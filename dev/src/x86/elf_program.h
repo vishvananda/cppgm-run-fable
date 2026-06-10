@@ -14,17 +14,24 @@ using std::vector;
 // statement) laid out in order into one RWX PT_LOAD segment loaded at
 // 0x400000, headers included. Labels bind to an item and resolve to
 // the item's post-padding virtual address; recorded patches then
-// receive (label value + addend) truncated to the patch width. Code
-// encodings have value-independent lengths, so a single sequential
-// layout pass is final.
+// receive (label value + addend), truncated for data fields, made
+// place-relative for rel32 fields, and range-checked for the
+// sign-extended code fields. Code encodings have value-independent
+// lengths, so a single sequential layout pass is final.
 
 // One statement's contribution to the image. Code items have align 1;
-// data items pad to their natural alignment with zero bytes.
+// data items pad to their natural alignment with zero bytes. Item
+// addresses are contractual (programs compute label differences), so
+// code/data cache-line isolation lives inside the code items: a body
+// adjacent to data moves to a fresh line behind an entry sled or a
+// trailing guard, both part of the item's implementation-defined
+// translation size.
 struct ImageItem
 {
-	ImageItem() : align(1) {}
+	ImageItem() : align(1), is_code(false) {}
 
 	size_t align;
+	bool is_code;
 	vector<unsigned char> bytes;
 	vector<X86Patch> patches;
 };

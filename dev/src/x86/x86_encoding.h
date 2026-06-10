@@ -13,9 +13,10 @@ using std::vector;
 // sequence (legacy prefixes, REX, opcode, ModRM, SIB, displacement,
 // immediate). Immediates may depend on a label address that is only
 // known after image layout, so every label-bearing form has a
-// value-independent encoded length (mov r64, imm64 and fixed-width
-// data) and reports the immediate field as an X86Patch to fill in
-// later. X86CodeBuffer accumulates the encoded statement body and its
+// value-independent encoded length (mov r64, imm64, absolute [disp32]
+// operands, rel32 control transfers, and fixed-width data) and
+// reports the label field as an X86Patch to fill in later.
+// X86CodeBuffer accumulates the encoded statement body and its
 // pending patches. Later assignments extend the mnemonic table; the
 // encoder core is form-driven, not opcode-driven.
 
@@ -72,28 +73,56 @@ struct X86Imm
 	unsigned long long addend;
 };
 
-// A pending little-endian fixup: write the resolved immediate,
-// truncated to `size` bytes, at `offset` within the emitted bytes.
+// How a resolved patch value lands in its field. The CPU
+// sign-extends disp32 and rel32 fields back to 64 bits, so those
+// kinds fail layout instead of silently truncating a value the field
+// cannot represent.
+enum EX86PatchKind
+{
+	X86_PATCH_TRUNC,  // little-endian value truncated to size (data)
+	X86_PATCH_ABS,    // absolute address; must survive sign-extension
+	X86_PATCH_PCREL   // value minus the address after the field
+};
+
+// A pending little-endian fixup: write the resolved immediate, as
+// interpreted by `kind`, at `offset` within the emitted bytes.
 struct X86Patch
 {
+	X86Patch() : offset(0), size(0), kind(X86_PATCH_TRUNC) {}
+
 	size_t offset;
 	int size;
+	EX86PatchKind kind;
 	X86Imm imm;
 };
 
-// Memory operand [base register + displacement].
+// Memory operand: [base register + displacement], or an absolute
+// [disp32] form (no base register) whose address may be a label
+// resolved at layout.
 struct X86Mem
 {
-	X86Mem() : base(X86_RAX), disp(0) {}
-	X86Mem(int base, int disp) : base(base), disp(disp) {}
+	X86Mem() : has_base(true), base(X86_RAX), disp(0) {}
+	X86Mem(int base, int disp) : has_base(true), base(base), disp(disp) {}
 
+	static X86Mem Absolute(const X86Imm& addr)
+	{
+		X86Mem mem;
+		mem.has_base = false;
+		mem.abs = addr;
+		return mem;
+	}
+
+	bool has_base;
 	int base;
 	int disp;
+	X86Imm abs;
 };
 
 enum EX86Mnemonic
 {
-	X86_MOV_RI,    // mov r64, imm64 (the only label-bearing form)
+	X86_MOV_RI,    // mov r64, imm64 (label-bearing immediate form)
+	X86_MOV_RI32,  // mov r32, imm32 (zero-extends; constant only)
+	X86_MOV_RI32S, // mov r64, imm32 (sign-extends; constant only)
 	X86_MOV_RR,    // mov r(w), r(w)
 	X86_MOV_RM,    // mov r(w), [mem]
 	X86_MOV_MR,    // mov [mem], r(w)
@@ -119,6 +148,9 @@ enum EX86Mnemonic
 	X86_SETCC,     // setcc r8
 	X86_JCC_REL8,
 	X86_JMP_REL8,
+	X86_JCC_REL32, // jcc rel32 to a label target (imm)
+	X86_JMP_REL32, // jmp rel32 to a label target (imm)
+	X86_CALL_REL32,// call rel32 to a label target (imm)
 	X86_JMP_R,     // jmp r64
 	X86_CALL_R,    // call r64
 	X86_RET,
@@ -157,11 +189,7 @@ struct X86Instruction
 
 struct X86MachineCode
 {
-	X86MachineCode() : has_patch(false)
-	{
-		patch.offset = 0;
-		patch.size = 0;
-	}
+	X86MachineCode() : has_patch(false) {}
 
 	vector<unsigned char> bytes;
 	bool has_patch;
@@ -197,6 +225,9 @@ public:
 	void Setcc(int cond, int reg);
 	void JccRel8(int cond, int rel);
 	void JmpRel8(int rel);
+	void JccRel32(int cond, const X86Imm& target);
+	void JmpRel32(const X86Imm& target);
+	void CallRel32(const X86Imm& target);
 	void JmpReg(int reg);
 	void CallReg(int reg);
 	void Ret();

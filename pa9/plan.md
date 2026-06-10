@@ -46,19 +46,57 @@ program's stdout and exit status are what the tests compare.
   spills. Integer ops use width-exact x86 forms; floats go through
   the x87 stack (fld/fild operands, faddp/fsubp/fmulp/fdivp/fcomip,
   fstp/fistp results); u64<->f80 use the 2^63/2^64 adjustment idiom.
+  Memory operands encode directly as absolute [disp32] or
+  [base + disp32] addressing modes when the address term allows;
+  only label-plus-base sums compute addresses in rsi/rdi. Control
+  transfers to immediate targets use jmp/call/jcc rel32; computed
+  targets go through a register.
 - `x86_encoding` owns the X86Instruction object model (mnemonic +
   Reg/Mem/Imm operands) and the generic encoder (legacy prefixes,
   REX, opcode, ModRM, SIB, disp, imm). Immediates carry an optional
   symbolic label reference; every label-bearing form encodes with a
-  value-independent length (mov r64, imm64 / fixed-width data), so
-  statement sizes are final on the first pass.
+  value-independent length (mov r64, imm64, absolute [disp32]
+  operands, rel32 transfers, fixed-width data), so statement sizes
+  are final on the first pass. Constant immediates pick the shortest
+  64-bit-faithful mov form (imm32 zero-extend, imm32 sign-extend for
+  [-2^31, -1], else imm64). Patches carry a kind: data fields
+  truncate, absolute and pc-relative code fields are range-checked
+  at layout against the CPU's sign-extension of the field.
 - `elf_program` owns layout and output: items are code bytes or data
   blobs with alignment (literal statements pad to their PA2 type
   alignment, dataN to N/8); offsets are assigned sequentially, labels
   bind to their statement's post-padding address at 0x400000 + 120 +
-  offset, recorded patches (label value + addend, truncated to the
-  patch width) are applied, and the ELF header + one RWX PT_LOAD
-  segment + payload is written and chmod 0755.
+  offset, recorded patches are applied, and the ELF header + one RWX
+  PT_LOAD segment + payload is written and chmod 0755. Statement
+  addresses are contractual (fixtures compute sizes as label
+  differences, for example `isub64 x64 start data`), so layout never
+  inserts padding between items beyond the documented natural
+  alignment.
+
+## Code/data cache-line isolation
+
+A store into a cache line that also holds executed (or
+prefetched-ahead) instructions triggers the CPU's self-modifying-code
+machine clear, a full pipeline flush. CY86 programs declare hot
+store-target data directly adjacent to the code that loops over it
+(`300-binary-calculator` spent 8.7 of its 8.8 seconds on these
+clears; the harness allows 10 before EXIT_TIMEOUT). Because item
+addresses are contractual, the isolation lives inside the code
+items, whose translation sizes are implementation-defined:
+
+- a code item that follows data keeps its label address but starts
+  with a jmp-rel32 entry sled to its body on the next cache line, so
+  indirect transfers through the label value still work while steady
+  state never executes from the line that data shares;
+- direct rel32 transfers (zero-addend pc-relative patches) resolve
+  to the target's body, skipping the sled so hot calls never fetch
+  the shared line; the ELF entry point also targets the body;
+- a code item that precedes data ends with trailing guard lines
+  (two; the instruction prefetcher runs a line or two ahead) inside
+  its own translation.
+
+Measured on the binary-calculator workload (1M operations, 16 MB
+input): 8.8s before, 0.30s after, output identical.
 
 The entry point is the label `start` if present, otherwise the first
 statement's address.
@@ -99,9 +137,10 @@ The implementation matches the pipeline above; the audit (see
   all mnemonics) rather than per-opcode byte tables, which is the
   extension point later backend assignments need.
 - Every label-bearing encoding has a value-independent length
-  (mov r64, imm64 and fixed-width data items), so layout is a single
-  sequential pass plus one patch pass; there is no fixed-point
-  relayout loop to go quadratic.
+  (mov r64, imm64, absolute [disp32], rel32 transfers, and
+  fixed-width data items), so layout is a single sequential pass
+  plus one patch pass; there is no fixed-point relayout loop to go
+  quadratic.
 
 One semantic bug was found by differential probing against
 `cy86-ref` and fixed: the +-literal offset term of label immediates

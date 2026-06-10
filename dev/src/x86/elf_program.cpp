@@ -16,11 +16,38 @@ const size_t kElfHeaderSize = 64;
 const size_t kProgramHeaderSize = 56;
 const size_t kHeaderBytes = kElfHeaderSize + kProgramHeaderSize;
 
+// Code/data isolation: a store into a cache line that also holds
+// executed (or prefetched-ahead) instructions triggers the CPU's
+// self-modifying-code machine clear, which is ruinous in hot loops.
+// Item addresses are contractual (programs compute label
+// differences), so isolation lives inside code translations, whose
+// sizes are implementation-defined: bodies adjacent to data move to
+// fresh cache lines within their own item. Trailing guard lines keep
+// store targets out of the instruction prefetcher's reach.
+const size_t kCacheLine = 64;
+const size_t kGuardLines = 2;
+const size_t kJmpRel32Size = 5;
+
+unsigned long long AlignUp(unsigned long long value, size_t align)
+{
+	return (value + align - 1) / align * align;
+}
+
 void PutBytes(vector<unsigned char>& out, unsigned long long value,
               int size)
 {
 	for (int i = 0; i < size; i++)
 		out.push_back(static_cast<unsigned char>(value >> (8 * i)));
+}
+
+// True when `value` survives the CPU's sign-extension of a `size`-
+// byte field back to 64 bits (disp32 and rel32 are sign-extended).
+bool SignExtendsFromField(unsigned long long value, int size)
+{
+	int shift = 64 - 8 * size;
+	long long extended =
+		static_cast<long long>(value << shift) >> shift;
+	return static_cast<unsigned long long>(extended) == value;
 }
 
 // ELF header plus one RWX PT_LOAD program header mapping the whole
@@ -95,7 +122,12 @@ void ProgramImage::Layout(vector<unsigned char>& payload,
 
 	// Item addresses are determined purely by sizes and alignment, so
 	// one pass assigns them and a second pass fills label patches.
+	// Labels resolve to the item address; the executable body of a
+	// code item that follows data sits behind an entry sled (jmp to
+	// the next cache line), so indirect transfers to the label still
+	// work while nothing executes from a line that data shares.
 	vector<size_t> item_offset(items_.size(), 0);
+	vector<size_t> body_offset(items_.size(), 0);
 	for (size_t i = 0; i < items_.size(); i++)
 	{
 		unsigned long long vaddr = payload_base + payload.size();
@@ -103,8 +135,36 @@ void ProgramImage::Layout(vector<unsigned char>& payload,
 			(items_[i].align - vaddr % items_[i].align) % items_[i].align);
 		payload.insert(payload.end(), pad, 0);
 		item_offset[i] = payload.size();
+
+		bool after_data =
+			i > 0 && items_[i].is_code && !items_[i - 1].is_code;
+		vaddr = payload_base + payload.size();
+		if (after_data && vaddr % kCacheLine != 0)
+		{
+			unsigned long long body =
+				AlignUp(vaddr + kJmpRel32Size, kCacheLine);
+			payload.push_back(0xE9);
+			PutBytes(payload, body - (vaddr + kJmpRel32Size), 4);
+			payload.insert(
+				payload.end(),
+				static_cast<size_t>(body - vaddr) - kJmpRel32Size, 0);
+		}
+		body_offset[i] = payload.size();
 		payload.insert(payload.end(), items_[i].bytes.begin(),
 		               items_[i].bytes.end());
+
+		bool before_data = i + 1 < items_.size() && items_[i].is_code &&
+		                   !items_[i + 1].is_code;
+		if (before_data)
+		{
+			// The instruction prefetcher runs a line or two past the
+			// body: keep following store targets out of its reach.
+			vaddr = payload_base + payload.size();
+			size_t gap = static_cast<size_t>(
+				AlignUp(vaddr, kCacheLine) - vaddr +
+				kGuardLines * kCacheLine);
+			payload.insert(payload.end(), gap, 0);
+		}
 	}
 
 	vector<unsigned long long> label_value(label_item_.size(), 0);
@@ -118,8 +178,24 @@ void ProgramImage::Layout(vector<unsigned char>& payload,
 			const X86Patch& patch = items_[i].patches[p];
 			unsigned long long value = patch.imm.addend;
 			if (patch.imm.has_label)
-				value += label_value[static_cast<size_t>(patch.imm.label)];
-			size_t at = item_offset[i] + patch.offset;
+			{
+				size_t target =
+					label_item_[static_cast<size_t>(patch.imm.label)];
+				// Direct control transfers skip a target's entry sled.
+				if (patch.kind == X86_PATCH_PCREL &&
+				    patch.imm.addend == 0)
+					value = payload_base + body_offset[target];
+				else
+					value +=
+						label_value[static_cast<size_t>(patch.imm.label)];
+			}
+			size_t at = body_offset[i] + patch.offset;
+			if (patch.kind == X86_PATCH_PCREL)
+				value -= payload_base + at + patch.size;
+			if (patch.kind != X86_PATCH_TRUNC &&
+			    !SignExtendsFromField(value, patch.size))
+				throw runtime_error(
+					"label value out of range for its encoded field");
 			for (int b = 0; b < patch.size; b++)
 				payload[at + b] =
 					static_cast<unsigned char>(value >> (8 * b));
@@ -127,9 +203,10 @@ void ProgramImage::Layout(vector<unsigned char>& payload,
 	}
 
 	if (entry_label_ >= 0)
-		entry = label_value[static_cast<size_t>(entry_label_)];
+		entry = payload_base +
+		        body_offset[label_item_[static_cast<size_t>(entry_label_)]];
 	else if (!items_.empty())
-		entry = payload_base + item_offset[0];
+		entry = payload_base + body_offset[0];
 	else
 		entry = payload_base;
 }

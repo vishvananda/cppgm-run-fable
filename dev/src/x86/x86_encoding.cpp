@@ -41,8 +41,9 @@ struct ModRMForm
 };
 
 void EmitModRM(const ModRMForm& form, const X86Instruction& instr,
-               vector<unsigned char>& out)
+               X86MachineCode& code)
 {
+	vector<unsigned char>& out = code.bytes;
 	int opcode = (form.width == 8 && form.opcode8 >= 0) ? form.opcode8
 	                                                    : form.opcode;
 	if (form.width == 16)
@@ -50,7 +51,10 @@ void EmitModRM(const ModRMForm& form, const X86Instruction& instr,
 
 	bool rex_w = form.width == 64;
 	bool rex_r = !form.reg_is_ext && (form.reg_field & 8) != 0;
-	bool rex_b = (instr.rm_is_mem ? instr.mem.base : instr.rm_reg) & 8;
+	int rm_id = instr.rm_is_mem
+		? (instr.mem.has_base ? instr.mem.base : 0)
+		: instr.rm_reg;
+	bool rex_b = (rm_id & 8) != 0;
 	bool rex_low =
 		(form.width == 8 && !form.reg_is_ext &&
 		 NeedsLowByteRex(form.reg_field)) ||
@@ -67,6 +71,23 @@ void EmitModRM(const ModRMForm& form, const X86Instruction& instr,
 	if (!instr.rm_is_mem)
 	{
 		out.push_back(0xC0 | reg_bits | (instr.rm_reg & 7));
+		return;
+	}
+
+	if (!instr.mem.has_base)
+	{
+		// mod=00 with SIB base=101 and no index: absolute [disp32].
+		out.push_back(reg_bits | 4);
+		out.push_back(0x25);
+		if (instr.mem.abs.has_label)
+		{
+			code.has_patch = true;
+			code.patch.offset = out.size();
+			code.patch.size = 4;
+			code.patch.kind = X86_PATCH_ABS;
+			code.patch.imm = instr.mem.abs;
+		}
+		PutLittleEndian(out, instr.mem.abs.addend, 4);
 		return;
 	}
 
@@ -256,7 +277,7 @@ X86MachineCode EncodeModRMInstruction(const X86Instruction& instr)
 		throw logic_error("unsupported x86 instruction form");
 	}
 
-	EmitModRM(form, instr, code.bytes);
+	EmitModRM(form, instr, code);
 	return code;
 }
 
@@ -276,6 +297,38 @@ X86MachineCode EncodeX86Instruction(const X86Instruction& instr)
 		code.patch.imm = instr.imm;
 		PutLittleEndian(code.bytes, instr.imm.addend, 8);
 		return code;
+	case X86_MOV_RI32:
+		if (instr.reg & 8)
+			code.bytes.push_back(0x41);
+		code.bytes.push_back(0xB8 | (instr.reg & 7));
+		PutLittleEndian(code.bytes, instr.imm.addend, 4);
+		return code;
+	case X86_MOV_RI32S:
+		code.bytes.push_back(0x48 | ((instr.reg & 8) ? 1 : 0));
+		code.bytes.push_back(0xC7);
+		code.bytes.push_back(0xC0 | (instr.reg & 7));
+		PutLittleEndian(code.bytes, instr.imm.addend, 4);
+		return code;
+	case X86_JMP_REL32:
+	case X86_CALL_REL32:
+	case X86_JCC_REL32:
+		if (instr.mnemonic == X86_JCC_REL32)
+		{
+			code.bytes.push_back(0x0F);
+			code.bytes.push_back(0x80 | instr.cond);
+		}
+		else
+		{
+			code.bytes.push_back(
+				instr.mnemonic == X86_JMP_REL32 ? 0xE9 : 0xE8);
+		}
+		code.has_patch = true;
+		code.patch.offset = code.bytes.size();
+		code.patch.size = 4;
+		code.patch.kind = X86_PATCH_PCREL;
+		code.patch.imm = instr.imm;
+		PutLittleEndian(code.bytes, 0, 4);
+		return code;
 	case X86_SHR_I:
 	{
 		X86Instruction shifted = instr;
@@ -288,7 +341,7 @@ X86MachineCode EncodeX86Instruction(const X86Instruction& instr)
 		form.reg_is_ext = true;
 		form.width = instr.width;
 		form.rm_op_width = instr.width;
-		EmitModRM(form, shifted, code.bytes);
+		EmitModRM(form, shifted, code);
 		code.bytes.push_back(
 			static_cast<unsigned char>(instr.imm.addend & 0xFF));
 		return code;
@@ -333,10 +386,20 @@ void X86CodeBuffer::AppendBuffer(const X86CodeBuffer& other)
 void X86CodeBuffer::MovRegImm(int reg, const X86Imm& imm)
 {
 	X86Instruction instr;
-	instr.mnemonic = X86_MOV_RI;
 	instr.width = 64;
 	instr.reg = reg;
 	instr.imm = imm;
+	// A constant's value is known now: use the shortest encoding that
+	// reproduces all 64 bits. Label values keep the full-width form.
+	long long signed_value = static_cast<long long>(imm.addend);
+	if (imm.has_label)
+		instr.mnemonic = X86_MOV_RI;
+	else if (imm.addend <= 0xFFFFFFFFull)
+		instr.mnemonic = X86_MOV_RI32;
+	else if (signed_value < 0 && signed_value >= -2147483648LL)
+		instr.mnemonic = X86_MOV_RI32S;
+	else
+		instr.mnemonic = X86_MOV_RI;
 	Append(instr);
 }
 
@@ -471,6 +534,31 @@ void X86CodeBuffer::JmpRel8(int rel)
 	X86Instruction instr;
 	instr.mnemonic = X86_JMP_REL8;
 	instr.rel = rel;
+	Append(instr);
+}
+
+void X86CodeBuffer::JccRel32(int cond, const X86Imm& target)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_JCC_REL32;
+	instr.cond = cond;
+	instr.imm = target;
+	Append(instr);
+}
+
+void X86CodeBuffer::JmpRel32(const X86Imm& target)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_JMP_REL32;
+	instr.imm = target;
+	Append(instr);
+}
+
+void X86CodeBuffer::CallRel32(const X86Imm& target)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_CALL_REL32;
+	instr.imm = target;
 	Append(instr);
 }
 

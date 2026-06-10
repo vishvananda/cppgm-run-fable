@@ -9,9 +9,13 @@ using std::logic_error;
 //   cy86  sp bp x64 y64 z64 t64
 //   x86   rsp rbp r12 r13 r14 r15
 //
-// Per instruction, source operands load into rax/rbx/rcx, memory
-// addresses compute in rsi (loads) and rdi (stores), and rdx is
-// implicitly used by mul/div. The red zone holds per-instruction
+// Per instruction, source operands load into rax/rbx/rcx, and rdx is
+// implicitly used by mul/div. Memory operands encode directly as
+// absolute [disp32] or [base + disp32] addressing modes when the
+// address term allows it; only label-plus-base sums fall back to
+// address arithmetic in rsi (loads) and rdi (stores). Control
+// transfers to immediate targets use rel32 forms; computed targets
+// go through a register. The red zone holds per-instruction
 // temporaries: [rsp-8..rsp-56] stage system call arguments,
 // [rsp-80..rsp-65] is the x87 transfer slot, [rsp-96..rsp-89] the
 // fistp result slot. CY86 programs may not touch the red zone, so
@@ -54,6 +58,37 @@ X86Imm Imm80High(const CY86Immediate& imm)
 	if (imm.has_label)
 		return X86Imm::Constant(0);
 	return X86Imm::Constant(LittleEndianValue(imm.bytes.substr(8)));
+}
+
+bool FitsDisp32(unsigned long long value)
+{
+	long long signed_value = static_cast<long long>(value);
+	return signed_value >= -2147483648LL && signed_value <= 2147483647LL;
+}
+
+// A memory operand reachable as one x86 addressing mode, `extra`
+// bytes past the operand's address: an absolute [disp32] (label
+// addresses are range-checked at layout) or [base + disp32]. A label
+// term with a base register still needs address arithmetic.
+bool DirectMem(const CY86Operand& op, int extra, X86Mem& mem)
+{
+	if (!op.mem_has_base)
+	{
+		X86Imm addr = ImmValue(op.imm);
+		addr.addend += static_cast<unsigned long long>(extra);
+		if (!addr.has_label && !FitsDisp32(addr.addend))
+			return false;
+		mem = X86Mem::Absolute(addr);
+		return true;
+	}
+	if (op.imm.has_label)
+		return false;
+	unsigned long long disp =
+		op.imm.addend + static_cast<unsigned long long>(extra);
+	if (!FitsDisp32(disp))
+		return false;
+	mem = X86Mem(MapRegister(op.mem_base), static_cast<int>(disp));
+	return true;
 }
 
 int RelationCond(int variant)
@@ -115,6 +150,7 @@ private:
 	// Source operand value (low `width` bits) into `reg`.
 	void LoadSource(const CY86Operand& op, int width, int reg)
 	{
+		X86Mem mem;
 		switch (op.kind)
 		{
 		case CY86_OPERAND_REGISTER:
@@ -124,6 +160,11 @@ private:
 			code_.MovRegImm(reg, ImmValue(op.imm));
 			break;
 		case CY86_OPERAND_MEMORY:
+			if (DirectMem(op, 0, mem))
+			{
+				code_.MovRegMem(width, reg, mem);
+				break;
+			}
 			LoadAddress(op, X86_RSI);
 			code_.MovRegMem(width, reg, X86Mem(X86_RSI, 0));
 			break;
@@ -157,6 +198,12 @@ private:
 			code_.MovRegReg(width, MapRegister(op.reg), reg);
 			return;
 		}
+		X86Mem mem;
+		if (DirectMem(op, 0, mem))
+		{
+			code_.MovMemReg(width, mem, reg);
+			return;
+		}
 		LoadAddress(op, X86_RDI);
 		code_.MovMemReg(width, X86Mem(X86_RDI, 0), reg);
 	}
@@ -166,6 +213,12 @@ private:
 	{
 		if (op.kind == CY86_OPERAND_MEMORY)
 		{
+			X86Mem mem;
+			if (DirectMem(op, 0, mem))
+			{
+				code_.X87Mem(X86_FLD, width, mem);
+				return;
+			}
 			LoadAddress(op, X86_RSI);
 			code_.X87Mem(X86_FLD, width, X86Mem(X86_RSI, 0));
 			return;
@@ -190,6 +243,12 @@ private:
 	{
 		if (op.kind == CY86_OPERAND_MEMORY)
 		{
+			X86Mem mem;
+			if (DirectMem(op, 0, mem))
+			{
+				code_.X87Mem(X86_FSTP, width, mem);
+				return;
+			}
 			LoadAddress(op, X86_RDI);
 			code_.X87Mem(X86_FSTP, width, X86Mem(X86_RDI, 0));
 			return;
@@ -214,24 +273,48 @@ private:
 	void EmitMove80()
 	{
 		const CY86Operand& src = Operand(1);
+		X86Mem low;
+		X86Mem high;
 		if (src.kind == CY86_OPERAND_MEMORY)
 		{
-			LoadAddress(src, X86_RSI);
-			code_.MovRegMem(64, X86_RAX, X86Mem(X86_RSI, 0));
-			code_.MovRegMem(16, X86_RCX, X86Mem(X86_RSI, 8));
+			if (DirectMem(src, 0, low) && DirectMem(src, 8, high))
+			{
+				code_.MovRegMem(64, X86_RAX, low);
+				code_.MovRegMem(16, X86_RCX, high);
+			}
+			else
+			{
+				LoadAddress(src, X86_RSI);
+				code_.MovRegMem(64, X86_RAX, X86Mem(X86_RSI, 0));
+				code_.MovRegMem(16, X86_RCX, X86Mem(X86_RSI, 8));
+			}
 		}
 		else
 		{
 			code_.MovRegImm(X86_RAX, ImmValue(src.imm));
 			code_.MovRegImm(X86_RCX, Imm80High(src.imm));
 		}
-		LoadAddress(Operand(0), X86_RDI);
+		const CY86Operand& dst = Operand(0);
+		if (DirectMem(dst, 0, low) && DirectMem(dst, 8, high))
+		{
+			code_.MovMemReg(64, low, X86_RAX);
+			code_.MovMemReg(16, high, X86_RCX);
+			return;
+		}
+		LoadAddress(dst, X86_RDI);
 		code_.MovMemReg(64, X86Mem(X86_RDI, 0), X86_RAX);
 		code_.MovMemReg(16, X86Mem(X86_RDI, 8), X86_RCX);
 	}
 
 	void EmitJumpIf()
 	{
+		if (Operand(1).kind == CY86_OPERAND_IMMEDIATE)
+		{
+			LoadSource(Operand(0), 8, X86_RAX);
+			code_.Alu(X86_TEST, 8, X86_RAX, X86_RAX);
+			code_.JccRel32(X86_CC_NE, ImmValue(Operand(1).imm));
+			return;
+		}
 		LoadSource(Operand(0), 8, X86_RAX);
 		LoadSource(Operand(1), 64, X86_RBX);
 		code_.Alu(X86_TEST, 8, X86_RAX, X86_RAX);
@@ -440,6 +523,11 @@ private:
 			EmitMove();
 			break;
 		case CY86_FAM_JUMP:
+			if (Operand(0).kind == CY86_OPERAND_IMMEDIATE)
+			{
+				code_.JmpRel32(ImmValue(Operand(0).imm));
+				break;
+			}
 			LoadSource(Operand(0), 64, X86_RAX);
 			code_.JmpReg(X86_RAX);
 			break;
@@ -447,6 +535,11 @@ private:
 			EmitJumpIf();
 			break;
 		case CY86_FAM_CALL:
+			if (Operand(0).kind == CY86_OPERAND_IMMEDIATE)
+			{
+				code_.CallRel32(ImmValue(Operand(0).imm));
+				break;
+			}
 			LoadSource(Operand(0), 64, X86_RAX);
 			code_.CallReg(X86_RAX);
 			break;
@@ -545,6 +638,7 @@ void TranslateCY86Program(const CY86Program& program, ProgramImage& image)
 		}
 		else
 		{
+			item.is_code = true;
 			StatementTranslator translator(stmt);
 			translator.Translate(item);
 		}
