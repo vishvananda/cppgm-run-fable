@@ -90,10 +90,16 @@ PaintSet PaintInterner::Intersect(const PaintSet& a, const PaintSet& b)
 	return result;
 }
 
+void PPTokenCollector::token_start_line(long line)
+{
+	pending_line_ = line;
+}
+
 void PPTokenCollector::Add(EPPTokenKind kind, const string& data)
 {
 	PPToken token(kind, data);
 	token.ws_before = pending_ws_;
+	token.line = pending_line_;
 	pending_ws_ = false;
 	tokens.push_back(token);
 }

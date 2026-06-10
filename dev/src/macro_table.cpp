@@ -164,6 +164,14 @@ void MacroTable::Define(const vector<PPToken>& line)
 	macros_[macro.name] = macro;
 }
 
+void MacroTable::DefineBuiltin(const string& name, EMacroBuiltin builtin)
+{
+	MacroDefinition macro;
+	macro.name = name;
+	macro.builtin = builtin;
+	macros_[name] = macro;
+}
+
 void MacroTable::Undef(const vector<PPToken>& line)
 {
 	if (line.empty() || line[0].kind != PPT_IDENTIFIER)

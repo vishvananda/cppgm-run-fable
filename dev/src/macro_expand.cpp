@@ -58,6 +58,19 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 			output.push_back(head);
 			continue;
 		}
+		if (macro->builtin != kBuiltinNone)
+		{
+			if (!builtins_)
+				throw std::logic_error("builtin macro invoked without a "
+				                       "builtin token source");
+			PPToken token = builtins_->MakeBuiltinToken(macro->builtin, head);
+			token.ws_before = head.ws_before;
+			token.blacklist = paints_.Insert(head.blacklist, macro->name);
+			token.file = head.file;
+			token.line = head.line;
+			input.push_front(token);
+			continue;
+		}
 		vector<vector<PPToken>> args;
 		PPToken close;
 		if (macro->function_like)
@@ -66,6 +79,17 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 			args = CollectArguments(input, *macro, close);
 		}
 		vector<PPToken> replaced = Substitute(*macro, args, head, close);
+		// produced tokens take the invocation's position, so a
+		// replacement-list __FILE__/__LINE__ reports the invocation site;
+		// the line is the invocation's LAST token (reference-pinned: the
+		// scan position when the expansion happens, so a multi-line
+		// argument list reports the closing paren's line)
+		const PPToken& tail = macro->function_like ? close : head;
+		for (size_t i = 0; i < replaced.size(); i++)
+		{
+			replaced[i].file = head.file;
+			replaced[i].line = tail.line;
+		}
 		input.insert(input.begin(), replaced.begin(), replaced.end());
 	}
 }

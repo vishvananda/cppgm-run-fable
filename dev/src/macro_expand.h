@@ -11,6 +11,18 @@ using std::vector;
 #include "macro_table.h"
 #include "pp_token.h"
 
+// Produces the dynamically computed token of a builtin predefined macro
+// (__FILE__/__LINE__) for an invocation through `head`: the value is
+// derived from head's file/line stamp and the owner's presumed-position
+// state. Implemented by the PA5 Preprocessor.
+struct IBuiltinTokenSource
+{
+	virtual PPToken MakeBuiltinToken(EMacroBuiltin builtin,
+	                                 const PPToken& head) = 0;
+
+	virtual ~IBuiltinTokenSource() {}
+};
+
 // Macro replacement (16.3) over one text-sequence, with the course-defined
 // nesting semantics (see pa4/plan.md): every token carries a blacklist of
 // macro names it can never invoke (an interned PaintSet, so shared paint
@@ -29,7 +41,12 @@ using std::vector;
 class MacroExpander
 {
 public:
-	explicit MacroExpander(const MacroTable& table) : table_(table) {}
+	// `builtins` resolves builtin predefined macros; null (the PA4 input
+	// class, which has none) makes invoking one a logic error.
+	explicit MacroExpander(const MacroTable& table,
+	                       IBuiltinTokenSource* builtins = 0)
+		: table_(table), builtins_(builtins)
+	{}
 
 	// New-lines must already be folded into ws_before by the caller.
 	// Arguments are expanded with the same entry point ("as if the
@@ -52,5 +69,6 @@ private:
 	PPToken RetokenizeSpelling(const string& spelling) const;
 
 	const MacroTable& table_;
+	IBuiltinTokenSource* builtins_;
 	PaintInterner paints_;
 };

@@ -222,6 +222,10 @@ PostToken MakeInvalidToken(const string& source);
 // size bytes of value in the ABI byte order (little-endian).
 string LittleEndianBytes(unsigned long long value, size_t size);
 
+// Zero-extended numeric value of literal value bytes in the ABI byte
+// order (the inverse of LittleEndianBytes).
+unsigned long long LittleEndianValue(const string& bytes);
+
 // True and sets type when spelling is a keyword, identifier-like
 // operator, or operator/punctuator with a `simple` mapping. The four
 // preprocessing-only operators (#, ##, %:, %:%:) have no mapping.

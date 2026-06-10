@@ -1,84 +1,86 @@
-// (C) 2013 CPPGM Foundation www.cppgm.org.  All rights reserved.
-
-#include <utility>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <stdexcept>
+#include <cstdlib>
+#include <ctime>
 #include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace std;
 
-#include "exceptions.h"
+#include "post_token.h"
+#include "post_tokenizer.h"
+#include "preprocess.h"
 
-// For pragma once implementation:
-// system-wide unique file id type `PA5FileId`
-typedef pair<unsigned long int, unsigned long int> PA5FileId;
+// preproc: executes translation phases 1-6 and the tokenization part of
+// phase 7 over each command-line source file (a complete preprocessor
+// and lexer for the PA5 input class) and describes the token sequences
+// to the output file: `preproc <N>`, then per srcfile `sof <name>`, the
+// PA2 posttoken lines, and `eof`. Each srcfile is preprocessed with
+// fresh state; only the asctime-derived __DATE__/__TIME__ values are
+// captured once at entry. Any error exits EXIT_FAILURE (the outfile
+// state is undefined on failure).
+//
+// The --batch-stdin worker protocol is provided by the test runner entry
+// point (src/test_runner.cpp).
 
-// bootstrap system call interface, used by PA5GetFileId
-extern "C" long int syscall(long int n, ...) throw ();
+namespace {
 
-// PA5GetFileId returns true iff file found at path `path`.
-// out parameter `out_fileid` is set to file id
-bool PA5GetFileId(const string& path, PA5FileId& out_fileid)
+// Writes posttoken lines to the outfile. A phase-7 invalid token is a
+// PA5 error rather than output.
+struct FilePostTokenStream : IPostTokenStream
 {
-	struct
+	explicit FilePostTokenStream(ostream& out) : out_(out) {}
+
+	void emit(const PostToken& token)
 	{
-			unsigned long int dev;
-			unsigned long int ino;
-			long int unused[16];
-	} data;
+		if (token.kind == PTK_INVALID)
+			throw runtime_error("invalid token at phase 7: " + token.source);
+		out_ << DescribePostToken(token) << "\n";
+	}
 
-	int res = syscall(4, path.c_str(), &data);
-
-	out_fileid = make_pair(data.dev, data.ino);
-
-	return res == 0;
-}
-
-// OPTIONAL: Also search `PA5StdIncPaths` on `--stdinc` command-line switch (not by default)
-vector<string> PA5StdIncPaths =
-{
-    "/usr/include/c++/4.7/",
-    "/usr/include/c++/4.7/x86_64-linux-gnu/",
-    "/usr/include/c++/4.7/backward/",
-    "/usr/lib/gcc/x86_64-linux-gnu/4.7/include/",
-    "/usr/local/include/",
-    "/usr/lib/gcc/x86_64-linux-gnu/4.7/include-fixed/",
-    "/usr/include/x86_64-linux-gnu/",
-    "/usr/include/"
+	ostream& out_;
 };
 
-bool HasBatchStdinArg(int argc, char** argv)
+// The course-defined predefined macros with fixed replacement lists;
+// __FILE__/__LINE__ are installed by the Preprocessor as builtins.
+// __DATE__ ("Mmm dd yyyy") and __TIME__ ("hh:mm:ss") slice the asctime
+// format "Www Mmm dd hh:mm:ss yyyy\n", called once here at main entry.
+vector<pair<string, string>> PredefinedObjectMacros()
+{
+	time_t now = time(0);
+	string stamp = asctime(localtime(&now));
+	vector<pair<string, string>> macros;
+	macros.push_back(make_pair("__CPPGM__", "201303L"));
+	macros.push_back(make_pair("__cplusplus", "201103L"));
+	macros.push_back(make_pair("__STDC_HOSTED__", "1"));
+	macros.push_back(make_pair("__CPPGM_AUTHOR__",
+	                           "\"Vishvananda Abrams\""));
+	macros.push_back(make_pair("__DATE__", "\"" + stamp.substr(4, 7) +
+	                                       stamp.substr(20, 4) + "\""));
+	macros.push_back(make_pair("__TIME__",
+	                           "\"" + stamp.substr(11, 8) + "\""));
+	return macros;
+}
+
+} // namespace
+
+int main(int argc, char** argv)
 {
 	for (int i = 1; i < argc; i++)
 	{
 		if (string(argv[i]) == "--batch-stdin")
-			return true;
+		{
+			cerr << "ERROR: --batch-stdin requires the test runner build "
+			        "(CPPGM_TEST_RUNNER=1)" << endl;
+			return EXIT_FAILURE;
+		}
 	}
-	return false;
-}
 
-int RunNotImplementedBatchMode()
-{
-	string line;
-	while (getline(cin, line))
-	{
-		(void)line;
-		cout << "EXIT_NOT_IMPLEMENTED" << endl;
-	}
-	return EXIT_SUCCESS;
-}
-
-int main(int argc, char** argv)
-{
 	try
 	{
-		if (HasBatchStdinArg(argc, argv))
-			return RunNotImplementedBatchMode();
-
 		vector<string> args;
-
 		for (int i = 1; i < argc; i++)
 			args.emplace_back(argv[i]);
 
@@ -88,31 +90,25 @@ int main(int argc, char** argv)
 		string outfile = args[1];
 		size_t nsrcfiles = args.size() - 2;
 
-		throw NotImplementedException();
+		vector<pair<string, string>> predefined = PredefinedObjectMacros();
 
-		ofstream out(outfile);
+		ofstream out(outfile.c_str());
+		if (!out)
+			throw runtime_error("cannot create output file: " + outfile);
 
-		out << "preproc " << nsrcfiles << endl;
+		out << "preproc " << nsrcfiles << "\n";
 
 		for (size_t i = 0; i < nsrcfiles; i++)
 		{
-			string srcfile = args[i+2];
-
-			out << "sof " << srcfile << endl;
-
-			ifstream in(srcfile);
-
-			// TODO: implement `preproc` as per PA5 description
-			out << "not yet implemented" << endl;
-	
-			out << "eof" << endl;
-
+			string srcfile = args[i + 2];
+			out << "sof " << srcfile << "\n";
+			FilePostTokenStream printer(out);
+			PostTokenizer post_tokenizer(printer);
+			Preprocessor preprocessor(post_tokenizer, predefined);
+			preprocessor.ProcessSourceFile(srcfile);
 		}
-	}
-	catch (const NotImplementedException& e)
-	{
-		cerr << "ERROR: " << e.what() << endl;
-		return CPPGM_EXIT_NOT_IMPLEMENTED;
+
+		return EXIT_SUCCESS;
 	}
 	catch (exception& e)
 	{

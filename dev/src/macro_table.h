@@ -13,6 +13,16 @@ using std::vector;
 // The one spelling of the variadic-arguments identifier (16.3p5).
 extern const char* const kMacroVaArgs;
 
+// Builtin (dynamically valued) predefined macros: the expander asks its
+// IBuiltinTokenSource for the produced token instead of substituting a
+// stored replacement list.
+enum EMacroBuiltin
+{
+	kBuiltinNone,
+	kBuiltinFile,
+	kBuiltinLine
+};
+
 // One macro definition (16.3). The replacement list is stored trimmed
 // (no leading/trailing whitespace flags beyond the first token, whose
 // ws_before is not part of the 16.3p1 identity) with paste_op set on the
@@ -22,7 +32,8 @@ extern const char* const kMacroVaArgs;
 struct MacroDefinition
 {
 	MacroDefinition()
-		: function_like(false), variadic(false), has_paste(false)
+		: function_like(false), variadic(false), has_paste(false),
+		  builtin(kBuiltinNone)
 	{}
 
 	string name;
@@ -31,6 +42,7 @@ struct MacroDefinition
 	bool has_paste;
 	vector<string> params;
 	vector<PPToken> replacement;
+	EMacroBuiltin builtin;
 };
 
 // The set of macros defined at the current point of the file. Define and
@@ -43,6 +55,10 @@ class MacroTable
 public:
 	void Define(const vector<PPToken>& line);
 	void Undef(const vector<PPToken>& line);
+
+	// Registers an object-like predefined macro whose invocation produces
+	// a dynamically computed token (__FILE__/__LINE__).
+	void DefineBuiltin(const string& name, EMacroBuiltin builtin);
 
 	// Null when no macro of that name is defined.
 	const MacroDefinition* Lookup(const string& name) const;

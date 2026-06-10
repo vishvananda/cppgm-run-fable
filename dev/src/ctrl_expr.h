@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -10,9 +11,23 @@ using std::string;
 #include "post_token.h"
 
 // Answers the `defined` operator in a controlling expression. PA3 wires
-// the course mock; the preprocessor assignments wire the real macro
-// table, so the evaluator never owns macro state.
-typedef bool (*IsDefinedFn)(const string& identifier);
+// the course mock; the preprocessor assignments close over the real
+// macro table, so the evaluator never owns macro state.
+typedef std::function<bool(const string& identifier)> IsDefinedFn;
+
+// Typed outcome of one controlling-expression evaluation. kNone: the
+// token sequence formed no unit (empty). kError: the PA3 "error"
+// outcome. kValue: the 64-bit promoted value and its signedness.
+struct CtrlExprResult
+{
+	enum Kind { kNone, kError, kValue };
+
+	CtrlExprResult() : kind(kNone), value(0), is_unsigned(false) {}
+
+	Kind kind;
+	unsigned long long value;
+	bool is_unsigned;
+};
 
 // Streaming evaluator for conditional-inclusion controlling expressions
 // (16.1), pinned to the reference binary's semantics (the pinned rules
@@ -64,6 +79,9 @@ public:
 	// produces one (a value or "error"); empty lines produce none.
 	bool FinishLine(string& output);
 
+	// Typed form of FinishLine (kError replaces "error" output).
+	bool FinishLineResult(CtrlExprResult& result);
+
 	// Discards all pending state (a partial line at end of input is
 	// dropped, matching the reference).
 	void Reset();
@@ -87,10 +105,15 @@ private:
 // identifier_or_keyword context: identifiers NOT folded to keywords).
 // Returns the output line -- a decimal intmax_t value, a decimal
 // uintmax_t value with a `u` suffix, or "error" -- or "" for an empty
-// token sequence. Exposed separately so the preprocessor assignments
-// can evaluate #if/#elif token sequences directly.
+// token sequence.
 string EvaluateControllingExpression(const std::vector<PostToken>& tokens,
                                      IsDefinedFn is_defined);
+
+// Typed form of EvaluateControllingExpression, so the preprocessor
+// assignments read #if/#elif truth from the evaluated value instead of
+// re-parsing the PA3 output line.
+CtrlExprResult EvaluateControllingResult(const std::vector<PostToken>& tokens,
+                                         IsDefinedFn is_defined);
 
 // PA3 driver stream: converts each phase-3 preprocessing-token in
 // identifier_or_keyword context (whitespace discarded, no string

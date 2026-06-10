@@ -78,16 +78,21 @@ enum EPPTokenKind
 // arrive via substitution are inert), param_index is the parameter slot
 // the token substitutes (0..params-1 named, params for __VA_ARGS__, -1
 // for non-parameters).
+// `file` and `line` are the PA5 position stamp: the 1-based physical
+// source line of the token's first character and the index of its file
+// instance in the owning Preprocessor's table (-1 outside PA5). Macro
+// invocation re-stamps produced tokens with the head's position, so an
+// invoked __FILE__/__LINE__ reports its own presumed position.
 struct PPToken
 {
 	PPToken()
 		: kind(PPT_NEW_LINE), ws_before(false), noninvokable(false),
-		  paste_op(false), param_index(-1)
+		  paste_op(false), param_index(-1), file(-1), line(0)
 	{}
 
 	PPToken(EPPTokenKind k, const string& spelling)
 		: kind(k), data(spelling), ws_before(false), noninvokable(false),
-		  paste_op(false), param_index(-1)
+		  paste_op(false), param_index(-1), file(-1), line(0)
 	{}
 
 	EPPTokenKind kind;
@@ -97,15 +102,20 @@ struct PPToken
 	bool noninvokable;
 	bool paste_op;
 	int param_index;
+	int file;
+	long line;
 };
 
 // Collects a phase-3 token stream into PPToken values. Whitespace
 // sequences become ws_before on the following token (or are dropped at
-// eof); the eof emission itself is not stored.
-class PPTokenCollector : public IPPTokenStream
+// eof); the eof emission itself is not stored. Passing the collector as
+// the tokenizer's line sink stamps each token's physical line.
+class PPTokenCollector : public IPPTokenStream, public IPPTokenLineSink
 {
 public:
-	PPTokenCollector() : pending_ws_(false) {}
+	PPTokenCollector() : pending_ws_(false), pending_line_(0) {}
+
+	void token_start_line(long line);
 
 	void emit_whitespace_sequence();
 	void emit_new_line();
@@ -126,6 +136,7 @@ private:
 	void Add(EPPTokenKind kind, const string& data);
 
 	bool pending_ws_;
+	long pending_line_;
 };
 
 // Replays one token into a phase 5-7 consumer (whitespace flags are

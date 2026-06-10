@@ -59,9 +59,10 @@ bool IsOpStartChar(int c)
 class PPTokenizer
 {
 public:
-	PPTokenizer(const TranslatedSource& source, IPPTokenStream& output)
-		: source_(source), output_(output), pos_(0),
-		  include_state_(kLineStart)
+	PPTokenizer(const TranslatedSource& source, IPPTokenStream& output,
+	            IPPTokenLineSink* lines)
+		: source_(source), output_(output), lines_(lines), pos_(0),
+		  include_state_(kLineStart), line_(1), line_scan_pos_(0)
 	{}
 
 	void Run()
@@ -108,8 +109,27 @@ private:
 		return out;
 	}
 
+	// Counts physical new-lines in the phase-1 byte stream up to the
+	// token's first source byte. Emission start offsets are
+	// nondecreasing (raw string rescans only skip forward), so one
+	// incremental scan covers the whole file.
+	void ReportTokenStartLine()
+	{
+		if (!lines_)
+			return;
+		size_t offset = Chars()[pos_].src_begin;
+		while (line_scan_pos_ < offset)
+		{
+			if (source_.bytes[line_scan_pos_] == '\n')
+				line_++;
+			line_scan_pos_++;
+		}
+		lines_->token_start_line(line_);
+	}
+
 	void ScanToken()
 	{
+		ReportTokenStartLine();
 		int c = Peek(0);
 		if (c == '\n')
 		{
@@ -543,14 +563,18 @@ private:
 
 	const TranslatedSource& source_;
 	IPPTokenStream& output_;
+	IPPTokenLineSink* lines_;
 	size_t pos_;
 	IncludeState include_state_;
+	long line_;
+	size_t line_scan_pos_;
 };
 
 } // namespace
 
-void TokenizePPTokens(const TranslatedSource& source, IPPTokenStream& output)
+void TokenizePPTokens(const TranslatedSource& source, IPPTokenStream& output,
+                      IPPTokenLineSink* lines)
 {
-	PPTokenizer tokenizer(source, output);
+	PPTokenizer tokenizer(source, output, lines);
 	tokenizer.Run();
 }

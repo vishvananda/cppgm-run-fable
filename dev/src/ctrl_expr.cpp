@@ -542,27 +542,39 @@ EvalResult Evaluate(const Node& node, bool enabled)
 }
 
 // Parses and evaluates one complete evaluation unit.
-string EvaluateUnit(const std::vector<PostToken>& tokens)
+CtrlExprResult EvaluateUnit(const std::vector<PostToken>& tokens)
 {
+	CtrlExprResult result;
 	try
 	{
 		NodePtr root = Parser(tokens).Parse();
-		EvalResult result = Evaluate(*root, true);
-		std::ostringstream oss;
-		if (result.is_unsigned)
-			oss << result.value << 'u';
-		else
-			oss << static_cast<long long>(result.value);
-		return oss.str();
+		EvalResult evaluated = Evaluate(*root, true);
+		result.kind = CtrlExprResult::kValue;
+		result.value = evaluated.value;
+		result.is_unsigned = evaluated.is_unsigned;
 	}
 	catch (const ParseError&)
 	{
-		return "error";
+		result.kind = CtrlExprResult::kError;
 	}
 	catch (const EvalError&)
 	{
-		return "error";
+		result.kind = CtrlExprResult::kError;
 	}
+	return result;
+}
+
+// The PA3 output line for a value or error result.
+string FormatResult(const CtrlExprResult& result)
+{
+	if (result.kind == CtrlExprResult::kError)
+		return "error";
+	std::ostringstream oss;
+	if (result.is_unsigned)
+		oss << result.value << 'u';
+	else
+		oss << static_cast<long long>(result.value);
+	return oss.str();
 }
 
 PostToken MakeDefinedResult(bool defined)
@@ -679,6 +691,15 @@ void CtrlExprCalculator::FeedDefined(TokenCategory category,
 
 bool CtrlExprCalculator::FinishLine(string& output)
 {
+	CtrlExprResult result;
+	if (!FinishLineResult(result))
+		return false;
+	output = FormatResult(result);
+	return true;
+}
+
+bool CtrlExprCalculator::FinishLineResult(CtrlExprResult& result)
+{
 	// a line that contributed no tokens prints nothing; pending state
 	// (carried unit, skip poison) passes over it untouched
 	if (!active_)
@@ -695,21 +716,21 @@ bool CtrlExprCalculator::FinishLine(string& output)
 	{
 		// the unit (and a pending skip poison) survives into the next line
 		error_pending_ = false;
-		output = "error";
+		result.kind = CtrlExprResult::kError;
 		return true;
 	}
 	if (skip_)
 	{
 		skip_ = false;
 		unit_.clear();
-		output = "error";
+		result.kind = CtrlExprResult::kError;
 		return true;
 	}
 	if (unit_.empty())
 		return false;
 	std::vector<PostToken> unit;
 	unit.swap(unit_);
-	output = EvaluateUnit(unit);
+	result = EvaluateUnit(unit);
 	return true;
 }
 
@@ -725,6 +746,15 @@ void CtrlExprCalculator::Reset()
 
 string EvaluateControllingExpression(const std::vector<PostToken>& tokens,
                                      IsDefinedFn is_defined)
+{
+	CtrlExprResult result = EvaluateControllingResult(tokens, is_defined);
+	if (result.kind == CtrlExprResult::kNone)
+		return "";
+	return FormatResult(result);
+}
+
+CtrlExprResult EvaluateControllingResult(const std::vector<PostToken>& tokens,
+                                         IsDefinedFn is_defined)
 {
 	CtrlExprCalculator calc(is_defined);
 	for (size_t i = 0; i < tokens.size(); i++)
@@ -756,10 +786,9 @@ string EvaluateControllingExpression(const std::vector<PostToken>& tokens,
 		}
 		calc.Token(category, token);
 	}
-	string output;
-	if (!calc.FinishLine(output))
-		return "";
-	return output;
+	CtrlExprResult result;
+	calc.FinishLineResult(result);
+	return result;
 }
 
 CtrlExprStream::CtrlExprStream(std::ostream& out, IsDefinedFn is_defined)

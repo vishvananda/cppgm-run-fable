@@ -359,6 +359,14 @@ string LittleEndianBytes(unsigned long long value, size_t size)
 	return bytes;
 }
 
+unsigned long long LittleEndianValue(const string& bytes)
+{
+	unsigned long long value = 0;
+	for (size_t i = bytes.size(); i-- > 0;)
+		value = (value << 8) | static_cast<unsigned char>(bytes[i]);
+	return value;
+}
+
 bool LookupSimpleTokenType(const string& spelling, ETokenType& type)
 {
 	auto it = SimpleTokenTypes().find(spelling);

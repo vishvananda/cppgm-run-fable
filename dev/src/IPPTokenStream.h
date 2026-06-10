@@ -1,5 +1,17 @@
 #pragma once
 
+// Optional side channel of TokenizePPTokens: receives the 1-based
+// physical source line (a phase-1 byte-stream fact; line splices and
+// block comments hide new-lines from the phase-3 stream) of the next
+// token before its emit_* call. PA5 stamps tokens with it for
+// __FILE__/__LINE__ tracking; earlier assignments pass no sink.
+struct IPPTokenLineSink
+{
+	virtual void token_start_line(long line) = 0;
+
+	virtual ~IPPTokenLineSink() {}
+};
+
 struct IPPTokenStream
 {
 	virtual void emit_whitespace_sequence() = 0;
