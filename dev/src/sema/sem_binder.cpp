@@ -176,20 +176,26 @@ string SemBinder::AnonymousTypeName(const AstDecl& decl)
 	return DeclBinder::AnonymousTypeName(decl);
 }
 
-string SemBinder::TypeDisplayName(const string& key,
-                                  const string& name) const
+// The enclosing named namespace/class path of `scope` joined with `::`
+// (trailing separator included); unnamed components are skipped.
+string SemBinder::QualifiedScopePath(const Scope* scope) const
 {
-	// PA12 displays are qualified by the enclosing named namespaces and
-	// classes ("struct n::S"); unnamed namespace components are skipped.
 	string path;
-	for (const Scope* scope = current_; scope && scope->parent;
-	     scope = scope->parent)
+	for (; scope && scope->parent; scope = scope->parent)
 	{
 		if ((scope->kind == SCOPE_NAMESPACE ||
 		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
 			path = scope->name + "::" + path;
 	}
-	return key + " " + path + name;
+	return path;
+}
+
+string SemBinder::TypeDisplayName(const string& key,
+                                  const string& name) const
+{
+	// PA12 displays are qualified by the enclosing named namespaces and
+	// classes ("struct n::S"); unnamed namespace components are skipped.
+	return key + " " + QualifiedScopePath(current_) + name;
 }
 
 ScopeBinding& SemBinder::BindFunctionName(const string& name,
@@ -314,14 +320,12 @@ const string& SemBinder::EnsureDefaultConstructor(const TypePtr& type,
 		constructors_.find(info);
 	if (found != constructors_.end())
 		return found->second;
-	// The qualified constructor name: the entity's qualified name (the
-	// display spelling after its class-key word) plus the class's own
-	// name again.
-	string qualified = info->display.substr(info->display.find(' ') + 1);
-	size_t base_at = qualified.rfind("::");
-	string base = base_at == string::npos
-		? qualified : qualified.substr(base_at + 2);
-	string name = qualified + "::" + base;
+	// The qualified constructor name: the class's enclosing scope path
+	// plus its own name twice. The member scope records both facts (a
+	// complete class always has one).
+	const Scope* members = model_.MemberScope(info);
+	const string& base = members->name;
+	string name = QualifiedScopePath(members->parent) + base + "::" + base;
 
 	SemNodePtr definition = MakeSemNode(SN_FUNCTION_DEFINITION);
 	definition->name = name;

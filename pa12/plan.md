@@ -204,3 +204,65 @@ Any pipeline, parse, or semantic error exits `EXIT_FAILURE`.
   nsdecl/nsinit) cover it.
 - `perl scripts/cppgm_file_audit.pl --stage pa12 --paths dev/src` for
   the architecture gate.
+
+## Architecture Review
+
+The implemented pipeline matches the plan: `run_emit_semantics_mode`
+runs phases 1-7 + the PA10 parse + one `SemBinder` forward pass per
+unit on the large-stack worker, and the printer renders the recorded
+`SemNode` tree without consulting the AST or scope model again. Worker
+failures rethrow in `run_unit_on_large_stack`, so every parse or
+semantic error reaches `EXIT_FAILURE` - there is no fallback success
+path and no canned output.
+
+Layering came out as designed and mirrors the assignment's design
+notes:
+
+- `sem_convert` owns conversion classification and 13.3 ranking as
+  pure functions over (type, category, null-literal, function-set)
+  facts; `SelectBestOverload` is the single best-viable-function
+  implementation, shared by named calls and (via
+  `ClassifyConversion`) copy-initialization and argument checks.
+- `sem_expr` owns clause 5 expression analysis and composes through
+  `SemValue` (reference-stripped type + category + dump node), calling
+  back into the binder only through the narrow `ISemExprHost`
+  interface (lookup, type-ids, const-eval).
+- `sem_binder` owns scope/statement structure, declaration-order dump
+  recording, overload-set maintenance on `ScopeBinding`, and the
+  synthesized artifacts (`__local_type<n>`, anonymous-union storage,
+  implicit default constructors).
+- The PA11 `DeclBinder` traversal was generalized with protected
+  virtual seams (display naming, function-name binding, declaration
+  events, body/statement binding) whose base implementations preserve
+  PA11 behavior exactly; PA10/PA11 dumps are regression-gated by the
+  through-pa12 report.
+
+Facts are typed end to end: literal kind/type/value bytes ride
+`ParseToken` -> `AstExpr` from phase 7 (no spelling re-lexing), value
+categories and types are enum/`TypePtr` fields on `SemNode`, owner
+scopes are stamped on bindings by `AddBinding`, and canonical names
+are derived from scope-chain walks. One stringly seam found in audit
+(the implicit-constructor name re-parsed the entity's display
+spelling) was replaced by a structural walk of the class's member
+scope (`QualifiedScopePath`).
+
+## Final Architecture Review
+
+Post-audit state: `make test-report-through-pa12` passes 694/694 (126
+PA12 tests, 9 expected-failure), and the pa12 file audit passes. The
+remaining audit-tool warning (`parse/parser.h` implementation body) is
+pre-existing PA6 surface used only by the `recog` driver, outside the
+PA12 change set.
+
+No interpreter/VM/template substitutes exist (the stage's product is
+the semantic dump itself, produced from real analysis); no
+test-specific gates (`__builtin_constant_p` is keyed on the builtin
+name only after value lookup fails, matching its documented
+semantics); no timeout workarounds (per-unit work is one forward
+traversal; lookups are map-backed via `binding_index`; overload
+selection is O(candidates x args) per call). Conversion logic,
+overload ranking, expression analysis, and dump recording each have a
+single owner, and the shared PA7-PA11 surfaces were extended only
+behind flags (`SetParameterAdjustment`) or new type kinds
+(`TK_MEMBER_POINTER`, function cv) that earlier fixtures never
+exercise.

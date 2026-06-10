@@ -55,6 +55,7 @@ private:
 	// --- dump recording ---
 	SemNode* AppendItem(SemNodePtr node);
 	SemNode* AppendItem(ESemNodeKind kind);
+	string QualifiedScopePath(const Scope* scope) const;
 
 	// --- statements ---
 	void BindCompoundStatement(const AstStmt& stmt);
