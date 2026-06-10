@@ -1,6 +1,5 @@
 #include "pp_tokenizer.h"
 
-#include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -9,8 +8,6 @@
 #include "utf8.h"
 
 namespace {
-
-const int kEndOfInput = -1;
 
 // See C++ standard 2.11 Identifiers and Annex E.1
 const std::pair<int, int> kAnnexE1AllowedRanges[] =
@@ -155,7 +152,7 @@ public:
 
 	void Run()
 	{
-		while (pos_ < Chars().size() && Peek(0) != kEndOfInput)
+		while (Peek(0) != kEndOfInputChar)
 			ScanToken();
 		output_.emit_eof();
 	}
@@ -171,10 +168,22 @@ private:
 		return source_.chars;
 	}
 
+	// Translated code point at index i; the end of the stream reads as
+	// kEndOfInputChar. Reading a malformed byte in translated mode is an
+	// error (a raw string literal rescans the source bytes instead, so
+	// its kInvalidChar entries are never read).
+	int At(size_t i) const
+	{
+		if (i >= Chars().size())
+			return kEndOfInputChar;
+		if (Chars()[i].cp == kInvalidChar)
+			throw std::runtime_error("invalid UTF-8 byte sequence");
+		return Chars()[i].cp;
+	}
+
 	int Peek(size_t ahead) const
 	{
-		size_t i = pos_ + ahead;
-		return i < Chars().size() ? Chars()[i].cp : kEndOfInput;
+		return At(pos_ + ahead);
 	}
 
 	string EncodeRange(size_t begin, size_t end) const
@@ -271,10 +280,9 @@ private:
 	void SkipBlockComment()
 	{
 		size_t i = pos_ + 2;
-		while (i < Chars().size() && Chars()[i].cp != kEndOfInput)
+		while (At(i) != kEndOfInputChar)
 		{
-			if (Chars()[i].cp == '*' && i + 1 < Chars().size() &&
-				Chars()[i + 1].cp == '/')
+			if (At(i) == '*' && At(i + 1) == '/')
 			{
 				pos_ = i + 2;
 				return;
@@ -290,9 +298,9 @@ private:
 	void SkipLineComment()
 	{
 		size_t i = pos_ + 2;
-		while (i < Chars().size() && Chars()[i].cp != kEndOfInput)
+		while (At(i) != kEndOfInputChar)
 		{
-			if (Chars()[i].cp == '\n')
+			if (At(i) == '\n')
 			{
 				pos_ = i;
 				return;
@@ -440,7 +448,7 @@ private:
 				pos_++;
 				break;
 			}
-			if (c == '\n' || c == kEndOfInput)
+			if (c == '\n' || c == kEndOfInputChar)
 				throw std::runtime_error(
 					"unterminated character literal");
 			if (c == '\\')
@@ -468,7 +476,7 @@ private:
 				pos_++;
 				break;
 			}
-			if (c == '\n' || c == kEndOfInput)
+			if (c == '\n' || c == kEndOfInputChar)
 				throw std::runtime_error("unterminated string literal");
 			if (c == '\\')
 				ScanEscapeSequence();
@@ -484,33 +492,33 @@ private:
 		include_state_ = kNormal;
 	}
 
-	// Scans the raw portion of a raw string literal over the phase-1
-	// stream so trigraphs, line splices, and universal-character-names
-	// are reverted (2.14.5p4), then resumes the translated stream after
-	// the closing quote. begin is the translated index of the encoding
-	// prefix; pos_ is at the opening quote.
+	// Scans the raw portion of a raw string literal over the source bytes
+	// so trigraphs, line splices, and universal-character-names are
+	// reverted (2.14.5p4) and ordinary UTF-8 decoding applies, then
+	// resumes the translated stream after the closing quote. begin is the
+	// translated index of the encoding prefix; pos_ is at the opening
+	// quote.
 	void ScanRawStringLiteral(size_t begin)
 	{
-		const std::vector<int>& raw = source_.raw;
+		const std::string& bytes = source_.bytes;
 		string data = EncodeRange(begin, pos_ + 1);
 		size_t r = Chars()[pos_].src_end;
 		size_t raw_begin = r;
 		std::vector<int> delim;
 		while (true)
 		{
-			if (r >= raw.size() || raw[r] == '\n')
+			if (r >= bytes.size() || bytes[r] == '\n')
 				throw std::runtime_error(
 					"unterminated raw string literal");
-			if (raw[r] == '(')
+			if (bytes[r] == '(')
 				break;
-			delim.push_back(raw[r]);
+			delim.push_back(DecodeUtf8Char(bytes, r));
 			if (delim.size() > 16)
 				throw std::runtime_error(
 					"raw string delimiter too long");
-			r++;
 		}
 		size_t close_quote = FindRawClosingQuote(r + 1, delim);
-		data += EncodeUtf8Range(raw, raw_begin, close_quote + 1);
+		data += ReencodeUtf8Range(bytes, raw_begin, close_quote + 1);
 		pos_ = ResumeIndexAfterRaw(close_quote + 1);
 		size_t suffix_begin = pos_;
 		bool user_defined = ScanUdSuffix();
@@ -522,36 +530,40 @@ private:
 		include_state_ = kNormal;
 	}
 
-	// Returns the raw index of the closing quote of ")delim"" at or after
-	// search_from.
+	// Returns the byte offset of the closing quote of ")delim"" at or
+	// after search_from. The delimiter is matched by decoded code point,
+	// not byte-wise: a stray Windows-1252 byte and its UTF-8 spelling
+	// are the same d-char (reference behavior).
 	size_t FindRawClosingQuote(size_t search_from,
 	                           const std::vector<int>& delim) const
 	{
-		const std::vector<int>& raw = source_.raw;
-		for (size_t r = search_from; r < raw.size(); r++)
+		const std::string& bytes = source_.bytes;
+		size_t r = search_from;
+		while (r < bytes.size())
 		{
-			if (raw[r] != ')')
+			if (DecodeUtf8Char(bytes, r) != ')')
 				continue;
-			size_t quote = r + 1 + delim.size();
-			if (quote >= raw.size() || raw[quote] != '"')
-				continue;
-			if (std::equal(delim.begin(), delim.end(),
-			               raw.begin() + r + 1))
-				return quote;
+			size_t q = r;
+			bool match = true;
+			for (size_t k = 0; match && k < delim.size(); k++)
+				match = q < bytes.size() &&
+					DecodeUtf8Char(bytes, q) == delim[k];
+			if (match && q < bytes.size() && bytes[q] == '"')
+				return q;
 		}
 		throw std::runtime_error("unterminated raw string literal");
 	}
 
-	// First translated index at or after the given raw index. src_begin
+	// First translated index at or after the given byte offset. src_begin
 	// is nondecreasing across the translated stream.
-	size_t ResumeIndexAfterRaw(size_t raw_index) const
+	size_t ResumeIndexAfterRaw(size_t byte_offset) const
 	{
 		size_t lo = 0;
 		size_t hi = Chars().size();
 		while (lo < hi)
 		{
 			size_t mid = (lo + hi) / 2;
-			if (Chars()[mid].src_begin < raw_index)
+			if (Chars()[mid].src_begin < byte_offset)
 				lo = mid + 1;
 			else
 				hi = mid;
@@ -563,10 +575,9 @@ private:
 	{
 		size_t begin = pos_;
 		size_t i = pos_ + 1;
-		while (i < Chars().size() && Chars()[i].cp != '\n' &&
-			Chars()[i].cp != kEndOfInput && Chars()[i].cp != close)
+		while (At(i) != '\n' && At(i) != kEndOfInputChar && At(i) != close)
 			i++;
-		if (i >= Chars().size() || Chars()[i].cp != close)
+		if (At(i) != close)
 			throw std::runtime_error("unterminated header name");
 		pos_ = i + 1;
 		output_.emit_header_name(EncodeRange(begin, pos_));
