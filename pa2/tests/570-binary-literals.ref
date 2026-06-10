@@ -1,0 +1,25 @@
+literal 0b101 int 05000000
+literal 0B101 int 05000000
+literal 0b101u unsigned int 05000000
+literal 0b101l long int 0500000000000000
+literal 0b101ull unsigned long long int 0500000000000000
+literal 0b11111111111111111111111111111111 unsigned int FFFFFFFF
+literal 0b1111111111111111111111111111111111111111111111111111111111111111 unsigned long int FFFFFFFFFFFFFFFF
+invalid 0b11111111111111111111111111111111111111111111111111111111111111111
+invalid 0b
+invalid 0b2
+invalid 0b12
+user-defined-literal 0b101_x _x integer 0b101
+invalid 0b_x
+invalid 0b1.5
+invalid 0b1e1
+invalid 0b101uu
+user-defined-literal 0b101_ _ integer 0b101
+user-defined-literal 0b0_0 _0 integer 0b0
+invalid 0b1e_1
+invalid 0b1_e1
+user-defined-literal 0b1_p1 _p1 integer 0b1
+user-defined-literal 0b1_ex _ex integer 0b1
+user-defined-literal 0b1_x1 _x1 integer 0b1
+invalid 0b1_xp1
+eof

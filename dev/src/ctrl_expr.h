@@ -14,23 +14,89 @@ using std::string;
 // table, so the evaluator never owns macro state.
 typedef bool (*IsDefinedFn)(const string& identifier);
 
-// Evaluates one conditional-inclusion controlling expression (16.1) given
-// the line's preprocessing-tokens converted to PostTokens in
-// identifier_or_keyword context (identifiers NOT folded to keywords).
-// Returns the output line: a decimal intmax_t value, a decimal uintmax_t
-// value with a `u` suffix, or "error". Per 16.2.4 every operand acts as
-// intmax_t/uintmax_t; result signedness is computed statically over the
-// whole tree (including non-evaluated ?: branches), while evaluation
-// errors (division/modulus by zero, INTMAX_MIN/-1, shift count negative
-// or >= 64) only count where evaluation actually reaches.
+// Streaming evaluator for conditional-inclusion controlling expressions
+// (16.1), pinned to the reference binary's semantics (the pinned rules
+// are catalogued in pa3/plan.md):
+//
+// - Tokens accumulate into an evaluation unit; `defined id` and
+//   `defined ( id )` fold to a signed 1/0 literal as tokens arrive.
+// - A non-evaluable token (floating or user-defined literal, string,
+//   invalid character literal, operator outside the grammar, stray
+//   character) poisons the rest of the line: the line prints `error`
+//   and the unit restarts empty.
+// - An invalid pp-number empties the unit and defers an `error` to the
+//   line's new-line, but tokens after it keep accumulating and carry
+//   into the NEXT line's unit (reference behavior: the error line's
+//   remainder and the following line evaluate as one unit).
+// - At a new-line: a dangling `defined` operand is a self-contained
+//   `error`; a missing `)` of `defined (id` reports `error` but keeps
+//   the folded value in the carried unit.
+// - A complete unit evaluates with the reference's recovery semantics:
+//   a grammar operator where a primary was required is consumed as a
+//   zero that is unsigned where evaluation is enabled; tokens after a
+//   complete top-level expression are ignored; running out of tokens
+//   mid-parse is an error. Per 16.2.4 every operand acts as
+//   intmax_t/uintmax_t; signedness propagates from non-evaluated ?:
+//   branches, while course-defined evaluation errors (division/modulus
+//   by zero, INTMAX_MIN/-1, shift count negative or >= 64) only count
+//   where evaluation actually reaches.
+class CtrlExprCalculator
+{
+public:
+	// The PA1 emit channel a token arrived through. The analyzed
+	// PostToken alone is not enough: an invalid pp-number carries the
+	// unit across lines while an invalid character literal only poisons
+	// its own line.
+	enum TokenCategory
+	{
+		kNumber,        // pp-number, analyzed (integer/floating/UD/invalid)
+		kCharLiteral,   // character-literal, analyzed (incl. UD/invalid)
+		kIdentifier,
+		kOpOrPunc,      // analyzed op (PTK_SIMPLE or invalid # ## %: %:%:)
+		kNonEvaluable   // strings, header-names, stray characters
+	};
+
+	explicit CtrlExprCalculator(IsDefinedFn is_defined);
+
+	void Token(TokenCategory category, const PostToken& token);
+
+	// Ends the logical line. Returns true and sets output when the line
+	// produces one (a value or "error"); empty lines produce none.
+	bool FinishLine(string& output);
+
+	// Discards all pending state (a partial line at end of input is
+	// dropped, matching the reference).
+	void Reset();
+
+private:
+	enum DefinedState { kNoDefined, kWantOperand, kWantRParen };
+
+	void FeedDefined(TokenCategory category, const PostToken& token);
+
+	IsDefinedFn is_defined_;
+	std::vector<PostToken> unit_;
+	bool active_;         // line contributed tokens; token-less lines
+	                      // print nothing and pending state passes over
+	bool skip_;           // poisoned line: drop tokens until new-line
+	bool error_pending_;  // invalid pp-number: error at new-line, unit carries
+	DefinedState defined_;
+	bool defined_paren_;
+};
+
+// Evaluates one controlling expression given its converted tokens (PA3
+// identifier_or_keyword context: identifiers NOT folded to keywords).
+// Returns the output line -- a decimal intmax_t value, a decimal
+// uintmax_t value with a `u` suffix, or "error" -- or "" for an empty
+// token sequence. Exposed separately so the preprocessor assignments
+// can evaluate #if/#elif token sequences directly.
 string EvaluateControllingExpression(const std::vector<PostToken>& tokens,
                                      IsDefinedFn is_defined);
 
-// PA3 driver stream: splits the phase-3 preprocessing-token stream into
-// logical lines at new-line tokens, converts each token (whitespace
-// discarded, no string-literal concatenation -- a string is never an
-// integral-literal), and writes one EvaluateControllingExpression result
-// line per non-empty line, then "eof".
+// PA3 driver stream: converts each phase-3 preprocessing-token in
+// identifier_or_keyword context (whitespace discarded, no string
+// concatenation -- a string is never an integral-literal) and feeds the
+// streaming calculator, writing one result line per logical line that
+// produces one, then "eof".
 class CtrlExprStream : public IPPTokenStream
 {
 public:
@@ -50,9 +116,6 @@ public:
 	void emit_eof();
 
 private:
-	void FinishLine();
-
 	std::ostream& out_;
-	IsDefinedFn is_defined_;
-	std::vector<PostToken> line_;
+	CtrlExprCalculator calc_;
 };

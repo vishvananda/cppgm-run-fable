@@ -46,7 +46,8 @@ bool MatchIntegerSuffix(const string& s, size_t pos, IntegerSuffix& suffix)
 	return pos == s.size();
 }
 
-// Matches a decimal-literal, octal-literal, or hexadecimal-literal at the
+// Matches a decimal-literal, octal-literal, hexadecimal-literal, or
+// binary-literal (GNU 0b extension, accepted by the reference) at the
 // start of s; end is set one past the last digit.
 bool MatchIntegerDigits(const string& s, size_t& end, int& base)
 {
@@ -72,6 +73,17 @@ bool MatchIntegerDigits(const string& s, size_t& end, int& base)
 		end = i;
 		return true;
 	}
+	if (s.size() >= 2 && (s[1] == 'b' || s[1] == 'B'))
+	{
+		size_t i = 2;
+		while (i < s.size() && (s[i] == '0' || s[i] == '1'))
+			i++;
+		if (i == 2)
+			return false;
+		base = 2;
+		end = i;
+		return true;
+	}
 	size_t i = 1;
 	while (i < s.size() && IsOctalDigit(s[i]))
 		i++;
@@ -86,7 +98,7 @@ bool ComputeIntegerValue(const string& s, size_t end, int base,
                          unsigned long long& value)
 {
 	value = 0;
-	size_t pos = base == 16 ? 2 : 0;
+	size_t pos = base == 16 || base == 2 ? 2 : 0;
 	for (; pos < end; pos++)
 	{
 		unsigned long long digit = HexDigitValue(s[pos]);
@@ -335,8 +347,8 @@ class UdNumberShapeScanner
 {
 public:
 	UdNumberShapeScanner()
-		: state_(kInt), hex_(false), octal_(false), dot_seen_(false),
-		  bad_octal_(false), mantissa_digits_(0)
+		: state_(kInt), hex_(false), binary_(false), octal_(false),
+		  dot_seen_(false), bad_octal_(false), mantissa_digits_(0)
 	{}
 
 	EUdNumberKind Scan(const string& s);
@@ -381,6 +393,7 @@ private:
 
 	State state_;
 	bool hex_;
+	bool binary_;
 	bool octal_;
 	bool dot_seen_;
 	bool bad_octal_;
@@ -392,6 +405,22 @@ bool UdNumberShapeScanner::StepNumber(char c)
 	switch (state_)
 	{
 	case kInt:
+		// a binary literal (GNU 0b extension, accepted by the reference)
+		// takes only binary digits and a ud-suffix: no dot, no exponent
+		if (binary_)
+		{
+			if (c == '0' || c == '1')
+			{
+				mantissa_digits_++;
+				return true;
+			}
+			if (c == '_' && mantissa_digits_ > 0)
+			{
+				state_ = kSufInt;
+				return true;
+			}
+			return false;
+		}
 		if (IsNumberDigit(c))
 		{
 			if (octal_ && c > '7')
@@ -575,6 +604,11 @@ EUdNumberKind UdNumberShapeScanner::Scan(const string& s)
 	if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
 	{
 		hex_ = true;
+		i = 2;
+	}
+	else if (s.size() >= 2 && s[0] == '0' && (s[1] == 'b' || s[1] == 'B'))
+	{
+		binary_ = true;
 		i = 2;
 	}
 	else
