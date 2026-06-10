@@ -460,8 +460,14 @@ void LowIRCY86Emitter::emit_call(const LowIRInstruction & in)
 		{
 			if(operand.is_literal())
 			{
-				f80_value_to_scratch(operand, frame.scratch(1));
-				ins("isub64 x64 bp " + std::to_string(frame.scratch(1)));
+				if(operand.literal_class != LOWIR_LITERAL_F80)
+					throw std::runtime_error(
+						"by-address literal argument requires an f80 "
+						"spelling");
+				long home =
+					frame.call_literal_homes.at(call_literal_index++);
+				f80_value_to_scratch(operand, home);
+				ins("isub64 x64 bp " + std::to_string(home));
 			}
 			else
 				address_to_x64(operand);

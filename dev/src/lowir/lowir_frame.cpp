@@ -96,6 +96,17 @@ LowIRFrame ComputeLowIRFrame(const LowIRFunction & function)
 		{
 			const LowIRInstruction & ins = block.instructions[i];
 			scratch = scratch || instruction_needs_scratch(ins);
+			// f80 literal call arguments pass by address and need their
+			// own 16-byte homes; a scratch slot cannot hold more than
+			// one of them across a single call's argument setup.
+			if(ins.opcode == LOWIR_INS_CALL)
+				for(size_t a = 0; a < ins.operands.size(); ++a)
+					if(ins.operands[a].is_literal() &&
+					   ins.operands[a].literal_class == LOWIR_LITERAL_F80)
+					{
+						cursor += 16;
+						frame.call_literal_homes.push_back(cursor);
+					}
 			if(ins.result.empty() || frame.values.count(ins.result))
 				continue;
 			LowIRHome home;

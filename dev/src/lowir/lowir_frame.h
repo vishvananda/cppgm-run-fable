@@ -26,6 +26,9 @@ struct LowIRHome
 struct LowIRFrame
 {
 	map<string, LowIRHome> values;   // params, slots, and temps by name
+	vector<long> call_literal_homes; // 16-byte homes for f80 literal call
+	                                 // arguments, in block/instruction/
+	                                 // operand order
 	long ret_pointer_offset = 0;     // 0 when the return is direct
 	long homes_size = 0;
 	bool has_scratch = false;

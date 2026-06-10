@@ -37,6 +37,7 @@ struct LowIRCY86Emitter
 	// Current function state.
 	const LowIRFunction * function = nullptr;
 	LowIRFrame frame;
+	size_t call_literal_index = 0;  // next frame.call_literal_homes entry
 
 	LowIRCY86Emitter(const LowIRProgram & p, const LowIRProgramInfo & i)
 		: program(p), info(i) {}

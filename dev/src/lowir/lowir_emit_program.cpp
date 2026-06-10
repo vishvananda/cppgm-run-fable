@@ -107,6 +107,7 @@ void LowIRCY86Emitter::emit_function(const LowIRFunction & f)
 {
 	function = &f;
 	frame = ComputeLowIRFrame(f);
+	call_literal_index = 0;
 	label(function_label(f.name));
 	ins("isub64 sp sp 8");
 	ins("move64 [sp] bp");

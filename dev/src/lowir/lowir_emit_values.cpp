@@ -230,8 +230,9 @@ void LowIRCY86Emitter::f80_words_to_scratch(long scratch_offset)
 	ins("move64 " + home_high_ref(scratch_offset) + " z64");
 }
 
-// Materializes an f80 operand into a 16-byte scratch slot: literals via
-// move80 plus padding, stored values via their address.
+// Materializes an f80 operand into a 16-byte bp-relative slot (scratch
+// or a call-argument literal home): literals via move80 plus padding,
+// stored values via their address.
 void LowIRCY86Emitter::f80_value_to_scratch(const LowIROperand & operand,
                                             long scratch_offset)
 {

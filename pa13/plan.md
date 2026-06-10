@@ -101,7 +101,11 @@ Frame layout per function, allocated top down from `bp`:
    `obj<NxA>` rounded up to 8)
 3. slot homes in order (same sizing)
 4. temporary homes in first-definition order (`cmp` and `index` results
-   are 8; `convert`/`call`/`const`/`load`/`copy` size by their type)
+   are 8; `convert`/`call`/`const`/`load`/`copy` size by their type),
+   with one anonymous 16-byte home per f80 literal call argument
+   allocated in the same walk (each by-address literal needs storage
+   that survives until the `call`; a shared scratch slot cannot hold two
+   of them at once)
 5. a 64-byte scratch tail (four 16-byte slots `S1..S4` at offsets
    `homes+16k`) whenever the function contains any `convert` instruction
    or mentions `f80` anywhere (params, return, slots, instruction types)
@@ -141,3 +145,57 @@ six `data8 0;` lines.
 - `make test-report-through-pa13` as the exit criterion, preserving
   PA1-PA12.
 - `perl scripts/cppgm_file_audit.pl --stage pa13 --paths dev/src` clean.
+
+## Architecture Review
+
+The implementation matches the plan's ownership story. The driver
+(`dev/lowir2cy86.cpp`, 96 lines) only handles argv, file concatenation,
+and exit-status policy; every LowIR fact lives in `dev/src/lowir/`. The
+pipeline is strictly lex → parse → validate → translate with no phase
+skipped and no fallback success path: any failure throws and the driver
+maps it to `EXIT_FAILURE` without writing usable output. Nothing in the
+tool consults reference binaries, test names, or input paths.
+
+Boundaries hold as planned: `LowIRType` is the single owner of
+size/width/element facts consumed by validator, frame layout, and
+emitter; the validator alone owns legality tables and resolves
+entry/init/fini hooks into `LowIRProgramInfo`, which the emitter consumes
+without re-deriving metadata; the CY86 emitter writes text only and
+shares nothing with `dev/src/cy86/`. Semantic facts are typed enums
+(types, opcodes, operand kinds, literal classes); metadata stays
+textual key/value pairs because preserving the textual call-boundary
+contract is the point of the LowIR format — PA13 validates values
+against closed tables and translates only the facts the adapter needs
+(roles, storage, arity).
+
+Performance is linear end to end: one token vector, one recursive-descent
+pass, one validation walk with map/set symbol tables, one frame walk per
+function, one emission walk appending to a single output string. The
+EH-usage scan short-circuits on first hit. No quadratic scans, no
+repeated whole-program walks, no hot-path recomputation.
+
+## Final Architecture Review
+
+The PA13 audit (see `pa13/audit.md`) confirmed the structure above and
+fixed one latent miscompile found during review: f80 literal call
+arguments were materialized into a scratch slot that (a) was not
+allocated when the call was the function's only f80 mention — placing
+the bytes below `sp` where the `call` clobbers them — and (b) was shared
+by every f80 literal in one call. Each such literal now gets its own
+16-byte frame home allocated during the existing frame walk, and
+by-address literals with non-f80 spellings are rejected at translation
+instead of emitting malformed `move80` text. All 90 checked-in outputs
+are byte-identical before and after the fix.
+
+One inherited template quirk is documented rather than changed: the
+checked-in refs route by-address argument addresses through `x64` before
+moving them into later unit registers, which clobbers a unit-0 value
+already in `x64` (visible in `200-f80-direct-call.ref`). PA13 grades
+exact text equality, so the adapter reproduces the oracle's sequence;
+any later assignment that executes adapter output must resolve that
+template conflict on its own terms.
+
+Exit criteria: `make test-report-through-pa13` passes (784/784, 13/13
+stages) and `perl scripts/cppgm_file_audit.pl --stage pa13 --paths
+dev/src` passes with only the pre-existing PA10 `parse/parser.h`
+warning.
