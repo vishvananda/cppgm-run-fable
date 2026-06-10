@@ -4,6 +4,7 @@
 #include "sema/program.h"
 
 using std::runtime_error;
+using std::to_string;
 
 namespace {
 
@@ -85,7 +86,8 @@ vector<Namespace*> NamespaceChain(Namespace* ns)
 
 DeclParser::DeclParser(const vector<PostToken>& tokens, SemaModel& model,
                        Program& program)
-	: tokens_(tokens), pos_(0), model_(model), program_(program)
+	: tokens_(tokens), pos_(0), model_(model), program_(program),
+	  scope_switched_(false)
 {
 	eof_.kind = PTK_EOF;
 	for (size_t i = 0; i < tokens_.size(); i++)
@@ -245,6 +247,11 @@ void DeclParser::ParseNamespaceDefinition()
 	else
 	{
 		ns = AddMemberNamespace(model_, parent, name, is_inline);
+		// Unnamed namespaces (and everything inside one) never link, so
+		// they keep the default negative id - which doubles as the
+		// internal-linkage-context fact of 3.5p4.
+		if (!name.empty() && parent.link_id >= 0)
+			ns->link_id = program_.InternNamespace(parent.link_id, name);
 		lookup_cache_.Invalidate();
 	}
 	scopes_.push_back(ns);
@@ -383,16 +390,12 @@ void DeclParser::ParseSimpleDeclaration()
 	bool first = true;
 	while (true)
 	{
-		// A qualified declarator-id switches the lookup scope for its
-		// trailing suffixes and initializer (3.4.3p3); restore per
-		// init-declarator.
-		vector<Namespace*> saved_scopes = scopes_;
 		Declarator declarator;
 		ParseDeclarator(DM_NAMED, declarator);
 		if (first && AtSimple(OP_LBRACE))
 		{
 			ParseFunctionDefinition(specs, declarator);
-			scopes_.swap(saved_scopes);
+			RestoreDeclaratorScope();
 			return;
 		}
 		first = false;
@@ -408,7 +411,7 @@ void DeclParser::ParseSimpleDeclaration()
 		}
 		else
 			FinishUninitializedDeclaration(specs, entity);
-		scopes_.swap(saved_scopes);
+		RestoreDeclaratorScope();
 		if (!AtSimple(OP_COMMA))
 			break;
 		Advance();
@@ -422,6 +425,12 @@ void DeclParser::ParseFunctionDefinition(const DeclSpecifiers& specs,
 	DeclaredEntity* entity = DeclareSimple(specs, declarator);
 	if (!entity || entity->kind != SLOT_FUNCTION)
 		throw ParseError("only a function may have a body");
+	// 8.3.5p10: a typedef of function type shall not be used to define a
+	// function. A chunk-free declarator of function type means the whole
+	// type came from the decl-specifier-seq.
+	if (!HasDeclaratorChunks(declarator))
+		throw ParseError("function `" + entity->name +
+		                 "` defined through a typedef");
 	program_.RecordDefinition(entity);
 	ExpectSimple(OP_LBRACE);
 	ExpectSimple(OP_RBRACE);
@@ -520,6 +529,7 @@ DeclaredEntity* DeclParser::DeclareQualified(const DeclSpecifiers& specs,
 	DeclaredEntity* entity = found->entity;
 	entity->type = MergeRedeclaredType(entity->type, type);
 	CheckRedeclarationSpecifiers(entity, specs);
+	entity->is_constexpr = entity->is_constexpr || specs.is_constexpr;
 	return entity;
 }
 
@@ -606,7 +616,7 @@ DeclaredEntity* DeclParser::LinkNewEntity(const string& name,
 {
 	Namespace& current = *scopes_.back();
 	ELinkage linkage = LNK_EXTERNAL;
-	if (specs.is_static || InsideUnnamedNamespace(&current))
+	if (specs.is_static || current.link_id < 0)  // 3.5p4: unnamed context
 		linkage = LNK_INTERNAL;
 	else if (entity_kind == SLOT_VARIABLE && !specs.is_extern)
 	{
@@ -618,7 +628,7 @@ DeclaredEntity* DeclParser::LinkNewEntity(const string& name,
 	string key;
 	if (linkage == LNK_EXTERNAL)
 	{
-		key = NamespacePath(&current) + "::" + name;
+		key = to_string(current.link_id) + ":" + name;
 		if (entity_kind == SLOT_FUNCTION)
 			key += SignatureKey(type);
 	}
@@ -629,6 +639,7 @@ DeclaredEntity* DeclParser::LinkNewEntity(const string& name,
 	{
 		entity->is_constexpr = specs.is_constexpr;
 		entity->is_inline = specs.is_inline;
+		entity->is_thread_local = specs.is_thread_local;
 		return entity;
 	}
 	// Linked to a previous translation unit's declarations (3.5p9-10).
@@ -638,6 +649,7 @@ DeclaredEntity* DeclParser::LinkNewEntity(const string& name,
 	entity->type = MergeRedeclaredType(entity->type, type);
 	CheckRedeclarationSpecifiers(entity, specs);
 	entity->is_inline = entity->is_inline || specs.is_inline;
+	entity->is_constexpr = entity->is_constexpr || specs.is_constexpr;
 	return entity;
 }
 
@@ -652,6 +664,12 @@ void DeclParser::CheckRedeclarationSpecifiers(
 	if (entity->kind == SLOT_FUNCTION &&
 	    entity->is_constexpr != specs.is_constexpr)
 		throw ParseError("constexpr disagreement on redeclaration of `" +
+		                 entity->name + "`");
+	// 7.1.1: thread_local appears on every declaration of the variable
+	// or on none (real linkers enforce this across translation units).
+	if (entity->kind == SLOT_VARIABLE &&
+	    entity->is_thread_local != specs.is_thread_local)
+		throw ParseError("thread_local disagreement on redeclaration of `" +
 		                 entity->name + "`");
 }
 
@@ -889,23 +907,37 @@ bool DeclParser::ConsumeSpecifierKeyword(SpecifierState& state,
 	case KW_TYPEDEF:
 	case KW_CONSTEXPR:
 	case KW_INLINE:
+	{
 		// 8.3.5p2 (parameters) / 8.4 type-ids: only type-specifiers.
 		if (context != SC_DECLARATION)
 			throw ParseError("specifier not allowed in this context");
+		bool* flag;
 		switch (Peek().token_type)
 		{
-		case KW_STATIC: state.is_static = true; break;
-		case KW_THREAD_LOCAL: state.is_thread_local = true; break;
-		case KW_EXTERN: state.is_extern = true; break;
-		case KW_TYPEDEF: state.is_typedef = true; break;
-		case KW_CONSTEXPR: state.is_constexpr = true; break;
-		default: state.is_inline = true; break;
+		case KW_STATIC: flag = &state.is_static; break;
+		case KW_THREAD_LOCAL: flag = &state.is_thread_local; break;
+		case KW_EXTERN: flag = &state.is_extern; break;
+		case KW_TYPEDEF: flag = &state.is_typedef; break;
+		case KW_CONSTEXPR: flag = &state.is_constexpr; break;
+		default: flag = &state.is_inline; break;
 		}
+		// 7.1.1p1 (storage classes) and the per-specifier rules: each of
+		// these may appear at most once in a decl-specifier-seq.
+		if (*flag)
+			throw ParseError("duplicate specifier");
+		*flag = true;
 		break;
+	}
 	case KW_CONST:
+		// 7.1.6.2p2: redundant cv-qualifiers are ill-formed except when
+		// introduced through a typedef-name.
+		if (state.is_const)
+			throw ParseError("duplicate const");
 		state.is_const = true;
 		break;
 	case KW_VOLATILE:
+		if (state.is_volatile)
+			throw ParseError("duplicate volatile");
 		state.is_volatile = true;
 		break;
 	case KW_SIGNED:
@@ -1031,10 +1063,19 @@ void DeclParser::ParsePtrOperators(vector<DeclaratorChunk>& out)
 			chunk.kind = DeclaratorChunk::CK_POINTER;
 			while (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
 			{
+				// 7.1.6.1p1: at most one of each in a cv-qualifier-seq.
 				if (AtSimple(KW_CONST))
+				{
+					if (chunk.is_const)
+						throw ParseError("duplicate const");
 					chunk.is_const = true;
+				}
 				else
+				{
+					if (chunk.is_volatile)
+						throw ParseError("duplicate volatile");
 					chunk.is_volatile = true;
+				}
 				Advance();
 			}
 		}
@@ -1101,9 +1142,22 @@ void DeclParser::EnterQualifiedDeclaratorScope(QualifiedName& name)
 		                 "` outside an enclosing namespace");
 	name.scope = target;
 	// 3.4.3p3: names after the qualified declarator-id (array bounds,
-	// the initializer) are looked up in the member's namespace. The
-	// caller restores the chain after the init-declarator.
+	// the initializer) are looked up in the member's namespace until
+	// RestoreDeclaratorScope. At most one declarator-id exists per
+	// init-declarator (parameters reject qualified names), so the one
+	// save slot cannot be clobbered.
+	saved_scopes_.swap(scopes_);
 	scopes_ = NamespaceChain(target);
+	scope_switched_ = true;
+}
+
+void DeclParser::RestoreDeclaratorScope()
+{
+	if (!scope_switched_)
+		return;
+	scopes_.swap(saved_scopes_);
+	saved_scopes_.clear();
+	scope_switched_ = false;
 }
 
 void DeclParser::ParseDeclaratorSuffixes(vector<DeclaratorChunk>& out)
@@ -1278,4 +1332,11 @@ DeclParser::DeclaratorName(const Declarator& declarator)
 	if (declarator.inner)
 		return DeclaratorName(*declarator.inner);
 	return 0;
+}
+
+bool DeclParser::HasDeclaratorChunks(const Declarator& declarator)
+{
+	if (!declarator.prefix.empty() || !declarator.suffixes.empty())
+		return true;
+	return declarator.inner && HasDeclaratorChunks(*declarator.inner);
 }

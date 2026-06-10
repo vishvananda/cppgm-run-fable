@@ -13,6 +13,17 @@ void Program::BeginTranslationUnit()
 	tu_++;
 }
 
+int Program::InternNamespace(int parent_id, const string& name)
+{
+	pair<int, string> key(parent_id, name);
+	map<pair<int, string>, int>::iterator it = namespace_ids_.find(key);
+	if (it != namespace_ids_.end())
+		return it->second;
+	int id = static_cast<int>(namespace_ids_.size()) + 1;  // 0 is global
+	namespace_ids_[key] = id;
+	return id;
+}
+
 DeclaredEntity* Program::LinkEntity(const string& key, ESlotKind kind,
                                     const string& name, const TypePtr& type,
                                     ELinkage linkage, bool& created)
@@ -145,7 +156,7 @@ void WriteSlot(string& image, const ImageSlot* slot)
 
 } // namespace
 
-void Program::WriteImage(ostream& out) const
+void Program::WriteImage(ostream& out)
 {
 	unsigned long long offset = 4;  // the "PA8" magic
 	vector<ImageSlot*> placed;

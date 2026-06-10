@@ -239,8 +239,9 @@ private:
 	void ParseDeclaratorRoot(EDeclaratorMode mode, Declarator& out);
 	// Resolves a qualified declarator-id's namespace, checks 8.3p1
 	// enclosure, and switches the lookup scope chain (3.4.3p3) until
-	// the caller restores it.
+	// RestoreDeclaratorScope (a no-op when no switch happened).
 	void EnterQualifiedDeclaratorScope(QualifiedName& name);
+	void RestoreDeclaratorScope();
 	void ParseDeclaratorSuffixes(vector<DeclaratorChunk>& out);
 	DeclaratorChunk ParseParametersAndQualifiers();
 	TypePtr ParseParameterDeclaration();
@@ -253,6 +254,9 @@ private:
 	                                 const Declarator& declarator,
 	                                 const TypePtr& spec_base) const;
 	static const QualifiedName* DeclaratorName(const Declarator& d);
+	// True when any level of the declarator has a type chunk (a
+	// chunk-free declarator's type is the decl-specifier-seq type).
+	static bool HasDeclaratorChunks(const Declarator& d);
 
 	const vector<PostToken>& tokens_;
 	size_t pos_;
@@ -260,6 +264,10 @@ private:
 	SemaModel& model_;
 	Program& program_;
 	vector<Namespace*> scopes_;  // lexical namespace chain, global first
+	// The lexical chain saved by EnterQualifiedDeclaratorScope (swapped,
+	// not copied, so unqualified declarators cost nothing).
+	vector<Namespace*> saved_scopes_;
+	bool scope_switched_;
 
 	// Directive-closure memo for UnqualifiedLookup; invalidated at the
 	// two places that add using-directives (ParseUsingDirective and

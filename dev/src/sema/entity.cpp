@@ -8,6 +8,7 @@ SemaModel::SemaModel()
 {
 	namespaces_.emplace_back(new Namespace());
 	global_ = namespaces_.back().get();
+	global_->link_id = 0;
 }
 
 Namespace* SemaModel::CreateNamespace(const string& name, bool is_inline,
@@ -51,22 +52,6 @@ bool NamespaceEncloses(const Namespace* outer, const Namespace* inner)
 {
 	for (const Namespace* walk = inner; walk; walk = walk->parent)
 		if (walk == outer)
-			return true;
-	return false;
-}
-
-string NamespacePath(const Namespace* ns)
-{
-	if (!ns->parent)
-		return "";
-	string parent = NamespacePath(ns->parent);
-	return parent.empty() ? ns->name : parent + "::" + ns->name;
-}
-
-bool InsideUnnamedNamespace(const Namespace* ns)
-{
-	for (const Namespace* walk = ns; walk->parent; walk = walk->parent)
-		if (walk->name.empty())
 			return true;
 	return false;
 }

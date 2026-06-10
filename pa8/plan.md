@@ -48,12 +48,15 @@ image's first-declaration order all fall out of creation order.
   addend}), `init_is_constant`, `is_constexpr`, `defined_tu`, and the
   final image offset. A single scalar initializer means a slot never
   needs more than one relocation.
-- `DeclaredEntity : ImageSlot` adds name, linkage, inline flag. The
-  entity object is shared program-wide: when a TU declares an
-  external name, `Program` returns the already-linked entity (keyed
-  by home-namespace path + name, plus the parameter-type signature
-  for functions). Internal-linkage entities are never keyed, so each
-  TU gets its own. Constant reads check `defined_tu == current TU`,
+- `DeclaredEntity : ImageSlot` adds name, linkage, and the inline,
+  constexpr, and thread_local declaration facts. The entity object is
+  shared program-wide: when a TU declares an external name, `Program`
+  returns the already-linked entity, keyed by the home namespace's
+  program-interned identity (`Namespace::link_id`, assigned once at
+  namespace creation; negative ids mark unnamed-namespace context per
+  3.5p4) plus the name, plus the parameter-type signature for
+  functions. Internal-linkage entities are never keyed, so each TU
+  gets its own. Constant reads check `defined_tu == current TU`,
   which makes cross-TU initializers correctly non-constant.
 - `Binding` gains a function overload list (entity + per-overload
   imported flag) and an `imported` flag (set by using-declarations
@@ -172,7 +175,7 @@ reference parity (AGENTS.md). Probes of `nsinit-ref` informed these:
 ## Validation
 
 1. `make test-report ACTIVE_TEST_REPORT_PAS='pa8'` while iterating
-   (41 local fixtures).
+   (41 local fixtures plus 8 course fixtures from the audit).
 2. `make test-report-through-pa8` as the exit gate (pa1-pa7 must stay
    green; nsdecl shares the sema sources, so regressions show here).
 3. `perl scripts/cppgm_file_audit.pl --stage pa8 --paths dev/src`.
@@ -181,6 +184,15 @@ reference parity (AGENTS.md). Probes of `nsinit-ref` informed these:
    qualification rules, arrays/strings, static_assert, namespace and
    redeclaration conflicts, qualified declarator scope, internal/
    external linkage mixes). All checked divergences triaged below.
+5. Course fixtures (`cppgm.tests/course/pa8/`, refs generated with
+   `nsinit-ref`) pin the audit-fixed behaviors where the reference
+   agrees: typedef-bodied function definitions rejected and
+   typedef-declared functions still definable, thread_local
+   redeclaration agreement (reject and accept directions), constexpr
+   added on qualified and cross-TU redeclarations feeding 5.19 reads,
+   redundant cv through a typedef accepted, and a 600-deep namespace
+   nest with 600 initialized members (the linking-key performance
+   shape; the reference needs 1.5s, ours 0.05s).
 
 ## Known reference divergences (non-fixture inputs)
 
@@ -222,3 +234,55 @@ the standard win (AGENTS.md). The sweep found these classes:
   / `extern double x;`) is ill-formed NDR; we diagnose.
 - Function stub alignment and the dead temporary on string-literal
   reference binding, per the decisions above.
+- Duplicated decl-specifiers: the reference accepts `static static`,
+  `extern extern`, `thread_local thread_local`, `const const`,
+  `volatile volatile`, duplicate `typedef`/`constexpr`/`inline`, and
+  `int* const const`; 7.1.1p1, 7.1.6.1p1, and 7.1.6.2p2 make all of
+  these ill-formed (g++ -std=c++11 agrees), so we diagnose.
+- thread_local agreement: every declaration of a variable must agree
+  on thread_local. The reference diagnoses the same-TU mismatch but
+  accepts the cross-TU one; we diagnose program-wide (the same rule,
+  and what real linkers do with TLS/non-TLS symbol mixes - the
+  cross-TU stance we already take for redefinitions).
+
+## Architecture Review
+
+- Ownership: `Program` owns every image slot (entities, temporaries,
+  string literals) and the linking maps; `SemaModel` owns one TU's
+  namespace tree; `TypePtr` nodes are immutable and shared. All
+  declaration facts are typed fields on the one shared entity -
+  type, linkage, defining TU, init kind/bytes/target, constexpr,
+  inline, thread_local - written at declaration/redeclaration time
+  and read by the evaluator (5.19) and the image writer; nothing
+  downstream re-derives them.
+- Identity: cross-TU namespace identity is an interned integer
+  (`Namespace::link_id`, one `Program::InternNamespace` map), so
+  linking keys cost O(name + signature) regardless of nesting depth,
+  and `link_id < 0` is the single representation of "inside an
+  unnamed namespace" (3.5p4). The only string in a key is the
+  rendered parameter signature, bounded by the declaration's own
+  length and never parsed back.
+- Control flow: one forward recursive-descent pass per TU on a
+  large-stack worker thread; choice points resolve predictively from
+  lookup state (no backtracking over semantic actions); the
+  qualified-declarator scope switch (3.4.3p3) swaps the lexical
+  chain in O(1) and restores it per init-declarator.
+- Diagnosis: every diagnosable ill-formed construct throws, and the
+  driver maps any throw to EXIT_FAILURE; UB-territory inputs (outside
+  pa8.gram) also throw rather than guessing.
+
+## Final Architecture Review
+
+The PA8 audit closed four diagnosis gaps (duplicate specifiers,
+typedef-bodied function definitions, thread_local disagreement,
+constexpr dropped on qualified/cross-TU redeclaration paths) and one
+performance class (per-declaration O(depth^2) linking-key rendering,
+replaced by interned namespace ids; the per-declarator scope-chain
+copy, replaced by swaps). After those changes the model has one owner
+per fact, the parser does no per-declaration work proportional to
+namespace depth, adversarial deep-nesting inputs run linearly (40k
+deep + 40k declarations in 0.8s; the reference segfaults at 20k), and
+the full suite (373 cases incl. 8 new course pins) plus the file
+audit pass. Remaining known divergences from `nsinit-ref` are all
+deliberate, standard-backed, and documented above; fixtures gate none
+of them.

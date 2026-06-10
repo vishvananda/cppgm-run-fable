@@ -4,10 +4,12 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using std::map;
 using std::ostream;
+using std::pair;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -41,6 +43,12 @@ public:
 	// Marks the start of the next translation unit (first call: index 0).
 	void BeginTranslationUnit();
 
+	// The program-wide identity of the namespace `name` declared in the
+	// namespace with identity `parent_id` (global namespace: 0). The
+	// same path from any translation unit yields the same id, giving
+	// linking keys an O(1) namespace component.
+	int InternNamespace(int parent_id, const string& name);
+
 	// Returns the entity for a first-in-this-TU declaration: for an
 	// external `key`, the entity another translation unit already
 	// declared under that key if any, otherwise a new entity (which is
@@ -64,15 +72,16 @@ public:
 	// terminator.
 	ImageSlot* CreateStringLiteral(const PostToken& token);
 
-	// Lays out the image (assigning offsets) and writes it: magic,
+	// Lays out the image (assigning slot offsets) and writes it: magic,
 	// Block 1 (skipping never-defined variables), Block 2, Block 3,
 	// with zero padding to each object's alignment and relocations
 	// resolved (unplaced targets resolve to offset 0).
-	void WriteImage(ostream& out) const;
+	void WriteImage(ostream& out);
 
 private:
 	vector<unique_ptr<DeclaredEntity>> entities_;
 	vector<unique_ptr<ImageSlot>> objects_;  // temporaries and strings
+	map<pair<int, string>, int> namespace_ids_;  // (parent id, name) -> id
 	map<string, DeclaredEntity*> linked_;    // external key -> entity
 	vector<DeclaredEntity*> block1_;
 	vector<ImageSlot*> block2_;

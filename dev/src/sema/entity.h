@@ -83,11 +83,16 @@ enum ELinkage
 // SLOT_FUNCTION). One object per linked entity program-wide.
 struct DeclaredEntity : ImageSlot
 {
-	DeclaredEntity() : linkage(LNK_EXTERNAL), is_inline(false) {}
+	DeclaredEntity()
+		: linkage(LNK_EXTERNAL), is_inline(false), is_thread_local(false)
+	{}
 
 	string name;
 	ELinkage linkage;
-	bool is_inline;  // functions (7.1.2)
+	bool is_inline;        // functions (7.1.2)
+	// Variables: thread storage duration. The image is unaffected, but
+	// every declaration of the entity must agree on it (7.1.1).
+	bool is_thread_local;
 };
 
 enum EBindingKind
@@ -129,10 +134,17 @@ struct Binding
 
 struct Namespace
 {
-	Namespace() : is_inline(false), parent(0), unnamed_member(0) {}
+	Namespace() : is_inline(false), link_id(-1), parent(0), unnamed_member(0)
+	{}
 
 	string name;  // empty for the global and unnamed namespaces
 	bool is_inline;
+	// Program-wide identity of this namespace's path, interned by the
+	// Program at creation (global namespace: 0) and shared across
+	// translation units, so linking keys never re-render the path.
+	// Negative for unnamed namespaces and their members, whose entities
+	// have internal linkage (3.5p4) and never link.
+	int link_id;
 	Namespace* parent;  // null for the global namespace
 
 	// Every name declared in this namespace (members, aliases, names
@@ -190,16 +202,6 @@ void AddUsingDirective(Namespace& ns, Namespace* nominated);
 // True when `outer` is `inner` or one of its ancestors (3.3.6: every
 // namespace encloses itself).
 bool NamespaceEncloses(const Namespace* outer, const Namespace* inner);
-
-// The qualified path of `ns` from the global namespace ("A::B"; empty
-// for the global namespace itself). Unnamed namespaces contribute an
-// empty component, but entities under one have internal linkage and
-// never use the path.
-string NamespacePath(const Namespace* ns);
-
-// True when `ns` or any of its ancestors is an unnamed namespace
-// (3.5p4: members of such namespaces have internal linkage).
-bool InsideUnnamedNamespace(const Namespace* ns);
 
 // Writes the PA7 namespace description (recursively) to `out`.
 void DescribeNamespace(ostream& out, const Namespace& ns);
