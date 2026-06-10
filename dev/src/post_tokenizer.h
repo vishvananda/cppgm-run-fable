@@ -13,7 +13,9 @@ using std::string;
 // are dropped (phase 4 is a no-op for this input class). Adjacent
 // string-literal preprocessing-tokens are buffered into a maximal
 // sequence and concatenated (phase 6) when any other token or eof
-// arrives. Conversion failures emit invalid tokens; the stream keeps
+// arrives -- except a character literal whose body fails to decode,
+// which is reported inline without breaking the sequence (reference
+// behavior). Conversion failures emit invalid tokens; the stream keeps
 // going.
 class PostTokenizer : public IPPTokenStream
 {
@@ -34,6 +36,7 @@ public:
 	void emit_eof();
 
 private:
+	void EmitCharLiteral(const string& data);
 	void FlushStringSequence();
 
 	IPostTokenStream& output_;

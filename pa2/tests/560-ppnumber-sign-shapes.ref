@@ -1,0 +1,71 @@
+invalid 8E0e4x0e-7968ecf
+invalid 1p
+simple + OP_PLUS
+literal 3 int 03000000
+literal 0x1e int 1E000000
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 1x2e
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 1.2x3p
+simple + OP_PLUS
+literal 4 int 04000000
+invalid 1.x1p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 1e+x2p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 9P
+simple - OP_MINUS
+literal 5 int 05000000
+invalid 1..e+3
+literal 0X3E int 3E000000
+simple + OP_PLUS
+literal 2 int 02000000
+invalid 12x3p+4
+invalid 12x3e
+simple + OP_PLUS
+literal 4 int 04000000
+invalid 00x1e
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 00x1p+3
+invalid 2x1p+3
+invalid 2x1e
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 1xx2p+3
+invalid 1Xp+3
+invalid .0x1p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 0.x1p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 1a2x3p+4
+invalid 1ex2p+3
+invalid 80e4x1p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 1_x2p+3
+invalid 1x2x3e
+simple + OP_PLUS
+literal 4 int 04000000
+invalid 0x1p+2p+3
+literal 0x1e int 1E000000
+simple + OP_PLUS
+invalid 2p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 0.x1e+3
+invalid 1e+2e-3
+invalid 1eAx2p+3
+invalid 1E0x2p
+simple + OP_PLUS
+literal 3 int 03000000
+invalid 0x1pf
+simple + OP_PLUS
+literal 3 int 03000000
+eof

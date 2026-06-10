@@ -1,0 +1,30 @@
+user-defined-literal 5E_bhE8 _bhE8 floating 5E
+user-defined-literal 27E_Pe8u _Pe8u floating 27E
+invalid 1e_3
+user-defined-literal 1e_8e3 _8e3 floating 1e
+invalid 0x1p_e3
+user-defined-literal 1e_xp3 _xp3 floating 1e
+invalid 1e_ea3
+invalid 1e_x3
+user-defined-literal 1e_exp3 _exp3 floating 1e
+user-defined-literal 1e3_x4 _x4 floating 1e3
+user-defined-literal 1e_e3x4 _e3x4 floating 1e
+invalid 1e_.3
+invalid 123_.5
+invalid 1e3_.5
+invalid 1e_p3
+invalid 0x1p_X3
+user-defined-literal 0x1p_xp3 _xp3 floating 0x1p
+invalid 123_x_p3
+user-defined-literal 123_a3é _a3é integer 123
+user-defined-literal 123_xé _xé integer 123
+user-defined-literal 1.5_é9 _é9 floating 1.5
+user-defined-literal 123_é _é integer 123
+invalid 12é_x
+invalid 12é
+user-defined-literal 123_xé3 _xé3 integer 123
+invalid 1e_é
+invalid 1e+_x
+invalid 0x1p+_l
+invalid 1e-_e3
+eof

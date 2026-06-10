@@ -1,0 +1,11 @@
+literal u"x" "\x10FFFF" array of 4 char16_t 7800FFDBFFDF0000
+simple ; OP_SEMICOLON
+invalid u8""s ""s
+simple ; OP_SEMICOLON
+invalid ""s ""t
+simple ; OP_SEMICOLON
+invalid u8"\x10FFFF" u"x"
+simple ; OP_SEMICOLON
+invalid "\x10FFFF"_x "y"_y
+simple ; OP_SEMICOLON
+eof

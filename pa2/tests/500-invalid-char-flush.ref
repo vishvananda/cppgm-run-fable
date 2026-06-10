@@ -1,0 +1,40 @@
+invalid ''
+literal "a" "b" array of 3 char 616200
+simple ; OP_SEMICOLON
+invalid 'bc'
+literal "a" "b" array of 3 char 616200
+simple ; OP_SEMICOLON
+invalid '\x110000'
+literal "a" "b" array of 3 char 616200
+simple ; OP_SEMICOLON
+invalid '\xD800'
+literal "a" "b" array of 3 char 616200
+simple ; OP_SEMICOLON
+invalid 'ab'q
+literal "a" "b" array of 3 char 616200
+simple ; OP_SEMICOLON
+invalid ''_q
+literal "a" "b" array of 3 char 616200
+simple ; OP_SEMICOLON
+literal "a" array of 2 char 6100
+invalid 'b'q
+literal "c" array of 2 char 6300
+simple ; OP_SEMICOLON
+literal "a" array of 2 char 6100
+invalid u'\x10000'
+literal "c" array of 2 char 6300
+simple ; OP_SEMICOLON
+literal "a" array of 2 char 6100
+user-defined-literal 'b'_q _q character char 62
+literal "c" array of 2 char 6300
+simple ; OP_SEMICOLON
+invalid ''
+literal "a" array of 2 char 6100
+literal 'x' char 78
+literal "b" array of 2 char 6200
+simple ; OP_SEMICOLON
+invalid ''
+invalid ''
+literal "a" "b" "c" array of 4 char 61626300
+simple ; OP_SEMICOLON
+eof

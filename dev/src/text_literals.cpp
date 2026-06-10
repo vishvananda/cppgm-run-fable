@@ -105,6 +105,20 @@ bool DecodeBody(const string& body, bool raw, std::vector<int>& cps)
 	return true;
 }
 
+// The reference extracts a ud-suffix by scanning ASCII identifier
+// characters forward from the closing quote. PA1 may have attached
+// further non-ASCII identifier characters to the preprocessing-token;
+// those stay in the token source but are dropped from the analysis
+// entirely ("abc"é is a plain string literal, "abc"_é has ud-suffix _).
+string ExtractAsciiUdSuffix(const string& source, size_t close)
+{
+	size_t end = close + 1;
+	while (end < source.size() &&
+	       (IsNondigit(source[end]) || IsDigit(source[end])))
+		end++;
+	return source.substr(close + 1, end - (close + 1));
+}
+
 struct CharLiteralParts
 {
 	string prefix;  // "", "u", "U", "L"
@@ -120,7 +134,7 @@ bool ParseCharLiteral(const string& source, CharLiteralParts& parts)
 		return false;
 	parts.prefix = source.substr(0, open);
 	parts.body = source.substr(open + 1, close - open - 1);
-	parts.ud_suffix = source.substr(close + 1);
+	parts.ud_suffix = ExtractAsciiUdSuffix(source, close);
 	return parts.prefix.empty() || parts.prefix == "u" ||
 		parts.prefix == "U" || parts.prefix == "L";
 }
@@ -165,7 +179,7 @@ bool ParseStringLiteral(const string& source, StringLiteralParts& parts)
 	string head = source.substr(0, open);
 	parts.raw = !head.empty() && head[head.size() - 1] == 'R';
 	parts.prefix = parts.raw ? head.substr(0, head.size() - 1) : head;
-	parts.ud_suffix = source.substr(close + 1);
+	parts.ud_suffix = ExtractAsciiUdSuffix(source, close);
 	if (!IsEncodingPrefix(parts.prefix))
 		return false;
 	if (!parts.raw)
@@ -258,18 +272,32 @@ bool CombineSequenceAttribute(const string& value, string& combined)
 
 } // namespace
 
-PostToken AnalyzeCharLiteral(const string& source)
+CharLiteralAnalysis AnalyzeCharLiteral(const string& source)
 {
+	CharLiteralAnalysis result;
+	result.body_invalid = false;
 	CharLiteralParts parts;
 	if (!ParseCharLiteral(source, parts))
-		return MakeInvalidToken(source);
-	if (!parts.ud_suffix.empty() && !IsUdSuffixSpelling(parts.ud_suffix))
-		return MakeInvalidToken(source);
+	{
+		result.token = MakeInvalidToken(source);
+		return result;
+	}
+	// The body is checked before the ud-suffix ('ab'q fails as a body,
+	// not a suffix, so it does not interrupt a string sequence).
 	std::vector<int> cps;
 	if (!DecodeBody(parts.body, false, cps) || cps.size() != 1 ||
 	    !IsValidLiteralCodePoint(cps[0]))
-		return MakeInvalidToken(source);
+	{
+		result.token = MakeInvalidToken(source);
+		result.body_invalid = true;
+		return result;
+	}
 	int cp = cps[0];
+	if (!parts.ud_suffix.empty() && parts.ud_suffix[0] != '_')
+	{
+		result.token = MakeInvalidToken(source);
+		return result;
+	}
 
 	PostToken token;
 	token.kind = parts.ud_suffix.empty() ? PTK_LITERAL : PTK_UD_CHARACTER;
@@ -285,7 +313,10 @@ PostToken AnalyzeCharLiteral(const string& source)
 	else if (parts.prefix == "u")
 	{
 		if (cp >= 0x10000)  // must fit one UTF-16 code unit
-			return MakeInvalidToken(source);
+		{
+			result.token = MakeInvalidToken(source);
+			return result;
+		}
 		token.type = FT_CHAR16_T;
 		size = 2;
 	}
@@ -300,7 +331,8 @@ PostToken AnalyzeCharLiteral(const string& source)
 		size = 4;
 	}
 	token.data = LittleEndianBytes(cp, size);
-	return token;
+	result.token = token;
+	return result;
 }
 
 PostToken AnalyzeStringSequence(const std::vector<string>& sources)
@@ -314,25 +346,30 @@ PostToken AnalyzeStringSequence(const std::vector<string>& sources)
 		StringLiteralParts parts;
 		if (!ParseStringLiteral(source, parts))
 			return MakeInvalidToken(joined);
-		if (!CombineSequenceAttribute(parts.prefix, prefix))
-			return MakeInvalidToken(joined);
-		if (!parts.ud_suffix.empty() &&
-		    !IsUdSuffixSpelling(parts.ud_suffix))
-			return MakeInvalidToken(joined);
-		if (!CombineSequenceAttribute(parts.ud_suffix, ud_suffix))
+		if (!CombineSequenceAttribute(parts.prefix, prefix) ||
+		    !CombineSequenceAttribute(parts.ud_suffix, ud_suffix))
 			return MakeInvalidToken(joined);
 		if (!DecodeBody(parts.body, parts.raw, cps))
 			return MakeInvalidToken(joined);
 	}
 	cps.push_back(0);
 
+	// Reference check order: encode first (a UTF-8 range failure is a
+	// hard translation error even when the suffix below would have made
+	// the sequence invalid), then require the combined ud-suffix to
+	// start with an underscore.
+	size_t unit_size;
+	EFundamentalType type = StringElementType(prefix, unit_size);
+	string data = EncodeStringData(cps, unit_size);
+	if (!ud_suffix.empty() && ud_suffix[0] != '_')
+		return MakeInvalidToken(joined);
+
 	PostToken token;
 	token.kind = ud_suffix.empty() ? PTK_LITERAL_ARRAY : PTK_UD_STRING;
 	token.source = joined;
 	token.ud_suffix = ud_suffix;
-	size_t unit_size;
-	token.type = StringElementType(prefix, unit_size);
-	token.data = EncodeStringData(cps, unit_size);
+	token.type = type;
+	token.data = data;
 	token.num_elements = token.data.size() / unit_size;
 	return token;
 }

@@ -43,14 +43,12 @@ void PostTokenizer::emit_pp_number(const string& data)
 
 void PostTokenizer::emit_character_literal(const string& data)
 {
-	FlushStringSequence();
-	output_.emit(AnalyzeCharLiteral(data));
+	EmitCharLiteral(data);
 }
 
 void PostTokenizer::emit_user_defined_character_literal(const string& data)
 {
-	FlushStringSequence();
-	output_.emit(AnalyzeCharLiteral(data));
+	EmitCharLiteral(data);
 }
 
 void PostTokenizer::emit_string_literal(const string& data)
@@ -88,6 +86,18 @@ void PostTokenizer::emit_eof()
 	PostToken token;
 	token.kind = PTK_EOF;
 	output_.emit(token);
+}
+
+// A character literal whose body fails to decode is reported inline and
+// does not terminate the pending string-literal sequence ("a" '' "b"
+// still concatenates around the invalid, matching the reference); all
+// other character-literal outcomes flush like any other token.
+void PostTokenizer::EmitCharLiteral(const string& data)
+{
+	CharLiteralAnalysis analysis = AnalyzeCharLiteral(data);
+	if (!analysis.body_invalid)
+		FlushStringSequence();
+	output_.emit(analysis.token);
 }
 
 void PostTokenizer::FlushStringSequence()

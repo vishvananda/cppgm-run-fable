@@ -3,8 +3,6 @@
 #include <cstddef>
 #include <utility>
 
-#include "utf8.h"
-
 namespace {
 
 // See C++ standard 2.11 Identifiers and Annex E.1
@@ -105,19 +103,4 @@ bool IsSimpleEscapeChar(int c)
 	default:
 		return false;
 	}
-}
-
-bool IsUdSuffixSpelling(const std::string& spelling)
-{
-	if (spelling.empty() || spelling[0] != '_')
-		return false;
-	size_t pos = 1;
-	while (pos < spelling.size())
-	{
-		int cp;
-		if (!TryDecodeUtf8Char(spelling, pos, cp) ||
-		    !IsIdentifierContinue(cp))
-			return false;
-	}
-	return true;
 }

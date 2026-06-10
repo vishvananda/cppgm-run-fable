@@ -1,0 +1,29 @@
+invalid "abc"yyy
+simple ; OP_SEMICOLON
+literal "abc"é array of 4 char 61626300
+simple ; OP_SEMICOLON
+literal "abc"ﮩ array of 4 char 61626300
+simple ; OP_SEMICOLON
+literal "abc"éx array of 4 char 61626300
+simple ; OP_SEMICOLON
+invalid "abc"xé
+simple ; OP_SEMICOLON
+user-defined-literal "abc"_é _ string array of 4 char 61626300
+simple ; OP_SEMICOLON
+user-defined-literal "abc"_x "d"é _x string array of 5 char 6162636400
+simple ; OP_SEMICOLON
+user-defined-literal "abc"é "d"_x _x string array of 5 char 6162636400
+simple ; OP_SEMICOLON
+user-defined-literal "abc"_9é _9 string array of 4 char 61626300
+simple ; OP_SEMICOLON
+user-defined-literal "a"_xé "b"_x _x string array of 3 char 616200
+simple ; OP_SEMICOLON
+literal 'a'é char 61
+simple ; OP_SEMICOLON
+invalid 'a'xé
+simple ; OP_SEMICOLON
+user-defined-literal 'a'_é _ character char 61
+simple ; OP_SEMICOLON
+user-defined-literal 'a'_x9é _x9 character char 61
+simple ; OP_SEMICOLON
+eof

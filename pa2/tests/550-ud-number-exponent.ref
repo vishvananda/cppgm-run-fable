@@ -1,0 +1,25 @@
+user-defined-literal 0x.56fP18637c_l _l floating 0x.56fP18637c
+user-defined-literal 0x0410P98e6_0eXEe _0eXEe floating 0x0410P98e6
+user-defined-literal 0X1.04p7e_a3ab _a3ab floating 0X1.04p7e
+user-defined-literal 0X5p9417E.6_aE92 _aE92 floating 0X5p9417E.6
+user-defined-literal 164e._ _ floating 164e.
+user-defined-literal 164e.5_x _x floating 164e.5
+user-defined-literal 164e._x _x floating 164e.
+invalid 1e.x_
+invalid 1e.5e3_x
+user-defined-literal 0x1p.c_l _l floating 0x1p.c
+user-defined-literal 0x1p3.c_l _l floating 0x1p3.c
+invalid 1e3.f_x
+invalid 1e.._
+user-defined-literal 1e+._ _ floating 1e+.
+invalid 1e.5.6_x
+user-defined-literal 0x1p3c.5_l _l floating 0x1p3c.5
+invalid 0x1pf_l
+user-defined-literal 0x1p+f_l _l floating 0x1p+f
+invalid 1e+f_x
+invalid 1.5e._x
+invalid 1.5e+._x
+user-defined-literal 0x1p+c.5_l _l floating 0x1p+c.5
+user-defined-literal 0x1p._l _l floating 0x1p.
+invalid 1.5e.5_x
+eof

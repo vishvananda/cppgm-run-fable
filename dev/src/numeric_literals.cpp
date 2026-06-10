@@ -3,7 +3,6 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
-#include <sstream>
 #include <vector>
 
 #include "lex_char_classes.h"
@@ -176,7 +175,7 @@ PostToken MakeIntegerLiteral(const string& source, size_t digits_end,
 
 // Matches floating-literal (2.14.4); suffix is the floating-suffix
 // character or 0 when absent.
-bool MatchFloating(const string& s, bool allow_suffix, char& suffix)
+bool MatchFloating(const string& s, char& suffix)
 {
 	size_t i = 0;
 	size_t int_digits = 0;
@@ -218,7 +217,7 @@ bool MatchFloating(const string& s, bool allow_suffix, char& suffix)
 	if (!has_dot && !has_exponent)
 		return false;
 	suffix = 0;
-	if (allow_suffix && i < s.size() &&
+	if (i < s.size() &&
 	    (s[i] == 'f' || s[i] == 'F' || s[i] == 'l' || s[i] == 'L'))
 		suffix = s[i++];
 	return i == s.size();
@@ -228,7 +227,7 @@ bool MatchFloating(const string& s, bool allow_suffix, char& suffix)
 // floating literals: 0x, hex digits with an optional fraction, a p/P
 // exponent with a required decimal digit-sequence, and only l/L (long
 // double) as an optional floating-suffix.
-bool MatchHexFloating(const string& s, bool allow_suffix, char& suffix)
+bool MatchHexFloating(const string& s, char& suffix)
 {
 	if (s.size() < 2 || s[0] != '0' || (s[1] != 'x' && s[1] != 'X'))
 		return false;
@@ -262,35 +261,28 @@ bool MatchHexFloating(const string& s, bool allow_suffix, char& suffix)
 	if (exponent_digits == 0)
 		return false;
 	suffix = 0;
-	if (allow_suffix && i < s.size() && (s[i] == 'l' || s[i] == 'L'))
+	if (i < s.size() && (s[i] == 'l' || s[i] == 'L'))
 		suffix = s[i++];
 	return i == s.size();
 }
 
-// Scans with the same istringstream extraction as the PA2 starter-code
-// PA2Decode_* functions so hexdumps are bit-identical to the reference.
-template <typename T>
-string ScanFloatingBytes(const string& spelling)
+// Packs the low value_size bytes of the scalar at value into an
+// object_size-byte zero-padded object representation (the x87 long
+// double has 10 value bytes inside a 16-byte object).
+string ValueObjectBytes(const void* value, size_t value_size,
+                        size_t object_size)
 {
-	std::istringstream iss(spelling);
-	T x;
-	iss >> x;
-	string bytes(sizeof(T), '\0');
-	std::memcpy(&bytes[0], &x, sizeof(T));
+	string bytes(object_size, '\0');
+	std::memcpy(&bytes[0], value, value_size);
 	return bytes;
 }
 
-// x87 long double: 10 value bytes inside a 16-byte zero-padded object.
-string ScanLongDoubleBytes(const string& spelling)
-{
-	std::istringstream iss(spelling);
-	long double x;
-	iss >> x;
-	string bytes(16, '\0');
-	std::memcpy(&bytes[0], &x, 10);
-	return bytes;
-}
-
+// Scans the floating literal the way the reference does: its era of
+// libstdc++ num_get delegated to strtof/strtod/strtold and stored the
+// result directly, so an out-of-range literal reads as +/-infinity (or
+// zero on underflow) where the modern extraction would clamp to the
+// largest finite value. strtod also accepts the C99 hexadecimal forms
+// that istringstream cannot parse.
 PostToken MakeFloatingLiteral(const string& source, char suffix)
 {
 	string spelling =
@@ -300,46 +292,21 @@ PostToken MakeFloatingLiteral(const string& source, char suffix)
 	token.source = source;
 	if (suffix == 'f' || suffix == 'F')
 	{
+		float x = std::strtof(spelling.c_str(), nullptr);
 		token.type = FT_FLOAT;
-		token.data = ScanFloatingBytes<float>(spelling);
+		token.data = ValueObjectBytes(&x, sizeof(x), sizeof(x));
 	}
 	else if (suffix == 'l' || suffix == 'L')
 	{
+		long double x = std::strtold(spelling.c_str(), nullptr);
 		token.type = FT_LONG_DOUBLE;
-		token.data = ScanLongDoubleBytes(spelling);
+		token.data = ValueObjectBytes(&x, 10, 16);
 	}
 	else
 	{
+		double x = std::strtod(spelling.c_str(), nullptr);
 		token.type = FT_DOUBLE;
-		token.data = ScanFloatingBytes<double>(spelling);
-	}
-	return token;
-}
-
-// Hexadecimal floating literals are not parseable by istringstream
-// extraction, so they scan through strtod/strtold like the reference.
-PostToken MakeHexFloatingLiteral(const string& source, char suffix)
-{
-	string spelling =
-		suffix ? source.substr(0, source.size() - 1) : source;
-	PostToken token;
-	token.kind = PTK_LITERAL;
-	token.source = source;
-	if (suffix)
-	{
-		long double x = strtold(spelling.c_str(), nullptr);
-		token.type = FT_LONG_DOUBLE;
-		string bytes(16, '\0');
-		std::memcpy(&bytes[0], &x, 10);
-		token.data = bytes;
-	}
-	else
-	{
-		double x = strtod(spelling.c_str(), nullptr);
-		token.type = FT_DOUBLE;
-		string bytes(sizeof(double), '\0');
-		std::memcpy(&bytes[0], &x, sizeof(double));
-		token.data = bytes;
+		token.data = ValueObjectBytes(&x, sizeof(x), sizeof(x));
 	}
 	return token;
 }
@@ -356,12 +323,14 @@ enum EUdNumberKind
 // ud-suffix, so an exponent marker ([eE], or [pP] once hex) immediately
 // followed by a decimal digit counts as the literal's exponent even
 // inside the suffix. Consequences pinned by the reference: 123_e3 is
-// ill-formed while 123_ex is fine; an x/X in an integer suffix switches
-// to hex interpretation and neutralizes e (123_xe3 valid, 123_xp3
-// invalid); a dangling exponent marker may complete inside the suffix
-// (1e_e3 and 0x1p_p3 are floating with prefixes 1e and 0x1p); a dot may
-// follow a completed exponent (1e3.4_x); octality is enforced only if
-// the number stays an integer (078_x invalid, 078e2_x floating).
+// ill-formed while 123_ex is fine; an x/X anywhere in the suffix
+// switches to hex interpretation and changes the marker (123_xe3 valid,
+// 123_xp3 invalid, 1e_xp3 floating); a dangling exponent marker must
+// complete somewhere inside the suffix, hunting across arbitrary
+// characters (1e_e3, 5E_bhE8, 1e_8e3 are floating; 1e_x and 1e_ea3 are
+// ill-formed); a dot may follow a completed exponent (1e3.4_x);
+// octality is enforced only if the number stays an integer (078_x
+// invalid, 078e2_x floating).
 class UdNumberShapeScanner
 {
 public:
@@ -466,7 +435,7 @@ bool UdNumberShapeScanner::StepNumber(char c)
 		}
 		return false;
 	case kExpMark:
-		if (IsDigit(c))  // exponents are decimal even for hex
+		if (IsDigit(c))  // the first exponent digit must be decimal
 		{
 			state_ = kExpDigits;
 			return true;
@@ -476,6 +445,12 @@ bool UdNumberShapeScanner::StepNumber(char c)
 			state_ = kExpSign;
 			return true;
 		}
+		if (c == '.' && !dot_seen_)
+		{
+			dot_seen_ = true;
+			state_ = kExpFrac;
+			return true;
+		}
 		if (c == '_' && mantissa_digits_ > 0)
 		{
 			state_ = dot_seen_ ? kSufFloat : kSufHunt;
@@ -483,14 +458,22 @@ bool UdNumberShapeScanner::StepNumber(char c)
 		}
 		return false;
 	case kExpSign:
-		if (IsDigit(c))
+		// further exponent characters follow the literal's base
+		// (0x1p+c is a complete hex exponent, 1e+f is not)
+		if (IsNumberDigit(c))
 		{
 			state_ = kExpDigits;
 			return true;
 		}
+		if (c == '.' && !dot_seen_)
+		{
+			dot_seen_ = true;
+			state_ = kExpFrac;
+			return true;
+		}
 		return false;
 	case kExpDigits:
-		if (IsDigit(c))
+		if (IsNumberDigit(c))
 			return true;
 		if (c == '.' && !dot_seen_)
 		{
@@ -505,7 +488,7 @@ bool UdNumberShapeScanner::StepNumber(char c)
 		}
 		return false;
 	default:  // kExpFrac
-		if (IsDigit(c))
+		if (IsNumberDigit(c))
 			return true;
 		if (c == '_')
 		{
@@ -552,19 +535,37 @@ bool UdNumberShapeScanner::StepSuffix(char c)
 	case kSufFloat:
 		return IsSuffixChar(c);
 	case kSufHunt:
+		if (c == 'x' || c == 'X')
+		{
+			hex_ = true;
+			return true;
+		}
 		if (IsMarker(c))
 		{
 			state_ = kSufHuntMark;
 			return true;
 		}
-		return false;
+		return IsSuffixChar(c);
 	default:  // kSufHuntMark
 		if (IsDigit(c))
 		{
 			state_ = kSufFloat;
 			return true;
 		}
-		return IsMarker(c);
+		if (c == 'x' || c == 'X')
+		{
+			hex_ = true;
+			state_ = kSufHunt;
+			return true;
+		}
+		if (IsMarker(c))
+			return true;
+		if (IsSuffixChar(c))
+		{
+			state_ = kSufHunt;
+			return true;
+		}
+		return false;
 	}
 }
 
@@ -629,10 +630,9 @@ PostToken AnalyzePPNumber(const string& source)
 		return MakeIntegerLiteral(source, digits_end, base, suffix);
 
 	char floating_suffix;
-	if (MatchFloating(source, true, floating_suffix))
+	if (MatchFloating(source, floating_suffix) ||
+	    MatchHexFloating(source, floating_suffix))
 		return MakeFloatingLiteral(source, floating_suffix);
-	if (MatchHexFloating(source, true, floating_suffix))
-		return MakeHexFloatingLiteral(source, floating_suffix);
 
 	return MakeInvalidToken(source);
 }

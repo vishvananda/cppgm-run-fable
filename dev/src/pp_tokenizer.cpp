@@ -265,14 +265,19 @@ private:
 				? kAfterInclude : kNormal;
 	}
 
-	// A pp-number whose first x/X precedes any dot lexes as a hexadecimal
-	// literal: its exponent character is p/P instead of e/E (matches the
-	// reference tokenizer; plain pp-numbers take a sign only after e/E).
+	// Reference pp-number scanning (pinned by differential probes): an
+	// exponent character (e/E, or p/P once hexadecimal) acts as a marker
+	// only when a decimal digit or sign follows; a marker takes the sign
+	// with it. An x/X switches the literal to hexadecimal -- changing
+	// the marker to p/P -- unless a dot or a real decimal exponent was
+	// already seen (12x3p+4 and 1eAx2p+4 take the sign; 1.2x3p, 1e+x2p,
+	// and 1E0x2p split before it).
 	void ScanPPNumber()
 	{
 		size_t begin = pos_;
 		bool dot_seen = false;
 		bool hex_literal = false;
+		bool exponent_seen = false;
 		if (Peek(0) == '.')
 		{
 			dot_seen = true;
@@ -282,13 +287,14 @@ private:
 		while (true)
 		{
 			int c = Peek(0);
-			bool exponent = hex_literal ? (c == 'p' || c == 'P')
-			                            : (c == 'e' || c == 'E');
-			if (exponent)
+			bool marker = hex_literal ? (c == 'p' || c == 'P')
+			                          : (c == 'e' || c == 'E');
+			int next = Peek(1);
+			if (marker && (IsDigit(next) || next == '+' || next == '-'))
 			{
-				pos_++;
-				if (Peek(0) == '+' || Peek(0) == '-')
-					pos_++;
+				pos_ += IsDigit(next) ? 1 : 2;
+				if (!hex_literal)
+					exponent_seen = true;
 				continue;
 			}
 			if (c == '.')
@@ -299,7 +305,7 @@ private:
 			}
 			if (IsIdentifierContinue(c))
 			{
-				if ((c == 'x' || c == 'X') && !dot_seen)
+				if ((c == 'x' || c == 'X') && !dot_seen && !exponent_seen)
 					hex_literal = true;
 				pos_++;
 				continue;
