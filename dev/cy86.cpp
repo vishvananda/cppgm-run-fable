@@ -1,122 +1,80 @@
-// (C) 2013 CPPGM Foundation www.cppgm.org.  All rights reserved.
-
-#include <vector>
-#include <string>
-#include <stdexcept>
+#include <cstdlib>
 #include <iostream>
-#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace std;
 
-#include "exceptions.h"
+#include "cy86/cy86_codegen.h"
+#include "cy86/cy86_parser.h"
+#include "post_token.h"
+#include "post_tokenizer.h"
+#include "predefined_macros.h"
+#include "preprocess.h"
+#include "x86/elf_program.h"
 
-struct ElfHeader
+// cy86: translates CY86 Mock Intermediate Language source files into
+// a native Linux x86-64 ELF executable. Each srcfile runs through the
+// PA5 preprocessor and the phase-7 tokenizer (so phase-6 string
+// concatenation stays per translation unit); the token sequences are
+// concatenated in command-line order, parsed against pa9.gram,
+// translated to x86-64 machine code, and laid out into the program
+// image. Diagnosable ill-formed programs exit EXIT_FAILURE.
+//
+// The --batch-stdin worker protocol is provided by the test runner
+// entry point (src/test_runner.cpp).
+
+namespace {
+
+// Collects the phase-7 tokens of one srcfile; the per-file eof marker
+// is dropped so the files concatenate into one program sequence.
+struct CollectingPostTokenStream : IPostTokenStream
 {
-    unsigned char ident[16] =
-    {
-        0x7f, 'E', 'L', 'F', // magic bytes
-        2, // 64-bit architecture
-        1, // two's compliment, little-endian
-        1, // ELF specification version 1.0
-        0, // System V ABI
-        0, // ABI Version
-        0, 0, 0, 0, 0, 0, 0 // Unused padding
-    };
+	void emit(const PostToken& token)
+	{
+		if (token.kind != PTK_EOF)
+			tokens.push_back(token);
+	}
 
-    short int type = 2; // executable file type
-    short int machine = 0x3E; // x86-64 Architecture
-    int version = 1; // ELF specification version 1.0
-    long int entry; // entry point virtual memory address
-
-    long int phoff = 64; // start of program segment header array file offset
-    long int shoff = 0; // no sections
-
-    int processor_flags = 0; // no processor-specific flags
-    short int ehsize = 64; // ELF header is 64 bytes long
-    short int phentsize = 56; // program header table entry size
-    short int phnum = 1; // number of program headers       
-    short int shentsize = 0; // no section header table entry size
-    short int shnum = 0; // no sections
-    short int shstrndx = 0; // no section header string table index
+	vector<PostToken> tokens;
 };
 
-struct ProgramSegmentHeader
-{
-    int type = 1; // PT_LOAD: loadable segment
+}  // namespace
 
-    static constexpr int executable = 1 << 0;
-    static constexpr int writable = 1 << 1;
-    static constexpr int readable = 1 << 2;
-
-    int flags = executable | writable | readable; // segment permissions
-
-    long int offset = 0; // source file offset
-    long int vaddr = 0x400000; // destination (virtual) memory address
-    long int paddr = 0; // unused, doesn't use physical memory
-    long int filesz; // source length
-    long int memsz; // destination length
-    long int align = 0; // unused, alignment of file/memory
-};
-
-// bootstrap system call interface, used by RABSetFileExecutable
-extern "C" long int syscall(long int n, ...) throw ();
-
-// PA9SetFileExecutable: sets file at `path` executable
-// returns true on success
-bool PA9SetFileExecutable(const string& path)
-{
-    int res = syscall(/* chmod */ 90, path.c_str(), 0755);
-
-    return res == 0;
-}
-
-bool HasBatchStdinArg(int argc, char** argv)
+int main(int argc, char** argv)
 {
 	for (int i = 1; i < argc; i++)
 	{
 		if (string(argv[i]) == "--batch-stdin")
-			return true;
+		{
+			cerr << "ERROR: --batch-stdin requires the test runner build "
+			        "(CPPGM_TEST_RUNNER=1)" << endl;
+			return EXIT_FAILURE;
+		}
 	}
-	return false;
-}
 
-int RunNotImplementedBatchMode()
-{
-	string line;
-	while (getline(cin, line))
-	{
-		(void)line;
-		cout << "EXIT_NOT_IMPLEMENTED" << endl;
-	}
-	return EXIT_SUCCESS;
-}
-
-int main(int argc, char** argv)
-{
 	try
 	{
-		if (HasBatchStdinArg(argc, argv))
-			return RunNotImplementedBatchMode();
-
 		vector<string> args;
-
 		for (int i = 1; i < argc; i++)
 			args.emplace_back(argv[i]);
 
-		string output_target;
 		string outfile;
 		vector<string> srcfiles;
-
 		for (size_t i = 0; i < args.size(); i++)
 		{
 			if (args[i] == "--target")
 			{
+				// The native x86-64 ELF target is the only output
+				// format; the harness option is accepted for
+				// compatibility.
 				if (i + 1 >= args.size())
 					throw logic_error("missing target after --target");
-				output_target = args[++i];
+				i++;
 				continue;
 			}
-
 			if (args[i] == "-o")
 			{
 				if (i + 1 >= args.size())
@@ -124,85 +82,29 @@ int main(int argc, char** argv)
 				outfile = args[++i];
 				continue;
 			}
-
 			srcfiles.push_back(args[i]);
 		}
-
 		if (outfile.empty() || srcfiles.empty())
 			throw logic_error("invalid usage");
 
-		(void)output_target;
-		size_t nsrcfiles = srcfiles.size();
+		vector<pair<string, string>> predefined = PredefinedObjectMacros();
 
-		throw NotImplementedException();
-
-		for (size_t i = 0; i < nsrcfiles; i++)
+		CollectingPostTokenStream collector;
+		for (size_t i = 0; i < srcfiles.size(); i++)
 		{
-			string srcfile = srcfiles[i];
-
-			ifstream in(srcfile);
-
-			// TODO: parse / semantically analyze / generate code for srcfile
+			PostTokenizer post_tokenizer(collector);
+			Preprocessor preprocessor(post_tokenizer, predefined);
+			preprocessor.ProcessSourceFile(srcfiles[i]);
 		}
 
-		ElfHeader elf_header;
-		ProgramSegmentHeader program_segment_header;
+		CY86Program program;
+		ParseCY86Program(collector.tokens, program);
 
-		// TODO: Replace this with assembled x86 machine code / data from above
+		ProgramImage image;
+		TranslateCY86Program(program, image);
+		image.WriteExecutable(outfile);
 
-		char data[] = "TODO\n"; // 6 bytes
-
-		unsigned char code[] =
-		{
-            // ==== write(stdout, "TODO\n") ====
-			// mov rax, 1 ... system call `write`
-			0x48, 0xc7, 0xc0, 0x01, 0x00, 0x00, 0x00,
-
-			// mov rdi, 1 ... stdout fd
-			0x48, 0xc7, 0xc7, 0x01, 0x00, 0x00, 0x00,
-			
-			// mov rsi, 0x400000 + 64 + 56 ... address of "TODO" string
-			0x48, 0xbe,
-			    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
-
-			// mov rdx, 5 ... num bytes to write
-			0x48, 0xc7, 0xc2, 0x05, 0x00, 0x00, 0x00,
-
-			// syscall
-			0x0f, 0x05,
-            // =====================
-
-
-            // ===== exit(0) =======
-			// mov rax, 60 ... system call `exit`
-			0x48, 0xc7, 0xc0, 0x3c, 0x00, 0x00, 0x00,
-
-			// mov rdi, 0 ... exit status 0
-			0x48, 0xc7, 0xc7, 0x00, 0x00, 0x00, 0x00,
-
-			// syscall
-			0x0f, 0x05
-            // =====================
-		};
-
-		elf_header.entry = 0x400000 + 64 + 56 + sizeof(data);
-		program_segment_header.filesz = 64 + 56 + 6 + sizeof(data) + sizeof(code);
-		program_segment_header.memsz = program_segment_header.filesz;
-
-		{
-			ofstream out(outfile);
-			out.write((char*) &elf_header, 64);
-			out.write((char*) &program_segment_header, 56);
-			out.write((char*) data, sizeof(data));
-			out.write((char*) code, sizeof(code));
-		}
-
-		PA9SetFileExecutable(outfile);
-	}
-	catch (const NotImplementedException& e)
-	{
-		cerr << "ERROR: " << e.what() << endl;
-		return CPPGM_EXIT_NOT_IMPLEMENTED;
+		return EXIT_SUCCESS;
 	}
 	catch (exception& e)
 	{

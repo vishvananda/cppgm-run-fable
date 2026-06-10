@@ -41,7 +41,7 @@ cppast
 mobjroundtrip
 nsdecl
 nsinit
-cy86
+/cy86
 clang-template-student-metrics-plugin.dylib
 clang-template-student-metrics-plugin.so
 clang-sema-interpose-probe.dylib
