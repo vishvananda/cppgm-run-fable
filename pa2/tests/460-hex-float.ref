@@ -1,0 +1,27 @@
+literal 0x1p3 double 0000000000002040
+literal 0x1P3 double 0000000000002040
+literal 0x1p+3 double 0000000000002040
+literal 0x1p-3 double 000000000000C03F
+literal 0x1.8p1 double 0000000000000840
+literal 0x.8p1 double 000000000000F03F
+literal 0x1.p3 double 0000000000002040
+literal 0xAp3 double 0000000000005440
+literal 0x1.fp3 double 0000000000002F40
+literal 0x1p3l long double 00000000000000800240000000000000
+literal 0x1p3L long double 00000000000000800240000000000000
+literal 0x1p+3l long double 00000000000000800240000000000000
+literal 0x1.8P+2l long double 00000000000000C00140000000000000
+invalid 0x1p3f
+invalid 0x1p3F
+invalid 0x1p3u
+invalid 0x1p3ll
+invalid 0x1p
+invalid 0xp3
+invalid 0x.p3
+invalid 0x1pf
+invalid 1p3
+invalid 0x1.2
+user-defined-literal 0x1p3_x _x floating 0x1p3
+user-defined-literal 0x.8p1_y _y floating 0x.8p1
+literal 0x1p33333333333333333 double 000000000000F07F
+eof

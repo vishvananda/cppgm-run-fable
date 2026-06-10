@@ -1,0 +1,27 @@
+literal u"\xD800" array of 2 char16_t 00D80000
+simple ; OP_SEMICOLON
+literal U"\xFFFFFFFF" array of 2 char32_t FFFFFFFF00000000
+simple ; OP_SEMICOLON
+literal "\xD800" "\xDC00" array of 7 char EDA080EDB08000
+simple ; OP_SEMICOLON
+literal u"\x110000" array of 3 char16_t 00DC00DC0000
+simple ; OP_SEMICOLON
+literal u"\x12345678" array of 3 char16_t D5DC78DE0000
+simple ; OP_SEMICOLON
+literal '\x100000000' char 00
+simple ; OP_SEMICOLON
+literal "\x100000000" array of 2 char 0000
+simple ; OP_SEMICOLON
+literal "\x10FFFE" array of 5 char F48FBFBE00
+simple ; OP_SEMICOLON
+literal u"\x10FFFF" array of 3 char16_t FFDBFFDF0000
+simple ; OP_SEMICOLON
+literal L"\x110000" array of 2 wchar_t 0000110000000000
+simple ; OP_SEMICOLON
+literal "\xck" array of 3 char 0C6B00
+simple ; OP_SEMICOLON
+literal '\x10FFFF' int FFFF1000
+simple ; OP_SEMICOLON
+invalid '\x110000'
+simple ; OP_SEMICOLON
+eof

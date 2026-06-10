@@ -1,0 +1,58 @@
+user-defined-literal 123_x _x integer 123
+invalid 123_e3
+user-defined-literal 123_e _e integer 123
+user-defined-literal 123_ex _ex integer 123
+invalid 123_e0
+invalid 123_E3
+user-defined-literal 123_eF _eF integer 123
+user-defined-literal 123_3 _3 integer 123
+user-defined-literal 123_xe3 _xe3 integer 123
+user-defined-literal 123_Xe3 _Xe3 integer 123
+invalid 123_ae3
+invalid 123_ye3
+invalid 123_xp3
+user-defined-literal 123_p3 _p3 integer 123
+user-defined-literal 0x12_e3 _e3 integer 0x12
+invalid 0x12_p3
+user-defined-literal 0x12_p _p integer 0x12
+invalid 0x12_ep3
+invalid 07_e9
+user-defined-literal 07_xe3 _xe3 integer 07
+invalid 078_x
+user-defined-literal 078e2_x _x floating 078e2
+user-defined-literal 08.5_x _x floating 08.5
+user-defined-literal 09e5_x _x floating 09e5
+user-defined-literal 00_x _x integer 00
+user-defined-literal 0_3 _3 integer 0
+user-defined-literal 1e_e3 _e3 floating 1e
+user-defined-literal 1E_e3 _e3 floating 1E
+invalid 1e_
+invalid 1e_x
+invalid 1e_e
+user-defined-literal 1e_ee3 _ee3 floating 1e
+user-defined-literal 1e_e3x _e3x floating 1e
+user-defined-literal 1.e_x _x floating 1.e
+user-defined-literal 1.e_ _ floating 1.e
+user-defined-literal 1.2e_e3 _e3 floating 1.2e
+user-defined-literal 1e3_ _ floating 1e3
+user-defined-literal 1e3.4_x _x floating 1e3.4
+user-defined-literal 1e3._x _x floating 1e3.
+user-defined-literal 1._ _ floating 1.
+user-defined-literal 1.0_e3 _e3 floating 1.0
+user-defined-literal 0x1p_p3 _p3 floating 0x1p
+user-defined-literal 0xp3_x _x floating 0xp3
+invalid 0xp_x
+user-defined-literal 0x1.p_x _x floating 0x1.p
+invalid 0x._x
+invalid 0x1.2_x
+invalid 0x1._x
+invalid 0x_x
+invalid 2147483647l_ud1
+invalid 123u_x
+user-defined-literal 1e+3_x _x floating 1e+3
+user-defined-literal .5_e3 _e3 floating .5
+user-defined-literal .5_x _x floating .5
+user-defined-literal 12.34_ee _ee floating 12.34
+user-defined-literal 0x1p3_p3 _p3 floating 0x1p3
+user-defined-literal 1e3_e3x _e3x floating 1e3
+eof
