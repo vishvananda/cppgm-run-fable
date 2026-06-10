@@ -1,13 +1,29 @@
-// Student-facing scaffold for the PA10+ `cppgm++` binary.
+// The `cppgm++` source compiler. PA10 implements --emit-ast: run
+// translation phases 1-7 over each srcfile, parse each translation
+// unit with the pa10.gram tree-building parser, and write the
+// deterministic AST dump.
 
 #include "exceptions.h"
 #include "tool_help_text.h"
 
+#include "ast/ast.h"
+#include "ast/ast_parser.h"
+#include "ast/ast_printer.h"
+#include "parse/parse_token.h"
+#include "post_token.h"
+#include "post_tokenizer.h"
+#include "predefined_macros.h"
+#include "preprocess.h"
+
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include <pthread.h>
 
 using namespace std;
 
@@ -177,15 +193,23 @@ EmitMode parse_emit_mode(vector<string> & args)
   return mode;
 }
 
-void parse_source_output_invocation(const vector<string> & args,
-                                    bool allow_lowir_options)
+struct SourceOutputInvocation
 {
-  bool explicit_outfile = false;
+  string outfile;
   vector<string> inputs;
+};
+
+SourceOutputInvocation parse_source_output_invocation(
+    const vector<string> & args,
+    bool allow_lowir_options)
+{
+  SourceOutputInvocation invocation;
+  bool explicit_outfile = false;
 
   for(size_t i = 0; i < args.size(); ++i) {
     if(args[i] == "-o") {
       consume_required_option_argument(args, i, "-o", "output file");
+      invocation.outfile = args[i];
       explicit_outfile = true;
       continue;
     }
@@ -203,12 +227,13 @@ void parse_source_output_invocation(const vector<string> & args,
     if(starts_with(args[i], "-")) {
       throw logic_error("unsupported option in emit mode: " + args[i]);
     }
-    inputs.push_back(args[i]);
+    invocation.inputs.push_back(args[i]);
   }
 
-  if(!explicit_outfile || inputs.empty()) {
+  if(!explicit_outfile || invocation.inputs.empty()) {
     throw logic_error("invalid usage");
   }
+  return invocation;
 }
 
 bool consume_preprocess_option(const vector<string> & args, size_t & i)
@@ -373,10 +398,104 @@ int run_unimplemented_mode(const char * feature,
   throw NotImplementedException();
 }
 
+// Collects the phase-7 tokens of one srcfile for the parser; invalid
+// tokens are kept and rejected by BuildParseTokens.
+struct CollectingPostTokenStream : IPostTokenStream
+{
+  void emit(const PostToken & token)
+  {
+    tokens.push_back(token);
+  }
+
+  vector<PostToken> tokens;
+};
+
+// Runs translation phases 1-7 over one srcfile and parses the token
+// sequence as a pa10.gram translation-unit. Throws on any pipeline or
+// parse error.
+AstDeclPtr parse_source_file_ast(
+    const string & srcfile,
+    const vector<pair<string, string>> & predefined)
+{
+  CollectingPostTokenStream collector;
+  PostTokenizer post_tokenizer(collector);
+  Preprocessor preprocessor(post_tokenizer, predefined);
+  preprocessor.ProcessSourceFile(srcfile);
+  vector<ParseToken> tokens = BuildParseTokens(collector.tokens);
+  AstParser parser(tokens);
+  return parser.ParseTranslationUnit();
+}
+
+// Recursive descent depth is proportional to input nesting, so each
+// srcfile parses on a worker thread with a large stack (virtual
+// memory; pages commit only as touched).
+const size_t cppgm_parse_stack_bytes = 512u << 20;
+
+struct EmitAstTask
+{
+  const string * srcfile;
+  const vector<pair<string, string>> * predefined;
+  AstDeclPtr unit;
+  bool failed;
+  string message;
+};
+
+void * emit_ast_thread_main(void * opaque)
+{
+  EmitAstTask * task = static_cast<EmitAstTask *>(opaque);
+  try
+  {
+    task->unit = parse_source_file_ast(*task->srcfile, *task->predefined);
+  }
+  catch(const exception & e)
+  {
+    task->failed = true;
+    task->message = e.what();
+  }
+  return 0;
+}
+
+AstDeclPtr parse_ast_on_large_stack(
+    const string & srcfile,
+    const vector<pair<string, string>> & predefined)
+{
+  EmitAstTask task;
+  task.srcfile = &srcfile;
+  task.predefined = &predefined;
+  task.failed = false;
+  pthread_attr_t attributes;
+  pthread_t thread;
+  if(pthread_attr_init(&attributes) != 0 ||
+     pthread_attr_setstacksize(&attributes, cppgm_parse_stack_bytes) != 0 ||
+     pthread_create(&thread, &attributes, emit_ast_thread_main, &task) != 0) {
+    throw runtime_error("cannot start parse worker thread");
+  }
+  pthread_join(thread, 0);
+  pthread_attr_destroy(&attributes);
+  if(task.failed) {
+    throw runtime_error(task.message);
+  }
+  return std::move(task.unit);
+}
+
 int run_emit_ast_mode(const vector<string> & args)
 {
-  parse_source_output_invocation(args, false);
-  return run_unimplemented_mode("--emit-ast", "PA10");
+  SourceOutputInvocation invocation =
+      parse_source_output_invocation(args, false);
+
+  vector<pair<string, string>> predefined = PredefinedObjectMacros();
+  vector<AstDeclPtr> units;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    units.push_back(parse_ast_on_large_stack(invocation.inputs[i],
+                                             predefined));
+  }
+
+  ofstream out(invocation.outfile.c_str());
+  if(!out) {
+    throw runtime_error("cannot create output file: " + invocation.outfile);
+  }
+  PrintAstOutput(units, out);
+  return EXIT_SUCCESS;
 }
 
 int run_emit_types_mode(const vector<string> & args)

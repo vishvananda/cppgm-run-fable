@@ -1,0 +1,136 @@
+#pragma once
+
+#include "ast/ast_names.h"
+
+// The PA10 syntax tree, part 2: expressions, lambdas, and statements.
+
+enum EExprKind
+{
+	EK_LITERAL,          // TT_LITERAL leaf
+	EK_KEYWORD_LITERAL,  // true false nullptr this
+	EK_ID,               // id-expression
+	EK_PAREN,            // ( expression )
+	EK_BINARY,           // all binary levels including comma
+	EK_ASSIGNMENT,       // assignment-operator form
+	EK_CONDITIONAL,      // ?:
+	EK_UNARY,            // prefix unary operators
+	EK_POSTFIX_INCDEC,   // postfix ++ --
+	EK_CALL,             // postfix ( argument-list? )
+	EK_FUNCTIONAL_CAST,  // simple-type-keyword ( arguments )
+	EK_SUBSCRIPT,        // postfix [ expression ]
+	EK_MEMBER,           // postfix . or -> id
+	EK_CSTYLE_CAST,      // ( type-id ) cast-expression
+	EK_KEYWORD_CAST,     // static_cast<...>(...) etc
+	EK_SIZEOF_EXPR,      // sizeof unary-expression
+	EK_SIZEOF_TYPE,      // sizeof ( type-id )
+	EK_TYPE_TRAIT,       // typeid / alignof / noexcept ( ... )
+	EK_NEW,              // new-expression
+	EK_DELETE,           // delete-expression
+	EK_LAMBDA,           // lambda-expression
+	EK_PACK_EXPANSION,   // initializer-clause ...
+	EK_BRACED            // braced-init-list
+};
+
+struct AstExpr
+{
+	explicit AstExpr(EExprKind kind_in);
+
+	EExprKind kind;
+	ETokenType op;             // operator / cast keyword / trait keyword
+	std::string op_spelling;
+	std::vector<AstExprPtr> operands;  // operands in source order
+	std::vector<AstExprPtr> arguments; // call/cast/placement arguments
+	AstName name;              // EK_ID; EK_MEMBER member name
+	std::string literal;       // EK_LITERAL / EK_KEYWORD_LITERAL spelling
+	AstTypeIdPtr type;         // casts, sizeof(type), traits, new
+	bool is_type_operand;      // EK_TYPE_TRAIT operand is a type-id
+	bool sizeof_paren;         // sizeof ( expression ) form
+	bool global_scope;         // EK_NEW / EK_DELETE leading ::
+	bool array_delete;         // delete [ ]
+	bool has_placement;        // EK_NEW placement arguments present
+	bool paren_type;           // EK_NEW ( type-id ) form
+	AstInitializerPtr new_init;  // EK_NEW initializer
+	AstLambdaPtr lambda;       // EK_LAMBDA
+};
+
+struct AstLambda
+{
+	AstLambda();
+
+	std::string introducer;    // flattened "[...]" capture text
+	bool has_declarator;
+	AstParameterClausePtr parameters;
+	bool mutable_specifier;
+	std::string mutable_spelling;
+	bool has_noexcept;
+	AstExprPtr noexcept_expr;  // may be null for bare noexcept
+	bool has_trailing;
+	AstTypeIdPtr trailing_type;
+	AstStmtPtr body;
+};
+
+// --- statements -------------------------------------------------------
+
+enum EStmtKind
+{
+	SK_COMPOUND,
+	SK_DECLARATION,
+	SK_EXPRESSION,
+	SK_IF,
+	SK_SWITCH,
+	SK_WHILE,
+	SK_DO,
+	SK_FOR,
+	SK_BREAK,
+	SK_CONTINUE,
+	SK_GOTO,
+	SK_RETURN,
+	SK_THROW,
+	SK_TRY,
+	SK_LABELED,
+	SK_CASE,
+	SK_DEFAULT
+};
+
+// if/switch/while/for/do condition: an expression or the
+// declaration form with a required initializer.
+struct AstCondition
+{
+	AstCondition();
+
+	bool is_declaration;
+	AstExprPtr expr;
+	AstSpecifierSeq specifiers;
+	AstDeclaratorPtr declarator;
+	AstInitializerPtr init;
+};
+
+typedef std::unique_ptr<AstCondition> AstConditionPtr;
+
+struct AstHandler
+{
+	AstHandler();
+
+	bool ellipsis;
+	AstSpecifierSeq specifiers;
+	AstDeclaratorPtr declarator;  // may be null or abstract
+	AstStmtPtr body;
+};
+
+struct AstStmt
+{
+	explicit AstStmt(EStmtKind kind_in);
+
+	EStmtKind kind;
+	std::vector<AstStmtPtr> items;  // SK_COMPOUND block items
+	AstDeclPtr decl;                // SK_DECLARATION
+	AstExprPtr expr;                // expression/return/throw/case value
+	std::string label;              // SK_GOTO, SK_LABELED
+	AstConditionPtr condition;      // if/switch/while/do/for
+	AstStmtPtr then_branch;         // SK_IF
+	AstStmtPtr else_branch;         // SK_IF
+	AstStmtPtr body;                // loop/switch/labeled/case bodies, try compound
+	AstStmtPtr for_init;            // SK_FOR (declaration or expression stmt)
+	AstExprPtr iteration;           // SK_FOR third clause
+	std::vector<AstHandler> handlers;  // SK_TRY
+};

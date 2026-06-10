@@ -1,0 +1,711 @@
+#include "ast/ast_parser.h"
+
+using std::string;
+using std::vector;
+using std::move;
+
+namespace {
+
+// Specifier sequence states: at most one type per sequence (7.1.6/2);
+// simple-type keywords may combine with each other (`unsigned long`),
+// a named type closes the sequence to further types.
+enum
+{
+	kNoType = 0,
+	kKeywordType = 1,
+	kNamedType = 2
+};
+
+bool IsSimpleTypeSpecifier(ETokenType type)
+{
+	switch (type)
+	{
+	case KW_BOOL: case KW_CHAR: case KW_CHAR16_T: case KW_CHAR32_T:
+	case KW_DOUBLE: case KW_FLOAT: case KW_INT: case KW_LONG:
+	case KW_SHORT: case KW_SIGNED: case KW_UNSIGNED: case KW_VOID:
+	case KW_WCHAR_T: case KW_AUTO:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool IsDeclOnlySpecifier(ETokenType type)
+{
+	switch (type)
+	{
+	case KW_TYPEDEF: case KW_EXTERN: case KW_STATIC: case KW_INLINE:
+	case KW_VIRTUAL: case KW_CONSTEXPR: case KW_THREAD_LOCAL:
+	case KW_FRIEND:
+		return true;
+	default:
+		return false;
+	}
+}
+
+}  // namespace
+
+bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
+                                  int& type_state)
+{
+	SkipDeclAdornments();
+	const ParseToken& token = Peek();
+	if (token.kind == PTOK_SIMPLE)
+	{
+		ETokenType type = token.simple_type;
+		if (type == KW_CONST || type == KW_VOLATILE ||
+		    (kind == kDeclSpecifierSeq && IsDeclOnlySpecifier(type)))
+		{
+			AstSpecifier spec;
+			spec.kind = SPEC_KEYWORD;
+			spec.keyword = type;
+			spec.spelling = token.spelling;
+			Advance();
+			seq.push_back(move(spec));
+			return true;
+		}
+		if (IsSimpleTypeSpecifier(type) && type_state != kNamedType)
+		{
+			AstSpecifier spec;
+			spec.kind = SPEC_KEYWORD;
+			spec.keyword = type;
+			spec.spelling = token.spelling;
+			Advance();
+			seq.push_back(move(spec));
+			type_state = kKeywordType;
+			return true;
+		}
+		if (type == KW_DECLTYPE && type_state == kNoType)
+		{
+			State state = Save();
+			Advance();
+			AstExprPtr expr;
+			if (MatchSimple(OP_LPAREN) && (expr = ParseExpression()) &&
+			    MatchSimple(OP_RPAREN))
+			{
+				AstSpecifier spec;
+				spec.kind = SPEC_DECLTYPE;
+				spec.decltype_expr = move(expr);
+				seq.push_back(move(spec));
+				type_state = kNamedType;
+				return true;
+			}
+			Restore(state);
+			return false;
+		}
+		if ((type == KW_CLASS || type == KW_STRUCT || type == KW_UNION) &&
+		    type_state == kNoType)
+		{
+			AstDeclPtr nested = ParseClassSpecifier();
+			if (!nested)
+				nested = ParseElaboratedClass();
+			if (!nested)
+				return false;
+			AstSpecifier spec;
+			spec.kind = SPEC_NESTED_DECL;
+			spec.nested_decl = move(nested);
+			seq.push_back(move(spec));
+			type_state = kNamedType;
+			return true;
+		}
+		if (type == KW_ENUM && type_state == kNoType)
+		{
+			AstDeclPtr nested = ParseEnumSpecifier();
+			if (!nested)
+				return false;
+			AstSpecifier spec;
+			spec.kind = SPEC_NESTED_DECL;
+			spec.nested_decl = move(nested);
+			seq.push_back(move(spec));
+			type_state = kNamedType;
+			return true;
+		}
+		if (type == KW_TYPENAME && type_state == kNoType)
+		{
+			State state = Save();
+			AstSpecifier spec;
+			spec.kind = SPEC_TYPE_NAME;
+			if (!ParseQualifiedTypeName(spec.name))
+			{
+				Restore(state);
+				return false;
+			}
+			seq.push_back(move(spec));
+			type_state = kNamedType;
+			return true;
+		}
+		if (type != OP_COLON2)
+			return false;
+	}
+	if ((token.kind == PTOK_IDENTIFIER || AtSimple(OP_COLON2)) &&
+	    type_state == kNoType)
+	{
+		State state = Save();
+		AstSpecifier spec;
+		spec.kind = SPEC_TYPE_NAME;
+		if (!ParseQualifiedTypeName(spec.name) ||
+		    !NameUsableAsType(spec.name))
+		{
+			Restore(state);
+			return false;
+		}
+		seq.push_back(move(spec));
+		type_state = kNamedType;
+		return true;
+	}
+	return false;
+}
+
+bool AstParser::ParseSpecifierSeq(AstSpecifierSeq& seq, ESeqKind kind)
+{
+	State state = Save();
+	int type_state = kNoType;
+	while (ParseOneSpecifier(seq, kind, type_state))
+	{
+	}
+	if (seq.empty())
+	{
+		Restore(state);
+		return false;
+	}
+	return true;
+}
+
+// type-id: type-specifier-seq abstract-declarator?
+bool AstParser::ParseTypeId(AstTypeIdPtr& type)
+{
+	State state = Save();
+	AstTypeIdPtr result(new AstTypeId());
+	if (!ParseSpecifierSeq(result->specifiers, kTypeSpecifierSeq))
+	{
+		Restore(state);
+		return false;
+	}
+	AstDeclaratorPtr declarator;
+	if (!ParseDeclarator(declarator, false))
+	{
+		Restore(state);
+		return false;
+	}
+	if (declarator && !declarator->Empty())
+		result->declarator = move(declarator);
+	type = move(result);
+	return true;
+}
+
+// ptr-operator*: * & && and member pointers NNS::*, each pointer
+// optionally followed by cv-qualifiers.
+bool AstParser::ParsePtrOperators(AstDeclarator& declarator)
+{
+	for (;;)
+	{
+		const ParseToken& token = Peek();
+		if (AtSimple(OP_STAR))
+		{
+			AstDeclaratorItem item;
+			item.kind = DI_PTR;
+			item.token = OP_STAR;
+			item.spelling = token.spelling;
+			Advance();
+			declarator.items.push_back(move(item));
+		}
+		else if (AtSimple(OP_AMP) || AtSimple(OP_LAND))
+		{
+			AstDeclaratorItem item;
+			item.kind = DI_PTR;
+			item.token = token.simple_type;
+			item.spelling = token.spelling;
+			Advance();
+			declarator.items.push_back(move(item));
+			continue;  // no cv after a reference
+		}
+		else
+		{
+			// nested-name-specifier ::* (pointer to member)
+			State state = Save();
+			AstName qualifier;
+			qualifier.global_scope = MatchSimple(OP_COLON2);
+			if (!ParseNestedNameParts(qualifier) || qualifier.parts.empty() ||
+			    !MatchSimple(OP_STAR))
+			{
+				Restore(state);
+				return true;
+			}
+			AstDeclaratorItem item;
+			item.kind = DI_MEMBER_PTR;
+			item.name = move(qualifier);
+			declarator.items.push_back(move(item));
+		}
+		while (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
+		{
+			AstDeclaratorItem cv;
+			cv.kind = DI_CV;
+			cv.token = Peek().simple_type;
+			cv.spelling = Peek().spelling;
+			Advance();
+			declarator.items.push_back(move(cv));
+		}
+	}
+}
+
+// function qualifiers after a parameter clause: cv, ref-qualifier,
+// noexcept, dynamic exception specification, virt-specifier, trailing
+// return type. [[...]] attributes are skipped.
+bool AstParser::ParseFunctionQualifiers(AstDeclarator& declarator)
+{
+	for (;;)
+	{
+		if (SkipSquareAttribute())
+			continue;
+		SkipDeclAdornments();
+		const ParseToken& token = Peek();
+		if (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
+		{
+			AstDeclaratorItem item;
+			item.kind = DI_CV;
+			item.token = token.simple_type;
+			item.spelling = token.spelling;
+			Advance();
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		if (AtSimple(OP_AMP) || AtSimple(OP_LAND))
+		{
+			AstDeclaratorItem item;
+			item.kind = DI_FUNC_QUAL;
+			item.qual.kind = FQ_VIRT;
+			item.qual.spelling = token.spelling;
+			Advance();
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		if (AtSimple(KW_NOEXCEPT))
+		{
+			Advance();
+			AstDeclaratorItem item;
+			item.kind = DI_FUNC_QUAL;
+			item.qual.kind = FQ_NOEXCEPT;
+			if (AtSimple(OP_LPAREN))
+			{
+				State state = Save();
+				Advance();
+				AstExprPtr expr = ParseExpression();
+				if (expr && MatchSimple(OP_RPAREN))
+				{
+					item.qual.has_expr = true;
+					item.qual.expr = move(expr);
+				}
+				else
+					Restore(state);
+			}
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		if (AtSimple(KW_THROW) && AtSimple(OP_LPAREN, 1))
+		{
+			State state = Save();
+			Advance();
+			Advance();
+			AstDeclaratorItem item;
+			item.kind = DI_FUNC_QUAL;
+			item.qual.kind = FQ_THROW;
+			bool ok = true;
+			if (!AtSimple(OP_RPAREN))
+			{
+				for (;;)
+				{
+					AstTypeIdPtr type;
+					if (!ParseTypeId(type))
+					{
+						ok = false;
+						break;
+					}
+					item.qual.throw_types.push_back(move(type));
+					if (!MatchSimple(OP_COMMA))
+						break;
+				}
+			}
+			if (!ok || !MatchSimple(OP_RPAREN))
+			{
+				Restore(state);
+				break;
+			}
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		if (Peek().kind == PTOK_IDENTIFIER &&
+		    (Peek().HasFlag(PTF_ST_OVERRIDE) || Peek().HasFlag(PTF_ST_FINAL)))
+		{
+			AstDeclaratorItem item;
+			item.kind = DI_FUNC_QUAL;
+			item.qual.kind = FQ_VIRT;
+			item.qual.spelling = token.spelling;
+			Advance();
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		if (AtSimple(OP_ARROW))
+		{
+			State state = Save();
+			Advance();
+			AstTypeIdPtr type;
+			if (!ParseTypeId(type))
+			{
+				Restore(state);
+				break;
+			}
+			AstDeclaratorItem item;
+			item.kind = DI_TRAILING_RETURN;
+			item.trailing_type = move(type);
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		break;
+	}
+	return true;
+}
+
+// declarator-suffix*: parameter clauses (with their function
+// qualifiers) and array bounds.
+bool AstParser::ParseDeclaratorSuffixes(AstDeclarator& declarator)
+{
+	for (;;)
+	{
+		if (SkipSquareAttribute())
+			continue;
+		if (AtSimple(OP_LPAREN))
+		{
+			State state = Save();
+			AstParameterClausePtr clause;
+			if (!ParseParameterClause(clause))
+			{
+				Restore(state);
+				break;
+			}
+			AstDeclaratorItem item;
+			item.kind = DI_PARAMS;
+			item.params = move(clause);
+			declarator.items.push_back(move(item));
+			ParseFunctionQualifiers(declarator);
+			continue;
+		}
+		if (AtSimple(OP_LSQUARE) && !AtSimple(OP_LSQUARE, 1))
+		{
+			State state = Save();
+			Advance();
+			AstDeclaratorItem item;
+			item.kind = DI_ARRAY;
+			if (!AtSimple(OP_RSQUARE))
+			{
+				item.array_bound = ParseExpression();
+				if (!item.array_bound)
+				{
+					Restore(state);
+					break;
+				}
+			}
+			if (!MatchSimple(OP_RSQUARE))
+			{
+				Restore(state);
+				break;
+			}
+			declarator.items.push_back(move(item));
+			continue;
+		}
+		break;
+	}
+	return true;
+}
+
+// direct-declarator / direct-abstract-declarator. The named nested
+// reading `( identifier )` is rejected when the identifier's nearest
+// declaration is a type: `future_error(error_code);` keeps error_code
+// a parameter type while `foo(x);` declares x (6.8, 8.2).
+bool AstParser::ParseDirectDeclarator(AstDeclarator& declarator, bool named)
+{
+	if (AtSimple(OP_LPAREN))
+	{
+		State state = Save();
+		Advance();
+		AstDeclaratorPtr inner;
+		if (ParseDeclarator(inner, named) && inner && !inner->Empty() &&
+		    MatchSimple(OP_RPAREN))
+		{
+			bool bare_type_id = false;
+			if (named && inner->items.size() == 1 &&
+			    inner->items[0].kind == DI_ID &&
+			    inner->items[0].name.IsPlainIdentifier())
+			{
+				int flags = ResolveName(inner->items[0].name);
+				bare_type_id = flags != kUnresolved && (flags & NF_TYPE);
+			}
+			if (!bare_type_id)
+			{
+				AstDeclaratorItem item;
+				item.kind = DI_NESTED;
+				item.nested = move(inner);
+				declarator.items.push_back(move(item));
+				return ParseDeclaratorSuffixes(declarator);
+			}
+		}
+		Restore(state);
+		if (named)
+			return false;
+		return ParseDeclaratorSuffixes(declarator);
+	}
+	if (AtSimple(OP_DOTS))
+	{
+		// Parameter pack marker before the (optional) declarator-id.
+		State state = Save();
+		Advance();
+		AstDeclaratorItem pack;
+		pack.kind = DI_PACK;
+		declarator.items.push_back(move(pack));
+		if (AtIdentifier())
+		{
+			AstName name;
+			if (ParseIdExpressionName(name))
+			{
+				AstDeclaratorItem item;
+				item.kind = DI_ID;
+				item.name = move(name);
+				declarator.items.push_back(move(item));
+			}
+		}
+		else if (named)
+		{
+			Restore(state);
+			declarator.items.pop_back();
+			return false;
+		}
+		return ParseDeclaratorSuffixes(declarator);
+	}
+	if (named)
+	{
+		State state = Save();
+		AstName name;
+		if (!ParseIdExpressionName(name))
+			return false;
+		// Destructors and conversion functions are declared through the
+		// special-member grammar, never as ordinary declarator-ids.
+		if (name.parts.back().tilde ||
+		    name.parts.back().kind == NP_CONVERSION_FUNCTION)
+		{
+			Restore(state);
+			return false;
+		}
+		AstDeclaratorItem item;
+		item.kind = DI_ID;
+		item.name = move(name);
+		declarator.items.push_back(move(item));
+		if (!ParseDeclaratorSuffixes(declarator))
+		{
+			Restore(state);
+			return false;
+		}
+		return true;
+	}
+	return ParseDeclaratorSuffixes(declarator);
+}
+
+// declarator: ptr-operator* direct-declarator. For named declarators
+// failure restores entry state; abstract declarators always succeed,
+// possibly empty (the caller checks Empty()).
+bool AstParser::ParseDeclarator(AstDeclaratorPtr& declarator, bool named)
+{
+	State state = Save();
+	AstDeclaratorPtr result(new AstDeclarator());
+	ParsePtrOperators(*result);
+	if (!ParseDirectDeclarator(*result, named))
+	{
+		Restore(state);
+		return false;
+	}
+	if (named && !result->IdName())
+	{
+		Restore(state);
+		return false;
+	}
+	declarator = move(result);
+	return true;
+}
+
+bool AstParser::AtParameterFollow() const
+{
+	return AtSimple(OP_COMMA) || AtSimple(OP_RPAREN) || AtSimple(OP_ASS) ||
+		AtSimple(OP_DOTS) || AtCloseAngle();
+}
+
+// parameter-declaration: decl-specifier-seq with an abstract-first
+// declarator (8.2/7: the type-id reading wins when both parse), the
+// choice validated against the parameter follow set.
+bool AstParser::ParseParameterDeclaration(AstParameter& parameter)
+{
+	State state = Save();
+	if (!ParseSpecifierSeq(parameter.specifiers, kDeclSpecifierSeq))
+	{
+		Restore(state);
+		return false;
+	}
+	State declarator_state = Save();
+	AstDeclaratorPtr abstract;
+	bool have = false;
+	if (ParseDeclarator(abstract, false) && AtParameterFollow())
+	{
+		if (!abstract->Empty())
+			parameter.declarator = move(abstract);
+		have = true;
+	}
+	if (!have)
+	{
+		Restore(declarator_state);
+		AstDeclaratorPtr named;
+		if (ParseDeclarator(named, true) && AtParameterFollow())
+			parameter.declarator = move(named);
+		else
+		{
+			Restore(state);
+			return false;
+		}
+	}
+	if (AtSimple(OP_ASS))
+	{
+		Advance();
+		AstExprPtr value = ParseInitializerClause();
+		if (!value)
+		{
+			Restore(state);
+			return false;
+		}
+		AstInitializerPtr init(new AstInitializer());
+		init->kind = INIT_EQ;
+		init->expr = move(value);
+		parameter.default_arg = move(init);
+	}
+	return true;
+}
+
+// parameter-clause: ( parameter-declaration-list? ) with the trailing
+// `, ...` and lone `...` variadic forms.
+bool AstParser::ParseParameterClause(AstParameterClausePtr& clause)
+{
+	State state = Save();
+	if (!MatchSimple(OP_LPAREN))
+		return false;
+	AstParameterClausePtr result(new AstParameterClause());
+	if (MatchSimple(OP_RPAREN))
+	{
+		clause = move(result);
+		return true;
+	}
+	if (MatchSimple(OP_DOTS))
+	{
+		if (!MatchSimple(OP_RPAREN))
+		{
+			Restore(state);
+			return false;
+		}
+		result->variadic = true;
+		clause = move(result);
+		return true;
+	}
+	for (;;)
+	{
+		AstParameter parameter;
+		if (!ParseParameterDeclaration(parameter))
+		{
+			Restore(state);
+			return false;
+		}
+		result->parameters.push_back(move(parameter));
+		if (MatchSimple(OP_COMMA))
+		{
+			if (MatchSimple(OP_DOTS))
+			{
+				result->variadic = true;
+				break;
+			}
+			continue;
+		}
+		if (MatchSimple(OP_DOTS))
+		{
+			result->variadic = true;
+			break;
+		}
+		break;
+	}
+	if (!MatchSimple(OP_RPAREN))
+	{
+		Restore(state);
+		return false;
+	}
+	clause = move(result);
+	return true;
+}
+
+// init-declarator initializers: = initializer-clause (with = default
+// and = delete as special members), braced-init-list, and when
+// allowed, ( expression-list ).
+bool AstParser::ParseInitializer(AstInitializerPtr& init, bool allow_paren)
+{
+	if (AtSimple(OP_ASS))
+	{
+		Advance();
+		AstInitializerPtr result(new AstInitializer());
+		if (AtSimple(KW_DEFAULT))
+		{
+			Advance();
+			result->kind = INIT_DEFAULT;
+			init = move(result);
+			return true;
+		}
+		if (AtSimple(KW_DELETE))
+		{
+			Advance();
+			result->kind = INIT_DELETE;
+			init = move(result);
+			return true;
+		}
+		AstExprPtr value = ParseInitializerClause();
+		if (!value)
+			return false;
+		result->kind = INIT_EQ;
+		result->expr = move(value);
+		init = move(result);
+		return true;
+	}
+	if (AtSimple(OP_LBRACE))
+	{
+		AstExprPtr braced = ParseBracedInitList();
+		if (!braced)
+			return false;
+		AstInitializerPtr result(new AstInitializer());
+		result->kind = INIT_BRACED;
+		result->expr = move(braced);
+		init = move(result);
+		return true;
+	}
+	if (allow_paren && AtSimple(OP_LPAREN))
+	{
+		State state = Save();
+		Advance();
+		AstInitializerPtr result(new AstInitializer());
+		result->kind = INIT_PAREN;
+		if (!ParseInitializerClauseList(result->args) ||
+		    !MatchSimple(OP_RPAREN))
+		{
+			Restore(state);
+			return false;
+		}
+		init = move(result);
+		return true;
+	}
+	return false;
+}
+
+bool AstParser::ParseBraceOrEqualInitializer(AstInitializerPtr& init)
+{
+	if (!AtSimple(OP_ASS) && !AtSimple(OP_LBRACE))
+		return false;
+	return ParseInitializer(init, false);
+}
