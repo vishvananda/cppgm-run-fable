@@ -87,6 +87,15 @@ ParseNodePtr Parser::ParseBinaryOperator(int level)
 	{
 		if (spec.ops[i] == OP_GT && InAngleBrackets())
 			continue;
+		// 14.2/3: a < following a name that lookup (here: the mock rules)
+		// finds to be a template-name is always the template-argument-list
+		// delimiter, never the less-than operator. simple-template-id
+		// already had its greedy chance at the name; the relational
+		// reading must not reinterpret the <.
+		if (spec.ops[i] == OP_LT && pos_ > 0 &&
+		    tokens_[pos_ - 1].kind == PTOK_IDENTIFIER &&
+		    tokens_[pos_ - 1].HasFlag(PTF_TEMPLATE_NAME))
+			continue;
 		if (AtSimple(spec.ops[i]))
 			return MatchSimpleLeaf(spec.ops[i]);
 	}
@@ -119,6 +128,12 @@ ParseNodePtr Parser::ParseConditionalSuffix(ParseNodePtr condition)
 
 ParseNodePtr Parser::ParseConditionalExpression()
 {
+	return MemoParse(kMemoConditionalExpression,
+	                 &Parser::ParseConditionalExpressionRule);
+}
+
+ParseNodePtr Parser::ParseConditionalExpressionRule()
+{
 	ParseNodePtr lhs = ParseBinaryExpression(0);
 	if (!lhs)
 		return ParseNodePtr();
@@ -132,6 +147,12 @@ ParseNodePtr Parser::ParseConditionalExpression()
 // assignment operator, exactly because the assignment lhs is the
 // ladder (logical-or) parse.
 ParseNodePtr Parser::ParseAssignmentExpression()
+{
+	return MemoParse(kMemoAssignmentExpression,
+	                 &Parser::ParseAssignmentExpressionRule);
+}
+
+ParseNodePtr Parser::ParseAssignmentExpressionRule()
 {
 	if (AtSimple(KW_THROW))
 		return ParseThrowExpression();
@@ -168,6 +189,11 @@ ParseNodePtr Parser::ParseAssignmentExpression()
 
 // expression: assignment-expression (OP_COMMA assignment-expression)*
 ParseNodePtr Parser::ParseExpression()
+{
+	return MemoParse(kMemoExpression, &Parser::ParseExpressionRule);
+}
+
+ParseNodePtr Parser::ParseExpressionRule()
 {
 	return ParseCommaList("expression", &Parser::ParseAssignmentExpression);
 }
@@ -622,6 +648,12 @@ ParseNodePtr Parser::ParsePseudoDestructorName()
 //     new-expression | delete-expression
 ParseNodePtr Parser::ParseUnaryExpression()
 {
+	return MemoParse(kMemoUnaryExpression,
+	                 &Parser::ParseUnaryExpressionRule);
+}
+
+ParseNodePtr Parser::ParseUnaryExpressionRule()
+{
 	if (AtSimple(KW_SIZEOF))
 		return ParseSizeofExpression();
 	if (AtSimple(KW_ALIGNOF))
@@ -960,6 +992,11 @@ ParseNodePtr Parser::ParseDeleteExpression()
 // out to unary-expression, so `(C)(x)` is a cast while `(x)(y)` is a
 // call (8.2).
 ParseNodePtr Parser::ParseCastExpression()
+{
+	return MemoParse(kMemoCastExpression, &Parser::ParseCastExpressionRule);
+}
+
+ParseNodePtr Parser::ParseCastExpressionRule()
 {
 	State state = Save();
 	if (MatchSimple(OP_LPAREN))

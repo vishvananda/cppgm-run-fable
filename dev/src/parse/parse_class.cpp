@@ -54,7 +54,7 @@ ParseNodePtr Parser::ParseClassHead()
 	if (name)
 	{
 		ParseNodePtr virt;
-		if (AtIdentifier() && Peek().spelling == "final")
+		if (AtIdentifier() && Peek().HasFlag(PTF_ST_FINAL))
 		{
 			virt = MakeParseNode("class-virt-specifier");
 			virt->Add(MatchIdentifierLeaf());
@@ -221,8 +221,7 @@ ParseNodePtr Parser::ParseMemberDeclarator()
 			node->Add(move(virt));
 			any_virt = true;
 		}
-		if (AtSimple(OP_ASS) && Peek(1).kind == PTOK_LITERAL &&
-		    Peek(1).spelling == "0")
+		if (AtSimple(OP_ASS) && Peek(1).HasFlag(PTF_ST_ZERO))
 		{
 			// pure-specifier: OP_ASS ST_ZERO (wins over an `= 0`
 			// initializer per the grammar's alternative order)
@@ -265,10 +264,7 @@ ParseNodePtr Parser::ParseMemberDeclarator()
 // identifiers with these spellings)
 ParseNodePtr Parser::ParseVirtSpecifier()
 {
-	if (!AtIdentifier())
-		return ParseNodePtr();
-	const string& spelling = Peek().spelling;
-	if (spelling != "override" && spelling != "final")
+	if (!AtIdentifier() || !Peek().HasFlag(PTF_ST_OVERRIDE | PTF_ST_FINAL))
 		return ParseNodePtr();
 	ParseNodePtr node = MakeParseNode("virt-specifier");
 	node->Add(MatchIdentifierLeaf());

@@ -13,8 +13,9 @@ using std::vector;
 // pair (14.2.3) and the sequence terminated by one ST_EOF. All literal
 // kinds (including user-defined) present one TT_LITERAL terminal. The
 // special tokens ST_EMPTYSTR / ST_ZERO / ST_OVERRIDE / ST_FINAL and the
-// mock name categories are spelling predicates on the carried source
-// text, queried only in the grammar positions that use them.
+// mock name categories are spelling-derived facts stamped once per
+// token at build time; the parser queries them as flags in the grammar
+// positions that use them.
 enum EParseTokenKind
 {
 	PTOK_SIMPLE,      // keyword or operator/punctuation (ETokenType)
@@ -25,15 +26,38 @@ enum EParseTokenKind
 	PTOK_EOF          // ST_EOF
 };
 
+enum EParseTokenFlags
+{
+	// mock name lookup categories (PTOK_IDENTIFIER)
+	PTF_CLASS_NAME = 1 << 0,      // contains 'C'
+	PTF_TEMPLATE_NAME = 1 << 1,   // contains 'T'
+	PTF_TYPEDEF_NAME = 1 << 2,    // contains 'Y'
+	PTF_ENUM_NAME = 1 << 3,       // contains 'E'
+	PTF_NAMESPACE_NAME = 1 << 4,  // contains 'N'
+	// context-sensitive keywords (PTOK_IDENTIFIER)
+	PTF_ST_OVERRIDE = 1 << 5,     // spelled `override`
+	PTF_ST_FINAL = 1 << 6,        // spelled `final`
+	// special literals (PTOK_LITERAL)
+	PTF_ST_EMPTYSTR = 1 << 7,     // spelled `""`
+	PTF_ST_ZERO = 1 << 8          // spelled `0`
+};
+
 struct ParseToken
 {
 	ParseToken(EParseTokenKind kind_in, ETokenType simple_type_in,
-	           const string& spelling_in)
-		: kind(kind_in), simple_type(simple_type_in), spelling(spelling_in)
+	           const string& spelling_in, unsigned flags_in)
+		: kind(kind_in), simple_type(simple_type_in), flags(flags_in),
+		  spelling(spelling_in)
 	{}
+
+	bool HasFlag(unsigned mask) const
+	{
+		return (flags & mask) != 0;
+	}
 
 	EParseTokenKind kind;
 	ETokenType simple_type;  // meaningful for PTOK_SIMPLE only
+	unsigned flags;          // EParseTokenFlags facts of the spelling
 	string spelling;         // source text (PostToken::source)
 };
 

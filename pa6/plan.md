@@ -115,6 +115,13 @@ standard's disambiguation rules:
   then extend with `? :` (conditional) or an assignment-operator +
   initializer-clause, avoiding the triple reparse of the grammar's
   alternatives.
+- 14.2/3 name commit: a `<` directly following an identifier the mock
+  rules categorize as a template-name is always the delimiter of a
+  template-argument-list and never the relational operator, so after
+  `simple-template-id` has had its greedy chance the binary ladder
+  refuses to reinterpret the `<` (`T1 < 2;` is BAD, matching the
+  reference; `(T1) < 2` and `a < b` stay relational). Pinned by
+  course/pa6/template-name-lt-commits-bad.
 
 Nullable-loop hazard: the only nullable starred element reached by a
 separator loop is `attribute-part` inside `attribute-list` (`[[,]]`),
@@ -160,7 +167,11 @@ start a declarator).
 ## Mock name lookup
 
 Identifier category = spelling probe (contains `C`/`T`/`Y`/`E`/`N` for
-class/template/typedef/enum/namespace-name). The gates live exactly
+class/template/typedef/enum/namespace-name), computed once per token in
+`BuildParseTokens` and stamped on the `ParseToken` as `EParseTokenFlags`
+bits alongside the other spelling-derived facts (`override`/`final`,
+`ST_EMPTYSTR`, `ST_ZERO`); the parser queries flags, never re-scans
+spellings. The gates live exactly
 where the grammar names a `*-name` nonterminal: `template-name`
 requires `T` before `<` opens a simple-template-id;
 `nested-name-specifier-root` requires a type-name or namespace-name
@@ -173,10 +184,12 @@ spelling checks on identifier tokens in virt-specifier positions only.
 
 ## Validation
 
-- `make -C pa6 test` for tests/ and course/pa6 (32 + 11 cases: the
+- `make -C pa6 test` for tests/ and course/pa6 (32 + 13 cases: the
   expression/statement/declaration ladder, ambiguity pins from 6.8 and
   8.2, close-angle-bracket OK/BAD triples, context-sensitive keywords,
-  bitfields, try/catch shapes).
+  bitfields, try/catch shapes, the 14.2/3 template-name `<` commit, and
+  a 300-deep failing template-argument nest that requires the failure
+  memo to finish inside the harness timeout).
 - `make test-report-through-pa6` as the exit criterion (PA1-PA5 stay
   untouched except the predefined-macro move in `preproc`, which is a
   pure code motion).
@@ -242,3 +255,71 @@ the handout's recommended architecture) and no implementation bodies;
 the line counter treats any `;`-bearing line as body weight. Splitting
 the class declaration across headers would be a mechanical split, so
 the single declaration header stays.
+
+## Architecture Review
+
+The audit pass over the as-built parser confirmed the ownership story
+and fixed two performance defects and one fact-recomputation smell:
+
+- Terminal facts are stamped, not re-derived. `BuildParseTokens` owns
+  every spelling-derived fact the grammar consumes — the five mock
+  name categories, `ST_OVERRIDE`/`ST_FINAL`, `ST_EMPTYSTR`, `ST_ZERO`
+  — as `EParseTokenFlags` bits computed once per token. The parser
+  reads flags at the `*-name`, virt-specifier, pure-specifier, and
+  literal-operator-id gates; no parse function scans a spelling. The
+  `IsMock*` predicates remain the single definition of the handout's
+  categories and are called only at stamping time.
+- Backtracking is bounded by failure memoization. Plain ordered-choice
+  retries made unparseable nested input exponential: every
+  template-argument tries the type-id, constant-expression, and
+  id-expression readings, and each reading re-descends the same
+  subtree, so an 8-deep failing `TC1<...%...>` nest took ~10s
+  (3^depth) where `recog-ref` took 0.13s. `MemoParse` remembers
+  failures per (rule, position, innermost-bracket-is-angle) for the 16
+  chokepoint rules every retry descends through (type-id, the
+  expression entry points, declarators, specifier sequences,
+  id-expression/template-id/nested-name-specifier,
+  block-declaration). The key is sound because a failed parse restores
+  the lookahead and bracket stack exactly, hard brackets and each
+  rule's own angle pairs balance inside the rule, and
+  `InAngleBrackets()` is the only ambient state any rule reads.
+  Failures-only keeps the cache a bitmap (no tree retention): a
+  success is consumed immediately by its caller, and ordered choice
+  revisits a succeeding position at most a constant number of times.
+- The 14.2/3 commit kills the residual quadratic. With memoization
+  alone, a failing d-deep template nest still cost O(d^2): each
+  level's constant-expression retry re-walked the remaining
+  `TC1 < TC1 < ...` chain as a relational chain. Refusing the
+  relational `<` when the previous token is a template-name identifier
+  implements 14.2/3 ("the < is always taken as the delimiter"), makes
+  the retry fail in O(1), and matches the reference (`T1 < 2;` BAD for
+  both). d=10000 now parses in 0.10s, on par with `recog-ref`.
+
+## Final Architecture Review
+
+- Ownership boundaries hold: phases 1-7 live in the PA5 pipeline
+  unchanged; `predefined_macros` is the one definition of the course
+  macro table shared by `preproc` and `recog`; `parse_token` owns the
+  PA6 terminal vocabulary and its stamped facts; `parse_tree` owns the
+  ungated debugging dump; `Parser` owns lookahead, the bracket-context
+  stack, and the failure memo, with one parse function per `pa6.gram`
+  nonterminal split by grammar area. No parse function touches
+  `brackets_` except through Advance/MatchOpenAngle/
+  ParseCloseAngleBracket/Restore.
+- No fallback success paths: OK requires the full pipeline plus a
+  `translation-unit` parse that reaches `ST_EOF`; every per-file error
+  (open failure, PA5 error, phase-7 invalid token, parse failure) is
+  BAD via one exception path; the tool never consults `recog-ref`, and
+  the batch runner re-executes the real `main`.
+- Performance envelope: 16k-line mixed declarations/templates/
+  statements parse in 1.58s vs the reference's 0.34s (the project's
+  usual ~5x constant factor, linear); adversarial nests (template
+  arguments, sizeof chains, parameter clauses, if-cascades) are
+  linear-time BAD; 100k-deep parentheses parse OK in ~1.8s on the
+  512MB worker stack. The memo bitmap costs 32 bits per token.
+- Acceptance was re-validated after the changes: 285/285 through-pa6
+  (including the two new course pins), and a fresh 400-file randomized
+  differential sweep against `recog-ref` shows zero cases of this
+  parser accepting what the reference rejects; all remaining
+  divergences are the documented reference lenience (no mock gating,
+  junk recovery, post-PA6 constructs).

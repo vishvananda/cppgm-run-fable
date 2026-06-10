@@ -160,7 +160,6 @@ ParseNodePtr Parser::ParseSelectionStatement()
 	node->Add(move(body));
 	if (is_if && AtSimple(KW_ELSE))
 	{
-		State else_state = Save();
 		ParseNodePtr else_kw = MatchSimpleLeaf(KW_ELSE);
 		ParseNodePtr else_body = ParseStatement();
 		if (!else_body)
@@ -170,7 +169,6 @@ ParseNodePtr Parser::ParseSelectionStatement()
 		}
 		node->Add(move(else_kw));
 		node->Add(move(else_body));
-		(void)else_state;
 	}
 	return node;
 }
@@ -306,8 +304,6 @@ ParseNodePtr Parser::ParseForSuffix()
 			else
 				return node;
 		}
-		Restore(state);
-		node = MakeParseNode("for-classic");
 	}
 	// for-range
 	Restore(state);

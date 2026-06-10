@@ -53,7 +53,35 @@ private:
 
 	typedef ParseNodePtr (Parser::*ParseFn)();
 
+	// The rules with failure memoization: the chokepoints every
+	// ordered-choice retry re-descends through (the type/expression/id
+	// readings of template-argument, sizeof, typeid, and alignas; the
+	// declaration/expression readings of statements and conditions; the
+	// abstract/named declarator readings of parameters). One slot per
+	// (rule, position, innermost-bracket-is-angle); see MemoParse.
+	enum EMemoRule
+	{
+		kMemoSimpleTemplateId,
+		kMemoIdExpression,
+		kMemoNestedNameSpecifier,
+		kMemoTypeId,
+		kMemoDeclarator,
+		kMemoAbstractDeclarator,
+		kMemoParametersAndQualifiers,
+		kMemoDeclSpecifierSeq,
+		kMemoTypeSpecifierSeq,
+		kMemoTrailingTypeSpecifierSeq,
+		kMemoConditionalExpression,
+		kMemoAssignmentExpression,
+		kMemoExpression,
+		kMemoCastExpression,
+		kMemoUnaryExpression,
+		kMemoBlockDeclaration,
+		kNumMemoRules
+	};
+
 	// --- token-stream infrastructure (parser_core.cpp) ---
+	ParseNodePtr MemoParse(EMemoRule rule_index, ParseFn rule);
 	State Save() const;
 	void Restore(const State& state);
 	const ParseToken& Peek(size_t ahead = 0) const;
@@ -77,10 +105,13 @@ private:
 	ParseNodePtr ParseClassName();
 	ParseNodePtr ParseNamespaceName();
 	ParseNodePtr ParseSimpleTemplateId();
+	ParseNodePtr ParseSimpleTemplateIdRule();
 	ParseNodePtr ParseIdExpression();
+	ParseNodePtr ParseIdExpressionRule();
 	ParseNodePtr ParseUnqualifiedId();
 	ParseNodePtr ParseQualifiedId();
 	ParseNodePtr ParseNestedNameSpecifier();
+	ParseNodePtr ParseNestedNameSpecifierRule();
 	ParseNodePtr ParseNestedNameSpecifierRoot();
 	ParseNodePtr ParseNestedNameSpecifierSuffix();
 	ParseNodePtr ParseDecltypeSpecifier();
@@ -110,6 +141,7 @@ private:
 	ParseNodePtr ParseExpressionList();
 	ParseNodePtr ParsePseudoDestructorName();
 	ParseNodePtr ParseUnaryExpression();
+	ParseNodePtr ParseUnaryExpressionRule();
 	ParseNodePtr ParseSizeofExpression();
 	ParseNodePtr ParseNewExpression();
 	ParseNodePtr ParseNewPlacement();
@@ -119,12 +151,16 @@ private:
 	ParseNodePtr ParseNewInitializer();
 	ParseNodePtr ParseDeleteExpression();
 	ParseNodePtr ParseCastExpression();
+	ParseNodePtr ParseCastExpressionRule();
 	ParseNodePtr ParseBinaryExpression(int level);
 	ParseNodePtr ParseBinaryOperator(int level);
 	ParseNodePtr ParseConditionalSuffix(ParseNodePtr condition);
 	ParseNodePtr ParseConditionalExpression();
+	ParseNodePtr ParseConditionalExpressionRule();
 	ParseNodePtr ParseAssignmentExpression();
+	ParseNodePtr ParseAssignmentExpressionRule();
 	ParseNodePtr ParseExpression();
+	ParseNodePtr ParseExpressionRule();
 	ParseNodePtr ParseConstantExpression();
 	ParseNodePtr ParseThrowExpression();
 	ParseNodePtr ParseInitializerClause();
@@ -152,6 +188,7 @@ private:
 	// --- declarations (parse_decl.cpp) ---
 	ParseNodePtr ParseDeclaration();
 	ParseNodePtr ParseBlockDeclaration();
+	ParseNodePtr ParseBlockDeclarationRule();
 	ParseNodePtr ParseSimpleDeclaration();
 	ParseNodePtr ParseStaticAssertDeclaration();
 	ParseNodePtr ParseAttributeDeclaration();
@@ -184,8 +221,11 @@ private:
 		kTrailingTypeSpecifierSeq
 	};
 	ParseNodePtr ParseDeclSpecifierSeq();
+	ParseNodePtr ParseDeclSpecifierSeqRule();
 	ParseNodePtr ParseTypeSpecifierSeq();
+	ParseNodePtr ParseTypeSpecifierSeqRule();
 	ParseNodePtr ParseTrailingTypeSpecifierSeq();
+	ParseNodePtr ParseTrailingTypeSpecifierSeqRule();
 	ParseNodePtr ParseSpecifierSeq(ESpecifierSeqKind kind, const char* name);
 	ParseNodePtr ParseOneSpecifier(ESpecifierSeqKind kind, bool* seen_type);
 	ParseNodePtr ParseTaggedTypeSpecifier(ESpecifierSeqKind kind,
@@ -203,17 +243,21 @@ private:
 	// --- declarators (parse_declarator.cpp) ---
 	ParseNodePtr ParseInitDeclarator();
 	ParseNodePtr ParseDeclarator();
+	ParseNodePtr ParseDeclaratorRule();
 	ParseNodePtr ParsePtrDeclarator();
 	ParseNodePtr ParseNoptrDeclarator();
 	ParseNodePtr ParseNoptrDeclaratorSuffix();
 	ParseNodePtr ParseParametersAndQualifiers();
+	ParseNodePtr ParseParametersAndQualifiersRule();
 	ParseNodePtr ParseTrailingReturnType();
 	ParseNodePtr ParsePtrOperator();
 	ParseNodePtr ParseCvQualifier();
 	ParseNodePtr ParseRefQualifier();
 	ParseNodePtr ParseDeclaratorId();
 	ParseNodePtr ParseTypeId();
+	ParseNodePtr ParseTypeIdRule();
 	ParseNodePtr ParseAbstractDeclarator();
+	ParseNodePtr ParseAbstractDeclaratorRule();
 	ParseNodePtr ParsePtrAbstractDeclarator();
 	ParseNodePtr ParseNoptrAbstractDeclarator();
 	ParseNodePtr ParseAbstractPackDeclarator();
@@ -249,4 +293,5 @@ private:
 	const vector<ParseToken>& tokens_;
 	size_t pos_;
 	vector<char> brackets_;
+	vector<bool> rule_failed_;  // MemoParse bitmap, one bit per slot
 };

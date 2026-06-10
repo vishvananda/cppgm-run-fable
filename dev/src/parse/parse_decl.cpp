@@ -63,6 +63,12 @@ ParseNodePtr Parser::ParseDeclaration()
 //     opaque-enum-declaration
 ParseNodePtr Parser::ParseBlockDeclaration()
 {
+	return MemoParse(kMemoBlockDeclaration,
+	                 &Parser::ParseBlockDeclarationRule);
+}
+
+ParseNodePtr Parser::ParseBlockDeclarationRule()
+{
 	ParseNodePtr inner;
 	if (AtSimple(KW_ASM))
 		inner = ParseAsmDefinition();
@@ -739,15 +745,33 @@ ParseNodePtr Parser::ParseBalancedToken()
 
 ParseNodePtr Parser::ParseDeclSpecifierSeq()
 {
+	return MemoParse(kMemoDeclSpecifierSeq,
+	                 &Parser::ParseDeclSpecifierSeqRule);
+}
+
+ParseNodePtr Parser::ParseDeclSpecifierSeqRule()
+{
 	return ParseSpecifierSeq(kDeclSpecifierSeq, "decl-specifier-seq");
 }
 
 ParseNodePtr Parser::ParseTypeSpecifierSeq()
 {
+	return MemoParse(kMemoTypeSpecifierSeq,
+	                 &Parser::ParseTypeSpecifierSeqRule);
+}
+
+ParseNodePtr Parser::ParseTypeSpecifierSeqRule()
+{
 	return ParseSpecifierSeq(kTypeSpecifierSeq, "type-specifier-seq");
 }
 
 ParseNodePtr Parser::ParseTrailingTypeSpecifierSeq()
+{
+	return MemoParse(kMemoTrailingTypeSpecifierSeq,
+	                 &Parser::ParseTrailingTypeSpecifierSeqRule);
+}
+
+ParseNodePtr Parser::ParseTrailingTypeSpecifierSeqRule()
 {
 	return ParseSpecifierSeq(kTrailingTypeSpecifierSeq,
 	                         "trailing-type-specifier-seq");

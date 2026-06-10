@@ -3,8 +3,36 @@
 using std::move;
 
 Parser::Parser(const vector<ParseToken>& tokens)
-	: tokens_(tokens), pos_(0)
+	: tokens_(tokens), pos_(0),
+	  rule_failed_(tokens.size() * kNumMemoRules * 2, false)
 {
+}
+
+// Failure memoization for the rules ordered-choice retries re-descend
+// through. A rule's outcome is a pure function of (rule, position,
+// innermost-bracket-is-angle): a failed parse restores the lookahead
+// and bracket stack, hard brackets and the rule's own angle pairs open
+// and close inside the rule, and InAngleBrackets() is the only ambient
+// state any rule reads. Without the memo, constructs whose readings
+// the grammar disambiguates by trial (template-argument's
+// type-id/constant-expression/id-expression, sizeof and typeid
+// operands, statement vs declaration, abstract vs named parameter
+// declarators) re-parse failing subtrees once per enclosing reading —
+// exponential in nesting depth on unparseable input (a 8-deep failing
+// template-argument nest took ~10s). Remembering failures bounds each
+// slot to one full parse. Successes are not cached: a successful parse
+// is consumed immediately by its caller, and ordered choice revisits a
+// succeeding position only a constant number of times.
+ParseNodePtr Parser::MemoParse(EMemoRule rule_index, ParseFn rule)
+{
+	size_t slot = (pos_ * kNumMemoRules + rule_index) * 2 +
+	              (InAngleBrackets() ? 1 : 0);
+	if (rule_failed_[slot])
+		return ParseNodePtr();
+	ParseNodePtr node = (this->*rule)();
+	if (!node)
+		rule_failed_[slot] = true;
+	return node;
 }
 
 // translation-unit: declaration* ST_EOF

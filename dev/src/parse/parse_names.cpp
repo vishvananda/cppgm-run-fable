@@ -19,15 +19,11 @@ ParseNodePtr Parser::ParseTypeName()
 		node->Add(move(id));
 		return node;
 	}
-	if (AtIdentifier())
+	if (AtIdentifier() &&
+	    Peek().HasFlag(PTF_CLASS_NAME | PTF_ENUM_NAME | PTF_TYPEDEF_NAME))
 	{
-		const string& spelling = Peek().spelling;
-		if (IsMockClassName(spelling) || IsMockEnumName(spelling) ||
-		    IsMockTypedefName(spelling))
-		{
-			node->Add(MatchIdentifierLeaf());
-			return node;
-		}
+		node->Add(MatchIdentifierLeaf());
+		return node;
 	}
 	return ParseNodePtr();
 }
@@ -42,7 +38,7 @@ ParseNodePtr Parser::ParseClassName()
 		node->Add(move(id));
 		return node;
 	}
-	if (AtIdentifier() && IsMockClassName(Peek().spelling))
+	if (AtIdentifier() && Peek().HasFlag(PTF_CLASS_NAME))
 	{
 		node->Add(MatchIdentifierLeaf());
 		return node;
@@ -52,7 +48,7 @@ ParseNodePtr Parser::ParseClassName()
 
 ParseNodePtr Parser::ParseNamespaceName()
 {
-	if (!AtIdentifier() || !IsMockNamespaceName(Peek().spelling))
+	if (!AtIdentifier() || !Peek().HasFlag(PTF_NAMESPACE_NAME))
 		return ParseNodePtr();
 	ParseNodePtr node = MakeParseNode("namespace-name");
 	node->Add(MatchIdentifierLeaf());
@@ -63,8 +59,14 @@ ParseNodePtr Parser::ParseNamespaceName()
 //     template-name OP_LT template-argument-list? close-angle-bracket
 ParseNodePtr Parser::ParseSimpleTemplateId()
 {
+	return MemoParse(kMemoSimpleTemplateId,
+	                 &Parser::ParseSimpleTemplateIdRule);
+}
+
+ParseNodePtr Parser::ParseSimpleTemplateIdRule()
+{
 	State state = Save();
-	if (!AtIdentifier() || !IsMockTemplateName(Peek().spelling))
+	if (!AtIdentifier() || !Peek().HasFlag(PTF_TEMPLATE_NAME))
 		return ParseNodePtr();
 	ParseNodePtr node = MakeParseNode("simple-template-id");
 	node->Add(MatchIdentifierLeaf());
@@ -89,6 +91,11 @@ ParseNodePtr Parser::ParseSimpleTemplateId()
 // id-expression: unqualified-id | qualified-id (qualified first: it
 // consumes the longer nested-name-specifier prefix)
 ParseNodePtr Parser::ParseIdExpression()
+{
+	return MemoParse(kMemoIdExpression, &Parser::ParseIdExpressionRule);
+}
+
+ParseNodePtr Parser::ParseIdExpressionRule()
 {
 	ParseNodePtr id = ParseQualifiedId();
 	if (!id)
@@ -161,6 +168,12 @@ ParseNodePtr Parser::ParseQualifiedId()
 // nested-name-specifier:
 //     nested-name-specifier-root nested-name-specifier-suffix*
 ParseNodePtr Parser::ParseNestedNameSpecifier()
+{
+	return MemoParse(kMemoNestedNameSpecifier,
+	                 &Parser::ParseNestedNameSpecifierRule);
+}
+
+ParseNodePtr Parser::ParseNestedNameSpecifierRule()
 {
 	ParseNodePtr root = ParseNestedNameSpecifierRoot();
 	if (!root)
@@ -443,7 +456,7 @@ ParseNodePtr Parser::ParseLiteralOperatorId()
 	ParseNodePtr kw = MatchSimpleLeaf(KW_OPERATOR);
 	if (!kw)
 		return ParseNodePtr();
-	if (!AtLiteral() || Peek().spelling != "\"\"" || !AtIdentifier(1))
+	if (!AtLiteral() || !Peek().HasFlag(PTF_ST_EMPTYSTR) || !AtIdentifier(1))
 	{
 		Restore(state);
 		return ParseNodePtr();

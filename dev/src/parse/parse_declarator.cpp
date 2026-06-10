@@ -26,6 +26,11 @@ ParseNodePtr Parser::ParseInitDeclarator()
 // arrow)
 ParseNodePtr Parser::ParseDeclarator()
 {
+	return MemoParse(kMemoDeclarator, &Parser::ParseDeclaratorRule);
+}
+
+ParseNodePtr Parser::ParseDeclaratorRule()
+{
 	State state = Save();
 	ParseNodePtr noptr = ParseNoptrDeclarator();
 	if (noptr)
@@ -143,6 +148,12 @@ ParseNodePtr Parser::ParseNoptrDeclaratorSuffix()
 //     OP_RPAREN cv-qualifier* ref-qualifier? exception-specification?
 //     attribute-specifier*
 ParseNodePtr Parser::ParseParametersAndQualifiers()
+{
+	return MemoParse(kMemoParametersAndQualifiers,
+	                 &Parser::ParseParametersAndQualifiersRule);
+}
+
+ParseNodePtr Parser::ParseParametersAndQualifiersRule()
 {
 	State state = Save();
 	if (!MatchSimple(OP_LPAREN))
@@ -279,6 +290,11 @@ ParseNodePtr Parser::ParseDeclaratorId()
 // type-id: type-specifier-seq abstract-declarator?
 ParseNodePtr Parser::ParseTypeId()
 {
+	return MemoParse(kMemoTypeId, &Parser::ParseTypeIdRule);
+}
+
+ParseNodePtr Parser::ParseTypeIdRule()
+{
 	ParseNodePtr specifiers = ParseTypeSpecifierSeq();
 	if (!specifiers)
 		return ParseNodePtr();
@@ -294,6 +310,12 @@ ParseNodePtr Parser::ParseTypeId()
 //     noptr-abstract-declarator? trailing-return-type |
 //     abstract-pack-declarator
 ParseNodePtr Parser::ParseAbstractDeclarator()
+{
+	return MemoParse(kMemoAbstractDeclarator,
+	                 &Parser::ParseAbstractDeclaratorRule);
+}
+
+ParseNodePtr Parser::ParseAbstractDeclaratorRule()
 {
 	State state = Save();
 	ParseNodePtr noptr = ParseNoptrAbstractDeclarator();

@@ -4,6 +4,39 @@
 
 using std::runtime_error;
 
+namespace {
+
+unsigned IdentifierFlags(const string& spelling)
+{
+	unsigned flags = 0;
+	if (IsMockClassName(spelling))
+		flags |= PTF_CLASS_NAME;
+	if (IsMockTemplateName(spelling))
+		flags |= PTF_TEMPLATE_NAME;
+	if (IsMockTypedefName(spelling))
+		flags |= PTF_TYPEDEF_NAME;
+	if (IsMockEnumName(spelling))
+		flags |= PTF_ENUM_NAME;
+	if (IsMockNamespaceName(spelling))
+		flags |= PTF_NAMESPACE_NAME;
+	if (spelling == "override")
+		flags |= PTF_ST_OVERRIDE;
+	else if (spelling == "final")
+		flags |= PTF_ST_FINAL;
+	return flags;
+}
+
+unsigned LiteralFlags(const string& spelling)
+{
+	if (spelling == "\"\"")
+		return PTF_ST_EMPTYSTR;
+	if (spelling == "0")
+		return PTF_ST_ZERO;
+	return 0;
+}
+
+} // namespace
+
 vector<ParseToken> BuildParseTokens(const vector<PostToken>& tokens)
 {
 	vector<ParseToken> result;
@@ -18,30 +51,32 @@ vector<ParseToken> BuildParseTokens(const vector<PostToken>& tokens)
 		case PTK_SIMPLE:
 			if (token.token_type == OP_RSHIFT)
 			{
-				result.push_back(ParseToken(PTOK_RSHIFT_1, OP_RSHIFT, ">"));
-				result.push_back(ParseToken(PTOK_RSHIFT_2, OP_RSHIFT, ">"));
+				result.push_back(ParseToken(PTOK_RSHIFT_1, OP_RSHIFT, ">", 0));
+				result.push_back(ParseToken(PTOK_RSHIFT_2, OP_RSHIFT, ">", 0));
 			}
 			else
 				result.push_back(ParseToken(PTOK_SIMPLE, token.token_type,
-				                            token.source));
+				                            token.source, 0));
 			break;
 		case PTK_IDENTIFIER:
 			result.push_back(ParseToken(PTOK_IDENTIFIER, KW_ALIGNAS,
-			                            token.source));
+			                            token.source,
+			                            IdentifierFlags(token.source)));
 			break;
 		case PTK_EOF:
-			result.push_back(ParseToken(PTOK_EOF, KW_ALIGNAS, ""));
+			result.push_back(ParseToken(PTOK_EOF, KW_ALIGNAS, "", 0));
 			break;
 		default:
 			// PTK_LITERAL, PTK_LITERAL_ARRAY, and the user-defined kinds
 			// are all TT_LITERAL terminals in the PA6 grammar.
 			result.push_back(ParseToken(PTOK_LITERAL, KW_ALIGNAS,
-			                            token.source));
+			                            token.source,
+			                            LiteralFlags(token.source)));
 			break;
 		}
 	}
 	if (result.empty() || result.back().kind != PTOK_EOF)
-		result.push_back(ParseToken(PTOK_EOF, KW_ALIGNAS, ""));
+		result.push_back(ParseToken(PTOK_EOF, KW_ALIGNAS, "", 0));
 	return result;
 }
 
