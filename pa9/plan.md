@@ -74,6 +74,72 @@ statement's address.
 - `perl scripts/cppgm_file_audit.pl --stage pa9 --paths dev/src`
   for size/structure gates.
 
+## Architecture Review
+
+The implementation matches the pipeline above; the audit (see
+`audit.md`) confirmed each stage's ownership against the code:
+
+- The driver (`dev/cy86.cpp`) runs the unmodified PA5 preprocessor
+  and phase-7 tokenizer per srcfile and concatenates the token
+  sequences; CY86 knowledge starts at the parser. There are no
+  test-shape or test-name gates and no fallback success paths: every
+  diagnosis throws, and `main` maps any throw to EXIT_FAILURE.
+- Semantic facts are typed, not stringly. The opcode table is built
+  once from the `cy86-opcode.desc` transcription into
+  `CY86OperandSpec` (written/imm-only flags + bit width) and an enum
+  family/variant that carries signedness, floatness, relation, and
+  syscall arity into codegen. Operand width conversion happens once,
+  in the parser, where the constraint is known; codegen consumes
+  converted bytes or symbolic label+addend immediates and never
+  re-derives values from token bytes.
+- Labels are interned to dense ids in the parser; codegen forwards
+  them in patches; the image resolves them once at layout. No
+  component recovers label facts downstream of their owner.
+- The encoder is form-driven (ModRM/REX/prefix machinery shared by
+  all mnemonics) rather than per-opcode byte tables, which is the
+  extension point later backend assignments need.
+- Every label-bearing encoding has a value-independent length
+  (mov r64, imm64 and fixed-width data items), so layout is a single
+  sequential pass plus one patch pass; there is no fixed-point
+  relayout loop to go quadratic.
+
+One semantic bug was found by differential probing against
+`cy86-ref` and fixed: the +-literal offset term of label immediates
+and memory displacements negated the literal at its own width before
+extension, so `(label - 1u)` added 0xFFFFFFFF instead of -1, and
+`[reg - "ab"]` (where the minus is subtraction of the converted
+64-bit value, not arithmetic literal negation) was wrongly rejected.
+`OffsetLiteral` now converts to 64 bits first and then negates
+modulo 2^64, matching the reference.
+
+## Final Architecture Review
+
+Re-reviewed after the audit fixes, against the exit criteria:
+
+- `make test-report-through-pa9`: 384/384 tests across pa1-pa9, all
+  stages passing; the PA9 fixtures execute the generated ELF natively
+  and diff stdout and exit status against committed reference
+  fixtures, so the binary is exercised for real, not pattern-matched.
+- Differential probes beyond the fixtures (alignment, width
+  conversion, 8/16-bit mul/div/mod, shifts, partial-register writes,
+  signed/unsigned/float compares, u64<->f80 boundaries, control
+  transfer, data-label patch truncation, ill-formed diagnosis parity)
+  agree with `cy86-ref` except for two documented stand-in gaps where
+  the handout governs: the stand-in cannot compile `move80` at all
+  ("not implemented yet") and does not enforce the handout's
+  requirement that label +- offsets be integral literals. This
+  implementation keeps `move80` fully implemented and keeps the
+  required diagnosis.
+- Generated code disassembles cleanly (objdump cross-check) with the
+  intended fixed sequences and REX-correct forms.
+- No interpreter, trampoline, template binary, or embedded payload
+  anywhere: the output is straight-line translated machine code laid
+  out by the image writer.
+- Performance: parsing, translation, encoding, and layout are all
+  linear in program size; table lookups are O(log n) over 170
+  opcodes. The full PA9 suite (build + 11 program runs) completes in
+  about a second.
+
 ## Later-assignment fit
 
 The X86Instruction model and encoder are the seed of the real backend

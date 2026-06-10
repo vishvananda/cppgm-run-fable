@@ -74,7 +74,6 @@ struct CY86Opcode
 	const char* name;
 	ECY86Family family;
 	int variant;
-	const char* spec;  // space-separated operand constraints
 	vector<CY86OperandSpec> operands;
 };
 

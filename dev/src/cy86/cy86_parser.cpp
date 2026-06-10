@@ -243,7 +243,6 @@ const map<string, const CY86Opcode*>& OpcodeTable()
 			opcodes[i].name = kRawOpcodes[i].name;
 			opcodes[i].family = kRawOpcodes[i].family;
 			opcodes[i].variant = kRawOpcodes[i].variant;
-			opcodes[i].spec = kRawOpcodes[i].spec;
 			opcodes[i].operands = ParseOperandSpecs(kRawOpcodes[i].spec);
 			table[opcodes[i].name] = &opcodes[i];
 		}
@@ -653,10 +652,13 @@ CY86Operand CY86Parser::ParseOperand(const CY86OperandSpec& spec,
 	return op;
 }
 
-// The +-literal term of a label immediate or memory address, negated
-// and extended to 64 bits. Label offsets require an integral literal;
-// plain memory displacements accept any literal through the 64-bit
-// immediate conversion.
+// The +-literal term of a label immediate or memory address. The
+// literal converts to 64 bits as an immediate operand of that width
+// (sign-extend signed integral, else zero-extend); OP_MINUS then
+// subtracts the converted value modulo 2^64, so for example `- 1u`
+// is an addend of -1, not of 0xFFFFFFFF (negation happens after the
+// extension, matching the reference). Label offsets require an
+// integral literal; plain memory displacements accept any literal.
 unsigned long long CY86Parser::OffsetLiteral(bool minus,
                                              bool require_integral)
 {
@@ -664,9 +666,8 @@ unsigned long long CY86Parser::OffsetLiteral(bool minus,
 	if (require_integral &&
 	    (literal.kind != PTK_LITERAL || !IsIntegralType(literal.type)))
 		throw runtime_error("label offset must be an integral literal");
-	if (minus)
-		NegateLiteral(literal);
-	return LiteralTo64(literal);
+	unsigned long long value = LiteralTo64(literal);
+	return minus ? 0 - value : value;
 }
 
 CY86Operand CY86Parser::ParseParenImmediate(const CY86OperandSpec& spec)
