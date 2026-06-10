@@ -1,10 +1,12 @@
 #include "sema/name_lookup.h"
 
 #include <set>
+#include <stdexcept>
 #include <utility>
 
 using std::make_pair;
 using std::pair;
+using std::runtime_error;
 using std::set;
 
 namespace {
@@ -18,6 +20,53 @@ const Binding* MatchInNamespace(const Namespace& ns, const string& name,
 	if (filter == LF_NAMESPACES_ONLY && it->second.kind != BK_NAMESPACE)
 		return 0;
 	return &it->second;
+}
+
+// Merges one found declaration into the accumulated result. Function
+// sets union (each entity once); any other combination of distinct
+// entities is an ambiguous lookup (3.4.1p2), a diagnosable error.
+void MergeCandidate(bool& found, Binding& out, const Binding& candidate,
+                    const string& name)
+{
+	if (!found)
+	{
+		found = true;
+		out = candidate;
+		return;
+	}
+	if (out.kind == BK_FUNCTION && candidate.kind == BK_FUNCTION)
+	{
+		for (size_t i = 0; i < candidate.overloads.size(); i++)
+		{
+			bool present = false;
+			for (size_t j = 0; j < out.overloads.size(); j++)
+				if (out.overloads[j].entity == candidate.overloads[i].entity)
+					present = true;
+			if (!present)
+				out.overloads.push_back(candidate.overloads[i]);
+		}
+		return;
+	}
+	bool same = false;
+	if (out.kind == candidate.kind)
+	{
+		switch (out.kind)
+		{
+		case BK_VARIABLE:
+			same = out.entity == candidate.entity;
+			break;
+		case BK_NAMESPACE:
+			same = out.target == candidate.target;
+			break;
+		case BK_TYPEDEF:
+			same = TypeEquals(out.type, candidate.type);
+			break;
+		case BK_FUNCTION:
+			break;
+		}
+	}
+	if (!same)
+		throw runtime_error("lookup of `" + name + "` is ambiguous");
 }
 
 // True when `inner` is declared inside `outer` at any depth.
@@ -72,39 +121,41 @@ void CollectInlineSet(const Namespace& ns, vector<const Namespace*>& out)
 			CollectInlineSet(*ns.members[i], out);
 }
 
-const Binding* QualifiedLookupRec(const Namespace& ns, const string& name,
-                                  ELookupFilter filter,
-                                  set<const Namespace*>& visited)
+bool QualifiedLookupRec(const Namespace& ns, const string& name,
+                        ELookupFilter filter, Binding& out,
+                        set<const Namespace*>& visited)
 {
 	if (!visited.insert(&ns).second)
-		return 0;
+		return false;
 	vector<const Namespace*> inline_set;
 	CollectInlineSet(ns, inline_set);
+	bool found = false;
 	for (size_t i = 0; i < inline_set.size(); i++)
 	{
-		const Binding* found = MatchInNamespace(*inline_set[i], name, filter);
-		if (found)
-			return found;
+		const Binding* match = MatchInNamespace(*inline_set[i], name, filter);
+		if (match)
+			MergeCandidate(found, out, *match, name);
 	}
+	if (found)
+		return true;
 	for (size_t i = 0; i < inline_set.size(); i++)
 	{
 		const vector<Namespace*>& directives = inline_set[i]->using_directives;
 		for (size_t j = 0; j < directives.size(); j++)
 		{
-			const Binding* found =
-				QualifiedLookupRec(*directives[j], name, filter, visited);
-			if (found)
-				return found;
+			Binding sub;
+			if (QualifiedLookupRec(*directives[j], name, filter, sub, visited))
+				MergeCandidate(found, out, sub, name);
 		}
 	}
-	return 0;
+	return found;
 }
 
 } // namespace
 
-const Binding* UnqualifiedLookup(const vector<Namespace*>& scopes,
-                                 const string& name, ELookupFilter filter,
-                                 DirectiveClosureCache* cache)
+bool UnqualifiedLookup(const vector<Namespace*>& scopes, const string& name,
+                       ELookupFilter filter, Binding& out,
+                       DirectiveClosureCache* cache)
 {
 	vector<ActiveDirective> local;
 	const vector<ActiveDirective>* directives = &local;
@@ -126,20 +177,42 @@ const Binding* UnqualifiedLookup(const vector<Namespace*>& scopes,
 	}
 	for (size_t i = scopes.size(); i-- > 0;)
 	{
-		const Binding* found = MatchInNamespace(*scopes[i], name, filter);
-		for (size_t j = 0; !found && j < directives->size(); j++)
-			if ((*directives)[j].anchor == scopes[i])
-				found = MatchInNamespace(*(*directives)[j].nominated, name,
-				                         filter);
+		bool found = false;
+		const Binding* own = MatchInNamespace(*scopes[i], name, filter);
+		if (own)
+			MergeCandidate(found, out, *own, name);
+		for (size_t j = 0; j < directives->size(); j++)
+		{
+			if ((*directives)[j].anchor != scopes[i])
+				continue;
+			const Binding* match =
+				MatchInNamespace(*(*directives)[j].nominated, name, filter);
+			if (match)
+				MergeCandidate(found, out, *match, name);
+		}
 		if (found)
-			return found;
+			return true;
 	}
-	return 0;
+	return false;
 }
 
-const Binding* QualifiedLookup(const Namespace& ns, const string& name,
-                               ELookupFilter filter)
+bool QualifiedLookup(const Namespace& ns, const string& name,
+                     ELookupFilter filter, Binding& out)
 {
 	set<const Namespace*> visited;
-	return QualifiedLookupRec(ns, name, filter, visited);
+	return QualifiedLookupRec(ns, name, filter, out, visited);
+}
+
+const Binding* MemberLookup(const Namespace& ns, const string& name)
+{
+	vector<const Namespace*> inline_set;
+	CollectInlineSet(ns, inline_set);
+	for (size_t i = 0; i < inline_set.size(); i++)
+	{
+		map<string, Binding>::const_iterator it =
+			inline_set[i]->bindings.find(name);
+		if (it != inline_set[i]->bindings.end())
+			return &it->second;
+	}
+	return 0;
 }

@@ -8,10 +8,13 @@ using std::vector;
 
 #include "sema/entity.h"
 
-// PA7 name lookup over the namespace model (3.4). Both lookups return
-// a pointer into a Namespace's binding map, or null when nothing is
-// found; they never modify the model, so the parser can also use them
-// for speculative classification (the '(' disambiguation). Because the
+// PA7/PA8 name lookup over the namespace model (3.4). Lookups return
+// the result by value because declarations reached through different
+// paths merge: function declarations found in multiple namespaces form
+// one overload set, while distinct non-function entities make the
+// lookup ambiguous (3.4.1p2, 3.4.3.2p3) - a diagnosable error in PA8.
+// Lookups never modify the model, so the parser can also use them for
+// speculative classification (the '(' disambiguation). Because the
 // model is built by one forward pass, every binding and using-directive
 // it contains was declared before the lookup point, which gives the
 // declared-before-use rule for free.
@@ -58,15 +61,25 @@ struct DirectiveClosureCache
 // at each scope the visible declarations are its own plus those of
 // every namespace nominated by an active using-directive (transitively
 // closed) whose anchor - the nearest namespace enclosing both the
-// directive and the nominated namespace - is that scope. `scopes` is
-// the lexical chain, global first. `cache` (optional) memoizes the
-// directive closure between consecutive lookups in the same scope.
-const Binding* UnqualifiedLookup(const vector<Namespace*>& scopes,
-                                 const string& name, ELookupFilter filter,
-                                 DirectiveClosureCache* cache = 0);
+// directive and the nominated namespace - is that scope. All
+// declarations visible at the innermost scope that has any are
+// merged into `out`; distinct non-function entities throw (ambiguous).
+// `scopes` is the lexical chain, global first. `cache` (optional)
+// memoizes the directive closure between consecutive lookups in the
+// same scope. Returns false when nothing is found.
+bool UnqualifiedLookup(const vector<Namespace*>& scopes, const string& name,
+                       ELookupFilter filter, Binding& out,
+                       DirectiveClosureCache* cache = 0);
 
 // 3.4.3.2: searches `ns` and its inline namespace set; only if that
 // finds nothing, recurses (each namespace at most once) into the
-// namespaces nominated by using-directives in that set.
-const Binding* QualifiedLookup(const Namespace& ns, const string& name,
-                               ELookupFilter filter);
+// namespaces nominated by using-directives in that set. Results merge
+// like UnqualifiedLookup.
+bool QualifiedLookup(const Namespace& ns, const string& name,
+                     ELookupFilter filter, Binding& out);
+
+// 7.3.1.2p2 / 3.4.3p3 support: the binding of a member declared in
+// `ns` or its inline namespace set (no using-directive traversal),
+// for redeclaration through a qualified declarator-id. Imported
+// bindings are returned as found; the caller rejects them.
+const Binding* MemberLookup(const Namespace& ns, const string& name);

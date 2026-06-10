@@ -1,50 +1,11 @@
 #include "sema/decl_parser.h"
 
+#include "sema/init.h"
+#include "sema/program.h"
+
 using std::runtime_error;
 
 namespace {
-
-bool IsIntegralLiteralType(EFundamentalType type)
-{
-	switch (type)
-	{
-	case FT_SIGNED_CHAR:
-	case FT_SHORT_INT:
-	case FT_INT:
-	case FT_LONG_INT:
-	case FT_LONG_LONG_INT:
-	case FT_UNSIGNED_CHAR:
-	case FT_UNSIGNED_SHORT_INT:
-	case FT_UNSIGNED_INT:
-	case FT_UNSIGNED_LONG_INT:
-	case FT_UNSIGNED_LONG_LONG_INT:
-	case FT_WCHAR_T:
-	case FT_CHAR:
-	case FT_CHAR16_T:
-	case FT_CHAR32_T:
-	case FT_BOOL:
-		return true;
-	default:
-		return false;
-	}
-}
-
-bool IsSignedLiteralType(EFundamentalType type)
-{
-	switch (type)
-	{
-	case FT_SIGNED_CHAR:
-	case FT_SHORT_INT:
-	case FT_INT:
-	case FT_LONG_INT:
-	case FT_LONG_LONG_INT:
-	case FT_CHAR:     // signed on the x86-64 ABI
-	case FT_WCHAR_T:  // int on the x86-64 ABI
-		return true;
-	default:
-		return false;
-	}
-}
 
 // True when the keyword can begin a parameter-declaration's
 // decl-specifier-seq (the '(' disambiguation).
@@ -56,6 +17,8 @@ bool IsDeclSpecifierKeyword(ETokenType type)
 	case KW_THREAD_LOCAL:
 	case KW_EXTERN:
 	case KW_TYPEDEF:
+	case KW_CONSTEXPR:
+	case KW_INLINE:
 	case KW_CONST:
 	case KW_VOLATILE:
 	case KW_SIGNED:
@@ -79,14 +42,50 @@ bool IsDeclSpecifierKeyword(ETokenType type)
 
 bool IsUnqualifiedVoid(const TypePtr& type)
 {
-	return type->kind == TK_FUNDAMENTAL && type->fundamental == FT_VOID &&
-		!type->is_const && !type->is_volatile;
+	return IsVoidType(type) && !type->is_const && !type->is_volatile;
+}
+
+// The function-signature part of a linking key (3.5: functions link by
+// name and parameter types; the canonical recursive description is the
+// stable rendering of the already-adjusted parameter list).
+string SignatureKey(const TypePtr& type)
+{
+	string key = "(";
+	for (size_t i = 0; i < type->parameters.size(); i++)
+	{
+		if (i > 0)
+			key += ",";
+		key += DescribeType(type->parameters[i]);
+	}
+	if (type->variadic)
+		key += ",...";
+	return key + ")";
+}
+
+bool SameSignature(const TypePtr& a, const TypePtr& b)
+{
+	if (a->variadic != b->variadic ||
+	    a->parameters.size() != b->parameters.size())
+		return false;
+	for (size_t i = 0; i < a->parameters.size(); i++)
+		if (!TypeEquals(a->parameters[i], b->parameters[i]))
+			return false;
+	return true;
+}
+
+vector<Namespace*> NamespaceChain(Namespace* ns)
+{
+	vector<Namespace*> chain;
+	for (Namespace* walk = ns; walk; walk = walk->parent)
+		chain.push_back(walk);
+	return vector<Namespace*>(chain.rbegin(), chain.rend());
 }
 
 } // namespace
 
-DeclParser::DeclParser(const vector<PostToken>& tokens, SemaModel& model)
-	: tokens_(tokens), pos_(0), model_(model)
+DeclParser::DeclParser(const vector<PostToken>& tokens, SemaModel& model,
+                       Program& program)
+	: tokens_(tokens), pos_(0), model_(model), program_(program)
 {
 	eof_.kind = PTK_EOF;
 	for (size_t i = 0; i < tokens_.size(); i++)
@@ -97,6 +96,7 @@ DeclParser::DeclParser(const vector<PostToken>& tokens, SemaModel& model)
 
 void DeclParser::ParseTranslationUnit()
 {
+	program_.BeginTranslationUnit();
 	scopes_.assign(1, model_.global());
 	ParseDeclarationSeq();
 	if (Peek().kind != PTK_EOF)
@@ -151,7 +151,7 @@ runtime_error DeclParser::ParseError(const string& message) const
 	const PostToken& token = Peek();
 	string at = token.kind == PTK_EOF ? string("end of input")
 	                                  : "`" + token.source + "`";
-	return runtime_error("pa7 parse error: " + message + " at " + at);
+	return runtime_error("parse error: " + message + " at " + at);
 }
 
 // --- declarations ---
@@ -169,7 +169,7 @@ void DeclParser::ParseDeclaration()
 		Advance();  // empty-declaration
 		return;
 	}
-	if (AtSimple(KW_INLINE))
+	if (AtSimple(KW_INLINE) && AtSimple(KW_NAMESPACE, 1))
 	{
 		ParseNamespaceDefinition();
 		return;
@@ -190,6 +190,11 @@ void DeclParser::ParseDeclaration()
 			ParseAliasDeclaration();
 		else
 			ParseUsingDeclaration();
+		return;
+	}
+	if (AtSimple(KW_STATIC_ASSERT))
+	{
+		ParseStaticAssert();
 		return;
 	}
 	ParseSimpleDeclaration();
@@ -219,10 +224,25 @@ void DeclParser::ParseNamespaceDefinition()
 	else
 	{
 		map<string, Binding>::iterator it = parent.bindings.find(name);
-		if (it != parent.bindings.end() && it->second.kind == BK_NAMESPACE)
+		if (it != parent.bindings.end())
+		{
+			// 7.3.1/3.3.1: only the original member namespace can be
+			// extended - not an alias (7.3.2) or any other entity.
+			if (it->second.kind != BK_NAMESPACE || it->second.imported)
+				throw ParseError("`" + name +
+				                 "` redeclared as a namespace");
 			ns = it->second.target;
+		}
 	}
-	if (!ns)
+	if (ns)
+	{
+		// 7.3.1p9: inline may be used on an extension-namespace-
+		// definition only if it was used on the original.
+		if (is_inline && !ns->is_inline)
+			throw ParseError("namespace `" + name +
+			                 "` was not declared inline");
+	}
+	else
 	{
 		ns = AddMemberNamespace(model_, parent, name, is_inline);
 		lookup_cache_.Invalidate();
@@ -240,10 +260,23 @@ void DeclParser::ParseNamespaceAlias()
 	ExpectSimple(OP_ASS);
 	Namespace* target = ParseNamespaceSpecifier();
 	ExpectSimple(OP_SEMICOLON);
+	Namespace& current = *scopes_.back();
+	map<string, Binding>::iterator it = current.bindings.find(name);
+	if (it != current.bindings.end())
+	{
+		// 7.3.2p3: may only redefine an alias declared here, to the
+		// namespace it already refers to.
+		if (it->second.kind != BK_NAMESPACE || !it->second.imported ||
+		    it->second.target != target)
+			throw ParseError("namespace alias `" + name +
+			                 "` conflicts with a previous declaration");
+		return;
+	}
 	Binding binding;
 	binding.kind = BK_NAMESPACE;
 	binding.target = target;
-	scopes_.back()->bindings[name] = binding;
+	binding.imported = true;
+	current.bindings[name] = binding;
 }
 
 void DeclParser::ParseUsingDirective()
@@ -263,16 +296,56 @@ void DeclParser::ParseUsingDeclaration()
 	ExpectSimple(OP_SEMICOLON);
 	if (!name.Qualified())
 		throw ParseError("using-declaration requires a qualified name");
-	const Binding* found = ResolveComponents(name.root_global, name.path,
-	                                         name.name, LF_ANY_ENTITY);
-	if (!found)
+	Binding found;
+	if (!ResolveComponents(name.root_global, name.path, name.name,
+	                       LF_ANY_ENTITY, found))
 		throw ParseError("using-declaration names unknown `" + name.name +
 		                 "`");
-	if (found->kind == BK_NAMESPACE)
+	if (found.kind == BK_NAMESPACE)
 		throw ParseError("using-declaration shall not name a namespace");
-	// The current namespace re-binds the same entity or alias; the
-	// entity still prints only under its first namespace.
-	scopes_.back()->bindings[name.name] = *found;
+	found.imported = true;
+	for (size_t i = 0; i < found.overloads.size(); i++)
+		found.overloads[i].imported = true;
+	Namespace& current = *scopes_.back();
+	map<string, Binding>::iterator it = current.bindings.find(name.name);
+	if (it == current.bindings.end())
+	{
+		// The current namespace re-binds the same entity; it still
+		// prints only under its first namespace.
+		current.bindings[name.name] = found;
+		return;
+	}
+	Binding& existing = it->second;
+	if (existing.kind == BK_FUNCTION && found.kind == BK_FUNCTION)
+	{
+		// 7.3.3p14: the imported overloads extend the set unless one
+		// clashes with a different function of the same signature.
+		for (size_t i = 0; i < found.overloads.size(); i++)
+		{
+			DeclaredEntity* incoming = found.overloads[i].entity;
+			bool present = false;
+			for (size_t j = 0; j < existing.overloads.size(); j++)
+			{
+				DeclaredEntity* prior = existing.overloads[j].entity;
+				if (prior == incoming)
+					present = true;
+				else if (SameSignature(prior->type, incoming->type))
+					throw ParseError("using-declaration of `" + name.name +
+					                 "` conflicts with a previous "
+					                 "declaration");
+			}
+			if (!present)
+				existing.overloads.push_back(found.overloads[i]);
+		}
+		return;
+	}
+	bool same = existing.kind == found.kind &&
+		((existing.kind == BK_VARIABLE && existing.entity == found.entity) ||
+		 (existing.kind == BK_TYPEDEF &&
+		  TypeEquals(existing.type, found.type)));
+	if (!same)
+		throw ParseError("using-declaration of `" + name.name +
+		                 "` conflicts with a previous declaration");
 }
 
 void DeclParser::ParseAliasDeclaration()
@@ -285,14 +358,57 @@ void DeclParser::ParseAliasDeclaration()
 	BindTypedef(name, type);
 }
 
+void DeclParser::ParseStaticAssert()
+{
+	ExpectSimple(KW_STATIC_ASSERT);
+	ExpectSimple(OP_LPAREN);
+	Expr condition = ParseExpression();
+	ExpectSimple(OP_COMMA);
+	// The message is a literal token of the grammar, not an expression:
+	// it gets no string-literal image object.
+	const PostToken& message = Peek();
+	if (message.kind != PTK_LITERAL && message.kind != PTK_LITERAL_ARRAY)
+		throw ParseError("expected literal");
+	string text = message.source;
+	Advance();
+	ExpectSimple(OP_RPAREN);
+	ExpectSimple(OP_SEMICOLON);
+	if (!EvaluateStaticAssertCondition(condition, program_.current_tu()))
+		throw runtime_error("static_assert failed: " + text);
+}
+
 void DeclParser::ParseSimpleDeclaration()
 {
-	DeclSpecifiers specs = ParseDeclSpecifierSeq(true);
+	DeclSpecifiers specs = ParseDeclSpecifierSeq(SC_DECLARATION);
+	bool first = true;
 	while (true)
 	{
+		// A qualified declarator-id switches the lookup scope for its
+		// trailing suffixes and initializer (3.4.3p3); restore per
+		// init-declarator.
+		vector<Namespace*> saved_scopes = scopes_;
 		Declarator declarator;
 		ParseDeclarator(DM_NAMED, declarator);
-		DeclareSimple(specs, declarator);
+		if (first && AtSimple(OP_LBRACE))
+		{
+			ParseFunctionDefinition(specs, declarator);
+			scopes_.swap(saved_scopes);
+			return;
+		}
+		first = false;
+		DeclaredEntity* entity = DeclareSimple(specs, declarator);
+		if (AtSimple(OP_ASS))
+		{
+			Advance();
+			if (!entity || entity->kind != SLOT_VARIABLE)
+				throw ParseError("only a variable can have an initializer");
+			Expr init = ParseExpression();
+			program_.RecordDefinition(entity);
+			ApplyInitializer(program_, *entity, init, entity->name);
+		}
+		else
+			FinishUninitializedDeclaration(specs, entity);
+		scopes_.swap(saved_scopes);
 		if (!AtSimple(OP_COMMA))
 			break;
 		Advance();
@@ -300,8 +416,37 @@ void DeclParser::ParseSimpleDeclaration()
 	ExpectSimple(OP_SEMICOLON);
 }
 
-void DeclParser::DeclareSimple(const DeclSpecifiers& specs,
-                               const Declarator& declarator)
+void DeclParser::ParseFunctionDefinition(const DeclSpecifiers& specs,
+                                         const Declarator& declarator)
+{
+	DeclaredEntity* entity = DeclareSimple(specs, declarator);
+	if (!entity || entity->kind != SLOT_FUNCTION)
+		throw ParseError("only a function may have a body");
+	program_.RecordDefinition(entity);
+	ExpectSimple(OP_LBRACE);
+	ExpectSimple(OP_RBRACE);
+}
+
+void DeclParser::FinishUninitializedDeclaration(const DeclSpecifiers& specs,
+                                                DeclaredEntity* entity)
+{
+	if (!entity || entity->kind != SLOT_VARIABLE)
+		return;  // typedef or function declaration
+	if (specs.is_extern)
+	{
+		// A declaration, not a definition (3.1p2) - but constexpr
+		// objects must be initialized wherever declared (7.1.5p9).
+		if (specs.is_constexpr)
+			throw ParseError("constexpr variable `" + entity->name +
+			                 "` requires an initializer");
+		return;
+	}
+	program_.RecordDefinition(entity);
+	ApplyDefaultInitialization(*entity, entity->name);
+}
+
+DeclaredEntity* DeclParser::DeclareSimple(const DeclSpecifiers& specs,
+                                          const Declarator& declarator)
 {
 	const QualifiedName* name = DeclaratorName(declarator);
 	if (!name)
@@ -312,48 +457,288 @@ void DeclParser::DeclareSimple(const DeclSpecifiers& specs,
 		if (name->Qualified())
 			throw ParseError("typedef declarator-id shall not be qualified");
 		BindTypedef(name->name, type);
-		return;
+		return 0;
+	}
+	if (type->kind == TK_FUNCTION)
+	{
+		if (specs.is_thread_local)
+			throw ParseError("thread_local on function `" + name->name +
+			                 "`");
+	}
+	else
+	{
+		if (specs.is_inline)
+			throw ParseError("inline on variable `" + name->name + "`");
+		// 7.1.5p9: constexpr declares the object const.
+		if (specs.is_constexpr)
+			type = MakeCvQualifiedType(type, true, false);
 	}
 	if (name->Qualified())
+		return DeclareQualified(specs, *name, type);
+	if (type->kind == TK_FUNCTION)
+		return DeclareFunction(specs, name->name, type);
+	return DeclareVariable(specs, name->name, type);
+}
+
+DeclaredEntity* DeclParser::DeclareQualified(const DeclSpecifiers& specs,
+                                             const QualifiedName& name,
+                                             const TypePtr& type)
+{
+	// 7.3.1.2p2: redeclares a member already declared in the nominated
+	// namespace; never a first declaration.
+	const Binding* found = MemberLookup(*name.scope, name.name);
+	if (!found || found->imported)
+		throw ParseError("`" + name.name +
+		                 "` is not a member of the nominated namespace");
+	if (type->kind == TK_FUNCTION)
 	{
-		// 7.3.1.2p2: redeclares a member already declared in the
-		// nominated namespace; never a first declaration.
-		const Binding* found = ResolveComponents(
-			name->root_global, name->path, name->name, LF_ANY_ENTITY);
-		if (!found ||
-		    (found->kind != BK_VARIABLE && found->kind != BK_FUNCTION))
-			throw ParseError("qualified declarator-id `" + name->name +
-			                 "` does not redeclare a namespace member");
-		found->entity->type = MergeRedeclaredType(found->entity->type, type);
-		return;
+		if (found->kind != BK_FUNCTION)
+			throw ParseError("`" + name.name +
+			                 "` redeclared as a different kind of entity");
+		for (size_t i = 0; i < found->overloads.size(); i++)
+		{
+			DeclaredEntity* entity = found->overloads[i].entity;
+			if (!SameSignature(entity->type, type))
+				continue;
+			if (found->overloads[i].imported)
+				throw ParseError("`" + name.name + "` does not declare a "
+				                 "member of the nominated namespace");
+			if (!TypeEquals(entity->type, type))
+				throw ParseError("`" + name.name +
+				                 "` redeclared with a different return "
+				                 "type");
+			CheckRedeclarationSpecifiers(entity, specs);
+			entity->is_inline = entity->is_inline || specs.is_inline;
+			return entity;
+		}
+		throw ParseError("qualified declaration of `" + name.name +
+		                 "` matches no declared overload");
 	}
+	if (found->kind != BK_VARIABLE)
+		throw ParseError("`" + name.name +
+		                 "` redeclared as a different kind of entity");
+	DeclaredEntity* entity = found->entity;
+	entity->type = MergeRedeclaredType(entity->type, type);
+	CheckRedeclarationSpecifiers(entity, specs);
+	return entity;
+}
+
+DeclaredEntity* DeclParser::DeclareVariable(const DeclSpecifiers& specs,
+                                            const string& name,
+                                            const TypePtr& type)
+{
 	Namespace& current = *scopes_.back();
-	map<string, Binding>::iterator it = current.bindings.find(name->name);
-	if (it != current.bindings.end() &&
-	    (it->second.kind == BK_VARIABLE || it->second.kind == BK_FUNCTION))
+	map<string, Binding>::iterator it = current.bindings.find(name);
+	if (it != current.bindings.end())
 	{
-		it->second.entity->type =
-			MergeRedeclaredType(it->second.entity->type, type);
-		return;
+		Binding& binding = it->second;
+		if (binding.kind != BK_VARIABLE)
+			throw ParseError("`" + name +
+			                 "` redeclared as a different kind of entity");
+		if (binding.imported)
+			throw ParseError("`" + name +
+			                 "` conflicts with a using-declaration");
+		DeclaredEntity* entity = binding.entity;
+		entity->type = MergeRedeclaredType(entity->type, type);
+		CheckRedeclarationSpecifiers(entity, specs);
+		entity->is_constexpr = entity->is_constexpr || specs.is_constexpr;
+		return entity;
 	}
-	DeclaredEntity* entity = model_.CreateEntity(name->name, type);
-	bool is_function = type->kind == TK_FUNCTION;
-	if (is_function)
-		current.functions.push_back(entity);
-	else
-		current.variables.push_back(entity);
+	DeclaredEntity* entity = LinkNewEntity(name, type, SLOT_VARIABLE, specs);
+	current.variables.push_back(entity);
 	Binding binding;
-	binding.kind = is_function ? BK_FUNCTION : BK_VARIABLE;
+	binding.kind = BK_VARIABLE;
 	binding.entity = entity;
-	current.bindings[name->name] = binding;
+	current.bindings[name] = binding;
+	return entity;
+}
+
+DeclaredEntity* DeclParser::DeclareFunction(const DeclSpecifiers& specs,
+                                            const string& name,
+                                            const TypePtr& type)
+{
+	Namespace& current = *scopes_.back();
+	map<string, Binding>::iterator it = current.bindings.find(name);
+	if (it != current.bindings.end() && it->second.kind != BK_FUNCTION)
+		throw ParseError("`" + name +
+		                 "` redeclared as a different kind of entity");
+	if (it != current.bindings.end())
+	{
+		Binding& binding = it->second;
+		for (size_t i = 0; i < binding.overloads.size(); i++)
+		{
+			DeclaredEntity* entity = binding.overloads[i].entity;
+			if (!SameSignature(entity->type, type))
+				continue;
+			if (binding.overloads[i].imported)
+				throw ParseError("`" + name +
+				                 "` conflicts with a using-declaration");
+			if (!TypeEquals(entity->type, type))
+				throw ParseError("`" + name + "` redeclared with a "
+				                 "different return type");
+			CheckRedeclarationSpecifiers(entity, specs);
+			entity->is_inline = entity->is_inline || specs.is_inline;
+			return entity;
+		}
+		// A new overload of a name this namespace already binds.
+		DeclaredEntity* entity =
+			LinkNewEntity(name, type, SLOT_FUNCTION, specs);
+		current.functions.push_back(entity);
+		binding.overloads.push_back(FunctionOverload(entity, false));
+		return entity;
+	}
+	DeclaredEntity* entity = LinkNewEntity(name, type, SLOT_FUNCTION, specs);
+	current.functions.push_back(entity);
+	Binding binding;
+	binding.kind = BK_FUNCTION;
+	binding.overloads.push_back(FunctionOverload(entity, false));
+	current.bindings[name] = binding;
+	return entity;
+}
+
+// First declaration of a name in the current namespace: computes the
+// linkage (3.5p3-4), links against another translation unit's entity
+// when external, and reconciles the declarations when linked.
+DeclaredEntity* DeclParser::LinkNewEntity(const string& name,
+                                          const TypePtr& type,
+                                          ESlotKind entity_kind,
+                                          const DeclSpecifiers& specs)
+{
+	Namespace& current = *scopes_.back();
+	ELinkage linkage = LNK_EXTERNAL;
+	if (specs.is_static || InsideUnnamedNamespace(&current))
+		linkage = LNK_INTERNAL;
+	else if (entity_kind == SLOT_VARIABLE && !specs.is_extern)
+	{
+		bool is_const, is_volatile;
+		TopCv(type, is_const, is_volatile);
+		if (is_const)
+			linkage = LNK_INTERNAL;
+	}
+	string key;
+	if (linkage == LNK_EXTERNAL)
+	{
+		key = NamespacePath(&current) + "::" + name;
+		if (entity_kind == SLOT_FUNCTION)
+			key += SignatureKey(type);
+	}
+	bool created;
+	DeclaredEntity* entity = program_.LinkEntity(key, entity_kind, name,
+	                                             type, linkage, created);
+	if (created)
+	{
+		entity->is_constexpr = specs.is_constexpr;
+		entity->is_inline = specs.is_inline;
+		return entity;
+	}
+	// Linked to a previous translation unit's declarations (3.5p9-10).
+	if (entity_kind == SLOT_FUNCTION && !TypeEquals(entity->type, type))
+		throw ParseError("`" + name +
+		                 "` redeclared with a different return type");
+	entity->type = MergeRedeclaredType(entity->type, type);
+	CheckRedeclarationSpecifiers(entity, specs);
+	entity->is_inline = entity->is_inline || specs.is_inline;
+	return entity;
+}
+
+void DeclParser::CheckRedeclarationSpecifiers(
+	DeclaredEntity* entity, const DeclSpecifiers& specs) const
+{
+	// 7.1.1p7 / 3.5p6: static after a declaration with external linkage.
+	if (specs.is_static && entity->linkage == LNK_EXTERNAL)
+		throw ParseError("static declaration of `" + entity->name +
+		                 "` follows non-static declaration");
+	// 7.1.5p2: every declaration of a constexpr function is constexpr.
+	if (entity->kind == SLOT_FUNCTION &&
+	    entity->is_constexpr != specs.is_constexpr)
+		throw ParseError("constexpr disagreement on redeclaration of `" +
+		                 entity->name + "`");
 }
 
 void DeclParser::BindTypedef(const string& name, const TypePtr& type)
 {
+	Namespace& current = *scopes_.back();
+	map<string, Binding>::iterator it = current.bindings.find(name);
+	if (it != current.bindings.end())
+	{
+		// 7.1.3p3: a typedef may redefine a name to the type it already
+		// refers to; anything else conflicts.
+		if (it->second.kind != BK_TYPEDEF ||
+		    !TypeEquals(it->second.type, type))
+			throw ParseError("typedef `" + name +
+			                 "` conflicts with a previous declaration");
+		return;
+	}
 	Binding binding;
 	binding.kind = BK_TYPEDEF;
 	binding.type = type;
-	scopes_.back()->bindings[name] = binding;
+	current.bindings[name] = binding;
+}
+
+// --- expressions ---
+
+Expr DeclParser::ParseExpression()
+{
+	if (AtSimple(KW_TRUE))
+	{
+		Advance();
+		return MakeBoolLiteralExpr(true);
+	}
+	if (AtSimple(KW_FALSE))
+	{
+		Advance();
+		return MakeBoolLiteralExpr(false);
+	}
+	if (AtSimple(KW_NULLPTR))
+	{
+		Advance();
+		return MakeNullptrLiteralExpr();
+	}
+	if (AtSimple(OP_LPAREN))
+	{
+		Advance();
+		Expr inner = ParseExpression();
+		ExpectSimple(OP_RPAREN);
+		return inner;
+	}
+	const PostToken& token = Peek();
+	if (token.kind == PTK_LITERAL)
+	{
+		Expr literal = MakeLiteralExpr(token);
+		Advance();
+		return literal;
+	}
+	if (token.kind == PTK_LITERAL_ARRAY)
+	{
+		// Each string-literal token is its own image object (Block 3,
+		// token order = parse order).
+		ImageSlot* slot = program_.CreateStringLiteral(token);
+		Advance();
+		return MakeStringLiteralExpr(slot);
+	}
+	if (AtIdentifier() || AtSimple(OP_COLON2))
+		return AnnotateIdExpression(ParseIdExpression());
+	throw ParseError("expected expression");
+}
+
+Expr DeclParser::AnnotateIdExpression(const QualifiedName& name)
+{
+	Binding found;
+	if (!ResolveComponents(name.root_global, name.path, name.name,
+	                       LF_ANY_ENTITY, found))
+		throw ParseError("`" + name.name +
+		                 "` was not declared in this scope");
+	if (found.kind == BK_VARIABLE)
+		return MakeVariableExpr(found.entity, program_.current_tu());
+	if (found.kind == BK_FUNCTION)
+	{
+		vector<DeclaredEntity*> set;
+		for (size_t i = 0; i < found.overloads.size(); i++)
+			set.push_back(found.overloads[i].entity);
+		return MakeFunctionExpr(set);
+	}
+	throw ParseError("`" + name.name +
+	                 "` does not name a variable or function");
 }
 
 // --- names ---
@@ -379,58 +764,68 @@ DeclParser::QualifiedName DeclParser::ParseIdExpression()
 Namespace* DeclParser::ParseNamespaceSpecifier()
 {
 	QualifiedName name = ParseIdExpression();
-	const Binding* found = ResolveComponents(name.root_global, name.path,
-	                                         name.name, LF_NAMESPACES_ONLY);
-	if (!found)
+	Binding found;
+	if (!ResolveComponents(name.root_global, name.path, name.name,
+	                       LF_NAMESPACES_ONLY, found))
 		throw ParseError("unknown namespace `" + name.name + "`");
-	return found->target;
+	return found.target;
 }
 
 TypePtr DeclParser::ResolveTypeName(const QualifiedName& name) const
 {
-	const Binding* found = ResolveComponents(name.root_global, name.path,
-	                                         name.name, LF_ANY_ENTITY);
-	if (!found || found->kind != BK_TYPEDEF)
+	Binding found;
+	if (!ResolveComponents(name.root_global, name.path, name.name,
+	                       LF_ANY_ENTITY, found) ||
+	    found.kind != BK_TYPEDEF)
 		throw ParseError("`" + name.name + "` does not name a type");
-	return found->type;
+	return found.type;
 }
 
-const Binding* DeclParser::ResolveComponents(bool root_global,
-                                             const vector<string>& path,
-                                             const string& last,
-                                             ELookupFilter filter) const
+Namespace* DeclParser::ResolveNamespacePath(
+	bool root_global, const vector<string>& path) const
 {
-	if (!root_global && path.empty())
-		return UnqualifiedLookup(scopes_, last, filter, &lookup_cache_);
 	Namespace* ns;
 	size_t start = 0;
 	if (root_global)
 		ns = model_.global();
 	else
 	{
-		const Binding* found =
-			UnqualifiedLookup(scopes_, path[0], LF_NAMESPACES_ONLY,
-			                  &lookup_cache_);
-		if (!found)
+		Binding found;
+		if (path.empty() ||
+		    !UnqualifiedLookup(scopes_, path[0], LF_NAMESPACES_ONLY, found,
+		                       &lookup_cache_))
 			return 0;
-		ns = found->target;
+		ns = found.target;
 		start = 1;
 	}
 	for (size_t i = start; i < path.size(); i++)
 	{
-		const Binding* found =
-			QualifiedLookup(*ns, path[i], LF_NAMESPACES_ONLY);
-		if (!found)
+		Binding found;
+		if (!QualifiedLookup(*ns, path[i], LF_NAMESPACES_ONLY, found))
 			return 0;
-		ns = found->target;
+		ns = found.target;
 	}
-	return QualifiedLookup(*ns, last, filter);
+	return ns;
+}
+
+bool DeclParser::ResolveComponents(bool root_global,
+                                   const vector<string>& path,
+                                   const string& last,
+                                   ELookupFilter filter, Binding& out) const
+{
+	if (!root_global && path.empty())
+		return UnqualifiedLookup(scopes_, last, filter, out,
+		                         &lookup_cache_);
+	Namespace* ns = ResolveNamespacePath(root_global, path);
+	if (!ns)
+		return false;
+	return QualifiedLookup(*ns, last, filter, out);
 }
 
 // --- specifiers ---
 
 DeclParser::DeclSpecifiers
-DeclParser::ParseDeclSpecifierSeq(bool allow_decl_specifiers)
+DeclParser::ParseDeclSpecifierSeq(ESpecifierContext context)
 {
 	SpecifierState state;
 	while (true)
@@ -438,7 +833,7 @@ DeclParser::ParseDeclSpecifierSeq(bool allow_decl_specifiers)
 		const PostToken& token = Peek();
 		if (token.kind == PTK_SIMPLE && token.token_type != OP_COLON2)
 		{
-			if (!ConsumeSpecifierKeyword(state, allow_decl_specifiers))
+			if (!ConsumeSpecifierKeyword(state, context))
 				break;
 			continue;
 		}
@@ -454,8 +849,19 @@ DeclParser::ParseDeclSpecifierSeq(bool allow_decl_specifiers)
 		}
 		break;
 	}
+	if (state.is_static && state.is_extern)
+		throw ParseError("multiple storage class specifiers");
+	if (state.is_typedef &&
+	    (state.is_static || state.is_extern || state.is_thread_local ||
+	     state.is_constexpr || state.is_inline))
+		throw ParseError("typedef combined with another specifier");
 	DeclSpecifiers specs;
 	specs.is_typedef = state.is_typedef;
+	specs.is_static = state.is_static;
+	specs.is_thread_local = state.is_thread_local;
+	specs.is_extern = state.is_extern;
+	specs.is_constexpr = state.is_constexpr;
+	specs.is_inline = state.is_inline;
 	if (state.named)
 	{
 		if (state.has_base || state.signed_count || state.unsigned_count ||
@@ -473,21 +879,28 @@ DeclParser::ParseDeclSpecifierSeq(bool allow_decl_specifiers)
 }
 
 bool DeclParser::ConsumeSpecifierKeyword(SpecifierState& state,
-                                         bool allow_decl_specifiers)
+                                         ESpecifierContext context)
 {
 	switch (Peek().token_type)
 	{
 	case KW_STATIC:
 	case KW_THREAD_LOCAL:
 	case KW_EXTERN:
-		// Storage class never affects the PA7 type or description.
-		if (!allow_decl_specifiers)
-			return false;
-		break;
 	case KW_TYPEDEF:
-		if (!allow_decl_specifiers)
-			return false;
-		state.is_typedef = true;
+	case KW_CONSTEXPR:
+	case KW_INLINE:
+		// 8.3.5p2 (parameters) / 8.4 type-ids: only type-specifiers.
+		if (context != SC_DECLARATION)
+			throw ParseError("specifier not allowed in this context");
+		switch (Peek().token_type)
+		{
+		case KW_STATIC: state.is_static = true; break;
+		case KW_THREAD_LOCAL: state.is_thread_local = true; break;
+		case KW_EXTERN: state.is_extern = true; break;
+		case KW_TYPEDEF: state.is_typedef = true; break;
+		case KW_CONSTEXPR: state.is_constexpr = true; break;
+		default: state.is_inline = true; break;
+		}
 		break;
 	case KW_CONST:
 		state.is_const = true;
@@ -592,7 +1005,7 @@ DeclParser::CombineFundamental(const SpecifierState& state) const
 
 TypePtr DeclParser::ParseTypeId()
 {
-	DeclSpecifiers specs = ParseDeclSpecifierSeq(false);
+	DeclSpecifiers specs = ParseDeclSpecifierSeq(SC_TYPE_ID);
 	Declarator declarator;
 	ParseDeclarator(DM_ABSTRACT, declarator);
 	return ComputeDeclaratorType(specs.type, declarator);
@@ -650,6 +1063,12 @@ void DeclParser::ParseDeclaratorRoot(EDeclaratorMode mode, Declarator& out)
 			                 "declarator");
 		out.name = ParseIdExpression();
 		out.has_name = true;
+		if (out.name.Qualified())
+		{
+			if (mode != DM_NAMED)
+				throw ParseError("parameter name shall not be qualified");
+			EnterQualifiedDeclaratorScope(out.name);
+		}
 		return;
 	}
 	if (AtSimple(OP_LPAREN))
@@ -667,6 +1086,24 @@ void DeclParser::ParseDeclaratorRoot(EDeclaratorMode mode, Declarator& out)
 	}
 	if (mode == DM_NAMED)
 		throw ParseError("expected declarator-id");
+}
+
+void DeclParser::EnterQualifiedDeclaratorScope(QualifiedName& name)
+{
+	Namespace* target = ResolveNamespacePath(name.root_global, name.path);
+	if (!target)
+		throw ParseError("unknown namespace in qualified declarator `" +
+		                 name.name + "`");
+	// 8.3p1 / 7.3.1.2p2: the declaration must appear in a namespace
+	// enclosing the member's namespace.
+	if (!NamespaceEncloses(scopes_.back(), target))
+		throw ParseError("qualified declarator `" + name.name +
+		                 "` outside an enclosing namespace");
+	name.scope = target;
+	// 3.4.3p3: names after the qualified declarator-id (array bounds,
+	// the initializer) are looked up in the member's namespace. The
+	// caller restores the chain after the init-declarator.
+	scopes_ = NamespaceChain(target);
 }
 
 void DeclParser::ParseDeclaratorSuffixes(vector<DeclaratorChunk>& out)
@@ -725,9 +1162,7 @@ DeclParser::DeclaratorChunk DeclParser::ParseParametersAndQualifiers()
 
 TypePtr DeclParser::ParseParameterDeclaration()
 {
-	DeclSpecifiers specs = ParseDeclSpecifierSeq(true);
-	if (specs.is_typedef)
-		throw ParseError("typedef in parameter declaration");
+	DeclSpecifiers specs = ParseDeclSpecifierSeq(SC_PARAMETER);
 	Declarator declarator;
 	ParseDeclarator(DM_PARAMETER, declarator);
 	return AdjustParameterType(ComputeDeclaratorType(specs.type,
@@ -741,9 +1176,9 @@ DeclParser::DeclaratorChunk DeclParser::ParseArrayBound()
 	ExpectSimple(OP_LSQUARE);
 	if (!AtSimple(OP_RSQUARE))
 	{
-		chunk.bound = EvaluateArrayBound(Peek());
+		Expr bound = ParseExpression();
+		chunk.bound = EvaluateArrayBound(bound, program_.current_tu());
 		chunk.bound_known = true;
-		Advance();
 	}
 	ExpectSimple(OP_RSQUARE);
 	return chunk;
@@ -792,24 +1227,35 @@ bool DeclParser::ScanIsTypeName(size_t ahead) const
 	}
 	if (!AtIdentifier(ahead))
 		return false;
-	const Binding* found = ResolveComponents(root_global, path,
-	                                         Peek(ahead).source,
-	                                         LF_ANY_ENTITY);
-	return found && found->kind == BK_TYPEDEF;
+	Binding found;
+	return ResolveComponents(root_global, path, Peek(ahead).source,
+	                         LF_ANY_ENTITY, found) &&
+		found.kind == BK_TYPEDEF;
 }
 
-TypePtr DeclParser::ComputeDeclaratorType(TypePtr base,
+TypePtr DeclParser::ComputeDeclaratorType(const TypePtr& base,
                                           const Declarator& declarator) const
 {
-	TypePtr type = base;
+	return ComputeDeclaratorTypeRec(base, declarator, base);
+}
+
+TypePtr DeclParser::ComputeDeclaratorTypeRec(TypePtr type,
+                                             const Declarator& declarator,
+                                             const TypePtr& spec_base) const
+{
 	for (size_t i = 0; i < declarator.prefix.size(); i++)
 	{
 		const DeclaratorChunk& chunk = declarator.prefix[i];
 		if (chunk.kind == DeclaratorChunk::CK_POINTER)
 			type = MakePointerType(type, chunk.is_const, chunk.is_volatile);
 		else
+			// 8.3.2p6: a reference applied to a reference collapses only
+			// when the inner one came through the typedef-name in the
+			// decl-specifier-seq; a chunk-built reference is a direct,
+			// ill-formed reference-to-reference.
 			type = MakeReferenceType(
-				type, chunk.kind == DeclaratorChunk::CK_RVALUE_REF);
+				type, chunk.kind == DeclaratorChunk::CK_RVALUE_REF,
+				type.get() == spec_base.get());
 	}
 	for (size_t i = declarator.suffixes.size(); i-- > 0;)
 	{
@@ -820,7 +1266,7 @@ TypePtr DeclParser::ComputeDeclaratorType(TypePtr base,
 			type = MakeArrayType(type, chunk.bound_known, chunk.bound);
 	}
 	if (declarator.inner)
-		return ComputeDeclaratorType(type, *declarator.inner);
+		return ComputeDeclaratorTypeRec(type, *declarator.inner, spec_base);
 	return type;
 }
 
@@ -832,22 +1278,4 @@ DeclParser::DeclaratorName(const Declarator& declarator)
 	if (declarator.inner)
 		return DeclaratorName(*declarator.inner);
 	return 0;
-}
-
-// 8.3.4p1 via the PA7 handout: the bound is a converted constant
-// expression of type size_t with a value greater than zero, and the
-// pa7.gram constant-expression is one non-user-defined literal.
-unsigned long long
-DeclParser::EvaluateArrayBound(const PostToken& literal) const
-{
-	if (literal.kind != PTK_LITERAL ||
-	    !IsIntegralLiteralType(literal.type))
-		throw ParseError("array bound must be an integral literal");
-	unsigned long long value = LittleEndianValue(literal.data);
-	if (IsSignedLiteralType(literal.type) && !literal.data.empty() &&
-	    (literal.data[literal.data.size() - 1] & 0x80))
-		throw ParseError("array bound must be positive");
-	if (value == 0)
-		throw ParseError("array bound must be greater than zero");
-	return value;
 }

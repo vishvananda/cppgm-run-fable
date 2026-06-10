@@ -1,45 +1,125 @@
-// (C) 2013 CPPGM Foundation www.cppgm.org.  All rights reserved.
-
-#include <vector>
-#include <string>
-#include <stdexcept>
-#include <iostream>
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <pthread.h>
 
 using namespace std;
 
-#include "exceptions.h"
+#include "post_token.h"
+#include "post_tokenizer.h"
+#include "predefined_macros.h"
+#include "preprocess.h"
+#include "sema/decl_parser.h"
+#include "sema/entity.h"
+#include "sema/program.h"
 
-bool HasBatchStdinArg(int argc, char** argv)
+// nsinit: runs translation phases 1-8 over the command-line source
+// files (the PA5 pipeline, then the PA8 semantic parse of the phase-7
+// token sequence against pa8.gram, building one linked Program across
+// the translation units), then lays out and writes the PA8 Mock
+// Program Image to the outfile. Diagnosable ill-formed programs exit
+// EXIT_FAILURE (PA8 requirement); so does any pipeline or parse error.
+//
+// The --batch-stdin worker protocol is provided by the test runner
+// entry point (src/test_runner.cpp).
+
+namespace {
+
+// Collects the phase-7 tokens of one srcfile for the semantic parser.
+struct CollectingPostTokenStream : IPostTokenStream
+{
+	void emit(const PostToken& token)
+	{
+		tokens.push_back(token);
+	}
+
+	vector<PostToken> tokens;
+};
+
+void AnalyzeTranslationUnit(Program& program, const string& srcfile,
+                            const vector<pair<string, string>>& predefined)
+{
+	CollectingPostTokenStream collector;
+	PostTokenizer post_tokenizer(collector);
+	Preprocessor preprocessor(post_tokenizer, predefined);
+	preprocessor.ProcessSourceFile(srcfile);
+	SemaModel model;
+	DeclParser parser(collector.tokens, model, program);
+	parser.ParseTranslationUnit();
+}
+
+// Recursive descent depth is proportional to declarator nesting, so
+// each srcfile runs on a worker thread with a large stack (virtual
+// memory; pages commit only as touched) instead of the default ~8MB.
+const size_t kParseStackBytes = 512u << 20;
+
+struct AnalyzeTask
+{
+	Program* program;
+	const string* srcfile;
+	const vector<pair<string, string>>* predefined;
+	bool failed;
+	string message;
+};
+
+void* AnalyzeThreadMain(void* opaque)
+{
+	AnalyzeTask* task = static_cast<AnalyzeTask*>(opaque);
+	try
+	{
+		AnalyzeTranslationUnit(*task->program, *task->srcfile,
+		                       *task->predefined);
+	}
+	catch (const exception& e)
+	{
+		task->failed = true;
+		task->message = e.what();
+	}
+	return 0;
+}
+
+void AnalyzeOnLargeStack(Program& program, const string& srcfile,
+                         const vector<pair<string, string>>& predefined)
+{
+	AnalyzeTask task;
+	task.program = &program;
+	task.srcfile = &srcfile;
+	task.predefined = &predefined;
+	task.failed = false;
+	pthread_attr_t attributes;
+	pthread_t thread;
+	if (pthread_attr_init(&attributes) != 0 ||
+	    pthread_attr_setstacksize(&attributes, kParseStackBytes) != 0 ||
+	    pthread_create(&thread, &attributes, AnalyzeThreadMain, &task) != 0)
+		throw runtime_error("cannot start parse worker thread");
+	pthread_join(thread, 0);
+	pthread_attr_destroy(&attributes);
+	if (task.failed)
+		throw runtime_error(task.message);
+}
+
+} // namespace
+
+int main(int argc, char** argv)
 {
 	for (int i = 1; i < argc; i++)
 	{
 		if (string(argv[i]) == "--batch-stdin")
-			return true;
+		{
+			cerr << "ERROR: --batch-stdin requires the test runner build "
+			        "(CPPGM_TEST_RUNNER=1)" << endl;
+			return EXIT_FAILURE;
+		}
 	}
-	return false;
-}
 
-int RunNotImplementedBatchMode()
-{
-	string line;
-	while (getline(cin, line))
-	{
-		(void)line;
-		cout << "EXIT_NOT_IMPLEMENTED" << endl;
-	}
-	return EXIT_SUCCESS;
-}
-
-int main(int argc, char** argv)
-{
 	try
 	{
-		if (HasBatchStdinArg(argc, argv))
-			return RunNotImplementedBatchMode();
-
 		vector<string> args;
-
 		for (int i = 1; i < argc; i++)
 			args.emplace_back(argv[i]);
 
@@ -49,29 +129,20 @@ int main(int argc, char** argv)
 		string outfile = args[1];
 		size_t nsrcfiles = args.size() - 2;
 
-		throw NotImplementedException();
+		vector<pair<string, string>> predefined = PredefinedObjectMacros();
 
-		vector<char> program_image;
-
+		Program program;
 		for (size_t i = 0; i < nsrcfiles; i++)
-		{
-			string srcfile = args[i+2];
+			AnalyzeOnLargeStack(program, args[i + 2], predefined);
 
-			ifstream in(srcfile);
+		ofstream out(outfile.c_str(), ios::binary);
+		if (!out)
+			throw runtime_error("cannot create output file: " + outfile);
+		program.WriteImage(out);
+		if (!out)
+			throw runtime_error("cannot write output file: " + outfile);
 
-			// ...
-
-			program_image.push_back('?');
-		}
-
-		ofstream out(outfile);
-
-		out.write(program_image.data(), program_image.size());
-	}
-	catch (const NotImplementedException& e)
-	{
-		cerr << "ERROR: " << e.what() << endl;
-		return CPPGM_EXIT_NOT_IMPLEMENTED;
+		return EXIT_SUCCESS;
 	}
 	catch (exception& e)
 	{

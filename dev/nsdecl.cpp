@@ -16,6 +16,7 @@ using namespace std;
 #include "preprocess.h"
 #include "sema/decl_parser.h"
 #include "sema/entity.h"
+#include "sema/program.h"
 
 // nsdecl: runs translation phases 1-7 over each command-line source
 // file (the PA5 pipeline, then the PA7 semantic parse of the phase-7
@@ -47,8 +48,11 @@ void DescribeTranslationUnit(ostream& out, const string& srcfile,
 	PostTokenizer post_tokenizer(collector);
 	Preprocessor preprocessor(post_tokenizer, predefined);
 	preprocessor.ProcessSourceFile(srcfile);
+	// A throwaway Program per translation unit: PA7 describes each unit
+	// independently, so nothing links across units here.
+	Program program;
 	SemaModel model;
-	DeclParser parser(collector.tokens, model);
+	DeclParser parser(collector.tokens, model, program);
 	parser.ParseTranslationUnit();
 	out << "start translation unit " << srcfile << "\n";
 	DescribeNamespace(out, *model.global());

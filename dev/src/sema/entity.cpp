@@ -21,16 +21,6 @@ Namespace* SemaModel::CreateNamespace(const string& name, bool is_inline,
 	return ns;
 }
 
-DeclaredEntity* SemaModel::CreateEntity(const string& name,
-                                        const TypePtr& type)
-{
-	entities_.emplace_back(new DeclaredEntity());
-	DeclaredEntity* entity = entities_.back().get();
-	entity->name = name;
-	entity->type = type;
-	return entity;
-}
-
 Namespace* AddMemberNamespace(SemaModel& model, Namespace& parent,
                               const string& name, bool is_inline)
 {
@@ -55,6 +45,30 @@ void AddUsingDirective(Namespace& ns, Namespace* nominated)
 	if (find(ns.using_directives.begin(), ns.using_directives.end(),
 	         nominated) == ns.using_directives.end())
 		ns.using_directives.push_back(nominated);
+}
+
+bool NamespaceEncloses(const Namespace* outer, const Namespace* inner)
+{
+	for (const Namespace* walk = inner; walk; walk = walk->parent)
+		if (walk == outer)
+			return true;
+	return false;
+}
+
+string NamespacePath(const Namespace* ns)
+{
+	if (!ns->parent)
+		return "";
+	string parent = NamespacePath(ns->parent);
+	return parent.empty() ? ns->name : parent + "::" + ns->name;
+}
+
+bool InsideUnnamedNamespace(const Namespace* ns)
+{
+	for (const Namespace* walk = ns; walk->parent; walk = walk->parent)
+		if (walk->name.empty())
+			return true;
+	return false;
 }
 
 void DescribeNamespace(ostream& out, const Namespace& ns)
