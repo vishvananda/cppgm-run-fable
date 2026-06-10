@@ -17,5 +17,5 @@ FRONTEND_OBJ_BASENAMES_nsinit := $(FRONTEND_OBJ_BASENAMES_nsdecl)
 FRONTEND_OBJ_BASENAMES_cy86 := pp_tokenizer source_translation utf8 lex_char_classes post_token post_tokenizer numeric_literals text_literals pp_token macro_table macro_expand ctrl_expr preprocess predefined_macros cy86/cy86_parser cy86/cy86_codegen x86/x86_encoding x86/elf_program
 FRONTEND_OBJ_BASENAMES_cppgm++ := pp_tokenizer source_translation utf8 lex_char_classes post_token post_tokenizer numeric_literals text_literals pp_token macro_table macro_expand ctrl_expr preprocess predefined_macros parse/parse_token ast/ast ast/ast_text ast/ast_printer ast/ast_parser_core ast/ast_parse_names ast/ast_parse_expr ast/ast_parse_stmt ast/ast_parse_decl ast/ast_parse_declarator ast/ast_parse_class sema/type sema/scope sema/scope_lookup sema/type_builder sema/const_expr sema/decl_binder sema/sem_node sema/sem_convert sema/sem_expr sema/sem_binder
 FRONTEND_OBJ_BASENAMES_lowiropt :=
-FRONTEND_OBJ_BASENAMES_lowir2cy86 :=
+FRONTEND_OBJ_BASENAMES_lowir2cy86 := lowir/lowir_program lowir/lowir_lexer lowir/lowir_parser lowir/lowir_validate lowir/lowir_frame lowir/lowir_emit_values lowir/lowir_emit_inst lowir/lowir_emit_program
 FRONTEND_OBJ_BASENAMES_lowir2native :=
