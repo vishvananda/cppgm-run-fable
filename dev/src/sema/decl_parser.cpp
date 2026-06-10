@@ -973,66 +973,29 @@ bool DeclParser::ConsumeSpecifierKeyword(SpecifierState& state,
 	return true;
 }
 
-bool DeclParser::SeenType(const SpecifierState& state)
+// The simple-type-specifier occurrence counts in the shared 7.1.6.2p3
+// combination vocabulary (sema/type.h).
+SimpleTypeSpecifiers DeclParser::SimpleSpecifiers(const SpecifierState& state)
 {
-	return state.has_base || state.named || state.signed_count > 0 ||
-		state.unsigned_count > 0 || state.short_count > 0 ||
-		state.long_count > 0;
+	SimpleTypeSpecifiers specs;
+	specs.has_base = state.has_base;
+	specs.base = state.base;
+	specs.signed_count = state.signed_count;
+	specs.unsigned_count = state.unsigned_count;
+	specs.short_count = state.short_count;
+	specs.long_count = state.long_count;
+	return specs;
 }
 
-// The 7.1.6.2p3 simple-type-specifier combination table.
+bool DeclParser::SeenType(const SpecifierState& state)
+{
+	return state.named || AnySimpleTypeSpecifier(SimpleSpecifiers(state));
+}
+
 EFundamentalType
 DeclParser::CombineFundamental(const SpecifierState& state) const
 {
-	if (!SeenType(state))
-		throw ParseError("declaration requires a type specifier");
-	bool is_unsigned = state.unsigned_count > 0;
-	if (state.signed_count + state.unsigned_count > 1 ||
-	    state.short_count > 1 || state.long_count > 2 ||
-	    (state.short_count && state.long_count))
-		throw ParseError("invalid type specifier combination");
-	bool modified = state.signed_count || state.unsigned_count ||
-		state.short_count || state.long_count;
-	switch (state.has_base ? state.base : KW_INT)
-	{
-	case KW_CHAR:
-		if (state.short_count || state.long_count)
-			throw ParseError("invalid type specifier combination");
-		if (is_unsigned)
-			return FT_UNSIGNED_CHAR;
-		return state.signed_count ? FT_SIGNED_CHAR : FT_CHAR;
-	case KW_CHAR16_T:
-	case KW_CHAR32_T:
-	case KW_WCHAR_T:
-	case KW_BOOL:
-	case KW_FLOAT:
-	case KW_VOID:
-		if (modified)
-			throw ParseError("invalid type specifier combination");
-		switch (state.base)
-		{
-		case KW_CHAR16_T: return FT_CHAR16_T;
-		case KW_CHAR32_T: return FT_CHAR32_T;
-		case KW_WCHAR_T: return FT_WCHAR_T;
-		case KW_BOOL: return FT_BOOL;
-		case KW_FLOAT: return FT_FLOAT;
-		default: return FT_VOID;
-		}
-	case KW_DOUBLE:
-		if (state.signed_count || state.unsigned_count ||
-		    state.short_count || state.long_count > 1)
-			throw ParseError("invalid type specifier combination");
-		return state.long_count ? FT_LONG_DOUBLE : FT_DOUBLE;
-	default:  // KW_INT, spelled or implied
-		if (state.short_count)
-			return is_unsigned ? FT_UNSIGNED_SHORT_INT : FT_SHORT_INT;
-		if (state.long_count == 2)
-			return is_unsigned ? FT_UNSIGNED_LONG_LONG_INT
-			                   : FT_LONG_LONG_INT;
-		if (state.long_count == 1)
-			return is_unsigned ? FT_UNSIGNED_LONG_INT : FT_LONG_INT;
-		return is_unsigned ? FT_UNSIGNED_INT : FT_INT;
-	}
+	return CombineSimpleTypeSpecifiers(SimpleSpecifiers(state));
 }
 
 TypePtr DeclParser::ParseTypeId()

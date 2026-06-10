@@ -30,7 +30,31 @@ enum ETypeKind
 	TK_LVALUE_REFERENCE,
 	TK_RVALUE_REFERENCE,
 	TK_ARRAY,
-	TK_FUNCTION
+	TK_FUNCTION,
+	// PA11 named types: classes, enumerations, and template type /
+	// template-template parameters. Each named type points at one
+	// NamedTypeInfo record; identity is pointer equality.
+	TK_CLASS,
+	TK_ENUM,
+	TK_TYPE_PARAM
+};
+
+// One record per named-type entity, owned by the semantic model that
+// declared it and shared by every Type node naming it, so completing
+// the entity (class definition, enum definition) is visible through
+// types composed before the completion (3.9p7).
+struct NamedTypeInfo
+{
+	NamedTypeInfo()
+		: complete(false), is_union(false), size(0), alignment(0)
+	{}
+
+	string display;  // canonical spelling: "struct C", "enum class FY",
+	                 // "typename T", "template-parameter TT"
+	bool complete;
+	bool is_union;             // classes
+	unsigned long long size;       // valid when complete
+	unsigned long long alignment;  // valid when complete
 };
 
 struct Type;
@@ -41,7 +65,7 @@ struct Type
 	Type()
 		: kind(TK_FUNDAMENTAL), is_const(false), is_volatile(false),
 		  fundamental(FT_VOID), bound_known(false), bound(0),
-		  variadic(false)
+		  variadic(false), named(0)
 	{}
 
 	ETypeKind kind;
@@ -57,6 +81,7 @@ struct Type
 	unsigned long long bound;      // TK_ARRAY when bound_known
 	vector<TypePtr> parameters;    // TK_FUNCTION, already adjusted (8.3.5p5)
 	bool variadic;                 // TK_FUNCTION
+	const NamedTypeInfo* named;    // TK_CLASS / TK_ENUM / TK_TYPE_PARAM
 };
 
 // --- classification of fundamental types (3.9.1) ---
@@ -76,6 +101,10 @@ bool IsVoidType(const TypePtr& type);  // possibly cv-qualified void
 // --- factories ---
 
 TypePtr MakeFundamentalType(EFundamentalType fundamental);
+
+// A class, enum, or template-parameter type naming `info` (which must
+// outlive every type composed over it).
+TypePtr MakeNamedType(ETypeKind kind, const NamedTypeInfo* info);
 
 // Throws on pointer to reference (8.3.2p4).
 TypePtr MakePointerType(const TypePtr& pointee, bool is_const,
@@ -139,3 +168,31 @@ unsigned long long TypeAlignment(const TypePtr& type);
 // Renders the recursive PA7 description ("pointer to const char",
 // "function of (int, ...) returning void", ...).
 string DescribeType(const TypePtr& type);
+
+// --- simple-type-specifier combination (7.1.6.2p3) ---
+
+// Occurrence counts of the simple-type-specifiers of one
+// decl-specifier-seq, shared by the PA7 token-driven declaration parser
+// and the PA11 AST type builder.
+struct SimpleTypeSpecifiers
+{
+	SimpleTypeSpecifiers()
+		: has_base(false), base(KW_INT), signed_count(0),
+		  unsigned_count(0), short_count(0), long_count(0)
+	{}
+
+	bool has_base;
+	ETokenType base;  // char/char16_t/char32_t/wchar_t/bool/int/
+	                  // float/double/void
+	int signed_count;
+	int unsigned_count;
+	int short_count;
+	int long_count;
+};
+
+bool AnySimpleTypeSpecifier(const SimpleTypeSpecifiers& specs);
+
+// The Table 10 combination, or a throw for combinations the table does
+// not contain (including the empty sequence).
+EFundamentalType CombineSimpleTypeSpecifiers(
+	const SimpleTypeSpecifiers& specs);

@@ -91,6 +91,16 @@ TypePtr MakeFundamentalType(EFundamentalType fundamental)
 	return make_shared<Type>(type);
 }
 
+TypePtr MakeNamedType(ETypeKind kind, const NamedTypeInfo* info)
+{
+	if (kind != TK_CLASS && kind != TK_ENUM && kind != TK_TYPE_PARAM)
+		throw runtime_error("not a named type kind");
+	Type type;
+	type.kind = kind;
+	type.named = info;
+	return make_shared<Type>(type);
+}
+
 TypePtr MakePointerType(const TypePtr& pointee, bool is_const,
                         bool is_volatile)
 {
@@ -212,6 +222,10 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 	{
 	case TK_FUNDAMENTAL:
 		return a->fundamental == b->fundamental;
+	case TK_CLASS:
+	case TK_ENUM:
+	case TK_TYPE_PARAM:
+		return a->named == b->named;
 	case TK_ARRAY:
 		if (a->bound_known != b->bound_known ||
 		    (a->bound_known && a->bound != b->bound))
@@ -332,6 +346,18 @@ static unsigned long long FundamentalSize(EFundamentalType type)
 	throw runtime_error("void is an incomplete type");
 }
 
+// TK_CLASS / TK_ENUM / TK_TYPE_PARAM: layout facts live on the shared
+// entity record once the entity completes. A zero alignment marks an
+// entity whose layout could not be computed (dependent member types in
+// a template), which has no size for PA11 purposes.
+static const NamedTypeInfo& CompleteNamedInfo(const TypePtr& type)
+{
+	if (type->kind == TK_TYPE_PARAM || !type->named->complete ||
+	    type->named->alignment == 0)
+		throw runtime_error(type->named->display + " is an incomplete type");
+	return *type->named;
+}
+
 unsigned long long TypeSize(const TypePtr& type)
 {
 	switch (type->kind)
@@ -342,6 +368,10 @@ unsigned long long TypeSize(const TypePtr& type)
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
 		return 8;
+	case TK_CLASS:
+	case TK_ENUM:
+	case TK_TYPE_PARAM:
+		return CompleteNamedInfo(type).size;
 	case TK_ARRAY:
 	{
 		if (!type->bound_known)
@@ -367,6 +397,10 @@ unsigned long long TypeAlignment(const TypePtr& type)
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
 		return 8;
+	case TK_CLASS:
+	case TK_ENUM:
+	case TK_TYPE_PARAM:
+		return CompleteNamedInfo(type).alignment;
 	case TK_ARRAY:
 		return TypeAlignment(type->target);
 	case TK_FUNCTION:
@@ -386,6 +420,10 @@ string DescribeType(const TypePtr& type)
 	{
 	case TK_FUNDAMENTAL:
 		return cv + FundamentalTypeName(type->fundamental);
+	case TK_CLASS:
+	case TK_ENUM:
+	case TK_TYPE_PARAM:
+		return cv + type->named->display;
 	case TK_POINTER:
 		return cv + "pointer to " + DescribeType(type->target);
 	case TK_LVALUE_REFERENCE:
@@ -411,4 +449,65 @@ string DescribeType(const TypePtr& type)
 		parameters += type->parameters.empty() ? "..." : ", ...";
 	return "function of (" + parameters + ") returning " +
 		DescribeType(type->target);
+}
+
+bool AnySimpleTypeSpecifier(const SimpleTypeSpecifiers& specs)
+{
+	return specs.has_base || specs.signed_count > 0 ||
+		specs.unsigned_count > 0 || specs.short_count > 0 ||
+		specs.long_count > 0;
+}
+
+EFundamentalType CombineSimpleTypeSpecifiers(
+	const SimpleTypeSpecifiers& specs)
+{
+	if (!AnySimpleTypeSpecifier(specs))
+		throw runtime_error("declaration requires a type specifier");
+	bool is_unsigned = specs.unsigned_count > 0;
+	if (specs.signed_count + specs.unsigned_count > 1 ||
+	    specs.short_count > 1 || specs.long_count > 2 ||
+	    (specs.short_count && specs.long_count))
+		throw runtime_error("invalid type specifier combination");
+	bool modified = specs.signed_count || specs.unsigned_count ||
+		specs.short_count || specs.long_count;
+	switch (specs.has_base ? specs.base : KW_INT)
+	{
+	case KW_CHAR:
+		if (specs.short_count || specs.long_count)
+			throw runtime_error("invalid type specifier combination");
+		if (is_unsigned)
+			return FT_UNSIGNED_CHAR;
+		return specs.signed_count ? FT_SIGNED_CHAR : FT_CHAR;
+	case KW_CHAR16_T:
+	case KW_CHAR32_T:
+	case KW_WCHAR_T:
+	case KW_BOOL:
+	case KW_FLOAT:
+	case KW_VOID:
+		if (modified)
+			throw runtime_error("invalid type specifier combination");
+		switch (specs.base)
+		{
+		case KW_CHAR16_T: return FT_CHAR16_T;
+		case KW_CHAR32_T: return FT_CHAR32_T;
+		case KW_WCHAR_T: return FT_WCHAR_T;
+		case KW_BOOL: return FT_BOOL;
+		case KW_FLOAT: return FT_FLOAT;
+		default: return FT_VOID;
+		}
+	case KW_DOUBLE:
+		if (specs.signed_count || specs.unsigned_count ||
+		    specs.short_count || specs.long_count > 1)
+			throw runtime_error("invalid type specifier combination");
+		return specs.long_count ? FT_LONG_DOUBLE : FT_DOUBLE;
+	default:  // KW_INT, spelled or implied
+		if (specs.short_count)
+			return is_unsigned ? FT_UNSIGNED_SHORT_INT : FT_SHORT_INT;
+		if (specs.long_count == 2)
+			return is_unsigned ? FT_UNSIGNED_LONG_LONG_INT
+			                   : FT_LONG_LONG_INT;
+		if (specs.long_count == 1)
+			return is_unsigned ? FT_UNSIGNED_LONG_INT : FT_LONG_INT;
+		return is_unsigned ? FT_UNSIGNED_INT : FT_INT;
+	}
 }

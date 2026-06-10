@@ -210,7 +210,8 @@ private:
 	bool ParseBraceOrEqualInitializer(AstInitializerPtr& init);
 
 	// --- declarations (ast_parse_decl.cpp) ---------------------------
-	AstDeclPtr ParseDeclaration();
+	AstDeclPtr ParseDeclaration();      // ParseDeclarationForms + span
+	AstDeclPtr ParseDeclarationForms();
 	AstDeclPtr ParseNamespaceDefinition();
 	AstDeclPtr ParseNamespaceAliasDefinition();
 	AstDeclPtr ParseUsingDeclarationOrDirective();
@@ -227,7 +228,8 @@ private:
 	AstDeclPtr ParseElaboratedClass();     // class-key name, no body
 	bool ParseClassBody(AstDecl& decl);
 	bool ParseBaseClause(AstDecl& decl);
-	AstDeclPtr ParseMemberDeclaration();
+	AstDeclPtr ParseMemberDeclaration();  // forms + token span
+	AstDeclPtr ParseMemberDeclarationForms();
 	AstDeclPtr ParseBitFieldDeclaration();
 	AstDeclPtr ParseSpecialMember(bool require_definition);
 	bool ParseSpecialMemberName(AstName& name);

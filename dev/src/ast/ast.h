@@ -103,6 +103,13 @@ struct AstDecl
 
 	EDeclKind kind;
 
+	// PA6-terminal token span [begin_token, end_token) of the
+	// declaration as parsed (including any trailing semicolon when the
+	// declaration owns one). PA11 derives the deterministic mock names
+	// of anonymous types from this span; the PA10 dump ignores it.
+	size_t begin_token;
+	size_t end_token;
+
 	// translation-unit / namespace / linkage bodies
 	std::vector<AstDeclPtr> body_decls;
 
@@ -131,6 +138,9 @@ struct AstDecl
 	ETokenType enum_key;
 	std::string enum_key_spelling;
 	bool has_enum_base;
+	// True when the enum-specifier had a { } body (a definition, even if
+	// empty), false for an opaque-enum-declaration.
+	bool enum_body;
 	std::vector<AstEnumerator> enumerators;
 
 	// static_assert

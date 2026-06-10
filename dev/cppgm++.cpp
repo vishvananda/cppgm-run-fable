@@ -1,7 +1,9 @@
 // The `cppgm++` source compiler. PA10 implements --emit-ast: run
 // translation phases 1-7 over each srcfile, parse each translation
 // unit with the pa10.gram tree-building parser, and write the
-// deterministic AST dump.
+// deterministic AST dump. PA11 implements --emit-types: bind each
+// parsed unit's declarations into the scope/type model and write the
+// deterministic scope-tree dump.
 
 #include "exceptions.h"
 #include "tool_help_text.h"
@@ -14,6 +16,8 @@
 #include "post_tokenizer.h"
 #include "predefined_macros.h"
 #include "preprocess.h"
+#include "sema/decl_binder.h"
+#include "sema/scope.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -427,15 +431,17 @@ AstDeclPtr parse_source_file_ast(
 }
 
 // Recursive descent depth is proportional to input nesting, so each
-// srcfile parses on a worker thread with a large stack (virtual
-// memory; pages commit only as touched).
+// srcfile parses (and binds) on a worker thread with a large stack
+// (virtual memory; pages commit only as touched).
 const size_t cppgm_parse_stack_bytes = 512u << 20;
 
 struct EmitAstTask
 {
   const string * srcfile;
   const vector<pair<string, string>> * predefined;
+  bool bind_types;
   AstDeclPtr unit;
+  unique_ptr<TypesModel> model;
   bool failed;
   string message;
 };
@@ -446,6 +452,11 @@ void * emit_ast_thread_main(void * opaque)
   try
   {
     task->unit = parse_source_file_ast(*task->srcfile, *task->predefined);
+    if(task->bind_types) {
+      task->model.reset(new TypesModel());
+      DeclBinder binder(*task->model);
+      binder.BindTranslationUnit(*task->unit);
+    }
   }
   catch(const exception & e)
   {
@@ -455,13 +466,15 @@ void * emit_ast_thread_main(void * opaque)
   return 0;
 }
 
-AstDeclPtr parse_ast_on_large_stack(
+EmitAstTask run_unit_on_large_stack(
     const string & srcfile,
-    const vector<pair<string, string>> & predefined)
+    const vector<pair<string, string>> & predefined,
+    bool bind_types)
 {
   EmitAstTask task;
   task.srcfile = &srcfile;
   task.predefined = &predefined;
+  task.bind_types = bind_types;
   task.failed = false;
   pthread_attr_t attributes;
   pthread_t thread;
@@ -475,7 +488,14 @@ AstDeclPtr parse_ast_on_large_stack(
   if(task.failed) {
     throw runtime_error(task.message);
   }
-  return std::move(task.unit);
+  return task;
+}
+
+AstDeclPtr parse_ast_on_large_stack(
+    const string & srcfile,
+    const vector<pair<string, string>> & predefined)
+{
+  return std::move(run_unit_on_large_stack(srcfile, predefined, false).unit);
 }
 
 int run_emit_ast_mode(const vector<string> & args)
@@ -500,8 +520,28 @@ int run_emit_ast_mode(const vector<string> & args)
 
 int run_emit_types_mode(const vector<string> & args)
 {
-  parse_source_output_invocation(args, false);
-  return run_unimplemented_mode("--emit-types", "PA11");
+  SourceOutputInvocation invocation =
+      parse_source_output_invocation(args, false);
+
+  vector<pair<string, string>> predefined = PredefinedObjectMacros();
+  vector<unique_ptr<TypesModel>> models;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    EmitAstTask task =
+        run_unit_on_large_stack(invocation.inputs[i], predefined, true);
+    models.push_back(std::move(task.model));
+  }
+
+  ofstream out(invocation.outfile.c_str());
+  if(!out) {
+    throw runtime_error("cannot create output file: " + invocation.outfile);
+  }
+  out << models.size() << " translation units\n";
+  for(size_t i = 0; i < models.size(); ++i) {
+    out << "start translation unit " << (i + 1) << "\n";
+    PrintTypesOutput(*models[i]->global(), out);
+    out << "end translation unit\n";
+  }
+  return EXIT_SUCCESS;
 }
 
 int run_emit_semantics_mode(const vector<string> & args)

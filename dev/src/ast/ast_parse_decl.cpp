@@ -348,10 +348,24 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 	return decl;
 }
 
-// declaration, ordered per the grammar with the keyword-dispatched
+// declaration: dispatches to the forms and stamps the parsed node with
+// its terminal token span (PA11 mock names for anonymous types).
+AstDeclPtr AstParser::ParseDeclaration()
+{
+	size_t begin = pos_;
+	AstDeclPtr decl = ParseDeclarationForms();
+	if (decl)
+	{
+		decl->begin_token = begin;
+		decl->end_token = pos_;
+	}
+	return decl;
+}
+
+// declaration forms, ordered per the grammar with the keyword-dispatched
 // forms first and the trial-parsed forms (class, enum, special
 // member, function, simple) in declaration-before-expression order.
-AstDeclPtr AstParser::ParseDeclaration()
+AstDeclPtr AstParser::ParseDeclarationForms()
 {
 	if (MatchSimple(OP_SEMICOLON))
 		return MakeDecl(DK_EMPTY);

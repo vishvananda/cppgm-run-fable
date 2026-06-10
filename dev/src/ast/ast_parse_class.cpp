@@ -120,6 +120,10 @@ AstDeclPtr AstParser::ParseClassSpecifier()
 		Restore(state);
 		return AstDeclPtr();
 	}
+	// Specifier-only span; a standalone class-declaration is re-stamped
+	// with its full span (trailing semicolon included) by the caller.
+	decl->begin_token = state.pos;
+	decl->end_token = pos_;
 	return decl;
 }
 
@@ -231,6 +235,7 @@ AstDeclPtr AstParser::ParseEnumSpecifier()
 	if (AtSimple(OP_LBRACE))
 	{
 		Advance();
+		decl->enum_body = true;
 		while (!AtSimple(OP_RBRACE))
 		{
 			if (!AtIdentifier())
@@ -267,6 +272,8 @@ AstDeclPtr AstParser::ParseEnumSpecifier()
 		return AstDeclPtr();
 	}
 	RegisterInDeclScope(decl->name, NF_TYPE);
+	decl->begin_token = state.pos;
+	decl->end_token = pos_;
 	return decl;
 }
 
@@ -508,10 +515,24 @@ AstDeclPtr AstParser::ParseBitFieldDeclaration()
 	return decl;
 }
 
-// class-member: access labels, then the declaration forms in
+// class-member: dispatches to the forms and stamps the parsed node
+// with its terminal token span, like ParseDeclaration.
+AstDeclPtr AstParser::ParseMemberDeclaration()
+{
+	size_t begin = pos_;
+	AstDeclPtr decl = ParseMemberDeclarationForms();
+	if (decl)
+	{
+		decl->begin_token = begin;
+		decl->end_token = pos_;
+	}
+	return decl;
+}
+
+// class-member forms: access labels, then the declaration forms in
 // declaration-before-special-member order (a constructor only wins
 // after the value reading fails).
-AstDeclPtr AstParser::ParseMemberDeclaration()
+AstDeclPtr AstParser::ParseMemberDeclarationForms()
 {
 	if (Peek().kind == PTOK_SIMPLE && IsAccessKeyword(Peek().simple_type) &&
 	    AtSimple(OP_COLON, 1))

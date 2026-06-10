@@ -229,6 +229,7 @@ private:
 	DeclSpecifiers ParseDeclSpecifierSeq(ESpecifierContext context);
 	bool ConsumeSpecifierKeyword(SpecifierState& state,
 	                             ESpecifierContext context);
+	static SimpleTypeSpecifiers SimpleSpecifiers(const SpecifierState& state);
 	static bool SeenType(const SpecifierState& state);
 	EFundamentalType CombineFundamental(const SpecifierState& state) const;
 	TypePtr ParseTypeId();
