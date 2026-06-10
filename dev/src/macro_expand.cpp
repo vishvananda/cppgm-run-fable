@@ -1,7 +1,5 @@
 #include "macro_expand.h"
 
-#include <algorithm>
-#include <iterator>
 #include <stdexcept>
 
 #include "pp_tokenizer.h"
@@ -10,37 +8,6 @@
 using std::runtime_error;
 
 namespace {
-
-const char* const kVaArgs = "__VA_ARGS__";
-
-// Parameter slot used by a replacement-list token: 0..params.size()-1 for
-// named parameters, params.size() for __VA_ARGS__, -1 for everything else.
-int ParamIndex(const MacroDefinition& macro, const PPToken& token)
-{
-	if (token.kind != PPT_IDENTIFIER)
-		return -1;
-	if (macro.variadic && token.data == kVaArgs)
-		return (int)macro.params.size();
-	for (size_t i = 0; i < macro.params.size(); i++)
-	{
-		if (macro.params[i] == token.data)
-			return (int)i;
-	}
-	return -1;
-}
-
-set<string> IntersectPaint(const set<string>& a, const set<string>& b)
-{
-	set<string> result;
-	std::set_intersection(a.begin(), a.end(), b.begin(), b.end(),
-	                      std::inserter(result, result.begin()));
-	return result;
-}
-
-void AddPaint(PPToken& token, const set<string>& paint)
-{
-	token.blacklist.insert(paint.begin(), paint.end());
-}
 
 // 16.3.2p2: \ is inserted before the " and \ characters of character and
 // string literal spellings only.
@@ -73,7 +40,7 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 			output.push_back(head);
 			continue;
 		}
-		if (head.data == kVaArgs)
+		if (head.data == kMacroVaArgs)
 			throw runtime_error("__VA_ARGS__ outside a variadic macro "
 			                    "replacement list");
 		const MacroDefinition* macro =
@@ -85,7 +52,7 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 			output.push_back(head);
 			continue;
 		}
-		if (head.blacklist.count(head.data))
+		if (PaintContains(head.blacklist, head.data))
 		{
 			head.noninvokable = true;
 			output.push_back(head);
@@ -158,14 +125,13 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
                                           const PPToken& head,
                                           const PPToken& close)
 {
-	set<string> base = head.blacklist;
+	PaintSet base = head.blacklist;
 	if (macro.function_like)
-		base = IntersectPaint(base, close.blacklist);
-	base.insert(macro.name);
+		base = paints_.Intersect(base, close.blacklist);
+	base = paints_.Insert(base, macro.name);
 	// Argument-origin tokens take the full head paint (course rule), not
 	// the intersected base, and keep what argument expansion added.
-	set<string> arg_paint = head.blacklist;
-	arg_paint.insert(macro.name);
+	PaintSet arg_paint = paints_.Insert(head.blacklist, macro.name);
 
 	vector<vector<PPToken>> expanded(args.size());
 	vector<bool> expanded_done(args.size(), false);
@@ -178,7 +144,7 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 		if (macro.function_like && IsHash(token))
 		{
 			// definition validation guarantees list[i + 1] is a parameter
-			PPToken text = Stringize(args[ParamIndex(macro, list[i + 1])]);
+			PPToken text = Stringize(args[list[i + 1].param_index]);
 			text.ws_before = token.ws_before;
 			text.blacklist = base;
 			items.push_back(text);
@@ -190,7 +156,7 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 			items.push_back(token);
 			continue;
 		}
-		int param = macro.function_like ? ParamIndex(macro, token) : -1;
+		int param = token.param_index;
 		if (param < 0)
 		{
 			PPToken copy = token;
@@ -228,13 +194,16 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 		for (size_t j = 0; j < source->size(); j++)
 		{
 			PPToken copy = (*source)[j];
-			AddPaint(copy, arg_paint);
+			copy.blacklist = paints_.Union(copy.blacklist, arg_paint);
 			items.push_back(copy);
 		}
 		items[first].ws_before = token.ws_before;
 	}
 
-	PastePass(items, base);
+	// placemarkers only arise next to a paste operator, so a paste-free
+	// replacement list needs no paste pass
+	if (macro.has_paste)
+		PastePass(items, base);
 	// the result occupies the invocation's position in the stream
 	if (!items.empty())
 		items[0].ws_before = head.ws_before;
@@ -242,7 +211,7 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 }
 
 void MacroExpander::PastePass(vector<PPToken>& items,
-                              const set<string>& base_paint)
+                              const PaintSet& base_paint)
 {
 	vector<PPToken> result;
 	size_t i = 0;

@@ -5,18 +5,24 @@
 
 using std::runtime_error;
 
+const char* const kMacroVaArgs = "__VA_ARGS__";
+
 namespace {
 
-const char* const kVaArgs = "__VA_ARGS__";
-
-bool IsParameter(const MacroDefinition& macro, const PPToken& token)
+// Parameter slot a replacement-list token substitutes: 0..params-1 for
+// named parameters, params for __VA_ARGS__, -1 for everything else.
+int ParamSlot(const MacroDefinition& macro, const PPToken& token)
 {
 	if (token.kind != PPT_IDENTIFIER)
-		return false;
-	if (macro.variadic && token.data == kVaArgs)
-		return true;
-	return std::find(macro.params.begin(), macro.params.end(), token.data)
-		!= macro.params.end();
+		return -1;
+	if (macro.variadic && token.data == kMacroVaArgs)
+		return (int)macro.params.size();
+	for (size_t i = 0; i < macro.params.size(); i++)
+	{
+		if (macro.params[i] == token.data)
+			return (int)i;
+	}
+	return -1;
 }
 
 // Splits `( identifier-list )` starting at line[pos] (the lparen) and
@@ -48,7 +54,7 @@ size_t ParseParameterList(const vector<PPToken>& line, size_t pos,
 			if (token.kind != PPT_IDENTIFIER)
 				throw runtime_error("expected parameter name in macro "
 				                    "parameter list");
-			if (token.data == kVaArgs)
+			if (token.data == kMacroVaArgs)
 				throw runtime_error("__VA_ARGS__ cannot be a macro "
 				                    "parameter name");
 			if (std::find(macro.params.begin(), macro.params.end(),
@@ -73,6 +79,8 @@ void ValidateReplacementList(MacroDefinition& macro)
 {
 	vector<PPToken>& list = macro.replacement;
 	for (size_t i = 0; i < list.size(); i++)
+		list[i].param_index = ParamSlot(macro, list[i]);
+	for (size_t i = 0; i < list.size(); i++)
 	{
 		if (IsHashHash(list[i]))
 		{
@@ -80,15 +88,16 @@ void ValidateReplacementList(MacroDefinition& macro)
 				throw runtime_error("## cannot appear at either end of a "
 				                    "replacement list");
 			list[i].paste_op = true;
+			macro.has_paste = true;
 		}
 		else if (IsHash(list[i]) && macro.function_like)
 		{
-			if (i + 1 == list.size() || !IsParameter(macro, list[i + 1]))
+			if (i + 1 == list.size() || list[i + 1].param_index < 0)
 				throw runtime_error("# must be followed by a macro "
 				                    "parameter");
 		}
-		else if (list[i].kind == PPT_IDENTIFIER && list[i].data == kVaArgs &&
-		         !macro.variadic)
+		else if (list[i].kind == PPT_IDENTIFIER &&
+		         list[i].data == kMacroVaArgs && !macro.variadic)
 		{
 			throw runtime_error("__VA_ARGS__ outside a variadic macro "
 			                    "replacement list");
@@ -127,7 +136,7 @@ void MacroTable::Define(const vector<PPToken>& line)
 		throw runtime_error("macro name missing in #define");
 	MacroDefinition macro;
 	macro.name = line[0].data;
-	if (macro.name == kVaArgs)
+	if (macro.name == kMacroVaArgs)
 		throw runtime_error("__VA_ARGS__ cannot be a macro name");
 
 	size_t pos = 1;
@@ -159,7 +168,7 @@ void MacroTable::Undef(const vector<PPToken>& line)
 {
 	if (line.empty() || line[0].kind != PPT_IDENTIFIER)
 		throw runtime_error("macro name missing in #undef");
-	if (line[0].data == kVaArgs)
+	if (line[0].data == kMacroVaArgs)
 		throw runtime_error("__VA_ARGS__ cannot be a macro name");
 	if (line.size() > 1)
 		throw runtime_error("extra tokens after #undef name");

@@ -91,7 +91,11 @@ through `IPPTokenStream`. New modules:
   zero/denormals — the modern istringstream extraction clamps to the
   largest finite value instead and must not be used. strtod also covers
   the C99 hexadecimal forms (`0x1.8p1`), which accept only `l`/`L` as a
-  suffix (`0x1p3f` invalid).
+  suffix (`0x1p3f` invalid). Deliberate divergence (standard over ref
+  parity, found by PA4 audit fuzzing): the reference also accepts the
+  GCC `__float128`-style `q`/`Q` floating suffix as long double
+  (`3.5Q`, `3.5E1q`); C++11 2.14.4 lists only `f l F L`, no fixture
+  exercises it, so this implementation reports `invalid`.
 - A pp-number containing a ud-suffix is validated by the reference's
   scanner, which keeps running its number DFA inside the suffix
   (`numeric_literals.cpp` UdNumberShapeScanner documents the quirks:

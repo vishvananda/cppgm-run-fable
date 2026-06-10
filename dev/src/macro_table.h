@@ -10,17 +10,25 @@ using std::vector;
 
 #include "pp_token.h"
 
+// The one spelling of the variadic-arguments identifier (16.3p5).
+extern const char* const kMacroVaArgs;
+
 // One macro definition (16.3). The replacement list is stored trimmed
 // (no leading/trailing whitespace flags beyond the first token, whose
 // ws_before is not part of the 16.3p1 identity) with paste_op set on the
-// ## tokens that operate during substitution.
+// ## tokens that operate during substitution and param_index stamped on
+// every token, so substitution never re-derives parameter slots from
+// spellings.
 struct MacroDefinition
 {
-	MacroDefinition() : function_like(false), variadic(false) {}
+	MacroDefinition()
+		: function_like(false), variadic(false), has_paste(false)
+	{}
 
 	string name;
 	bool function_like;
 	bool variadic;
+	bool has_paste;
 	vector<string> params;
 	vector<PPToken> replacement;
 };

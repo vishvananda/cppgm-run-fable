@@ -13,7 +13,8 @@ using std::vector;
 
 // Macro replacement (16.3) over one text-sequence, with the course-defined
 // nesting semantics (see pa4/plan.md): every token carries a blacklist of
-// macro names it can never invoke. Invoking macro M via head token T (and
+// macro names it can never invoke (an interned PaintSet, so shared paint
+// is one allocation). Invoking macro M via head token T (and
 // closing paren R for a function-like invocation) paints
 //   - replacement-origin tokens (copies of the replacement list, stringize
 //     and paste results) with base = (T ∩ R) ∪ {M} (object-like: T ∪ {M}),
@@ -46,9 +47,10 @@ private:
 	vector<PPToken> Substitute(const MacroDefinition& macro,
 	                           const vector<vector<PPToken>>& args,
 	                           const PPToken& head, const PPToken& close);
-	void PastePass(vector<PPToken>& items, const set<string>& base_paint);
+	void PastePass(vector<PPToken>& items, const PaintSet& base_paint);
 	PPToken Stringize(const vector<PPToken>& raw) const;
 	PPToken RetokenizeSpelling(const string& spelling) const;
 
 	const MacroTable& table_;
+	PaintInterner paints_;
 };

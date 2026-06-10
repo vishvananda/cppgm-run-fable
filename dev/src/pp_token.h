@@ -1,14 +1,51 @@
 #pragma once
 
-#include <set>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-using std::set;
+using std::map;
+using std::pair;
+using std::shared_ptr;
 using std::string;
 using std::vector;
 
 #include "IPPTokenStream.h"
+
+// Blue paint: the set of macro names a token can never invoke, stored
+// as an immutable sorted name vector shared by pointer (null is the
+// empty set). PaintInterner hash-conses the sets: however many tokens
+// carry the same paint there is one allocation, and copying a token
+// copies one pointer. Paint only ever changes through the interner,
+// which keeps the sorted-unique invariant PaintContains relies on.
+typedef shared_ptr<const vector<string>> PaintSet;
+
+bool PaintContains(const PaintSet& paint, const string& name);
+
+class PaintInterner
+{
+public:
+	// Every operation returns an interned set: value-equal results are
+	// pointer-equal, and subset/superset fast paths reuse the inputs.
+	// Results are also memoized by input pointer identity (interned sets
+	// live as long as the interner, so pointers stay unique), which makes
+	// the per-invocation derivations cheap on hot expansion chains.
+	PaintSet Insert(const PaintSet& paint, const string& name);
+	PaintSet Union(const PaintSet& a, const PaintSet& b);
+	PaintSet Intersect(const PaintSet& a, const PaintSet& b);
+
+private:
+	typedef const vector<string>* PaintKey;
+
+	PaintSet Intern(vector<string>& names);
+
+	map<vector<string>, PaintSet> sets_;
+	map<pair<PaintKey, string>, PaintSet> insert_memo_;
+	map<pair<PaintKey, PaintKey>, PaintSet> union_memo_;
+	map<pair<PaintKey, PaintKey>, PaintSet> intersect_memo_;
+};
 
 // Value form of one phase-3 IPPTokenStream emission. Whitespace runs are
 // folded into the next token's ws_before; new-lines stay real tokens
@@ -35,26 +72,31 @@ enum EPPTokenKind
 // `noninvokable` records that an invocation of this token was aborted, so
 // it is never reconsidered (course rule; blacklists never shrink, so this
 // is equivalent to re-checking, but it documents the intent).
-// `paste_op` marks a ## that was written in a replacement list and
-// therefore operates; ## tokens that arrive via substitution are inert.
+// `paste_op` and `param_index` are definition-time facts stamped onto
+// replacement-list tokens by MacroTable: paste_op marks a ## that was
+// written in a replacement list and therefore operates (## tokens that
+// arrive via substitution are inert), param_index is the parameter slot
+// the token substitutes (0..params-1 named, params for __VA_ARGS__, -1
+// for non-parameters).
 struct PPToken
 {
 	PPToken()
 		: kind(PPT_NEW_LINE), ws_before(false), noninvokable(false),
-		  paste_op(false)
+		  paste_op(false), param_index(-1)
 	{}
 
 	PPToken(EPPTokenKind k, const string& spelling)
 		: kind(k), data(spelling), ws_before(false), noninvokable(false),
-		  paste_op(false)
+		  paste_op(false), param_index(-1)
 	{}
 
 	EPPTokenKind kind;
 	string data;
 	bool ws_before;
-	set<string> blacklist;
+	PaintSet blacklist;
 	bool noninvokable;
 	bool paste_op;
+	int param_index;
 };
 
 // Collects a phase-3 token stream into PPToken values. Whitespace

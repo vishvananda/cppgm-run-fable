@@ -1,5 +1,95 @@
 #include "pp_token.h"
 
+#include <algorithm>
+#include <iterator>
+#include <utility>
+
+bool PaintContains(const PaintSet& paint, const string& name)
+{
+	return paint && std::binary_search(paint->begin(), paint->end(), name);
+}
+
+PaintSet PaintInterner::Intern(vector<string>& names)
+{
+	map<vector<string>, PaintSet>::iterator it = sets_.find(names);
+	if (it == sets_.end())
+	{
+		PaintSet made(new vector<string>(names));
+		it = sets_.insert(std::make_pair(names, made)).first;
+	}
+	return it->second;
+}
+
+PaintSet PaintInterner::Insert(const PaintSet& paint, const string& name)
+{
+	if (PaintContains(paint, name))
+		return paint;
+	pair<PaintKey, string> key(paint.get(), name);
+	map<pair<PaintKey, string>, PaintSet>::iterator memo =
+		insert_memo_.find(key);
+	if (memo != insert_memo_.end())
+		return memo->second;
+	vector<string> names;
+	if (paint)
+		names = *paint;
+	names.insert(std::lower_bound(names.begin(), names.end(), name), name);
+	PaintSet result = Intern(names);
+	insert_memo_[key] = result;
+	return result;
+}
+
+PaintSet PaintInterner::Union(const PaintSet& a, const PaintSet& b)
+{
+	if (a == b || !b)
+		return a;
+	if (!a)
+		return b;
+	pair<PaintKey, PaintKey> key(std::min(a.get(), b.get()),
+	                             std::max(a.get(), b.get()));
+	map<pair<PaintKey, PaintKey>, PaintSet>::iterator memo =
+		union_memo_.find(key);
+	if (memo != union_memo_.end())
+		return memo->second;
+	vector<string> names;
+	std::set_union(a->begin(), a->end(), b->begin(), b->end(),
+	               std::back_inserter(names));
+	PaintSet result;
+	if (names.size() == a->size())
+		result = a;
+	else if (names.size() == b->size())
+		result = b;
+	else
+		result = Intern(names);
+	union_memo_[key] = result;
+	return result;
+}
+
+PaintSet PaintInterner::Intersect(const PaintSet& a, const PaintSet& b)
+{
+	if (a == b)
+		return a;
+	if (!a || !b)
+		return PaintSet();
+	pair<PaintKey, PaintKey> key(std::min(a.get(), b.get()),
+	                             std::max(a.get(), b.get()));
+	map<pair<PaintKey, PaintKey>, PaintSet>::iterator memo =
+		intersect_memo_.find(key);
+	if (memo != intersect_memo_.end())
+		return memo->second;
+	vector<string> names;
+	std::set_intersection(a->begin(), a->end(), b->begin(), b->end(),
+	                      std::back_inserter(names));
+	PaintSet result;
+	if (names.size() == a->size())
+		result = a;
+	else if (names.size() == b->size())
+		result = b;
+	else if (!names.empty())
+		result = Intern(names);
+	intersect_memo_[key] = result;
+	return result;
+}
+
 void PPTokenCollector::Add(EPPTokenKind kind, const string& data)
 {
 	PPToken token(kind, data);

@@ -26,9 +26,11 @@ namespace {
 
 struct PrintingPostTokenStream : IPostTokenStream
 {
+	// "\n", not endl: a per-token flush dominates large outputs, and
+	// stdout is only compared on success, where exit flushes the stream.
 	void emit(const PostToken& token)
 	{
-		cout << DescribePostToken(token) << endl;
+		cout << DescribePostToken(token) << "\n";
 	}
 };
 
