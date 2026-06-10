@@ -206,6 +206,34 @@ string FlattenNameTopLevel(const AstName& name)
 	return FlattenNameBody(name);
 }
 
+string FlattenLambdaIntroducer(const AstLambda& lambda)
+{
+	string text = "[";
+	if (lambda.has_capture_default)
+		text += lambda.capture_default == OP_AMP ? "&" : "=";
+	for (size_t i = 0; i < lambda.captures.size(); i++)
+	{
+		if (i || lambda.has_capture_default)
+			text += ",";
+		const AstLambdaCapture& capture = lambda.captures[i];
+		switch (capture.kind)
+		{
+		case LC_THIS:
+			text += "this";
+			break;
+		case LC_COPY:
+			text += capture.identifier;
+			break;
+		case LC_REF:
+			text += "&" + capture.identifier;
+			break;
+		}
+		if (capture.pack)
+			text += "...";
+	}
+	return text + "]";
+}
+
 string FlattenSpecifierSeq(const AstSpecifierSeq& specifiers)
 {
 	string text;
@@ -344,7 +372,7 @@ string FlattenExpr(const AstExpr& expr)
 		return text + " " + FlattenExpr(*expr.operands[0]);
 	}
 	case EK_LAMBDA:
-		return expr.lambda->introducer;
+		return FlattenLambdaIntroducer(*expr.lambda);
 	case EK_PACK_EXPANSION:
 		return FlattenExpr(*expr.operands[0]) + "...";
 	case EK_BRACED:

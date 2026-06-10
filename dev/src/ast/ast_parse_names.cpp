@@ -59,15 +59,26 @@ bool AstParser::ParseTemplateArgument(AstTemplateArgument& argument)
 }
 
 // < template-argument-list? close-angle-bracket; the part's identifier
-// is already filled in by the caller.
+// is already filled in by the caller. Attempt outcomes are memoized by
+// `<` position (the parse depends only on the tokens and the current
+// name-table state) so uncommitted attempts do not re-parse the span
+// once per enclosing alternative.
 bool AstParser::ParseTemplateArgumentClause(AstNamePart& part)
 {
+	const size_t clause_pos = pos_;
+	std::map<size_t, ClauseMemo>::const_iterator memo =
+		clause_memo_.find(clause_pos);
+	if (memo != clause_memo_.end() && !memo->second.success)
+		return false;
 	State state = Save();
 	if (!MatchOpenAngle())
 		return false;
 	part.kind = NP_TEMPLATE_ID;
 	if (MatchCloseAngle())
+	{
+		RecordClauseOutcome(clause_pos, true);
 		return true;
+	}
 	for (;;)
 	{
 		AstTemplateArgument argument;
@@ -76,6 +87,7 @@ bool AstParser::ParseTemplateArgumentClause(AstNamePart& part)
 			Restore(state);
 			part.kind = NP_IDENTIFIER;
 			part.arguments.clear();
+			RecordClauseOutcome(clause_pos, false);
 			return false;
 		}
 		part.arguments.push_back(move(argument));
@@ -88,8 +100,10 @@ bool AstParser::ParseTemplateArgumentClause(AstNamePart& part)
 		Restore(state);
 		part.kind = NP_IDENTIFIER;
 		part.arguments.clear();
+		RecordClauseOutcome(clause_pos, false);
 		return false;
 	}
+	RecordClauseOutcome(clause_pos, true);
 	return true;
 }
 
@@ -131,9 +145,18 @@ bool AstParser::ParseNestedNameParts(AstName& name)
 				Advance();
 				if (AtSimple(OP_LT))
 				{
+					// A qualifier template-id commits only when `::`
+					// follows the clause; a memoized outcome answers
+					// that without re-parsing the clause span.
+					std::map<size_t, ClauseMemo>::const_iterator memo =
+						clause_memo_.find(pos_);
+					bool skip = memo != clause_memo_.end() &&
+						(!memo->second.success ||
+						 !TokenAt(memo->second.end_pos, OP_COLON2));
 					State id_state = Save();
-					if (!ParseTemplateArgumentClause(part) ||
-					    !AtSimple(OP_COLON2))
+					if (!skip &&
+					    (!ParseTemplateArgumentClause(part) ||
+					     !AtSimple(OP_COLON2)))
 					{
 						Restore(id_state);
 						part.kind = NP_IDENTIFIER;
@@ -201,16 +224,28 @@ bool AstParser::ParseTerminalIdentifier(AstName& name, bool type_context)
 		                             : ResolveTerminalFlags(name, part.identifier);
 		if (TemplateIdAllowed(flags))
 		{
-			State state = Save();
-			if (ParseTemplateArgumentClause(part))
+			// An unresolved name in an expression context commits only
+			// when `(` follows the clause; a memoized outcome answers
+			// that without re-parsing the clause span.
+			bool optimistic = flags == kUnresolved && !type_context;
+			std::map<size_t, ClauseMemo>::const_iterator memo =
+				optimistic ? clause_memo_.find(pos_) : clause_memo_.end();
+			bool skip = memo != clause_memo_.end() &&
+				(!memo->second.success ||
+				 !TokenAt(memo->second.end_pos, OP_LPAREN));
+			if (!skip)
 			{
-				bool commit = (flags != kUnresolved) || type_context ||
-					AtSimple(OP_LPAREN);
-				if (!commit)
+				State state = Save();
+				if (ParseTemplateArgumentClause(part))
 				{
-					Restore(state);
-					part.kind = NP_IDENTIFIER;
-					part.arguments.clear();
+					bool commit = (flags != kUnresolved) || type_context ||
+						AtSimple(OP_LPAREN);
+					if (!commit)
+					{
+						Restore(state);
+						part.kind = NP_IDENTIFIER;
+						part.arguments.clear();
+					}
 				}
 			}
 		}

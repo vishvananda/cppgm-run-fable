@@ -258,7 +258,7 @@ void PrintNewExpr(const AstExpr& expr, ostream& out, int depth)
 void PrintLambda(const AstLambda& lambda, ostream& out, int depth)
 {
 	Line(out, depth, "lambda-expression");
-	Line(out, depth + 1, "lambda-introducer " + lambda.introducer);
+	Line(out, depth + 1, "lambda-introducer " + FlattenLambdaIntroducer(lambda));
 	if (lambda.has_declarator)
 	{
 		Line(out, depth + 1, "lambda-declarator");
@@ -642,7 +642,7 @@ void PrintSpecialMember(const AstDecl& decl, ostream& out, int depth)
 		for (size_t i = 0; i < decl.member_specifiers.size(); i++)
 		{
 			const AstMemberSpecifier& spec = decl.member_specifiers[i];
-			if (spec.spelling == "explicit")
+			if (spec.keyword == KW_EXPLICIT)
 				Line(out, depth + 2, "specifier explicit");
 			else
 				Line(out, depth + 2, "specifier " +

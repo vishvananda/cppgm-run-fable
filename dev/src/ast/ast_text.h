@@ -17,6 +17,9 @@ std::string FlattenName(const AstName& name);
 // a leading `typename` keyword is dropped.
 std::string FlattenNameTopLevel(const AstName& name);
 
+// Renders the "[...]" capture text of a lambda-introducer.
+std::string FlattenLambdaIntroducer(const AstLambda& lambda);
+
 std::string FlattenTypeId(const AstTypeId& type);
 std::string FlattenSpecifierSeq(const AstSpecifierSeq& specifiers);
 std::string FlattenDeclarator(const AstDeclarator& declarator);

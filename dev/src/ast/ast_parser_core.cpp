@@ -21,12 +21,29 @@ AstParser::NameTable* AstParser::NewTable()
 	return &table_pool_.back();
 }
 
+void AstParser::InvalidateClauseMemo()
+{
+	if (!clause_memo_.empty())
+		clause_memo_.clear();
+}
+
+// Success records the lookahead one past the close angle so callers
+// can test the follow token without re-parsing.
+void AstParser::RecordClauseOutcome(size_t clause_pos, bool success)
+{
+	ClauseMemo memo;
+	memo.success = success;
+	memo.end_pos = success ? pos_ : clause_pos;
+	clause_memo_[clause_pos] = memo;
+}
+
 void AstParser::PushScope(NameTable* table, bool param_scope)
 {
 	ScopeRef scope;
 	scope.table = table;
 	scope.param_scope = param_scope;
 	scopes_.push_back(scope);
+	InvalidateClauseMemo();
 }
 
 void AstParser::PushTransientScope()
@@ -37,6 +54,7 @@ void AstParser::PushTransientScope()
 void AstParser::PopScope()
 {
 	scopes_.pop_back();
+	InvalidateClauseMemo();
 }
 
 // Registrations log their previous state so a failed parse can be
@@ -56,6 +74,7 @@ void AstParser::Register(const string& name, unsigned flags)
 	undo.old_flags = undo.existed ? it->second : 0;
 	undo_log_.push_back(undo);
 	table->entries[name] = undo.existed ? (it->second | flags) : flags;
+	InvalidateClauseMemo();
 }
 
 // The scope a declaration's name belongs to: the nearest scope that is
@@ -82,6 +101,7 @@ void AstParser::RegisterInDeclScope(const string& name, unsigned flags)
 	undo.old_flags = undo.existed ? it->second : 0;
 	undo_log_.push_back(undo);
 	table->entries[name] = undo.existed ? (it->second | flags) : flags;
+	InvalidateClauseMemo();
 }
 
 AstParser::NameTable* AstParser::GetOrCreateChild(NameTable* parent,
@@ -300,6 +320,8 @@ void AstParser::Restore(const State& state)
 	pos_ = state.pos;
 	if (brackets_.size() > state.bracket_depth)
 		brackets_.resize(state.bracket_depth);
+	if (undo_log_.size() > state.undo_depth)
+		InvalidateClauseMemo();
 	while (undo_log_.size() > state.undo_depth)
 	{
 		const UndoEntry& undo = undo_log_.back();
@@ -311,6 +333,14 @@ void AstParser::Restore(const State& state)
 	}
 	if (scopes_.size() > state.scope_depth)
 		scopes_.resize(state.scope_depth);
+}
+
+bool AstParser::TokenAt(size_t index, ETokenType type) const
+{
+	if (index >= tokens_.size())
+		index = tokens_.size() - 1;
+	return tokens_[index].kind == PTOK_SIMPLE &&
+		tokens_[index].simple_type == type;
 }
 
 const ParseToken& AstParser::Peek(size_t ahead) const

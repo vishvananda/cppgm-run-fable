@@ -53,11 +53,31 @@ struct AstExpr
 	AstLambdaPtr lambda;       // EK_LAMBDA
 };
 
+// lambda-introducer capture: identifier, & identifier, or this,
+// optionally a pack expansion.
+enum ELambdaCaptureKind
+{
+	LC_THIS,  // this
+	LC_COPY,  // identifier
+	LC_REF    // & identifier
+};
+
+struct AstLambdaCapture
+{
+	AstLambdaCapture();
+
+	ELambdaCaptureKind kind;
+	std::string identifier;
+	bool pack;
+};
+
 struct AstLambda
 {
 	AstLambda();
 
-	std::string introducer;    // flattened "[...]" capture text
+	bool has_capture_default;
+	ETokenType capture_default;  // OP_AMP / OP_ASS
+	std::vector<AstLambdaCapture> captures;
 	bool has_declarator;
 	AstParameterClausePtr parameters;
 	bool mutable_specifier;

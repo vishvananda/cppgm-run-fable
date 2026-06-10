@@ -60,6 +60,17 @@ a bracket stack where `(`/`[`/`{` push, template argument/parameter lists
 push an angle context, and OP_GT / ST_RSHIFT_1 / ST_RSHIFT_2 refuse to act
 as operators while the innermost open bracket is an angle.
 
+Template-argument-clause attempt outcomes are memoized by `<` token
+position (`clause_memo_`), invalidated whenever the name table or scope
+stack changes — the only context a clause parse depends on besides the
+tokens. Uncommitted attempts (expression-context `name<` without a
+following `(`, qualifier template-ids without a following `::`) consult
+the memo instead of re-parsing; without this, nested template-argument
+ambiguities re-parse the same span once per enclosing alternative,
+which compounds exponentially (`a<a<...<1+0>+0>+0>` at depth 12 ran
+past 10s; with the memo every depth rejects instantly, matching the
+reference).
+
 Disambiguation rules (validated against the fixtures):
 
 - block-item / for-init / class-member: declaration before expression
@@ -142,6 +153,9 @@ productions (not test-shape probes):
 
 - linkage-specification: `extern <string-literal> { declaration* }` and
   the single-declaration form, dumped as `linkage-specification <lang>`.
+- non-type template parameters (`source.gram` derives template-parameter
+  from type-parameter only; `200-non-type-template-parameters` requires
+  the declarator form).
 - dynamic exception specifications `throw ( type-id-list? )` as a
   function qualifier.
 - member-pointer ptr-operators `NNS::*` with cv-qualifiers.
@@ -154,9 +168,66 @@ productions (not test-shape probes):
 ## Validation
 
 1. `make -C pa10 test` / root `make test-report ACTIVE_TEST_REPORT_PAS='pa10'`
-   for the 134 local fixtures (128 success dumps + 6 failure statuses).
+   for the 134 local fixtures (128 success dumps + 6 failure statuses)
+   plus the `cppgm.tests/course/pa10` extension fixtures (lambda capture
+   forms, ref pinned from the reference binary).
 2. Root `make test-report-through-pa10` to prove PA1-PA9 stay green
    (recog and the rest of the pipeline are untouched, but cppgm++ build
    wiring changes).
 3. `perl scripts/cppgm_file_audit.pl --stage pa10 --paths dev/src` for
    size/structure gates (sources <= 1500 lines, functions <= 120 lines).
+
+## Architecture Review
+
+The implementation matches the pipeline above; the audit (see
+`audit.md`) confirmed each stage's ownership against the code:
+
+- The driver (`dev/cppgm++.cpp`) reuses the unmodified PA5 pipeline and
+  PA6 terminal preparation per srcfile; AST knowledge starts at
+  `dev/src/ast/`. There are no test-shape or test-name gates and no
+  fallback success paths: any pipeline or parse throw maps to
+  EXIT_FAILURE in `main`, and `ParseTranslationUnit` requires ST_EOF.
+- The dump is a rendering of the typed tree, never embedded text: every
+  printer line walks `AstDecl`/`AstStmt`/`AstExpr` structure, and
+  `ast_text` flattens that same structure for one-line annotations.
+  Nothing parses rendered text back.
+- Syntactic facts are typed, not stringly. Names are part lists with
+  template arguments, operator texts, conversion type-ids, and decltype
+  expressions; declarators are flat typed item lists; lambda captures
+  are a capture-default token plus `{this, id, &id}` capture entries
+  with pack flags (`AstLambdaCapture`), so PA11/PA12 never reparse
+  `[&x,=]` spellings. The only stored source spellings are leaf token
+  spellings (literals, keywords, identifiers), which is what the dump
+  format requires.
+- The syntactic name table is the parser's own concern: it feeds only
+  the standard's syntactic disambiguations, registrations are
+  undo-logged so backtracking is exact, and nothing downstream consumes
+  it. PA11's semantic lookup starts from the AST, not from this table.
+- Backtracking cost is bounded: save/restore is O(1) plus the undo tail,
+  and the clause memo (above) removes the one exponential re-parse
+  family. A 22k-line mixed input parses in ~0.7s; adversarial
+  template-argument nesting rejects instantly at any depth.
+
+## Final Architecture Review
+
+Post-audit state: 519/519 through PA10 (134 local + 1 course fixture),
+file audit clean (the one warning is the pre-existing PA6
+`parse/parser.h` header-implementation division, untouched by PA10).
+Remaining accepted trade-offs, none of which hide work from later
+assignments:
+
+- The parser accepts a small superset of `pa10.gram` on
+  undefined-behavior inputs (e.g. expression-first `alignof(expr)`,
+  lenient trait operands) where the references do the same; all
+  fixture-pinned rejections still reject.
+- `sizeof...(pack)` is not parsed: `source.gram` has no production for
+  it, and the shared grammar is the authority over reference leniency.
+- The persistent namespace/class child tables over-approximate scope
+  contents across failed parses (children created during an abandoned
+  attempt persist); this only widens the optimistic-unknown class of
+  names, which the disambiguation rules already treat permissively.
+- `Restore` truncates the bracket stack but cannot re-push entries
+  popped below the save depth; this is safe because every parse
+  function only consumes closers for brackets it opened itself (each
+  alternative saves at its construct's start), verified across all
+  Save/Restore sites during the audit.

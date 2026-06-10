@@ -77,8 +77,14 @@ AstExpr::AstExpr(EExprKind kind_in)
 {
 }
 
+AstLambdaCapture::AstLambdaCapture()
+	: kind(LC_COPY), pack(false)
+{
+}
+
 AstLambda::AstLambda()
-	: has_declarator(false), mutable_specifier(false),
+	: has_capture_default(false), capture_default(OP_AMP),
+	  has_declarator(false), mutable_specifier(false),
 	  has_noexcept(false), has_trailing(false)
 {
 }

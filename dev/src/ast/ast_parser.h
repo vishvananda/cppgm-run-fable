@@ -105,9 +105,21 @@ private:
 	void RegisterParameters(const AstDeclarator& declarator);
 	void RegisterTemplateName(const AstDecl& inner);
 
+	// Outcome of a template-argument-clause attempt at one `<` token
+	// position; end_pos is one past the close angle on success.
+	struct ClauseMemo
+	{
+		bool success;
+		size_t end_pos;
+	};
+
+	void InvalidateClauseMemo();
+	void RecordClauseOutcome(size_t clause_pos, bool success);
+
 	// --- token-stream infrastructure (ast_parser_core.cpp) ---------
 	State Save() const;
 	void Restore(const State& state);
+	bool TokenAt(size_t index, ETokenType type) const;
 	const ParseToken& Peek(size_t ahead = 0) const;
 	void Advance();
 	bool AtSimple(ETokenType type, size_t ahead = 0) const;
@@ -157,7 +169,7 @@ private:
 	AstExprPtr ParsePostfixRoot();
 	AstExprPtr ParsePrimaryExpression();
 	AstExprPtr ParseLambdaExpression();
-	bool ParseLambdaIntroducer(std::string& text);
+	bool ParseLambdaIntroducer(AstLambda& lambda);
 	AstExprPtr ParseInitializerClause();
 	bool ParseInitializerClauseList(std::vector<AstExprPtr>& list);
 	AstExprPtr ParseBracedInitList();
@@ -234,6 +246,13 @@ private:
 	std::deque<NameTable> table_pool_;
 	std::vector<ScopeRef> scopes_;
 	std::vector<UndoEntry> undo_log_;
+	// Clause attempt outcomes by `<` position, valid for the current
+	// name-table and scope state (any change invalidates). A clause
+	// parse depends only on its tokens and that state, so the memo lets
+	// uncommitted attempts skip re-parsing: without it, nested
+	// template-argument ambiguities re-parse the same span once per
+	// enclosing alternative, which compounds exponentially.
+	std::map<size_t, ClauseMemo> clause_memo_;
 	// Scope depth of the innermost template header whose declaration is
 	// being parsed; a name registered at exactly this depth is the
 	// templated entity itself. Zero when not inside a template header.

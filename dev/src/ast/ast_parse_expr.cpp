@@ -673,54 +673,60 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 	return node;
 }
 
-// lambda-introducer: [ capture-default? capture-list? ]; the dump
-// keeps only the flattened capture text.
-bool AstParser::ParseLambdaIntroducer(string& text)
+// lambda-introducer: [ lambda-capture? ] with lambda-capture =
+// capture-default (, capture-list)? | capture-list. A lone `&` (not
+// followed by an identifier) is the by-reference capture-default;
+// `&x` is a capture.
+bool AstParser::ParseLambdaIntroducer(AstLambda& lambda)
 {
 	if (!MatchSimple(OP_LSQUARE))
 		return false;
-	text = "[";
-	bool first = true;
-	while (!AtSimple(OP_RSQUARE))
+	if (MatchSimple(OP_RSQUARE))
+		return true;
+	if (AtSimple(OP_ASS) || (AtSimple(OP_AMP) && !AtIdentifier(1)))
 	{
-		if (!first && !MatchSimple(OP_COMMA))
+		lambda.has_capture_default = true;
+		lambda.capture_default = Peek().simple_type;
+		Advance();
+		if (MatchSimple(OP_RSQUARE))
+			return true;
+		if (!MatchSimple(OP_COMMA))
 			return false;
-		if (!first)
-			text += ",";
-		first = false;
-		if (MatchSimple(OP_AMP))
+	}
+	for (;;)
+	{
+		AstLambdaCapture capture;
+		if (MatchSimple(KW_THIS))
+			capture.kind = LC_THIS;
+		else if (MatchSimple(OP_AMP))
 		{
-			text += "&";
-			if (AtIdentifier())
-			{
-				text += Peek().spelling;
-				Advance();
-			}
+			if (!AtIdentifier())
+				return false;
+			capture.kind = LC_REF;
+			capture.identifier = Peek().spelling;
+			Advance();
 		}
-		else if (MatchSimple(OP_ASS))
-			text += "=";
-		else if (MatchSimple(KW_THIS))
-			text += "this";
 		else if (AtIdentifier())
 		{
-			text += Peek().spelling;
+			capture.kind = LC_COPY;
+			capture.identifier = Peek().spelling;
 			Advance();
 		}
 		else
 			return false;
-		if (MatchSimple(OP_DOTS))
-			text += "...";
+		capture.pack = MatchSimple(OP_DOTS);
+		lambda.captures.push_back(move(capture));
+		if (!MatchSimple(OP_COMMA))
+			break;
 	}
-	Advance();  // OP_RSQUARE
-	text += "]";
-	return true;
+	return MatchSimple(OP_RSQUARE);
 }
 
 AstExprPtr AstParser::ParseLambdaExpression()
 {
 	State state = Save();
 	AstLambdaPtr lambda(new AstLambda());
-	if (!ParseLambdaIntroducer(lambda->introducer))
+	if (!ParseLambdaIntroducer(*lambda))
 	{
 		Restore(state);
 		return AstExprPtr();
