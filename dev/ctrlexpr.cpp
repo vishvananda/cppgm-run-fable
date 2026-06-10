@@ -1,11 +1,23 @@
-// (C) 2013 CPPGM Foundation www.cppgm.org.  All rights reserved.
-
+#include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 using namespace std;
 
-#include "exceptions.h"
+#include "ctrl_expr.h"
+#include "pp_tokenizer.h"
+#include "source_translation.h"
+
+// ctrlexpr: applies translation phases 1-3 to the C++ source file on
+// stdin (no preprocessing directives, predefined macros, or pragma
+// operator), splits the preprocessing-token stream into logical lines,
+// and evaluates each non-empty line as a conditional-inclusion
+// controlling expression in the PA3 output format. Phase 1-3 failures
+// exit EXIT_FAILURE; all other problems print per-line "error".
+//
+// The --batch-stdin worker protocol is provided by the test runner entry
+// point (src/test_runner.cpp); this tool only evaluates a single file.
 
 // mock implementation of IsDefinedIdentifier for PA3
 // return true iff first code point is odd
@@ -17,41 +29,29 @@ bool PA3Mock_IsDefinedIdentifier(const string& identifier)
 		return identifier[0] % 2;
 }
 
-bool HasBatchStdinArg(int argc, char** argv)
+int main(int argc, char** argv)
 {
 	for (int i = 1; i < argc; i++)
 	{
 		if (string(argv[i]) == "--batch-stdin")
-			return true;
+		{
+			cerr << "ERROR: --batch-stdin requires the test runner build "
+			        "(CPPGM_TEST_RUNNER=1)" << endl;
+			return EXIT_FAILURE;
+		}
 	}
-	return false;
-}
 
-int RunNotImplementedBatchMode()
-{
-	string line;
-	while (getline(cin, line))
-	{
-		(void)line;
-		cout << "EXIT_NOT_IMPLEMENTED" << endl;
-	}
-	return EXIT_SUCCESS;
-}
-
-int main(int argc, char** argv)
-{
 	try
 	{
-		if (HasBatchStdinArg(argc, argv))
-			return RunNotImplementedBatchMode();
+		ostringstream oss;
+		oss << cin.rdbuf();
 
-		// TODO: Implement ctrlexpr as per PA3 assignment description
-		throw NotImplementedException();
-	}
-	catch (const NotImplementedException& e)
-	{
-		cerr << "ERROR: " << e.what() << endl;
-		return CPPGM_EXIT_NOT_IMPLEMENTED;
+		TranslatedSource source = TranslateSource(oss.str());
+
+		CtrlExprStream evaluator(cout, &PA3Mock_IsDefinedIdentifier);
+		TokenizePPTokens(source, evaluator);
+
+		return EXIT_SUCCESS;
 	}
 	catch (exception& e)
 	{
