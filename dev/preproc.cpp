@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -11,6 +10,7 @@ using namespace std;
 
 #include "post_token.h"
 #include "post_tokenizer.h"
+#include "predefined_macros.h"
 #include "preprocess.h"
 
 // preproc: executes translation phases 1-6 and the tokenization part of
@@ -42,27 +42,6 @@ struct FilePostTokenStream : IPostTokenStream
 
 	ostream& out_;
 };
-
-// The course-defined predefined macros with fixed replacement lists;
-// __FILE__/__LINE__ are installed by the Preprocessor as builtins.
-// __DATE__ ("Mmm dd yyyy") and __TIME__ ("hh:mm:ss") slice the asctime
-// format "Www Mmm dd hh:mm:ss yyyy\n", called once here at main entry.
-vector<pair<string, string>> PredefinedObjectMacros()
-{
-	time_t now = time(0);
-	string stamp = asctime(localtime(&now));
-	vector<pair<string, string>> macros;
-	macros.push_back(make_pair("__CPPGM__", "201303L"));
-	macros.push_back(make_pair("__cplusplus", "201103L"));
-	macros.push_back(make_pair("__STDC_HOSTED__", "1"));
-	macros.push_back(make_pair("__CPPGM_AUTHOR__",
-	                           "\"Vishvananda Abrams\""));
-	macros.push_back(make_pair("__DATE__", "\"" + stamp.substr(4, 7) +
-	                                       stamp.substr(20, 4) + "\""));
-	macros.push_back(make_pair("__TIME__",
-	                           "\"" + stamp.substr(11, 8) + "\""));
-	return macros;
-}
 
 } // namespace
 
