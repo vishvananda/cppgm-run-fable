@@ -42,6 +42,18 @@ struct AstExpr
 	std::vector<AstExprPtr> arguments; // call/cast/placement arguments
 	AstName name;              // EK_ID; EK_MEMBER member name
 	std::string literal;       // EK_LITERAL / EK_KEYWORD_LITERAL spelling
+	// EK_LITERAL phase-7 facts copied from the terminal (PTK_LITERAL /
+	// PTK_LITERAL_ARRAY / user-defined kinds, scalar or element type,
+	// element count, ABI value bytes). The PA10 dump ignores them; the
+	// PA12 semantic pass reads them instead of re-lexing the spelling.
+	EPostTokenKind literal_kind;
+	EFundamentalType literal_type;
+	size_t literal_elements;
+	std::string literal_data;
+	// EK_FUNCTIONAL_CAST: the simple-type keyword sequence (one entry
+	// for the classic single-keyword form, several for the PA12
+	// multi-keyword form such as `unsigned long(e)`).
+	std::vector<ETokenType> cast_keywords;
 	AstTypeIdPtr type;         // casts, sizeof(type), traits, new
 	bool is_type_operand;      // EK_TYPE_TRAIT operand is a type-id
 	bool sizeof_paren;         // sizeof ( expression ) form

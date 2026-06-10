@@ -53,8 +53,13 @@ bool NormalizeVoidParameter(const vector<ParameterInfo>& parameters,
 }  // namespace
 
 TypeBuilder::TypeBuilder(ITypeBuilderHost& host)
-	: host_(host)
+	: host_(host), adjust_parameters_(false)
 {
+}
+
+void TypeBuilder::SetParameterAdjustment(bool adjust)
+{
+	adjust_parameters_ = adjust;
 }
 
 void TypeBuilder::ConsumeSpecifierKeyword(const AstSpecifier& spec,
@@ -177,10 +182,24 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 	if (NormalizeVoidParameter(parameters, clause.variadic))
 		parameters.clear();
 	for (size_t i = 0; i < parameters.size(); i++)
-		types.push_back(parameters[i].type);
+	{
+		if (adjust_parameters_)
+		{
+			// 8.3.5p5: the function type gets the fully adjusted type;
+			// the parameter object decays arrays/functions but keeps
+			// its declared cv.
+			types.push_back(AdjustParameterType(parameters[i].type));
+			if (parameters[i].type->kind == TK_ARRAY ||
+			    parameters[i].type->kind == TK_FUNCTION)
+				parameters[i].type = AdjustParameterType(parameters[i].type);
+		}
+		else
+			types.push_back(parameters[i].type);
+	}
 }
 
 void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
+                                        bool fn_const, bool fn_volatile,
                                         DeclaratorInfo& out)
 {
 	switch (item.kind)
@@ -191,6 +210,9 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		vector<TypePtr> types;
 		BuildParameters(*item.params, parameters, types);
 		out.type = MakeFunctionType(out.type, types, item.params->variadic);
+		// 8.3.5p6: trailing cv-qualifiers belong to the function type
+		// (member functions; the binder rejects them elsewhere).
+		out.type = MakeCvQualifiedType(out.type, fn_const, fn_volatile);
 		out.declares_function = true;
 		out.parameters.swap(parameters);
 		break;
@@ -228,6 +250,7 @@ void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items,
 	size_t prefix_end = 0;
 	while (prefix_end < items.size() &&
 	       (items[prefix_end].kind == DI_PTR ||
+	        items[prefix_end].kind == DI_MEMBER_PTR ||
 	        items[prefix_end].kind == DI_CV))
 		prefix_end++;
 	size_t core = items.size();
@@ -244,20 +267,27 @@ void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items,
 		const AstDeclaratorItem& item = items[i];
 		if (item.kind == DI_CV)
 			continue;  // consumed by its pointer below
-		if (item.token == OP_STAR)
+		bool ptr_const = false;
+		bool ptr_volatile = false;
+		for (size_t j = i + 1;
+		     j < prefix_end && items[j].kind == DI_CV; j++)
 		{
-			bool ptr_const = false;
-			bool ptr_volatile = false;
-			for (size_t j = i + 1;
-			     j < prefix_end && items[j].kind == DI_CV; j++)
-			{
-				if (items[j].token == KW_CONST)
-					ptr_const = true;
-				else
-					ptr_volatile = true;
-			}
-			out.type = MakePointerType(out.type, ptr_const, ptr_volatile);
+			if (items[j].token == KW_CONST)
+				ptr_const = true;
+			else
+				ptr_volatile = true;
 		}
+		if (item.kind == DI_MEMBER_PTR)
+		{
+			TypePtr cls = host_.ResolveTypeName(item.name);
+			if (cls->kind != TK_CLASS)
+				throw runtime_error("member-pointer qualifier does not "
+				                    "name a class");
+			out.type = MakeMemberPointerType(cls->named, out.type,
+			                                 ptr_const, ptr_volatile);
+		}
+		else if (item.token == OP_STAR)
+			out.type = MakePointerType(out.type, ptr_const, ptr_volatile);
 		else if (item.token == OP_AMP || item.token == OP_LAND)
 			// Collapsing is only legal while the reference target is
 			// still the specifier-seq base, i.e. came through a
@@ -269,11 +299,28 @@ void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items,
 		collapsible = false;
 		out.declares_function = false;
 	}
+	bool fn_const = false;
+	bool fn_volatile = false;
 	for (size_t i = items.size(); i > suffix_begin; i--)
 	{
-		ApplyDeclaratorSuffix(items[i - 1], out);
+		const AstDeclaratorItem& item = items[i - 1];
+		if (item.kind == DI_CV)
+		{
+			// Trailing cv-qualifiers apply to the parameter clause they
+			// follow (8.3.5p6), composed right-to-left just below.
+			if (item.token == KW_CONST)
+				fn_const = true;
+			else
+				fn_volatile = true;
+			continue;
+		}
+		ApplyDeclaratorSuffix(item, fn_const, fn_volatile, out);
+		fn_const = false;
+		fn_volatile = false;
 		collapsible = false;
 	}
+	if (fn_const || fn_volatile)
+		throw runtime_error("cv-qualifier without a parameter clause");
 	if (core == items.size())
 		return;
 	if (items[core].kind == DI_ID)

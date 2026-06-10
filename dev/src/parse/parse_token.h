@@ -47,7 +47,8 @@ struct ParseToken
 	ParseToken(EParseTokenKind kind_in, ETokenType simple_type_in,
 	           const string& spelling_in, unsigned flags_in)
 		: kind(kind_in), simple_type(simple_type_in), flags(flags_in),
-		  spelling(spelling_in)
+		  spelling(spelling_in), literal_kind(PTK_INVALID),
+		  literal_type(FT_VOID), literal_elements(0)
 	{}
 
 	bool HasFlag(unsigned mask) const
@@ -59,6 +60,14 @@ struct ParseToken
 	ETokenType simple_type;  // meaningful for PTOK_SIMPLE only
 	unsigned flags;          // EParseTokenFlags facts of the spelling
 	string spelling;         // source text (PostToken::source)
+	// PTOK_LITERAL: the phase-7 literal facts (PostToken kind, scalar /
+	// element type, element count, ABI value bytes), preserved so the
+	// semantic passes consume typed state instead of re-lexing the
+	// spelling. PTK_INVALID for non-literal terminals.
+	EPostTokenKind literal_kind;
+	EFundamentalType literal_type;
+	size_t literal_elements;
+	string literal_data;
 };
 
 // Converts the collected phase-7 tokens of one translation unit into

@@ -72,6 +72,10 @@ vector<ParseToken> BuildParseTokens(const vector<PostToken>& tokens)
 			result.push_back(ParseToken(PTOK_LITERAL, KW_ALIGNAS,
 			                            token.source,
 			                            LiteralFlags(token.source)));
+			result.back().literal_kind = token.kind;
+			result.back().literal_type = token.type;
+			result.back().literal_elements = token.num_elements;
+			result.back().literal_data = token.data;
 			break;
 		}
 	}

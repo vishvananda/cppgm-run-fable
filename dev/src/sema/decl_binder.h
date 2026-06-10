@@ -13,10 +13,17 @@
 // values, static_assert). The builder and evaluator call back through
 // the two interfaces; everything outside the PA11 assignment boundary
 // throws, which the driver reports as EXIT_FAILURE.
+//
+// The traversal exposes protected virtual seams (display naming,
+// function-name binding, namespace bodies, declaration events,
+// statement binding) so the PA12 semantic binder can extend the same
+// forward pass with overload sets, expression analysis, and dump
+// recording without duplicating the declaration machinery.
 class DeclBinder : public ITypeBuilderHost, public IConstExprContext
 {
 public:
 	explicit DeclBinder(TypesModel& model);
+	virtual ~DeclBinder() {}
 
 	void BindTranslationUnit(const AstDecl& unit);
 
@@ -31,16 +38,19 @@ public:
 	virtual TypePtr TryResolveTypeFromName(const AstName& name);
 	virtual TypePtr ResolveTypeId(const AstTypeId& type_id);
 
-private:
+protected:
 	// --- declarations ---
 	void BindDeclarations(const std::vector<AstDeclPtr>& decls);
 	void BindDeclaration(const AstDecl& decl);
 	void BindNamespace(const AstDecl& decl);
+	// The body traversal of a (possibly reopened) namespace-definition;
+	// PA12 wraps it to record the dump node.
+	virtual void BindNamespaceBody(const AstDecl& decl, Scope* scope);
 	void BindNamespaceAlias(const AstDecl& decl);
 	void BindUsingDirective(const AstDecl& decl);
 	void BindUsingDeclaration(const AstDecl& decl);
 	void BindStaticAssert(const AstDecl& decl);
-	void BindSimpleDeclaration(const AstDecl& decl);
+	virtual void BindSimpleDeclaration(const AstDecl& decl);
 	void BindInitDeclarator(const DeclSpecifierInfo& specs,
 	                        const AstInitDeclarator& declarator);
 	void BindTypeAlias(const string& name, const TypePtr& type);
@@ -50,22 +60,46 @@ private:
 	void RecordConstantValue(ScopeBinding& binding,
 	                         const AstInitializer* init);
 	void BindFunctionDefinition(const AstDecl& decl);
+	// Find-or-extend the binding of a function name declared in the
+	// current scope (PA11: a different type is an error; PA12 collects
+	// overloads). `allow_block` admits block-scope redeclarations.
+	virtual ScopeBinding& BindFunctionName(const string& name,
+	                                       const TypePtr& type,
+	                                       bool allow_block);
+	// The body of a function definition; called with `current_` set to
+	// the new function scope (parameters bound). PA11 only walks block
+	// scopes and local declarations; PA12 analyzes the statements.
+	virtual void BindFunctionBody(const AstDecl& decl,
+	                              const DeclaratorInfo& composed,
+	                              const string& name);
 	void BindTemplateDeclaration(const AstDecl& decl);
 	void BindBitFieldDeclaration(const AstDecl& decl);
+
+	// --- declaration events (PA12 dump recording; no-ops in PA11) ---
+	virtual void OnTypeAliasBound(const string& name, const TypePtr& type);
+	virtual void OnVariableBound(ScopeBinding& binding,
+	                             const AstInitializer* init,
+	                             const DeclSpecifierInfo& specs);
+	virtual void OnFunctionDeclared(ScopeBinding& binding,
+	                                const TypePtr& type);
 
 	// --- classes and enums ---
 	TypePtr BindClass(const AstDecl& decl, bool standalone);
 	TypePtr BindClassForward(const AstDecl& decl, bool elaborated);
 	void CompleteClassLayout(NamedTypeInfo& info,
 	                         const std::vector<TypePtr>& fields);
-	void InjectAnonymousUnionMembers(const Scope& union_scope);
+	// 9.5p5 member injection of a standalone anonymous union; PA12 also
+	// synthesizes the storage variable and its construction.
+	virtual void BindAnonymousUnionMembers(const AstDecl& decl,
+	                                       const TypePtr& type,
+	                                       const Scope& union_scope);
 	TypePtr BindEnum(const AstDecl& decl);
 	TypePtr DeclareEnumEntity(const AstDecl& decl, const string& name,
 	                          bool scoped, const TypePtr& underlying);
 	void BindEnumerators(const AstDecl& decl, const TypePtr& enum_type);
 
 	// --- statements (block scopes and local declarations only) ---
-	void BindStatement(const AstStmt& stmt);
+	virtual void BindStatement(const AstStmt& stmt);
 
 	// --- names ---
 	// Validates the PA11-supported name shape (plain identifier parts).
@@ -84,7 +118,11 @@ private:
 	TypePtr DeclaredEntityType(const AstName& name,
 	                           bool& lvalue_entity);
 
-	string AnonymousTypeName(const AstDecl& decl) const;
+	// The canonical display spelling of a named type ("struct C"); the
+	// PA12 binder qualifies it with the enclosing namespace path.
+	virtual string TypeDisplayName(const string& key,
+	                               const string& name) const;
+	virtual string AnonymousTypeName(const AstDecl& decl);
 
 	TypesModel& model_;
 	TypeBuilder builder_;

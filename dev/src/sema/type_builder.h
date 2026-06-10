@@ -81,6 +81,12 @@ class TypeBuilder
 public:
 	explicit TypeBuilder(ITypeBuilderHost& host);
 
+	// PA12 mode: function types apply the 8.3.5p5 parameter adjustment
+	// (array/function decay, top-level cv deletion); the declared
+	// parameter objects keep their cv. PA11 keeps declared types (its
+	// fixtures pin `function of (array of 3 int)`).
+	void SetParameterAdjustment(bool adjust);
+
 	// decl-specifier-seq (allow_storage) or type-specifier-seq.
 	DeclSpecifierInfo ProcessSpecifiers(const AstSpecifierSeq& seq,
 	                                    bool allow_storage);
@@ -101,10 +107,12 @@ private:
 	void ComposeItems(const vector<AstDeclaratorItem>& items,
 	                  bool collapsible, DeclaratorInfo& out);
 	void ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
+	                           bool fn_const, bool fn_volatile,
 	                           DeclaratorInfo& out);
 	void BuildParameters(const AstParameterClause& clause,
 	                     vector<ParameterInfo>& parameters,
 	                     vector<TypePtr>& types);
 
 	ITypeBuilderHost& host_;
+	bool adjust_parameters_;
 };

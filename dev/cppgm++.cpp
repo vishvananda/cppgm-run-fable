@@ -18,6 +18,8 @@
 #include "preprocess.h"
 #include "sema/decl_binder.h"
 #include "sema/scope.h"
+#include "sema/sem_binder.h"
+#include "sema/sem_node.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -435,13 +437,21 @@ AstDeclPtr parse_source_file_ast(
 // (virtual memory; pages commit only as touched).
 const size_t cppgm_parse_stack_bytes = 512u << 20;
 
+enum class BindMode
+{
+  ParseOnly,
+  Types,
+  Semantics,
+};
+
 struct EmitAstTask
 {
   const string * srcfile;
   const vector<pair<string, string>> * predefined;
-  bool bind_types;
+  BindMode bind_mode;
   AstDeclPtr unit;
   unique_ptr<TypesModel> model;
+  unique_ptr<SemUnit> semantics;
   bool failed;
   string message;
 };
@@ -452,9 +462,15 @@ void * emit_ast_thread_main(void * opaque)
   try
   {
     task->unit = parse_source_file_ast(*task->srcfile, *task->predefined);
-    if(task->bind_types) {
+    if(task->bind_mode == BindMode::Types) {
       task->model.reset(new TypesModel());
       DeclBinder binder(*task->model);
+      binder.BindTranslationUnit(*task->unit);
+    }
+    else if(task->bind_mode == BindMode::Semantics) {
+      task->model.reset(new TypesModel());
+      task->semantics.reset(new SemUnit());
+      SemBinder binder(*task->model, *task->semantics);
       binder.BindTranslationUnit(*task->unit);
     }
   }
@@ -469,12 +485,12 @@ void * emit_ast_thread_main(void * opaque)
 EmitAstTask run_unit_on_large_stack(
     const string & srcfile,
     const vector<pair<string, string>> & predefined,
-    bool bind_types)
+    BindMode bind_mode)
 {
   EmitAstTask task;
   task.srcfile = &srcfile;
   task.predefined = &predefined;
-  task.bind_types = bind_types;
+  task.bind_mode = bind_mode;
   task.failed = false;
   pthread_attr_t attributes;
   pthread_t thread;
@@ -495,7 +511,8 @@ AstDeclPtr parse_ast_on_large_stack(
     const string & srcfile,
     const vector<pair<string, string>> & predefined)
 {
-  return std::move(run_unit_on_large_stack(srcfile, predefined, false).unit);
+  return std::move(run_unit_on_large_stack(srcfile, predefined,
+                                           BindMode::ParseOnly).unit);
 }
 
 int run_emit_ast_mode(const vector<string> & args)
@@ -526,8 +543,8 @@ int run_emit_types_mode(const vector<string> & args)
   vector<pair<string, string>> predefined = PredefinedObjectMacros();
   vector<unique_ptr<TypesModel>> models;
   for(size_t i = 0; i < invocation.inputs.size(); ++i) {
-    EmitAstTask task =
-        run_unit_on_large_stack(invocation.inputs[i], predefined, true);
+    EmitAstTask task = run_unit_on_large_stack(invocation.inputs[i],
+                                               predefined, BindMode::Types);
     models.push_back(std::move(task.model));
   }
 
@@ -546,8 +563,33 @@ int run_emit_types_mode(const vector<string> & args)
 
 int run_emit_semantics_mode(const vector<string> & args)
 {
-  parse_source_output_invocation(args, false);
-  return run_unimplemented_mode("--emit-semantics", "PA12");
+  SourceOutputInvocation invocation =
+      parse_source_output_invocation(args, false);
+
+  vector<pair<string, string>> predefined = PredefinedObjectMacros();
+  vector<unique_ptr<SemUnit>> units;
+  // The dump's type nodes point at entity records owned by each unit's
+  // model, so the models must outlive the printing below.
+  vector<unique_ptr<TypesModel>> models;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    EmitAstTask task = run_unit_on_large_stack(invocation.inputs[i],
+                                               predefined,
+                                               BindMode::Semantics);
+    units.push_back(std::move(task.semantics));
+    models.push_back(std::move(task.model));
+  }
+
+  ofstream out(invocation.outfile.c_str());
+  if(!out) {
+    throw runtime_error("cannot create output file: " + invocation.outfile);
+  }
+  out << units.size() << " translation units\n";
+  for(size_t i = 0; i < units.size(); ++i) {
+    out << "start translation unit " << (i + 1) << "\n";
+    PrintSemanticsOutput(*units[i], out);
+    out << "end translation unit\n";
+  }
+  return EXIT_SUCCESS;
 }
 
 int run_emit_lowir_mode(const vector<string> & args)

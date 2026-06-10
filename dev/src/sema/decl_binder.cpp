@@ -384,6 +384,11 @@ void DeclBinder::BindNamespace(const AstDecl& decl)
 	// in its parent.
 	if (decl.inline_namespace)
 		AddUsingDirective(*current_, scope);
+	BindNamespaceBody(decl, scope);
+}
+
+void DeclBinder::BindNamespaceBody(const AstDecl& decl, Scope* scope)
+{
 	Scope* saved = current_;
 	current_ = scope;
 	BindDeclarations(decl.body_decls);
@@ -482,23 +487,12 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	{
 		if (declarator.init)
 			throw OutsideBoundary("function declarator initializer");
-		if (ScopeBinding* existing = FindOwnBinding(*current_, name))
-		{
-			// 3.3.1/9.2p1: functions redeclare in namespace and block
-			// scopes; a member shall not be declared twice.
-			if (existing->kind != SB_FUNCTION ||
-			    (current_->kind != SCOPE_NAMESPACE &&
-			     current_->kind != SCOPE_BLOCK))
-				throw runtime_error("redeclaration of " + name);
-			existing->type =
-				MergeRedeclaredType(existing->type, composed.type);
-			return;
-		}
-		ScopeBinding binding;
-		binding.kind = SB_FUNCTION;
-		binding.name = name;
-		binding.type = composed.type;
-		AddBinding(*current_, binding);
+		// 8.3.5p6: cv-qualifiers only on non-static member functions.
+		if ((composed.type->is_const || composed.type->is_volatile) &&
+		    current_->kind != SCOPE_CLASS)
+			throw runtime_error("cv-qualified non-member function");
+		ScopeBinding& binding = BindFunctionName(name, composed.type, true);
+		OnFunctionDeclared(binding, composed.type);
 		return;
 	}
 	// 7.1.5p9: a constexpr object declaration declares a const object.
@@ -525,6 +519,7 @@ void DeclBinder::BindVariable(const string& name, const TypePtr& type,
 			throw runtime_error("redeclaration of " + name);
 		existing->type = MergeRedeclaredType(existing->type, type);
 		RecordConstantValue(*existing, init);
+		OnVariableBound(*existing, init, specs);
 		return;
 	}
 	ScopeBinding binding;
@@ -532,9 +527,10 @@ void DeclBinder::BindVariable(const string& name, const TypePtr& type,
 	binding.name = name;
 	binding.type = type;
 	RecordConstantValue(binding, init);
-	AddBinding(*current_, binding);
+	ScopeBinding& added = AddBinding(*current_, binding);
 	if (current_->kind == SCOPE_CLASS && current_fields_ && !specs.is_static)
 		current_fields_->push_back(type);
+	OnVariableBound(added, init, specs);
 }
 
 void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
@@ -549,6 +545,7 @@ void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 			 current_->kind != SCOPE_CLASS);
 		if (!redeclarable || !TypeEquals(existing->type, type))
 			throw runtime_error("conflicting type alias " + name);
+		OnTypeAliasBound(name, type);
 		return;
 	}
 	ScopeBinding binding;
@@ -556,6 +553,7 @@ void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 	binding.name = name;
 	binding.type = type;
 	AddBinding(*current_, binding);
+	OnTypeAliasBound(name, type);
 }
 
 void DeclBinder::RecordConstantValue(ScopeBinding& binding,
@@ -600,25 +598,12 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	if (!composed.declares_function || composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function definition requires a function "
 		                    "declarator");
+	// 8.3.5p6: cv-qualifiers only on non-static member functions.
+	if ((composed.type->is_const || composed.type->is_volatile) &&
+	    current_->kind != SCOPE_CLASS)
+		throw runtime_error("cv-qualified non-member function");
 	const string& name = composed.id->parts[0].identifier;
-	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
-	{
-		// A definition merges with a prior namespace-scope declaration;
-		// declaring and then defining a member in-class re-declares the
-		// member name (9.2p1).
-		if (existing->kind != SB_FUNCTION ||
-		    current_->kind != SCOPE_NAMESPACE)
-			throw runtime_error("redeclaration of " + name);
-		existing->type = MergeRedeclaredType(existing->type, composed.type);
-	}
-	else
-	{
-		ScopeBinding binding;
-		binding.kind = SB_FUNCTION;
-		binding.name = name;
-		binding.type = composed.type;
-		AddBinding(*current_, binding);
-	}
+	BindFunctionName(name, composed.type, false);
 	Scope* scope = model_.CreateScope(SCOPE_FUNCTION, name, current_);
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
@@ -633,8 +618,62 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	}
 	Scope* saved = current_;
 	current_ = scope;
-	BindStatement(*decl.body);
+	BindFunctionBody(decl, composed, name);
 	current_ = saved;
+}
+
+ScopeBinding& DeclBinder::BindFunctionName(const string& name,
+                                           const TypePtr& type,
+                                           bool allow_block)
+{
+	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
+	{
+		// 3.3.1/9.2p1: functions redeclare in namespace scopes (and, for
+		// plain declarations, block scopes); a member shall not be
+		// declared twice.
+		if (existing->kind != SB_FUNCTION ||
+		    (current_->kind != SCOPE_NAMESPACE &&
+		     !(allow_block && current_->kind == SCOPE_BLOCK)))
+			throw runtime_error("redeclaration of " + name);
+		existing->type = MergeRedeclaredType(existing->type, type);
+		return *existing;
+	}
+	ScopeBinding binding;
+	binding.kind = SB_FUNCTION;
+	binding.name = name;
+	binding.type = type;
+	return AddBinding(*current_, binding);
+}
+
+void DeclBinder::BindFunctionBody(const AstDecl& decl,
+                                  const DeclaratorInfo& composed,
+                                  const string& name)
+{
+	(void)composed;
+	(void)name;
+	BindStatement(*decl.body);
+}
+
+void DeclBinder::OnTypeAliasBound(const string& name, const TypePtr& type)
+{
+	(void)name;
+	(void)type;
+}
+
+void DeclBinder::OnVariableBound(ScopeBinding& binding,
+                                 const AstInitializer* init,
+                                 const DeclSpecifierInfo& specs)
+{
+	(void)binding;
+	(void)init;
+	(void)specs;
+}
+
+void DeclBinder::OnFunctionDeclared(ScopeBinding& binding,
+                                    const TypePtr& type)
+{
+	(void)binding;
+	(void)type;
 }
 
 void DeclBinder::BindTemplateDeclaration(const AstDecl& decl)
@@ -691,10 +730,16 @@ void DeclBinder::BindBitFieldDeclaration(const AstDecl& decl)
 
 // --- classes and enums ----------------------------------------------------
 
-string DeclBinder::AnonymousTypeName(const AstDecl& decl) const
+string DeclBinder::AnonymousTypeName(const AstDecl& decl)
 {
 	return "__anonymous_" + decl.class_key_spelling + "_type__" +
 		to_string(decl.begin_token) + "_" + to_string(decl.end_token);
+}
+
+string DeclBinder::TypeDisplayName(const string& key,
+                                   const string& name) const
+{
+	return key + " " + name;
 }
 
 void DeclBinder::CompleteClassLayout(NamedTypeInfo& info,
@@ -727,8 +772,12 @@ void DeclBinder::CompleteClassLayout(NamedTypeInfo& info,
 	info.alignment = alignment;
 }
 
-void DeclBinder::InjectAnonymousUnionMembers(const Scope& union_scope)
+void DeclBinder::BindAnonymousUnionMembers(const AstDecl& decl,
+                                           const TypePtr& type,
+                                           const Scope& union_scope)
 {
+	(void)decl;
+	(void)type;
 	// 9.5p5: the member names enter the enclosing scope as variables.
 	for (size_t i = 0; i < union_scope.bindings.size(); i++)
 	{
@@ -777,7 +826,7 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 	else
 	{
 		info = model_.CreateNamedTypeInfo(
-			decl.class_key_spelling + " " + name);
+			TypeDisplayName(decl.class_key_spelling, name));
 		info->is_union = is_union;
 		type = MakeNamedType(TK_CLASS, info);
 		if (!anonymous)
@@ -808,7 +857,7 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 
 	if (standalone && anonymous)
 	{
-		InjectAnonymousUnionMembers(*scope);
+		BindAnonymousUnionMembers(decl, type, *scope);
 		if (current_->kind == SCOPE_CLASS && current_fields_)
 			current_fields_->push_back(type);
 	}
@@ -833,8 +882,8 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 			throw runtime_error(name + " does not name a matching class");
 		return found->type;
 	}
-	NamedTypeInfo* info =
-		model_.CreateNamedTypeInfo(decl.class_key_spelling + " " + name);
+	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
+		TypeDisplayName(decl.class_key_spelling, name));
 	info->is_union = is_union;
 	TypePtr type = MakeNamedType(TK_CLASS, info);
 	ScopeBinding binding;
@@ -864,7 +913,7 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 		return existing->type;
 	}
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-		(scoped ? "enum class " : "enum ") + name);
+		TypeDisplayName(scoped ? "enum class" : "enum", name));
 	info->complete = true;
 	info->is_scoped = scoped;
 	info->enum_underlying = underlying->fundamental;

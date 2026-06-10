@@ -597,28 +597,63 @@ AstExprPtr AstParser::ParsePostfixExpression()
 	return expr;
 }
 
-// postfix roots: a simple-type keyword followed by `(` is a
+// postfix roots: a simple-type keyword sequence followed by `(` is a
 // function-style cast (dumped with a paren-argument-list); everything
-// else is a primary-expression.
+// else is a primary-expression. The sequence form (`unsigned long(e)`)
+// keeps every keyword in `cast_keywords` for the semantic passes.
 AstExprPtr AstParser::ParsePostfixRoot()
 {
 	const ParseToken& token = Peek();
-	if (token.kind == PTOK_SIMPLE && IsSimpleTypeKeyword(token.simple_type) &&
-	    AtSimple(OP_LPAREN, 1))
+	if (token.kind == PTOK_SIMPLE && IsSimpleTypeKeyword(token.simple_type))
 	{
-		State entry = Save();
-		AstExprPtr node = MakeExpr(EK_FUNCTIONAL_CAST);
-		node->op = token.simple_type;
-		node->op_spelling = token.spelling;
-		Advance();
-		AstExprPtr args = ParseParenExprList(EK_FUNCTIONAL_CAST);
-		if (!args)
+		size_t keywords = 1;
+		while (Peek(keywords).kind == PTOK_SIMPLE &&
+		       IsSimpleTypeKeyword(Peek(keywords).simple_type))
+			keywords++;
+		if (AtSimple(OP_LPAREN, keywords))
 		{
-			Restore(entry);
-			return AstExprPtr();
+			State entry = Save();
+			AstExprPtr node = MakeExpr(EK_FUNCTIONAL_CAST);
+			node->op = token.simple_type;
+			for (size_t i = 0; i < keywords; i++)
+			{
+				const ParseToken& keyword = Peek();
+				node->cast_keywords.push_back(keyword.simple_type);
+				if (i)
+					node->op_spelling += " ";
+				node->op_spelling += keyword.spelling;
+				Advance();
+			}
+			AstExprPtr args = ParseParenExprList(EK_FUNCTIONAL_CAST);
+			if (!args)
+			{
+				Restore(entry);
+				return AstExprPtr();
+			}
+			node->arguments.swap(args->arguments);
+			return node;
 		}
-		node->arguments.swap(args->arguments);
-		return node;
+	}
+	if (AtSimple(KW_DECLTYPE) && AtSimple(OP_LPAREN, 1))
+	{
+		// decltype-specifier as a postfix root (`decltype(x)(1)`): an
+		// id-expression with one decltype part; the suffix loop attaches
+		// the cast's argument list as a call. A trailing `::` is a
+		// decltype-rooted qualified-id instead (primary-expression).
+		State entry = Save();
+		Advance();
+		Advance();
+		AstExprPtr inner = ParseExpression();
+		if (inner && MatchSimple(OP_RPAREN) && !AtSimple(OP_COLON2))
+		{
+			AstExprPtr node = MakeExpr(EK_ID);
+			AstNamePart part;
+			part.kind = NP_DECLTYPE;
+			part.decltype_expr = move(inner);
+			node->name.parts.push_back(move(part));
+			return node;
+		}
+		Restore(entry);
 	}
 	return ParsePrimaryExpression();
 }
@@ -630,6 +665,10 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 	{
 		AstExprPtr node = MakeExpr(EK_LITERAL);
 		node->literal = token.spelling;
+		node->literal_kind = token.literal_kind;
+		node->literal_type = token.literal_type;
+		node->literal_elements = token.literal_elements;
+		node->literal_data = token.literal_data;
 		Advance();
 		return node;
 	}

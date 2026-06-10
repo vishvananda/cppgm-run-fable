@@ -162,6 +162,21 @@ TypePtr MakeFunctionType(const TypePtr& return_type,
 	return make_shared<Type>(type);
 }
 
+TypePtr MakeMemberPointerType(const NamedTypeInfo* cls,
+                              const TypePtr& member, bool is_const,
+                              bool is_volatile)
+{
+	if (IsReferenceType(member) || IsVoidType(member))
+		throw runtime_error("invalid member-pointer member type");
+	Type type;
+	type.kind = TK_MEMBER_POINTER;
+	type.is_const = is_const;
+	type.is_volatile = is_volatile;
+	type.named = cls;
+	type.target = member;
+	return make_shared<Type>(type);
+}
+
 TypePtr MakeCvQualifiedType(const TypePtr& type, bool add_const,
                             bool add_volatile)
 {
@@ -238,6 +253,10 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 		for (size_t i = 0; i < a->parameters.size(); i++)
 			if (!TypeEquals(a->parameters[i], b->parameters[i]))
 				return false;
+		break;
+	case TK_MEMBER_POINTER:
+		if (a->named != b->named)
+			return false;
 		break;
 	default:
 		break;
@@ -368,6 +387,9 @@ unsigned long long TypeSize(const TypePtr& type)
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
 		return 8;
+	case TK_MEMBER_POINTER:
+		// Itanium ABI: {ptr} for data members, {ptr, adj} for functions.
+		return type->target->kind == TK_FUNCTION ? 16 : 8;
 	case TK_CLASS:
 	case TK_ENUM:
 	case TK_TYPE_PARAM:
@@ -396,6 +418,7 @@ unsigned long long TypeAlignment(const TypePtr& type)
 	case TK_POINTER:
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
+	case TK_MEMBER_POINTER:
 		return 8;
 	case TK_CLASS:
 	case TK_ENUM:
@@ -426,6 +449,9 @@ string DescribeType(const TypePtr& type)
 		return cv + type->named->display;
 	case TK_POINTER:
 		return cv + "pointer to " + DescribeType(type->target);
+	case TK_MEMBER_POINTER:
+		return cv + "member-pointer of " + type->named->display + " to " +
+			DescribeType(type->target);
 	case TK_LVALUE_REFERENCE:
 		return "lvalue-reference to " + DescribeType(type->target);
 	case TK_RVALUE_REFERENCE:
@@ -447,7 +473,14 @@ string DescribeType(const TypePtr& type)
 	}
 	if (type->variadic)
 		parameters += type->parameters.empty() ? "..." : ", ...";
-	return "function of (" + parameters + ") returning " +
+	// Member-function cv-qualifiers print between the parameter list and
+	// the return type (`function of () const returning int`).
+	string qualifiers;
+	if (type->is_const)
+		qualifiers += " const";
+	if (type->is_volatile)
+		qualifiers += " volatile";
+	return "function of (" + parameters + ")" + qualifiers + " returning " +
 		DescribeType(type->target);
 }
 

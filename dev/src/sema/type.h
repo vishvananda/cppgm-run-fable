@@ -36,7 +36,10 @@ enum ETypeKind
 	// NamedTypeInfo record; identity is pointer equality.
 	TK_CLASS,
 	TK_ENUM,
-	TK_TYPE_PARAM
+	TK_TYPE_PARAM,
+	// PA12: pointer to member of the class `named` of type `target`
+	// (8.3.3). Node cv is the pointer's own qualification.
+	TK_MEMBER_POINTER
 };
 
 // One record per named-type entity, owned by the semantic model that
@@ -83,12 +86,16 @@ struct Type
 	bool is_volatile;
 
 	EFundamentalType fundamental;  // TK_FUNDAMENTAL
-	TypePtr target;                // pointee / referee / element / return
+	TypePtr target;                // pointee / referee / element / return /
+	                               // member type (TK_MEMBER_POINTER)
 	bool bound_known;              // TK_ARRAY: false for unknown bound
 	unsigned long long bound;      // TK_ARRAY when bound_known
 	vector<TypePtr> parameters;    // TK_FUNCTION, already adjusted (8.3.5p5)
 	bool variadic;                 // TK_FUNCTION
-	const NamedTypeInfo* named;    // TK_CLASS / TK_ENUM / TK_TYPE_PARAM
+	// TK_FUNCTION: member-function cv-qualifiers (8.3.5p6) are stored as
+	// the node's is_const/is_volatile and print after the parameter list.
+	const NamedTypeInfo* named;    // TK_CLASS / TK_ENUM / TK_TYPE_PARAM /
+	                               // TK_MEMBER_POINTER (the class)
 };
 
 // --- classification of fundamental types (3.9.1) ---
@@ -133,6 +140,12 @@ TypePtr MakeArrayType(const TypePtr& element, bool bound_known,
 // Throws when the return type is a function or array (8.3.5p8).
 TypePtr MakeFunctionType(const TypePtr& return_type,
                          const vector<TypePtr>& parameters, bool variadic);
+
+// 8.3.3: pointer to member of `cls` of type `member`. Throws on
+// reference or void member types (8.3.3p3).
+TypePtr MakeMemberPointerType(const NamedTypeInfo* cls,
+                              const TypePtr& member, bool is_const,
+                              bool is_volatile);
 
 // cv applied through a typedef-name or specifier-seq: redistributes
 // onto array element types and is silently dropped on references.

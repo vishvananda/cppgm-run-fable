@@ -61,7 +61,8 @@ struct Scope;
 
 struct ScopeBinding
 {
-	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false) {}
+	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
+	                 owner(0) {}
 
 	EScopeBindingKind kind;
 	string name;
@@ -69,6 +70,17 @@ struct ScopeBinding
 	Scope* target;   // SB_NAMESPACE / SB_NAMESPACE_ALIAS
 	bool has_value;  // SB_ENUMERATOR and constant SB_VARIABLE
 	ConstValue value;
+	// The scope the binding was declared in (stamped by AddBinding; a
+	// using-declaration import keeps the original owner). Powers the
+	// PA12 canonical qualified names.
+	const Scope* owner;
+	// PA12 SB_FUNCTION overload set: the types declared for this name
+	// beyond `type`, in declaration order (PA11 never populates it).
+	vector<TypePtr> overloads;
+	// PA12 anonymous-union members injected into a block scope (9.5p5):
+	// the synthesized storage variable they live in.
+	string anon_storage_name;
+	TypePtr anon_storage_type;
 };
 
 struct Scope
@@ -116,11 +128,14 @@ public:
 
 	void SetMemberScope(const NamedTypeInfo* info, Scope* scope);
 	Scope* MemberScope(const NamedTypeInfo* info) const;  // null if none
+	// The entity a member scope belongs to (null for non-member scopes).
+	const NamedTypeInfo* ScopeEntity(const Scope* scope) const;
 
 private:
 	vector<unique_ptr<Scope>> scopes_;
 	vector<unique_ptr<NamedTypeInfo>> infos_;
 	map<const NamedTypeInfo*, Scope*> member_scopes_;
+	map<const Scope*, const NamedTypeInfo*> scope_entities_;
 	Scope* global_;
 };
 

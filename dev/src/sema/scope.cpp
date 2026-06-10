@@ -38,6 +38,14 @@ NamedTypeInfo* TypesModel::MutableInfo(const NamedTypeInfo* info)
 void TypesModel::SetMemberScope(const NamedTypeInfo* info, Scope* scope)
 {
 	member_scopes_[info] = scope;
+	scope_entities_[scope] = info;
+}
+
+const NamedTypeInfo* TypesModel::ScopeEntity(const Scope* scope) const
+{
+	map<const Scope*, const NamedTypeInfo*>::const_iterator found =
+		scope_entities_.find(scope);
+	return found == scope_entities_.end() ? 0 : found->second;
 }
 
 Scope* TypesModel::MemberScope(const NamedTypeInfo* info) const
@@ -73,6 +81,8 @@ ScopeBinding& AddBinding(Scope& scope, const ScopeBinding& binding)
 		throw runtime_error(binding.name + " redeclares a parameter");
 	scope.binding_index[binding.name] = scope.bindings.size();
 	scope.bindings.push_back(binding);
+	if (!scope.bindings.back().owner)
+		scope.bindings.back().owner = &scope;
 	return scope.bindings.back();
 }
 

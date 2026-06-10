@@ -61,7 +61,8 @@ AstStmtPtr AstParser::ParseLabeledStatement()
 			Restore(state);
 			return AstStmtPtr();
 		}
-		AstStmtPtr body = ParseStatement();
+		// 6.8: the labeled statement may itself be a declaration.
+		AstStmtPtr body = ParseBlockItem();
 		if (!body)
 		{
 			Restore(state);
@@ -80,7 +81,7 @@ AstStmtPtr AstParser::ParseLabeledStatement()
 			Restore(state);
 			return AstStmtPtr();
 		}
-		AstStmtPtr body = ParseStatement();
+		AstStmtPtr body = ParseBlockItem();
 		if (!body)
 		{
 			Restore(state);

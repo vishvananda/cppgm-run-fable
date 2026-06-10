@@ -71,7 +71,8 @@ AstInitializer::AstInitializer()
 }
 
 AstExpr::AstExpr(EExprKind kind_in)
-	: kind(kind_in), op(OP_STAR), is_type_operand(false),
+	: kind(kind_in), op(OP_STAR), literal_kind(PTK_INVALID),
+	  literal_type(FT_VOID), literal_elements(0), is_type_operand(false),
 	  sizeof_paren(false), global_scope(false), array_delete(false),
 	  has_placement(false), paren_type(false)
 {
