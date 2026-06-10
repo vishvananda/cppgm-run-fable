@@ -70,6 +70,12 @@ Reference binaries such as `pptoken-ref` or `cppgm++-ref` are provided for
 observing expected behavior and regenerating reference fixtures. They must not
 be used by your compiler implementation.
 
+The reference binaries are not perfect. Only checked-in fixtures gate an
+assignment. Synthesizing new inputs is fine, but reference behavior outside
+the test suites is intended to be correct, not guaranteed; prefer the handout
+and the standard over exact reference parity. Error message text is never
+compared: failing tests check only the exit status.
+
 The repository does not store the large binary payloads in Git. The checked-in
 `*-ref` wrappers automatically download, verify, and unpack the pinned
 reference-binary bundle the first time a reference tool is needed. To fetch the

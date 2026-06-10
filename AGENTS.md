@@ -54,6 +54,11 @@ Reference outputs and exit-status sidecars are the oracle. Reference binaries
 such as `pptoken-ref` or `cppgm++-ref` are for observation and fixture
 regeneration only.
 
+The reference binaries are not perfect. Only checked-in fixtures gate an
+assignment; prefer the handout and the standard over exact reference parity on
+non-test inputs. Error message text is never compared: failing tests check
+only the exit status.
+
 Do not edit tests or `.ref` files to hide incomplete behavior. Ref regeneration
 must use the provided `*-ref` binaries through the documented `ref-test`
 targets.
