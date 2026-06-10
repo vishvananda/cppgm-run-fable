@@ -1,7 +1,5 @@
 #pragma once
 
-#include <map>
-
 #include "ast/ast.h"
 #include "sema/const_expr.h"
 #include "sema/scope.h"
@@ -34,15 +32,6 @@ public:
 	virtual TypePtr ResolveTypeId(const AstTypeId& type_id);
 
 private:
-	// Redeclaration facts of one enumeration entity (7.2p2).
-	struct EnumFacts
-	{
-		EnumFacts() : scoped(false), defined(false) {}
-		TypePtr underlying;
-		bool scoped;
-		bool defined;
-	};
-
 	// --- declarations ---
 	void BindDeclarations(const std::vector<AstDeclPtr>& decls);
 	void BindDeclaration(const AstDecl& decl);
@@ -56,7 +45,8 @@ private:
 	                        const AstInitDeclarator& declarator);
 	void BindTypeAlias(const string& name, const TypePtr& type);
 	void BindVariable(const string& name, const TypePtr& type,
-	                  const AstInitializer* init, bool is_static);
+	                  const AstInitializer* init,
+	                  const DeclSpecifierInfo& specs);
 	void RecordConstantValue(ScopeBinding& binding,
 	                         const AstInitializer* init);
 	void BindFunctionDefinition(const AstDecl& decl);
@@ -102,6 +92,5 @@ private:
 	// Non-static data member types of the class currently being bound
 	// (null outside a class-specifier body), for layout completion.
 	std::vector<TypePtr>* current_fields_;
-	std::map<const NamedTypeInfo*, EnumFacts> enum_facts_;
 	int anonymous_enums_;
 };

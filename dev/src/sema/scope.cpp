@@ -64,6 +64,13 @@ ScopeBinding& AddBinding(Scope& scope, const ScopeBinding& binding)
 {
 	if (scope.binding_index.count(binding.name))
 		throw runtime_error("redeclaration of " + binding.name);
+	// 3.3.3p2: a parameter name shall not be redeclared in the
+	// outermost block of its function definition (function scopes hold
+	// only parameter bindings).
+	if (scope.kind == SCOPE_BLOCK && scope.parent &&
+	    scope.parent->kind == SCOPE_FUNCTION &&
+	    FindOwnBinding(*scope.parent, binding.name))
+		throw runtime_error(binding.name + " redeclares a parameter");
 	scope.binding_index[binding.name] = scope.bindings.size();
 	scope.bindings.push_back(binding);
 	return scope.bindings.back();

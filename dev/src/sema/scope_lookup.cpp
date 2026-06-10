@@ -85,13 +85,32 @@ vector<ActiveDirective> DirectiveClosure(const Scope* from)
 	return closure;
 }
 
-// Merges one more found declaration into the result; distinct bindings
-// for the same name make the lookup ambiguous.
+// 7.3.4p6 / 3.4.3.2p3: declarations found in several namespaces are
+// ambiguous only when they do not declare the same entity - a
+// namespace seen beside its aliases, the same type reached through
+// different names, or one declaration imported into several scopes by
+// using-declarations (imports share the entity's type node and value).
+bool SameFoundEntity(const ScopeBinding& a, const ScopeBinding& b)
+{
+	bool a_namespace = a.kind == SB_NAMESPACE || a.kind == SB_NAMESPACE_ALIAS;
+	bool b_namespace = b.kind == SB_NAMESPACE || b.kind == SB_NAMESPACE_ALIAS;
+	if (a_namespace || b_namespace)
+		return a_namespace && b_namespace && a.target == b.target;
+	bool a_type = a.kind == SB_TYPE || a.kind == SB_TYPE_ALIAS;
+	bool b_type = b.kind == SB_TYPE || b.kind == SB_TYPE_ALIAS;
+	if (a_type || b_type)
+		return a_type && b_type && TypeEquals(a.type, b.type);
+	return a.kind == b.kind && a.type == b.type &&
+		a.has_value == b.has_value && a.value.bits == b.value.bits;
+}
+
+// Merges one more found declaration into the result; bindings naming
+// distinct entities make the lookup ambiguous.
 void MergeFound(const ScopeBinding* candidate, const ScopeBinding*& result)
 {
 	if (!result)
 		result = candidate;
-	else if (result != candidate)
+	else if (result != candidate && !SameFoundEntity(*result, *candidate))
 		throw runtime_error("ambiguous name lookup of " + candidate->name);
 }
 

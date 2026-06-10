@@ -40,6 +40,34 @@ bool LayoutDependent(const TypePtr& type)
 	}
 }
 
+// True when the two typed values denote the same integer: the stored
+// 64 bits agree and so does their sign interpretation.
+bool SameIntegerValue(const ConstValue& a, const ConstValue& b)
+{
+	bool a_negative = IsSignedIntegralFundamental(a.type) &&
+		(long long)a.bits < 0;
+	bool b_negative = IsSignedIntegralFundamental(b.type) &&
+		(long long)b.bits < 0;
+	return a.bits == b.bits && a_negative == b_negative;
+}
+
+// 7.2p5: the implicit value of an enumerator without an initializer is
+// one more than the previous enumerator, and must be representable in
+// the underlying type.
+ConstValue SuccessorValue(const ConstValue& value, EFundamentalType type)
+{
+	bool is_signed = IsSignedIntegralFundamental(type);
+	if (value.bits == (is_signed ? 0x7fffffffffffffffull : ~0ull))
+		throw runtime_error("enumerator value overflows the underlying "
+		                    "type");
+	ConstValue next = ConvertConstValue(ConstValue(type, value.bits + 1),
+	                                    type);
+	if (next.bits != value.bits + 1)
+		throw runtime_error("enumerator value overflows the underlying "
+		                    "type");
+	return next;
+}
+
 }  // namespace
 
 DeclBinder::DeclBinder(TypesModel& model)
@@ -456,7 +484,11 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 			throw OutsideBoundary("function declarator initializer");
 		if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 		{
-			if (existing->kind != SB_FUNCTION)
+			// 3.3.1/9.2p1: functions redeclare in namespace and block
+			// scopes; a member shall not be declared twice.
+			if (existing->kind != SB_FUNCTION ||
+			    (current_->kind != SCOPE_NAMESPACE &&
+			     current_->kind != SCOPE_BLOCK))
 				throw runtime_error("redeclaration of " + name);
 			existing->type =
 				MergeRedeclaredType(existing->type, composed.type);
@@ -473,17 +505,23 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	TypePtr type = composed.type;
 	if (specs.is_constexpr)
 		type = MakeCvQualifiedType(type, true, false);
-	BindVariable(name, type, declarator.init.get(), specs.is_static);
+	BindVariable(name, type, declarator.init.get(), specs);
 }
 
 void DeclBinder::BindVariable(const string& name, const TypePtr& type,
-                              const AstInitializer* init, bool is_static)
+                              const AstInitializer* init,
+                              const DeclSpecifierInfo& specs)
 {
 	if (IsVoidType(type))
 		throw runtime_error("variable of void type");
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 	{
-		if (existing->kind != SB_VARIABLE)
+		// 3.3.1/9.2p1: an object redeclares in a namespace scope or
+		// through extern in a block scope; a data member or plain local
+		// shall not be declared twice.
+		if (existing->kind != SB_VARIABLE ||
+		    (current_->kind != SCOPE_NAMESPACE &&
+		     !(current_->kind == SCOPE_BLOCK && specs.is_extern)))
 			throw runtime_error("redeclaration of " + name);
 		existing->type = MergeRedeclaredType(existing->type, type);
 		RecordConstantValue(*existing, init);
@@ -495,7 +533,7 @@ void DeclBinder::BindVariable(const string& name, const TypePtr& type,
 	binding.type = type;
 	RecordConstantValue(binding, init);
 	AddBinding(*current_, binding);
-	if (current_->kind == SCOPE_CLASS && current_fields_ && !is_static)
+	if (current_->kind == SCOPE_CLASS && current_fields_ && !specs.is_static)
 		current_fields_->push_back(type);
 }
 
@@ -503,9 +541,13 @@ void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 {
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 	{
-		// 7.1.3p3: a typedef may redeclare the same type.
-		if (existing->kind != SB_TYPE_ALIAS ||
-		    !TypeEquals(existing->type, type))
+		// 7.1.3p3-p4: a typedef-name may redeclare the same type - any
+		// such name in a non-class scope, but in a class scope only the
+		// name of a class or enumeration declared there (9.2p1).
+		bool redeclarable = existing->kind == SB_TYPE ||
+			(existing->kind == SB_TYPE_ALIAS &&
+			 current_->kind != SCOPE_CLASS);
+		if (!redeclarable || !TypeEquals(existing->type, type))
 			throw runtime_error("conflicting type alias " + name);
 		return;
 	}
@@ -561,7 +603,11 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	const string& name = composed.id->parts[0].identifier;
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 	{
-		if (existing->kind != SB_FUNCTION)
+		// A definition merges with a prior namespace-scope declaration;
+		// declaring and then defining a member in-class re-declares the
+		// member name (9.2p1).
+		if (existing->kind != SB_FUNCTION ||
+		    current_->kind != SCOPE_NAMESPACE)
 			throw runtime_error("redeclaration of " + name);
 		existing->type = MergeRedeclaredType(existing->type, composed.type);
 	}
@@ -639,7 +685,7 @@ void DeclBinder::BindBitFieldDeclaration(const AstDecl& decl)
 		if (!IsIntegralType(composed.type))
 			throw runtime_error("bit-field of a non-integral type");
 		BindVariable(composed.id->parts[0].identifier, composed.type, 0,
-		             specs.is_static);
+		             specs);
 	}
 }
 
@@ -754,8 +800,11 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 	BindDeclarations(decl.members);
 	current_ = saved_scope;
 	current_fields_ = saved_fields;
-	info->complete = true;
+	// Layout runs before the entity completes so a by-value member of
+	// the class itself still reads as incomplete (9.2p9) and fails in
+	// TypeSize rather than completing with no layout.
 	CompleteClassLayout(*info, fields);
+	info->complete = true;
 
 	if (standalone && anonymous)
 	{
@@ -807,9 +856,9 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 		if (existing->kind != SB_TYPE ||
 		    existing->type->kind != TK_ENUM)
 			throw runtime_error(name + " redeclared as an enumeration");
-		EnumFacts& facts = enum_facts_[existing->type->named];
-		if (facts.scoped != scoped ||
-		    !TypeEquals(facts.underlying, underlying))
+		const NamedTypeInfo* info = existing->type->named;
+		if (info->is_scoped != scoped ||
+		    info->enum_underlying != underlying->fundamental)
 			throw runtime_error("conflicting redeclaration of enum " +
 			                    name);
 		return existing->type;
@@ -817,12 +866,11 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
 		(scoped ? "enum class " : "enum ") + name);
 	info->complete = true;
+	info->is_scoped = scoped;
+	info->enum_underlying = underlying->fundamental;
 	info->size = TypeSize(underlying);
 	info->alignment = TypeAlignment(underlying);
 	TypePtr type = MakeNamedType(TK_ENUM, info);
-	EnumFacts& facts = enum_facts_[info];
-	facts.underlying = underlying;
-	facts.scoped = scoped;
 	if (!decl.name.empty())
 	{
 		ScopeBinding binding;
@@ -842,9 +890,8 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 void DeclBinder::BindEnumerators(const AstDecl& decl,
                                  const TypePtr& enum_type)
 {
-	const EnumFacts& facts = enum_facts_[enum_type->named];
-	EFundamentalType underlying = facts.underlying->fundamental;
-	Scope* target = facts.scoped
+	EFundamentalType underlying = enum_type->named->enum_underlying;
+	Scope* target = enum_type->named->is_scoped
 		? model_.MemberScope(enum_type->named) : current_;
 	Scope* saved = current_;
 	// 7.2p10: earlier enumerators are in scope inside the list.
@@ -855,8 +902,16 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
 		const AstEnumerator& enumerator = decl.enumerators[i];
 		ConstValue value = next;
 		if (enumerator.value)
-			value = ConvertConstValue(
-				EvaluateConstExpr(*enumerator.value, *this), underlying);
+		{
+			// 7.2p5: the given value must be representable in the
+			// (PA11 int-fixed) underlying type; silently wrapping
+			// would dump a value the program never wrote.
+			ConstValue given = EvaluateConstExpr(*enumerator.value, *this);
+			value = ConvertConstValue(given, underlying);
+			if (!SameIntegerValue(given, value))
+				throw runtime_error(enumerator.name + " is not "
+				                    "representable in the underlying type");
+		}
 		ScopeBinding binding;
 		binding.kind = SB_ENUMERATOR;
 		binding.name = enumerator.name;
@@ -864,8 +919,7 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
 		binding.has_value = true;
 		binding.value = value;
 		AddBinding(*target, binding);
-		next = ConvertConstValue(
-			ConstValue(underlying, value.bits + 1), underlying);
+		next = SuccessorValue(value, underlying);
 	}
 	current_ = saved;
 }
@@ -899,10 +953,10 @@ TypePtr DeclBinder::BindEnum(const AstDecl& decl)
 	TypePtr type = DeclareEnumEntity(decl, name, scoped, underlying);
 	if (decl.enum_body)
 	{
-		EnumFacts& facts = enum_facts_[type->named];
-		if (facts.defined)
+		NamedTypeInfo* info = model_.MutableInfo(type->named);
+		if (info->is_defined)
 			throw runtime_error("redefinition of enum " + name);
-		facts.defined = true;
+		info->is_defined = true;
 		BindEnumerators(decl, type);
 	}
 	return type;

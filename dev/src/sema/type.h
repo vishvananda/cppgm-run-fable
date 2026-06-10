@@ -46,13 +46,20 @@ enum ETypeKind
 struct NamedTypeInfo
 {
 	NamedTypeInfo()
-		: complete(false), is_union(false), size(0), alignment(0)
+		: complete(false), is_union(false), is_scoped(false),
+		  is_defined(false), enum_underlying(FT_INT), size(0), alignment(0)
 	{}
 
 	string display;  // canonical spelling: "struct C", "enum class FY",
 	                 // "typename T", "template-parameter TT"
 	bool complete;
-	bool is_union;             // classes
+	bool is_union;   // classes
+	// Enumeration facts (7.2): scoped-ness and the (PA11 int-fixed)
+	// underlying type are redeclaration-checked entity properties, and
+	// is_defined records that the enumerator list has been seen.
+	bool is_scoped;
+	bool is_defined;
+	EFundamentalType enum_underlying;
 	unsigned long long size;       // valid when complete
 	unsigned long long alignment;  // valid when complete
 };

@@ -140,3 +140,68 @@ Any pipeline, parse, or semantic error exits `EXIT_FAILURE`.
   the regression surface: nsdecl/nsinit and the PA10 dump).
 - `perl scripts/cppgm_file_audit.pl --stage pa11 --paths dev/src` for the
   architecture gate (file/function size, no shortcut smells).
+
+## Architecture Review
+
+Audit of the implementation as committed (431d667a9) against the
+boundaries above:
+
+- The layering holds. `DeclBinder` is the only mutator of the model;
+  `TypeBuilder` owns only structural clause-8 rules and reaches
+  declaration side effects through `ITypeBuilderHost`; `const_expr`
+  sees the binder only through `IConstExprContext`; the printer
+  consumes the finished `Scope` tree and nothing else. No module
+  re-reads source text or the AST after binding.
+- The shared regression surface is behavior-preserving:
+  `DeclParser::ParseError` already returned `runtime_error`, so
+  delegating to the moved `CombineSimpleTypeSpecifiers` table changes
+  no nsdecl/nsinit behavior, and the PA10 dump ignores the new
+  AST span/`enum_body` fields (full suite green).
+- Lookup cost is structural: `FindOwnBinding` is map-backed per scope,
+  so binding and redeclaration matching are O(log n) per name, and the
+  7.3.4 directive closure is proportional to the lexical chain plus the
+  active directives of one lookup - no quadratic scans, no caches to
+  invalidate.
+- Found during audit and fixed (details in `audit.md`):
+  1. Enum entity facts (scoped-ness, underlying type, definedness)
+     lived in a binder-private side map and died with the binder; the
+     surviving model encoded scoped-ness only inside the display
+     string. They are entity facts and now live on `NamedTypeInfo`.
+  2. `MergeFound` used binding-object identity as entity identity, so
+     one entity reached through a namespace alias, a using-declaration
+     import, or same-type typedefs in two namespaces was misdiagnosed
+     as ambiguous (7.3.4p6).
+  3. `BindClass` marked the entity complete before computing layout,
+     so `struct C { C c; };` completed "layout-free" through the
+     dependent-layout path instead of failing as incomplete (9.2p9).
+  4. Enumerator values silently wrapped on overflow (7.2p5), dumping
+     values the program never wrote.
+  5. Redeclaration merging ignored scope kind: duplicate class members
+     and block locals merged silently, and 3.3.3p2 parameter
+     redeclaration in the outermost block was accepted.
+
+## Final Architecture Review
+
+State after the audit cleanup:
+
+- `TypesModel` is the single surviving artifact per TU: scopes with
+  ordered bindings, `NamedTypeInfo` entity records (class layout,
+  union-ness, enum scoped-ness/underlying type/definedness as typed
+  fields), and the member-scope map. Nothing downstream needs to parse
+  display strings or re-walk the AST; PA12 can attach expression and
+  call semantics to this model directly, as the handout requires.
+- Diagnosis is honest within the boundary: every accepted dump line is
+  derived from bound declarations; unsupported constructs and
+  non-representable constants throw rather than approximating, and the
+  scope-kind redeclaration rules reject ill-formed merges instead of
+  printing a merged fiction.
+- Remaining deliberate boundaries (per the handout, not deferred
+  defects): no overload sets (a second function declaration with a
+  different type is an error), unscoped enums fix `int` as the model
+  underlying type rather than computing a value-dependent one (values
+  outside it now fail instead of wrapping), and value-name entity
+  identity is per-binding plus shared type nodes - sufficient for the
+  7.3.4p6 same-entity cases reachable in the PA11 subset; PA12's
+  entity records subsume it when expressions arrive.
+- `make test-report-through-pa11` (568/568) and the pa11 file audit
+  pass on the cleaned tree.
