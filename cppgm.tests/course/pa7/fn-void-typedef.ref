@@ -1,0 +1,10 @@
+1 translation units
+start translation unit course/pa7/fn-void-typedef.t
+start unnamed namespace
+variable pf pointer to function of () returning int
+variable apf array of 3 pointer to function of () returning int
+function f function of () returning int
+function g function of () returning int
+function h function of () returning int
+end namespace
+end translation unit

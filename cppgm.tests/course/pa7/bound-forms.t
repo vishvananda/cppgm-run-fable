@@ -1,0 +1,10 @@
+int a1['a'];
+int a3[0x7F];
+int a4[1u];
+int a5[2147483647];
+int a6[4294967295u];
+int a8[1l];
+char16_t a9[u'x'];
+char32_t a10[U'y'];
+wchar_t a11[L'z'];
+int a12[010];

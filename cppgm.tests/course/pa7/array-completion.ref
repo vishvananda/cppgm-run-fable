@@ -1,0 +1,10 @@
+1 translation units
+start translation unit course/pa7/array-completion.t
+start unnamed namespace
+variable a array of 10 int
+start namespace Q
+variable arr array of 12 int
+variable arr2 array of 7 volatile int
+end namespace
+end namespace
+end translation unit

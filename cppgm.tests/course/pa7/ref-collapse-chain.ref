@@ -1,0 +1,9 @@
+1 translation units
+start translation unit course/pa7/ref-collapse-chain.t
+start unnamed namespace
+variable a lvalue-reference to int
+variable b lvalue-reference to int
+variable c rvalue-reference to int
+function g function of (lvalue-reference to int, lvalue-reference to int, rvalue-reference to int) returning void
+end namespace
+end translation unit

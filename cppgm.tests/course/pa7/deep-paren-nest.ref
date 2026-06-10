@@ -1,0 +1,6 @@
+1 translation units
+start translation unit course/pa7/deep-paren-nest.t
+start unnamed namespace
+variable x int
+end namespace
+end translation unit

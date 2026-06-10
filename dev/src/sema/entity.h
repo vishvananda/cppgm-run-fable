@@ -53,11 +53,9 @@ struct Binding
 
 struct Namespace
 {
-	Namespace() : is_unnamed(false), is_inline(false), parent(0),
-	              unnamed_member(0) {}
+	Namespace() : is_inline(false), parent(0), unnamed_member(0) {}
 
 	string name;  // empty for the global and unnamed namespaces
-	bool is_unnamed;
 	bool is_inline;
 	Namespace* parent;  // null for the global namespace
 
@@ -93,8 +91,8 @@ public:
 		return global_;
 	}
 
-	Namespace* CreateNamespace(const string& name, bool is_unnamed,
-	                           bool is_inline, Namespace* parent);
+	Namespace* CreateNamespace(const string& name, bool is_inline,
+	                           Namespace* parent);
 	DeclaredEntity* CreateEntity(const string& name, const TypePtr& type);
 
 private:
@@ -103,13 +101,13 @@ private:
 	Namespace* global_;
 };
 
-// Creates a new member namespace of `parent` and wires the semantic
-// facts of 7.3.1: print-list position, the name binding (named case),
-// the unique-unnamed-member slot, and the implicit using-directive for
-// unnamed and inline members.
+// Creates a new member namespace of `parent` (empty `name` means the
+// unnamed member) and wires the semantic facts of 7.3.1: print-list
+// position, the name binding (named case), the unique-unnamed-member
+// slot, and the implicit using-directive for unnamed and inline
+// members.
 Namespace* AddMemberNamespace(SemaModel& model, Namespace& parent,
-                              const string& name, bool is_unnamed,
-                              bool is_inline);
+                              const string& name, bool is_inline);
 
 // Appends a using-directive if `nominated` is not already nominated in
 // `ns` (a repeated directive adds nothing to any lookup).

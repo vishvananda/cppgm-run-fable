@@ -1,0 +1,20 @@
+1 translation units
+start translation unit course/pa7/nsname-lookup.t
+start unnamed namespace
+start namespace N2
+variable q int
+end namespace
+start namespace M2
+variable N2 int
+variable t int
+end namespace
+start namespace M3
+variable N4 int
+variable u int
+end namespace
+start namespace M4
+variable N2 int
+variable t4 int
+end namespace
+end namespace
+end translation unit

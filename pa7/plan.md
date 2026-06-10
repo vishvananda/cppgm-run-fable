@@ -98,8 +98,10 @@ assignments (PA8 nsinit onward) extend the same model.
     typedef. Named top-level declarators always take `(` as a
     parenthesized sub-declarator.
   - semantic actions: namespace definition find-or-create (reopen keeps
-    first-declaration position; one unnamed member per parent; inline
-    flag set at creation, OR-ed on reopen; unnamed/inline insert the
+    first-declaration position; one unnamed member per parent; the
+    inline flag is fixed at creation — an extension-namespace-definition
+    that disagrees is ill-formed (7.3.1p2), so reopen ignores it;
+    unnamed/inline insert the
     implicit using-directive into the parent); namespace alias binds
     the target object under the new name; using-declaration binds the
     qualified-lookup result into the current namespace (entities stay
@@ -127,7 +129,8 @@ declarator split). No changes to other tools' sets.
 ## Validation
 
 1. `make test-report ACTIVE_TEST_REPORT_PAS='pa7'` while iterating
-   (all 24 local tests; there is no cppgm.tests/course/pa7 directory).
+   (25 local tests plus the 14 ref-generated pins added by the audit
+   under `cppgm.tests/course/pa7/`).
 2. `make test-report-through-pa7` as the exit gate (pa1-pa6 must stay
    green; nsdecl links from shared sources, so rebuild fallout shows
    here).
@@ -136,3 +139,79 @@ declarator split). No changes to other tools' sets.
 Spot-check semantics beyond the fixtures with `nsdecl-ref` on
 synthesized inputs (transitive using-directives, inline namespace
 qualified lookup, reopened namespace ordering) before calling it done.
+
+## Known reference divergences (non-fixture inputs)
+
+Fixtures gate the assignment; on non-fixture inputs we follow the
+handout and the standard over reference parity (per AGENTS.md). The
+differential sweep found these classes, none covered by fixtures:
+
+- 8.2p7 `( type-name )` parameters: for `int f(int (I));` with `I` a
+  typedef-name, we take the pointer-to-function reading — the
+  standard's own [dcl.ambig.res] example (`void f(int(C))` declares a
+  parameter of type `int(*)(C)`) and g++ agree — while `nsdecl-ref`
+  takes the redundant-parens reading (parameter `int` named `I`).
+  Same class qualified: `int (Q::UL)`, `int (::I)`.
+- Directive anchoring: the reference errors on a well-formed own
+  binding shadowing a sibling-nominated directive
+  (`namespace P { namespace Q1 { typedef int TQ; } namespace Q3 {
+  typedef char TQ; using namespace Q1; TQ b; } }` — 7.3.4p2 anchors
+  Q1's contribution at P, so Q3::TQ simply hides it); the agreeing
+  no-shadow variants are pinned as course tests.
+- Ill-formed inputs (UB for PA7) where the tools differ arbitrarily:
+  qualified *function* declarators (pa7.gram has no function
+  definitions, and 8.3p1 allows a qualified declarator-id outside a
+  namespace only on a definition, so every qualified function
+  declaration is ill-formed — the reference duplicates the entity in
+  the current namespace except in the single-component direct case);
+  pointer-to-reference (reference rejects; we describe it
+  structurally, like the reference itself does for array-of-reference
+  and reference-to-void); float literal bounds and the keyword bounds
+  `true`/`false` (not TT_LITERAL, so outside pa7.gram; reference
+  accepts, we reject).
+- `int a[18446744073709551615ull]`: well-formed per the handout rule
+  (size_t-representable, > 0); we accept, the reference rejects.
+
+## Architecture Review
+
+- Ownership: every semantic fact has one representation — types are
+  immutable shared `Type` nodes built by factories that encode the
+  clause-8 composition rules (cv distribution, collapsing, 8.3.5p5)
+  exactly once; namespace identity is the `Namespace*` (aliases bind
+  the same object, so alias-qualified redeclaration needs no special
+  case); "prints as unnamed" is `name.empty()` (the audit removed a
+  duplicated `is_unnamed` flag); variable-vs-function is the binding
+  kind, stamped from the declared type at creation. Nothing re-derives
+  facts from token text after the point of parse.
+- Phase boundaries: the PA5 pipeline is reused byte-for-byte
+  (`Preprocessor` → `PostTokenizer`), the semantic parser consumes
+  `PostToken` directly because the array-bound rule needs literal type
+  and value bytes the PA6 `ParseToken` folding discards; the PA6
+  recognizer is untouched. Declared-before-use falls out of building
+  the model during one forward parse — lookups can only see prior
+  declarations, so no separate visibility bookkeeping exists.
+- Lookup: 3.4.1/7.3.4 and 3.4.3.2 live in `name_lookup.cpp` as pure
+  functions over the model; the parser's disambiguation
+  (`ScanIsTypeName`) reuses the same lookups speculatively, which is
+  sound because they never mutate. The transitive directive closure is
+  memoized per scope chain (`DirectiveClosureCache`), invalidated at
+  the two mutation points (explicit directive, namespace creation with
+  its implicit directive).
+- Robustness: recursion depth is bounded only by input nesting, so
+  nsdecl adopts recog's audited large-stack worker-thread strategy
+  (512MB virtual); the reference segfaults at ~20k-deep parenthesized
+  declarators, ours handles 1M in ~4.6s.
+
+## Final Architecture Review
+
+Re-checked after the audit changes: no fallback success paths (every
+output line flows from a completed phase 1-7 pipeline plus a full
+parse to EOF; all errors exit EXIT_FAILURE), no test-shaped gates, no
+stringly facts on hot paths, and the only quadratic that remains in
+lookup — probing each anchored directive's bindings per scope — is the
+semantic definition of 7.3.4 visibility, runs ~7x faster than the
+reference on a 3000-directive adversarial input, and is bounded by the
+directive count of real programs. The sema/ model (arena + raw
+non-owning pointers + immutable shared types) is the intended base for
+PA8 nsinit: linkage and initialization attach to `DeclaredEntity`
+without reshaping namespaces, lookup, or the parser.

@@ -1,0 +1,12 @@
+1 translation units
+start translation unit course/pa7/directive-anchor-sibling.t
+start unnamed namespace
+start namespace P
+start namespace Q1
+end namespace
+start namespace Q3
+variable b int
+end namespace
+end namespace
+end namespace
+end translation unit

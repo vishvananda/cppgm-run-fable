@@ -8,16 +8,14 @@ SemaModel::SemaModel()
 {
 	namespaces_.emplace_back(new Namespace());
 	global_ = namespaces_.back().get();
-	global_->is_unnamed = true;
 }
 
-Namespace* SemaModel::CreateNamespace(const string& name, bool is_unnamed,
-                                      bool is_inline, Namespace* parent)
+Namespace* SemaModel::CreateNamespace(const string& name, bool is_inline,
+                                      Namespace* parent)
 {
 	namespaces_.emplace_back(new Namespace());
 	Namespace* ns = namespaces_.back().get();
 	ns->name = name;
-	ns->is_unnamed = is_unnamed;
 	ns->is_inline = is_inline;
 	ns->parent = parent;
 	return ns;
@@ -34,13 +32,11 @@ DeclaredEntity* SemaModel::CreateEntity(const string& name,
 }
 
 Namespace* AddMemberNamespace(SemaModel& model, Namespace& parent,
-                              const string& name, bool is_unnamed,
-                              bool is_inline)
+                              const string& name, bool is_inline)
 {
-	Namespace* ns = model.CreateNamespace(is_unnamed ? string() : name,
-	                                      is_unnamed, is_inline, &parent);
+	Namespace* ns = model.CreateNamespace(name, is_inline, &parent);
 	parent.members.push_back(ns);
-	if (is_unnamed)
+	if (name.empty())
 		parent.unnamed_member = ns;
 	else
 	{
@@ -49,7 +45,7 @@ Namespace* AddMemberNamespace(SemaModel& model, Namespace& parent,
 		binding.target = ns;
 		parent.bindings[name] = binding;
 	}
-	if (is_unnamed || is_inline)
+	if (name.empty() || is_inline)
 		AddUsingDirective(parent, ns);
 	return ns;
 }

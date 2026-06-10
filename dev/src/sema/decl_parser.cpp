@@ -223,7 +223,10 @@ void DeclParser::ParseNamespaceDefinition()
 			ns = it->second.target;
 	}
 	if (!ns)
-		ns = AddMemberNamespace(model_, parent, name, is_unnamed, is_inline);
+	{
+		ns = AddMemberNamespace(model_, parent, name, is_inline);
+		lookup_cache_.Invalidate();
+	}
 	scopes_.push_back(ns);
 	ParseDeclarationSeq();
 	ExpectSimple(OP_RBRACE);
@@ -250,6 +253,7 @@ void DeclParser::ParseUsingDirective()
 	Namespace* target = ParseNamespaceSpecifier();
 	ExpectSimple(OP_SEMICOLON);
 	AddUsingDirective(*scopes_.back(), target);
+	lookup_cache_.Invalidate();
 }
 
 void DeclParser::ParseUsingDeclaration()
@@ -397,7 +401,7 @@ const Binding* DeclParser::ResolveComponents(bool root_global,
                                              ELookupFilter filter) const
 {
 	if (!root_global && path.empty())
-		return UnqualifiedLookup(scopes_, last, filter);
+		return UnqualifiedLookup(scopes_, last, filter, &lookup_cache_);
 	Namespace* ns;
 	size_t start = 0;
 	if (root_global)
@@ -405,7 +409,8 @@ const Binding* DeclParser::ResolveComponents(bool root_global,
 	else
 	{
 		const Binding* found =
-			UnqualifiedLookup(scopes_, path[0], LF_NAMESPACES_ONLY);
+			UnqualifiedLookup(scopes_, path[0], LF_NAMESPACES_ONLY,
+			                  &lookup_cache_);
 		if (!found)
 			return 0;
 		ns = found->target;

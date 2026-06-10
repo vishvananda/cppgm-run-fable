@@ -1,0 +1,15 @@
+1 translation units
+start translation unit course/pa7/bound-forms.t
+start unnamed namespace
+variable a1 array of 97 int
+variable a3 array of 127 int
+variable a4 array of 1 int
+variable a5 array of 2147483647 int
+variable a6 array of 4294967295 int
+variable a8 array of 1 int
+variable a9 array of 120 char16_t
+variable a10 array of 121 char32_t
+variable a11 array of 122 wchar_t
+variable a12 array of 8 int
+end namespace
+end translation unit

@@ -1,0 +1,17 @@
+1 translation units
+start translation unit course/pa7/inline-alias-deep.t
+start unnamed namespace
+variable a int
+variable c char
+variable d char
+variable e int
+start namespace I0
+start namespace I1
+inline namespace
+variable v int
+start namespace Deep
+end namespace
+end namespace
+end namespace
+end namespace
+end translation unit

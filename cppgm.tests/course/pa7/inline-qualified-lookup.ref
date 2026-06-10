@@ -1,0 +1,17 @@
+1 translation units
+start translation unit course/pa7/inline-qualified-lookup.t
+start unnamed namespace
+variable a long int
+variable b short int
+variable c long int
+start namespace X
+start namespace Y
+inline namespace
+start namespace Z
+inline namespace
+variable deep int
+end namespace
+end namespace
+end namespace
+end namespace
+end translation unit

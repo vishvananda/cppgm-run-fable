@@ -1,0 +1,605 @@
+1 translation units
+start translation unit course/pa7/directive-chain.t
+start unnamed namespace
+variable v0 int
+variable v1 int
+variable v2 int
+variable v3 int
+variable v4 int
+variable v5 int
+variable v6 int
+variable v7 int
+variable v8 int
+variable v9 int
+variable v10 int
+variable v11 int
+variable v12 int
+variable v13 int
+variable v14 int
+variable v15 int
+variable v16 int
+variable v17 int
+variable v18 int
+variable v19 int
+variable v20 int
+variable v21 int
+variable v22 int
+variable v23 int
+variable v24 int
+variable v25 int
+variable v26 int
+variable v27 int
+variable v28 int
+variable v29 int
+variable v30 int
+variable v31 int
+variable v32 int
+variable v33 int
+variable v34 int
+variable v35 int
+variable v36 int
+variable v37 int
+variable v38 int
+variable v39 int
+variable v40 int
+variable v41 int
+variable v42 int
+variable v43 int
+variable v44 int
+variable v45 int
+variable v46 int
+variable v47 int
+variable v48 int
+variable v49 int
+variable v50 int
+variable v51 int
+variable v52 int
+variable v53 int
+variable v54 int
+variable v55 int
+variable v56 int
+variable v57 int
+variable v58 int
+variable v59 int
+variable v60 int
+variable v61 int
+variable v62 int
+variable v63 int
+variable v64 int
+variable v65 int
+variable v66 int
+variable v67 int
+variable v68 int
+variable v69 int
+variable v70 int
+variable v71 int
+variable v72 int
+variable v73 int
+variable v74 int
+variable v75 int
+variable v76 int
+variable v77 int
+variable v78 int
+variable v79 int
+variable v80 int
+variable v81 int
+variable v82 int
+variable v83 int
+variable v84 int
+variable v85 int
+variable v86 int
+variable v87 int
+variable v88 int
+variable v89 int
+variable v90 int
+variable v91 int
+variable v92 int
+variable v93 int
+variable v94 int
+variable v95 int
+variable v96 int
+variable v97 int
+variable v98 int
+variable v99 int
+variable v100 int
+variable v101 int
+variable v102 int
+variable v103 int
+variable v104 int
+variable v105 int
+variable v106 int
+variable v107 int
+variable v108 int
+variable v109 int
+variable v110 int
+variable v111 int
+variable v112 int
+variable v113 int
+variable v114 int
+variable v115 int
+variable v116 int
+variable v117 int
+variable v118 int
+variable v119 int
+variable v120 int
+variable v121 int
+variable v122 int
+variable v123 int
+variable v124 int
+variable v125 int
+variable v126 int
+variable v127 int
+variable v128 int
+variable v129 int
+variable v130 int
+variable v131 int
+variable v132 int
+variable v133 int
+variable v134 int
+variable v135 int
+variable v136 int
+variable v137 int
+variable v138 int
+variable v139 int
+variable v140 int
+variable v141 int
+variable v142 int
+variable v143 int
+variable v144 int
+variable v145 int
+variable v146 int
+variable v147 int
+variable v148 int
+variable v149 int
+variable v150 int
+variable v151 int
+variable v152 int
+variable v153 int
+variable v154 int
+variable v155 int
+variable v156 int
+variable v157 int
+variable v158 int
+variable v159 int
+variable v160 int
+variable v161 int
+variable v162 int
+variable v163 int
+variable v164 int
+variable v165 int
+variable v166 int
+variable v167 int
+variable v168 int
+variable v169 int
+variable v170 int
+variable v171 int
+variable v172 int
+variable v173 int
+variable v174 int
+variable v175 int
+variable v176 int
+variable v177 int
+variable v178 int
+variable v179 int
+variable v180 int
+variable v181 int
+variable v182 int
+variable v183 int
+variable v184 int
+variable v185 int
+variable v186 int
+variable v187 int
+variable v188 int
+variable v189 int
+variable v190 int
+variable v191 int
+variable v192 int
+variable v193 int
+variable v194 int
+variable v195 int
+variable v196 int
+variable v197 int
+variable v198 int
+variable v199 int
+start namespace A0
+end namespace
+start namespace A1
+end namespace
+start namespace A2
+end namespace
+start namespace A3
+end namespace
+start namespace A4
+end namespace
+start namespace A5
+end namespace
+start namespace A6
+end namespace
+start namespace A7
+end namespace
+start namespace A8
+end namespace
+start namespace A9
+end namespace
+start namespace A10
+end namespace
+start namespace A11
+end namespace
+start namespace A12
+end namespace
+start namespace A13
+end namespace
+start namespace A14
+end namespace
+start namespace A15
+end namespace
+start namespace A16
+end namespace
+start namespace A17
+end namespace
+start namespace A18
+end namespace
+start namespace A19
+end namespace
+start namespace A20
+end namespace
+start namespace A21
+end namespace
+start namespace A22
+end namespace
+start namespace A23
+end namespace
+start namespace A24
+end namespace
+start namespace A25
+end namespace
+start namespace A26
+end namespace
+start namespace A27
+end namespace
+start namespace A28
+end namespace
+start namespace A29
+end namespace
+start namespace A30
+end namespace
+start namespace A31
+end namespace
+start namespace A32
+end namespace
+start namespace A33
+end namespace
+start namespace A34
+end namespace
+start namespace A35
+end namespace
+start namespace A36
+end namespace
+start namespace A37
+end namespace
+start namespace A38
+end namespace
+start namespace A39
+end namespace
+start namespace A40
+end namespace
+start namespace A41
+end namespace
+start namespace A42
+end namespace
+start namespace A43
+end namespace
+start namespace A44
+end namespace
+start namespace A45
+end namespace
+start namespace A46
+end namespace
+start namespace A47
+end namespace
+start namespace A48
+end namespace
+start namespace A49
+end namespace
+start namespace A50
+end namespace
+start namespace A51
+end namespace
+start namespace A52
+end namespace
+start namespace A53
+end namespace
+start namespace A54
+end namespace
+start namespace A55
+end namespace
+start namespace A56
+end namespace
+start namespace A57
+end namespace
+start namespace A58
+end namespace
+start namespace A59
+end namespace
+start namespace A60
+end namespace
+start namespace A61
+end namespace
+start namespace A62
+end namespace
+start namespace A63
+end namespace
+start namespace A64
+end namespace
+start namespace A65
+end namespace
+start namespace A66
+end namespace
+start namespace A67
+end namespace
+start namespace A68
+end namespace
+start namespace A69
+end namespace
+start namespace A70
+end namespace
+start namespace A71
+end namespace
+start namespace A72
+end namespace
+start namespace A73
+end namespace
+start namespace A74
+end namespace
+start namespace A75
+end namespace
+start namespace A76
+end namespace
+start namespace A77
+end namespace
+start namespace A78
+end namespace
+start namespace A79
+end namespace
+start namespace A80
+end namespace
+start namespace A81
+end namespace
+start namespace A82
+end namespace
+start namespace A83
+end namespace
+start namespace A84
+end namespace
+start namespace A85
+end namespace
+start namespace A86
+end namespace
+start namespace A87
+end namespace
+start namespace A88
+end namespace
+start namespace A89
+end namespace
+start namespace A90
+end namespace
+start namespace A91
+end namespace
+start namespace A92
+end namespace
+start namespace A93
+end namespace
+start namespace A94
+end namespace
+start namespace A95
+end namespace
+start namespace A96
+end namespace
+start namespace A97
+end namespace
+start namespace A98
+end namespace
+start namespace A99
+end namespace
+start namespace A100
+end namespace
+start namespace A101
+end namespace
+start namespace A102
+end namespace
+start namespace A103
+end namespace
+start namespace A104
+end namespace
+start namespace A105
+end namespace
+start namespace A106
+end namespace
+start namespace A107
+end namespace
+start namespace A108
+end namespace
+start namespace A109
+end namespace
+start namespace A110
+end namespace
+start namespace A111
+end namespace
+start namespace A112
+end namespace
+start namespace A113
+end namespace
+start namespace A114
+end namespace
+start namespace A115
+end namespace
+start namespace A116
+end namespace
+start namespace A117
+end namespace
+start namespace A118
+end namespace
+start namespace A119
+end namespace
+start namespace A120
+end namespace
+start namespace A121
+end namespace
+start namespace A122
+end namespace
+start namespace A123
+end namespace
+start namespace A124
+end namespace
+start namespace A125
+end namespace
+start namespace A126
+end namespace
+start namespace A127
+end namespace
+start namespace A128
+end namespace
+start namespace A129
+end namespace
+start namespace A130
+end namespace
+start namespace A131
+end namespace
+start namespace A132
+end namespace
+start namespace A133
+end namespace
+start namespace A134
+end namespace
+start namespace A135
+end namespace
+start namespace A136
+end namespace
+start namespace A137
+end namespace
+start namespace A138
+end namespace
+start namespace A139
+end namespace
+start namespace A140
+end namespace
+start namespace A141
+end namespace
+start namespace A142
+end namespace
+start namespace A143
+end namespace
+start namespace A144
+end namespace
+start namespace A145
+end namespace
+start namespace A146
+end namespace
+start namespace A147
+end namespace
+start namespace A148
+end namespace
+start namespace A149
+end namespace
+start namespace A150
+end namespace
+start namespace A151
+end namespace
+start namespace A152
+end namespace
+start namespace A153
+end namespace
+start namespace A154
+end namespace
+start namespace A155
+end namespace
+start namespace A156
+end namespace
+start namespace A157
+end namespace
+start namespace A158
+end namespace
+start namespace A159
+end namespace
+start namespace A160
+end namespace
+start namespace A161
+end namespace
+start namespace A162
+end namespace
+start namespace A163
+end namespace
+start namespace A164
+end namespace
+start namespace A165
+end namespace
+start namespace A166
+end namespace
+start namespace A167
+end namespace
+start namespace A168
+end namespace
+start namespace A169
+end namespace
+start namespace A170
+end namespace
+start namespace A171
+end namespace
+start namespace A172
+end namespace
+start namespace A173
+end namespace
+start namespace A174
+end namespace
+start namespace A175
+end namespace
+start namespace A176
+end namespace
+start namespace A177
+end namespace
+start namespace A178
+end namespace
+start namespace A179
+end namespace
+start namespace A180
+end namespace
+start namespace A181
+end namespace
+start namespace A182
+end namespace
+start namespace A183
+end namespace
+start namespace A184
+end namespace
+start namespace A185
+end namespace
+start namespace A186
+end namespace
+start namespace A187
+end namespace
+start namespace A188
+end namespace
+start namespace A189
+end namespace
+start namespace A190
+end namespace
+start namespace A191
+end namespace
+start namespace A192
+end namespace
+start namespace A193
+end namespace
+start namespace A194
+end namespace
+start namespace A195
+end namespace
+start namespace A196
+end namespace
+start namespace A197
+end namespace
+start namespace A198
+end namespace
+start namespace A199
+end namespace
+end namespace
+end translation unit

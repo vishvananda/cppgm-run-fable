@@ -25,14 +25,45 @@ enum ELookupFilter
 	LF_NAMESPACES_ONLY
 };
 
+// One using-directive's contribution to unqualified lookup: the
+// nominated namespace's names appear as if declared in `anchor`
+// (7.3.4p2).
+struct ActiveDirective
+{
+	const Namespace* anchor;
+	const Namespace* nominated;
+};
+
+// Memo of the transitive directive closure for one lexical scope chain
+// (the chain is determined by its innermost namespace, so that pointer
+// is the key). The holder must call Invalidate() whenever a
+// using-directive is added anywhere in the model - explicit or implicit
+// (unnamed/inline member creation) - because closures reach namespaces
+// outside the current chain; entity and alias bindings do not affect
+// the closure.
+struct DirectiveClosureCache
+{
+	DirectiveClosureCache() : scope(0) {}
+
+	void Invalidate()
+	{
+		scope = 0;
+	}
+
+	const Namespace* scope;  // null when invalid
+	vector<ActiveDirective> directives;
+};
+
 // 3.4.1 with 7.3.4: walks the enclosing namespaces innermost-first;
 // at each scope the visible declarations are its own plus those of
 // every namespace nominated by an active using-directive (transitively
 // closed) whose anchor - the nearest namespace enclosing both the
 // directive and the nominated namespace - is that scope. `scopes` is
-// the lexical chain, global first.
+// the lexical chain, global first. `cache` (optional) memoizes the
+// directive closure between consecutive lookups in the same scope.
 const Binding* UnqualifiedLookup(const vector<Namespace*>& scopes,
-                                 const string& name, ELookupFilter filter);
+                                 const string& name, ELookupFilter filter,
+                                 DirectiveClosureCache* cache = 0);
 
 // 3.4.3.2: searches `ns` and its inline namespace set; only if that
 // finds nothing, recurses (each namespace at most once) into the

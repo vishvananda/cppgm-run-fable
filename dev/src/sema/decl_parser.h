@@ -192,4 +192,10 @@ private:
 	PostToken eof_;
 	SemaModel& model_;
 	vector<Namespace*> scopes_;  // lexical namespace chain, global first
+
+	// Directive-closure memo for UnqualifiedLookup; invalidated at the
+	// two places that add using-directives (ParseUsingDirective and
+	// namespace creation, whose unnamed/inline forms add the implicit
+	// directive). Mutable: lookups are logically const.
+	mutable DirectiveClosureCache lookup_cache_;
 };

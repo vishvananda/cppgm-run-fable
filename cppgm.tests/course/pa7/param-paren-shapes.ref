@@ -1,0 +1,11 @@
+1 translation units
+start translation unit course/pa7/param-paren-shapes.t
+start unnamed namespace
+function f1 function of (pointer to function of () returning int) returning int
+function f3 function of (pointer to function of (int) returning int) returning int
+function f4 function of (pointer to function of (pointer to function of (int) returning int) returning int) returning int
+function f5 function of (pointer to function of (...) returning int) returning int
+function g1 function of (int) returning int
+function k function of (pointer to function of () returning int) returning int
+end namespace
+end translation unit

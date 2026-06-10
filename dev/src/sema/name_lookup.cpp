@@ -41,12 +41,6 @@ const Namespace* DirectiveAnchor(const Namespace* container,
 	return walk;
 }
 
-struct ActiveDirective
-{
-	const Namespace* anchor;
-	const Namespace* nominated;
-};
-
 typedef set<pair<const Namespace*, const Namespace*>> DirectiveSeen;
 
 // 7.3.4p4: directives are transitive for unqualified lookup - a
@@ -109,20 +103,33 @@ const Binding* QualifiedLookupRec(const Namespace& ns, const string& name,
 } // namespace
 
 const Binding* UnqualifiedLookup(const vector<Namespace*>& scopes,
-                                 const string& name, ELookupFilter filter)
+                                 const string& name, ELookupFilter filter,
+                                 DirectiveClosureCache* cache)
 {
-	vector<ActiveDirective> directives;
-	DirectiveSeen seen;
-	for (size_t i = 0; i < scopes.size(); i++)
-		for (size_t j = 0; j < scopes[i]->using_directives.size(); j++)
-			AddActiveDirectives(scopes[i], scopes[i]->using_directives[j],
-			                    seen, directives);
+	vector<ActiveDirective> local;
+	const vector<ActiveDirective>* directives = &local;
+	if (cache && cache->scope == scopes.back())
+		directives = &cache->directives;
+	else
+	{
+		DirectiveSeen seen;
+		for (size_t i = 0; i < scopes.size(); i++)
+			for (size_t j = 0; j < scopes[i]->using_directives.size(); j++)
+				AddActiveDirectives(scopes[i], scopes[i]->using_directives[j],
+				                    seen, local);
+		if (cache)
+		{
+			cache->directives.swap(local);
+			cache->scope = scopes.back();
+			directives = &cache->directives;
+		}
+	}
 	for (size_t i = scopes.size(); i-- > 0;)
 	{
 		const Binding* found = MatchInNamespace(*scopes[i], name, filter);
-		for (size_t j = 0; !found && j < directives.size(); j++)
-			if (directives[j].anchor == scopes[i])
-				found = MatchInNamespace(*directives[j].nominated, name,
+		for (size_t j = 0; !found && j < directives->size(); j++)
+			if ((*directives)[j].anchor == scopes[i])
+				found = MatchInNamespace(*(*directives)[j].nominated, name,
 				                         filter);
 		if (found)
 			return found;

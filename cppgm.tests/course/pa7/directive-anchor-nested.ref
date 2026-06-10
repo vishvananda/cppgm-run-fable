@@ -1,0 +1,12 @@
+1 translation units
+start translation unit course/pa7/directive-anchor-nested.t
+start unnamed namespace
+start namespace A2
+start namespace B
+variable x int
+start namespace C
+end namespace
+end namespace
+end namespace
+end namespace
+end translation unit

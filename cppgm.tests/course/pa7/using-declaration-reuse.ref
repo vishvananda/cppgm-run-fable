@@ -1,0 +1,13 @@
+1 translation units
+start translation unit course/pa7/using-declaration-reuse.t
+start unnamed namespace
+variable s short int
+start namespace U
+variable lv long int
+end namespace
+start namespace W
+end namespace
+start namespace W2
+end namespace
+end namespace
+end translation unit

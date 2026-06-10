@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include <pthread.h>
+
 using namespace std;
 
 #include "post_token.h"
@@ -53,6 +55,56 @@ void DescribeTranslationUnit(ostream& out, const string& srcfile,
 	out << "end translation unit\n";
 }
 
+// Recursive descent depth is proportional to declarator nesting, so
+// each srcfile runs on a worker thread with a large stack (virtual
+// memory; pages commit only as touched) instead of the default ~8MB.
+const size_t kParseStackBytes = 512u << 20;
+
+struct DescribeTask
+{
+	ostream* out;
+	const string* srcfile;
+	const vector<pair<string, string>>* predefined;
+	bool failed;
+	string message;
+};
+
+void* DescribeThreadMain(void* opaque)
+{
+	DescribeTask* task = static_cast<DescribeTask*>(opaque);
+	try
+	{
+		DescribeTranslationUnit(*task->out, *task->srcfile,
+		                        *task->predefined);
+	}
+	catch (const exception& e)
+	{
+		task->failed = true;
+		task->message = e.what();
+	}
+	return 0;
+}
+
+void DescribeOnLargeStack(ostream& out, const string& srcfile,
+                          const vector<pair<string, string>>& predefined)
+{
+	DescribeTask task;
+	task.out = &out;
+	task.srcfile = &srcfile;
+	task.predefined = &predefined;
+	task.failed = false;
+	pthread_attr_t attributes;
+	pthread_t thread;
+	if (pthread_attr_init(&attributes) != 0 ||
+	    pthread_attr_setstacksize(&attributes, kParseStackBytes) != 0 ||
+	    pthread_create(&thread, &attributes, DescribeThreadMain, &task) != 0)
+		throw runtime_error("cannot start parse worker thread");
+	pthread_join(thread, 0);
+	pthread_attr_destroy(&attributes);
+	if (task.failed)
+		throw runtime_error(task.message);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -88,7 +140,7 @@ int main(int argc, char** argv)
 		out << nsrcfiles << " translation units\n";
 
 		for (size_t i = 0; i < nsrcfiles; i++)
-			DescribeTranslationUnit(out, args[i + 2], predefined);
+			DescribeOnLargeStack(out, args[i + 2], predefined);
 
 		return EXIT_SUCCESS;
 	}
