@@ -35,9 +35,10 @@ bool GetPreprocFileId(const string& path, PreprocFileId& out_fileid)
 
 namespace {
 
-// The ref caps include nesting ("Maximum include nexting reached");
-// generous bound well above any sane include tree.
-const int kMaxIncludeDepth = 256;
+// Reference-pinned include nesting cap ("Maximum include nexting
+// reached"): a chain of 198 nested includes succeeds and the 199th
+// fails (bisected against preproc-ref).
+const int kMaxIncludeDepth = 198;
 
 // Phases 1-3 over an internal spelling (predefined macro replacement
 // lists, destringized _Pragma contents); new-lines are dropped.
@@ -214,7 +215,7 @@ vector<PPToken> Preprocessor::TokenizeSource(const string& bytes,
 	TokenizePPTokens(source, collector, &collector);
 	for (size_t i = 0; i < collector.tokens.size(); i++)
 		collector.tokens[i].file = file_index;
-	return collector.tokens;
+	return std::move(collector.tokens);
 }
 
 bool Preprocessor::IsActive() const
@@ -226,9 +227,9 @@ bool Preprocessor::IsActive() const
 // a directive and its new-line ends it; every directive delimits the
 // text-sequences around it. Inactive text is dropped without expansion.
 // A file must close every conditional group it opened (16.1: the whole
-// group lives in one file).
-void Preprocessor::ProcessFileTokens(const vector<PPToken>& tokens,
-                                     int file_index)
+// group lives in one file). Owns `tokens` so each one moves (not
+// copies) into its directive line or text-sequence.
+void Preprocessor::ProcessFileTokens(vector<PPToken> tokens, int file_index)
 {
 	int saved_file = current_file_;
 	size_t saved_base = cond_base_;
@@ -256,7 +257,7 @@ void Preprocessor::ProcessFileTokens(const vector<PPToken>& tokens,
 			vector<PPToken> line;
 			for (i++; i < tokens.size() && tokens[i].kind != PPT_NEW_LINE;
 			     i++)
-				line.push_back(tokens[i]);
+				line.push_back(std::move(tokens[i]));
 			const PPToken& terminator =
 				i < tokens.size() ? tokens[i]
 				                  : (line.empty() ? token : line.back());
@@ -266,7 +267,7 @@ void Preprocessor::ProcessFileTokens(const vector<PPToken>& tokens,
 		line_start = false;
 		if (IsActive())
 		{
-			text.push_back(token);
+			text.push_back(std::move(tokens[i]));
 			if (newline_ws)
 			{
 				text.back().ws_before = true;
@@ -396,7 +397,10 @@ void Preprocessor::HandleElse(const vector<PPToken>& args)
 	CondGroup& group = conds_.back();
 	if (group.seen_else)
 		throw runtime_error("multiple #else in one #if group");
-	if (group.parent_active && !args.empty())
+	// reference-pinned: extra tokens are an error only when this #else
+	// becomes the active branch (ignored after a taken branch, unlike
+	// #endif whose check needs only parent_active)
+	if (group.parent_active && !group.taken && !args.empty())
 		throw runtime_error("extra tokens after #else");
 	group.seen_else = true;
 	group.active = group.parent_active && !group.taken;
@@ -583,9 +587,13 @@ void Preprocessor::HandlePragma(const vector<PPToken>& args)
 
 void Preprocessor::PragmaOnceCurrentFile()
 {
+	// reference-pinned: a presumed __FILE__ that cannot be stat'ed (e.g.
+	// rewritten by #line to a nonexistent name) is an error, not a no-op
 	PreprocFileId fileid;
-	if (GetPreprocFileId(files_[current_file_].presumed_name, fileid))
-		pragma_onced_.insert(fileid);
+	if (!GetPreprocFileId(files_[current_file_].presumed_name, fileid))
+		throw runtime_error("cannot stat #pragma once file: " +
+		                    files_[current_file_].presumed_name);
+	pragma_onced_.insert(fileid);
 }
 
 // Course-defined _Pragma operator: destringize and dispatch through the
@@ -603,7 +611,7 @@ void Preprocessor::FlushText(vector<PPToken>& text)
 {
 	if (text.empty())
 		return;
-	vector<PPToken> replaced = expander_.ExpandTextSequence(text);
+	vector<PPToken> replaced = expander_.ExpandTextSequence(std::move(text));
 	text.clear();
 	size_t i = 0;
 	while (i < replaced.size())

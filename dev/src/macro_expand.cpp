@@ -1,6 +1,8 @@
 #include "macro_expand.h"
 
+#include <iterator>
 #include <stdexcept>
+#include <utility>
 
 #include "pp_tokenizer.h"
 #include "source_translation.h"
@@ -29,15 +31,25 @@ vector<PPToken> MacroExpander::ExpandTextSequence(const vector<PPToken>& tokens)
 	return output;
 }
 
+vector<PPToken> MacroExpander::ExpandTextSequence(vector<PPToken>&& tokens)
+{
+	deque<PPToken> input(std::make_move_iterator(tokens.begin()),
+	                     std::make_move_iterator(tokens.end()));
+	tokens.clear();
+	vector<PPToken> output;
+	Scan(input, output);
+	return output;
+}
+
 void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 {
 	while (!input.empty())
 	{
-		PPToken head = input.front();
+		PPToken head = std::move(input.front());
 		input.pop_front();
 		if (head.kind != PPT_IDENTIFIER)
 		{
-			output.push_back(head);
+			output.push_back(std::move(head));
 			continue;
 		}
 		if (head.data == kMacroVaArgs)
@@ -49,13 +61,13 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 		    (macro->function_like &&
 		     (input.empty() || !IsOp(input.front(), "("))))
 		{
-			output.push_back(head);
+			output.push_back(std::move(head));
 			continue;
 		}
 		if (PaintContains(head.blacklist, head.data))
 		{
 			head.noninvokable = true;
-			output.push_back(head);
+			output.push_back(std::move(head));
 			continue;
 		}
 		if (macro->builtin != kBuiltinNone)
@@ -68,7 +80,7 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 			token.blacklist = paints_.Insert(head.blacklist, macro->name);
 			token.file = head.file;
 			token.line = head.line;
-			input.push_front(token);
+			input.push_front(std::move(token));
 			continue;
 		}
 		vector<vector<PPToken>> args;
@@ -90,7 +102,8 @@ void MacroExpander::Scan(deque<PPToken>& input, vector<PPToken>& output)
 			replaced[i].file = head.file;
 			replaced[i].line = tail.line;
 		}
-		input.insert(input.begin(), replaced.begin(), replaced.end());
+		input.insert(input.begin(), std::make_move_iterator(replaced.begin()),
+		             std::make_move_iterator(replaced.end()));
 	}
 }
 
@@ -103,12 +116,12 @@ vector<vector<PPToken>> MacroExpander::CollectArguments(
 	int depth = 0;
 	while (!input.empty())
 	{
-		PPToken token = input.front();
+		PPToken token = std::move(input.front());
 		input.pop_front();
 		if (depth == 0 && IsOp(token, ")"))
 		{
-			args.push_back(current);
-			close = token;
+			args.push_back(std::move(current));
+			close = std::move(token);
 			// () invokes a zero-parameter macro with no arguments. All
 			// other empty spans between delimiters are empty arguments.
 			if (named == 0 && !macro.variadic && args.size() == 1 &&
@@ -131,7 +144,7 @@ vector<vector<PPToken>> MacroExpander::CollectArguments(
 		if (depth == 0 && IsOp(token, ",") &&
 		    (!macro.variadic || args.size() < named))
 		{
-			args.push_back(current);
+			args.push_back(std::move(current));
 			current.clear();
 			continue;
 		}
@@ -139,7 +152,7 @@ vector<vector<PPToken>> MacroExpander::CollectArguments(
 			depth++;
 		else if (IsOp(token, ")"))
 			depth--;
-		current.push_back(token);
+		current.push_back(std::move(token));
 	}
 	throw runtime_error("unterminated invocation of macro " + macro.name);
 }
@@ -171,7 +184,7 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 			PPToken text = Stringize(args[list[i + 1].param_index]);
 			text.ws_before = token.ws_before;
 			text.blacklist = base;
-			items.push_back(text);
+			items.push_back(std::move(text));
 			i++;
 			continue;
 		}
@@ -185,7 +198,7 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 		{
 			PPToken copy = token;
 			copy.blacklist = base;
-			items.push_back(copy);
+			items.push_back(std::move(copy));
 			continue;
 		}
 		bool next_to_paste = (!items.empty() && items.back().paste_op) ||
@@ -219,7 +232,7 @@ vector<PPToken> MacroExpander::Substitute(const MacroDefinition& macro,
 		{
 			PPToken copy = (*source)[j];
 			copy.blacklist = paints_.Union(copy.blacklist, arg_paint);
-			items.push_back(copy);
+			items.push_back(std::move(copy));
 		}
 		items[first].ws_before = token.ws_before;
 	}
@@ -243,40 +256,40 @@ void MacroExpander::PastePass(vector<PPToken>& items,
 	{
 		if (!items[i].paste_op)
 		{
-			result.push_back(items[i]);
+			result.push_back(std::move(items[i]));
 			i++;
 			continue;
 		}
 		// definition validation: ## is never first or last in the
 		// replacement list, so both operands exist
-		PPToken left = result.back();
+		PPToken left = std::move(result.back());
 		result.pop_back();
-		PPToken right = items[i + 1];
+		PPToken right = std::move(items[i + 1]);
 		right.paste_op = false;
 		i += 2;
 		if (right.kind == PPT_PLACEMARKER)
 		{
 			// covers placemarker ## placemarker -> placemarker
-			result.push_back(left);
+			result.push_back(std::move(left));
 		}
 		else if (left.kind == PPT_PLACEMARKER)
 		{
 			right.ws_before = left.ws_before;
-			result.push_back(right);
+			result.push_back(std::move(right));
 		}
 		else
 		{
 			PPToken pasted = RetokenizeSpelling(left.data + right.data);
 			pasted.ws_before = left.ws_before;
 			pasted.blacklist = base_paint;
-			result.push_back(pasted);
+			result.push_back(std::move(pasted));
 		}
 	}
 	items.clear();
 	for (size_t j = 0; j < result.size(); j++)
 	{
 		if (result[j].kind != PPT_PLACEMARKER)
-			items.push_back(result[j]);
+			items.push_back(std::move(result[j]));
 	}
 }
 

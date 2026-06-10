@@ -51,8 +51,10 @@ public:
 	// New-lines must already be folded into ws_before by the caller.
 	// Arguments are expanded with the same entry point ("as if the
 	// argument formed the rest of the file" -- but in isolation, so a
-	// trailing function-like macro name stays unexpanded).
+	// trailing function-like macro name stays unexpanded). The rvalue
+	// form moves the sequence into the scan instead of copying it.
 	vector<PPToken> ExpandTextSequence(const vector<PPToken>& tokens);
+	vector<PPToken> ExpandTextSequence(vector<PPToken>&& tokens);
 
 private:
 	void Scan(deque<PPToken>& input, vector<PPToken>& output);

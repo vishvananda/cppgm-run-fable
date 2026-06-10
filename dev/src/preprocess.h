@@ -83,7 +83,7 @@ private:
 
 	bool IsActive() const;
 	vector<PPToken> TokenizeSource(const string& bytes, int file_index);
-	void ProcessFileTokens(const vector<PPToken>& tokens, int file_index);
+	void ProcessFileTokens(vector<PPToken> tokens, int file_index);
 	void ProcessDirective(const vector<PPToken>& line,
 	                      const PPToken& terminator);
 	void FlushText(vector<PPToken>& text);

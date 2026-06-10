@@ -109,11 +109,14 @@ an include stack:
   Ordering violations (`#elif` after `#else`, multiple `#else`,
   `#endif`/`#elif`/`#else` without a group in the same file) are
   errors even in inactive sections (170-nondir5, ref probes). Extra
-  tokens after `#else`/`#endif` are errors only when `parent_active`
-  (ref: "Illegal token after #endif"; ignored inside an inactive
-  parent, 170-nondir4). `#if`/`#elif` expressions are evaluated only
-  when they can decide (`parent_active && !taken`); otherwise their
-  tokens are skipped entirely (garbage allowed, exclude.t).
+  tokens after `#endif` are errors when `parent_active` (ref: "Illegal
+  token after #endif"; ignored inside an inactive parent, 170-nondir4);
+  extra tokens after `#else` are errors only when the `#else` becomes
+  the active branch (`parent_active && !taken` — audit-pinned: the ref
+  ignores `#else junk` after a taken branch). `#if`/`#elif`
+  expressions are evaluated only when they can decide
+  (`parent_active && !taken`); otherwise their tokens are skipped
+  entirely (garbage allowed, exclude.t).
 - Inactive sections process only the conditional directives; all other
   directives and text are skipped (bad `#define`s, bad invocations,
   missing includes are all fine — exclude.t).
@@ -136,17 +139,22 @@ an include stack:
   directory + nextf, when `__FILE__` has a `/`) then `nextf` against
   the CWD, testing existence with `PA5GetFileId`. The chosen path
   becomes the new instance's presumed name. A fileid in the pragma-once
-  set skips the include. Depth is capped (256; the ref also caps:
-  "Maximum include nexting reached"). At end of an included file (and
-  the srcfile) the conditional stack must be back at its entry depth.
+  set skips the include. The depth cap is reference-pinned at 198: a
+  chain of 198 nested includes succeeds and the 199th fails (bisected
+  against preproc-ref's "Maximum include nexting reached"). At end of
+  an included file (and the srcfile) the conditional stack must be
+  back at its entry depth.
 - `#line` (active only): macro-replace; accept `integer-literal` or
   `integer-literal string-literal` (any integer type — ref accepts
   `#line 16u` and `#line 0`); anything else is an error. Updates the
   current instance's offset (anchored at the directive's terminating
   new-line) and presumed name.
 - `#pragma` (active only): `once` (extra tokens are an error — ref)
-  adds fileid(presumed `__FILE__`) to the set; everything else,
-  including `cppgm_mock_unknown` and an empty pragma, is ignored.
+  adds fileid(presumed `__FILE__`) to the set; a presumed `__FILE__`
+  that cannot be stat'ed (e.g. rewritten by `#line` to a nonexistent
+  name) is an error, not a no-op (audit-pinned against the ref).
+  Everything else, including `cppgm_mock_unknown` and an empty pragma,
+  is ignored.
 - `#error` (active only): EXIT_FAILURE.
 - null directive: ignored. Non-directive: error when active, ignored
   when inactive.
@@ -182,3 +190,84 @@ gate only definedness and the fixed values' use in `#if`.
   extra-token rules, `#line 0`/`16u`, identifier-like-operator
   operands, unknown pragmas, include depth, concatenation across
   removed `_Pragma`s and inactive sections.
+
+## Architecture Review
+
+Findings of the post-implementation audit (see pa5/audit.md for the
+full probe, fuzz, and stress evidence):
+
+- Differential fuzzing against `preproc-ref` (~10k generated cases on
+  fresh seeds, filesystem-backed include trees, both error-biased and
+  valid-biased grammars) found two behavioral divergences, both fixed:
+  - Extra tokens after `#else` are an error only when the `#else`
+    becomes the active branch. The implementation checked
+    `parent_active` alone, rejecting `#if 1 ... #else junk` which the
+    reference accepts; `#endif`'s check really is `parent_active`
+    (probed both ways, and inside inactive parents per 170-nondir4).
+  - `#pragma once`/`_Pragma("once")` silently did nothing when the
+    presumed `__FILE__` (typically rewritten by `#line`) could not be
+    stat'ed. The reference errors; the silent path was exactly a
+    fallback-success bug, now a throw.
+- The include depth cap was a guess (256). Bisection pinned the
+  reference: a 198-deep chain succeeds with byte-identical output, the
+  199th level fails. `kMaxIncludeDepth` is now 198.
+- Stress comparison against the reference exposed avoidable copying in
+  the PA5 walk: `TokenizeSource` returned the collector's vector by
+  copy, every text/directive token was copied out of the file vector,
+  and the expander copied each sequence into its scan deque and copied
+  every produced token twice more on the rescan path. The walk now
+  owns its token vector and moves tokens through line collection,
+  text buffering (`ExpandTextSequence` gained an rvalue overload), and
+  the expander's scan/argument/substitute/paste paths. A 100k-line
+  `__LINE__`/paste storm dropped 2.76s -> 1.37s (ref 0.81s) and a
+  100k-directive nest 0.55s -> 0.21s (ref 0.20s); outputs stay
+  byte-identical and PA4's doubling chain is unchanged (0.34s vs ref
+  0.39s).
+- Scaling is linear: 50k/100k/200k/400k-line token files take
+  0.61/1.36/2.68/5.78s. Peak memory is proportional to the source file
+  (the materialized `TranslatedSource` + per-file token vector design
+  shared with every tool since PA1 — `posttoken` alone peaks at 229MB
+  on the same 8MB file, `macro` at 814MB, `preproc` at 627MB), where
+  the reference streams at a constant ~8MB. That constant-factor trade
+  is the project's established phase 1-3 architecture, not a PA5
+  regression; revisiting it means a streaming rewrite of the shared
+  pipeline, judged out of scope while every suite passes at 2-3x the
+  reference's wall clock on adversarial inputs and at parity on the
+  checked-in tests.
+
+## Final Architecture Review
+
+- Ownership: `preprocess` owns the phase-4 walk state (conditional
+  stack, file instances, pragma-once fileids, include depth) and is
+  the only writer of presumed file/line state; tokens carry only their
+  physical stamp (`file` index + `line`) set once at tokenize time.
+  `macro_table` owns builtin-ness as a typed enum; `macro_expand` owns
+  invocation semantics and asks an `IBuiltinTokenSource` for
+  dynamically valued tokens, so `__FILE__`/`__LINE__` flow through the
+  ordinary lookup/paint/placement path with no name sniffing in the
+  expander. `ctrl_expr` owns evaluation and exposes a typed
+  `CtrlExprResult`; `#if` truth is read from the value, never parsed
+  back out of the PA3 output string.
+- No fallback success paths: failed include searches, bad `#line`
+  operands, malformed `_Pragma` shapes, `#error`, non-directives in
+  active sections, dangling/extra conditional tokens (per the pinned
+  per-directive rules), un-stat-able `#pragma once` targets, dangling
+  groups at file end, and phase-7 `invalid` tokens all throw, and the
+  driver maps any throw to EXIT_FAILURE. Output is produced only by
+  the real phase 1-7 pipeline: TranslateSource + TokenizePPTokens into
+  the directive walk, the PA4 expander, and the PA2 PostTokenizer; the
+  predefined-macro spellings and `_Pragma` payloads are retokenized
+  through the same pipeline, never hand-assembled.
+- Shared-source regression risk was checked directly: the PA5 changes
+  to pp_tokenizer/pp_token/macro_table/macro_expand/ctrl_expr default
+  to prior behavior (no line sink, no builtins, function-pointer
+  `IsDefinedFn` still converts, `FinishLine` output strings
+  byte-stable), and `make test-report-through-pa5` passes 240/240
+  (PA1-PA4 suites included) after every audit change.
+- Performance: the walk is linear in file tokens plus tokens produced
+  by expansion; the tokenizer's line counter is a single incremental
+  scan; pragma-once fileid checks precede include re-reads; paint
+  interning behavior is unchanged from PA4. Stress cases (doubling
+  chain, deep/sequential includes, directive nests, pragma-once
+  storms) now run at or near reference speed with byte-identical
+  outputs.
