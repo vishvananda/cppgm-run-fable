@@ -503,7 +503,9 @@ AstExprPtr AstParser::ParseUnaryExpression()
 			{
 				node->type = move(type);
 				node->operands.push_back(move(operand));
-				return node;
+				// 5.2: the cast is a postfix-expression and accepts
+				// further postfix suffixes (`static_cast<T>(x)(y)`).
+				return ParsePostfixSuffixes(move(node));
 			}
 			Restore(state);
 			return AstExprPtr();
@@ -530,6 +532,11 @@ AstExprPtr AstParser::ParsePostfixExpression()
 	AstExprPtr expr = ParsePostfixRoot();
 	if (!expr)
 		return AstExprPtr();
+	return ParsePostfixSuffixes(move(expr));
+}
+
+AstExprPtr AstParser::ParsePostfixSuffixes(AstExprPtr expr)
+{
 	for (;;)
 	{
 		const ParseToken& token = Peek();

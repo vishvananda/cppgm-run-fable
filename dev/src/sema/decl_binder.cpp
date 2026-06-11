@@ -72,7 +72,7 @@ ConstValue SuccessorValue(const ConstValue& value, EFundamentalType type)
 
 DeclBinder::DeclBinder(TypesModel& model)
 	: model_(model), builder_(*this), current_(model.global()),
-	  current_fields_(0), anonymous_enums_(0)
+	  current_fields_(0), anonymous_enums_(0), in_c_linkage_(false)
 {
 }
 
@@ -89,6 +89,36 @@ const string& DeclBinder::PartName(const AstNamePart& part)
 	if (part.kind != NP_IDENTIFIER || part.tilde)
 		throw OutsideBoundary("name form");
 	return part.identifier;
+}
+
+string DeclBinder::DeclaredFunctionName(const AstNamePart& part)
+{
+	if (part.kind == NP_OPERATOR_FUNCTION)
+		return "operator " + part.operator_text;
+	return PartName(part);
+}
+
+void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
+                                     const DeclaratorInfo& composed,
+                                     bool deleted)
+{
+	// Locate the overload slot whose parameter list matches this
+	// declaration (entry 0 is binding.type).
+	size_t index = 0;
+	for (size_t i = 0; i < binding.overloads.size(); i++)
+		if (TypeEquals(binding.overloads[i], composed.type))
+			index = i + 1;
+	size_t count = binding.overloads.size() + 1;
+	binding.fn_defaults.resize(count);
+	binding.fn_deleted.resize(count, false);
+	if (deleted)
+		binding.fn_deleted[index] = true;
+	// 8.3.6p4: later declarations may add default arguments.
+	vector<const AstExpr*>& defaults = binding.fn_defaults[index];
+	defaults.resize(composed.parameters.size(), 0);
+	for (size_t i = 0; i < composed.parameters.size(); i++)
+		if (composed.parameters[i].default_arg && !defaults[i])
+			defaults[i] = composed.parameters[i].default_arg;
 }
 
 const string& DeclBinder::TerminalName(const AstName& name)
@@ -298,9 +328,18 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 	case DK_SPECIAL_MEMBER_DEFINITION:
 		return;
 	case DK_TRANSLATION_UNIT:
-	case DK_LINKAGE:
 		BindDeclarations(decl.body_decls);
 		return;
+	case DK_LINKAGE:
+	{
+		// 7.5: members of an extern "C" body get C language linkage;
+		// the scope model itself is unaffected.
+		bool saved = in_c_linkage_;
+		in_c_linkage_ = saved || decl.linkage == "C";
+		BindDeclarations(decl.body_decls);
+		in_c_linkage_ = saved;
+		return;
+	}
 	case DK_NAMESPACE:
 		BindNamespace(decl);
 		return;
@@ -473,9 +512,12 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 		builder_.ComposeDeclarator(declarator.declarator.get(), specs.type);
 	if (!composed.id)
 		throw runtime_error("declarator requires a name");
-	if (!composed.id->IsPlainIdentifier())
+	if (composed.id->parts.size() != 1 || composed.id->global_scope)
 		throw OutsideBoundary("qualified declarator-id");
-	const string& name = composed.id->parts[0].identifier;
+	if (!composed.id->IsPlainIdentifier() &&
+	    composed.type->kind != TK_FUNCTION)
+		throw OutsideBoundary("declarator-id form");
+	const string name = DeclaredFunctionName(composed.id->parts[0]);
 	if (specs.is_typedef)
 	{
 		if (declarator.init)
@@ -485,13 +527,20 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	}
 	if (composed.type->kind == TK_FUNCTION)
 	{
-		if (declarator.init)
+		// 8.4.3: `= delete` is a deleted definition; any other
+		// initializer on a function declarator is ill-formed.
+		bool deleted = declarator.init &&
+			declarator.init->kind == INIT_DELETE;
+		if (declarator.init && !deleted)
 			throw OutsideBoundary("function declarator initializer");
 		// 8.3.5p6: cv-qualifiers only on non-static member functions.
 		if ((composed.type->is_const || composed.type->is_volatile) &&
 		    current_->kind != SCOPE_CLASS)
 			throw runtime_error("cv-qualified non-member function");
 		ScopeBinding& binding = BindFunctionName(name, composed.type, true);
+		RecordFunctionFacts(binding, composed, deleted);
+		if (in_c_linkage_)
+			binding.c_linkage = true;
 		OnFunctionDeclared(binding, composed.type);
 		return;
 	}
@@ -593,8 +642,8 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 		throw runtime_error("typedef on a function definition");
 	DeclaratorInfo composed =
 		builder_.ComposeDeclarator(decl.declarator.get(), specs.type);
-	if (!composed.id || !composed.id->IsPlainIdentifier())
-		throw OutsideBoundary("qualified function definition");
+	if (!composed.id || composed.id->parts.empty())
+		throw OutsideBoundary("function definition declarator");
 	if (!composed.declares_function || composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function definition requires a function "
 		                    "declarator");
@@ -602,21 +651,38 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	if ((composed.type->is_const || composed.type->is_volatile) &&
 	    current_->kind != SCOPE_CLASS)
 		throw runtime_error("cv-qualified non-member function");
-	const string& name = composed.id->parts[0].identifier;
-	BindFunctionName(name, composed.type, false);
-	Scope* scope = model_.CreateScope(SCOPE_FUNCTION, name, current_);
+	const string name =
+		DeclaredFunctionName(composed.id->parts.back());
+	// 8.3p1: a qualified declarator-id defines an already-declared
+	// member of the named (namespace) scope.
+	Scope* declaring = current_;
+	if (composed.id->parts.size() > 1 || composed.id->global_scope)
+	{
+		declaring = ResolvePrefixScope(*composed.id);
+		if (declaring->kind != SCOPE_NAMESPACE)
+			throw OutsideBoundary("member function definition");
+		if (!FindOwnBinding(*declaring, name))
+			throw runtime_error(name + " is not a member of the "
+			                    "named namespace");
+	}
+	Scope* saved = current_;
+	current_ = declaring;
+	ScopeBinding& binding = BindFunctionName(name, composed.type, false);
+	RecordFunctionFacts(binding, composed, false);
+	if (in_c_linkage_)
+		binding.c_linkage = true;
+	Scope* scope = model_.CreateScope(SCOPE_FUNCTION, name, declaring);
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		const ParameterInfo& parameter = composed.parameters[i];
 		if (parameter.name.empty())
 			continue;
-		ScopeBinding binding;
-		binding.kind = SB_PARAMETER;
-		binding.name = parameter.name;
-		binding.type = parameter.type;
-		AddBinding(*scope, binding);
+		ScopeBinding param_binding;
+		param_binding.kind = SB_PARAMETER;
+		param_binding.name = parameter.name;
+		param_binding.type = parameter.type;
+		AddBinding(*scope, param_binding);
 	}
-	Scope* saved = current_;
 	current_ = scope;
 	BindFunctionBody(decl, composed, name);
 	current_ = saved;

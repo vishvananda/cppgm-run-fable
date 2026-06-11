@@ -245,6 +245,9 @@ void SemBinder::OnFunctionDeclared(ScopeBinding& binding,
 	SemNode* item = AppendItem(SN_FUNCTION_DECLARATION);
 	item->name = CanonicalQualifiedName(binding.owner, binding.name);
 	item->type = type;
+	item->entity_scope = binding.owner;
+	item->entity_name = binding.name;
+	item->c_linkage = binding.c_linkage;
 }
 
 void SemBinder::OnVariableBound(ScopeBinding& binding,
@@ -256,6 +259,12 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 	SemNode* item = AppendItem(SN_VARIABLE);
 	item->name = binding.name;
 	item->type = binding.type;
+	item->entity_scope = binding.owner;
+	item->entity_name = binding.name;
+	item->is_static_decl = specs.is_static;
+	item->is_extern_decl = specs.is_extern;
+	item->is_thread_local_decl = specs.is_thread_local;
+	item->c_linkage = in_c_linkage_;
 	if (init)
 	{
 		AnalyzeVariableInit(*item, binding, init);
@@ -417,11 +426,18 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	SemNode* item = AppendItem(SN_FUNCTION_DEFINITION);
 	item->name = CanonicalQualifiedName(declaring, name);
 	item->type = composed.type;
+	item->entity_scope = declaring;
+	item->entity_name = name;
+	item->unwind_no = composed.noexcept_simple;
+	if (const ScopeBinding* fn = FindOwnBinding(*declaring, name))
+		item->c_linkage = fn->c_linkage;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		SemNodePtr parameter = MakeSemNode(SN_PARAMETER);
 		parameter->name = composed.parameters[i].name;
 		parameter->type = composed.parameters[i].type;
+		parameter->entity_scope = current_;
+		parameter->entity_name = composed.parameters[i].name;
 		item->children.push_back(std::move(parameter));
 	}
 	parents_.push_back(item);
@@ -475,6 +491,18 @@ void SemBinder::BindStatement(const AstStmt& stmt)
 	case SK_CONTINUE:
 		AppendItem(SN_CONTINUE_STATEMENT);
 		return;
+	case SK_GOTO:
+		AppendItem(SN_GOTO_STATEMENT)->name = stmt.label;
+		return;
+	case SK_LABELED:
+	{
+		SemNode* item = AppendItem(SN_LABEL_STATEMENT);
+		item->name = stmt.label;
+		parents_.push_back(item);
+		BindStatement(*stmt.body);
+		parents_.pop_back();
+		return;
+	}
 	default:
 		throw OutsideBoundary("statement form");
 	}
@@ -686,6 +714,14 @@ void SemBinder::BindLabelStatement(const AstStmt& stmt)
 	{
 		SemValue value = analyzer_.Analyze(*stmt.expr);
 		item->children.push_back(std::move(value.node));
+		// 6.4.2p2: the case value is a constant expression; record it
+		// for the lowering's dispatch table.
+		ConstValue case_value;
+		if (!TryEvaluateConstant(*stmt.expr, case_value))
+			throw runtime_error("case value is not a constant "
+			                    "expression");
+		item->has_value = true;
+		item->value = case_value;
 	}
 	BindStatement(*stmt.body);
 	parents_.pop_back();

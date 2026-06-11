@@ -1,0 +1,1154 @@
+#include "lowering/lower_function.h"
+
+#include <stdexcept>
+
+#include "lowering/lower_types.h"
+#include "sema/const_expr.h"
+#include "sema/sem_convert.h"
+
+using std::runtime_error;
+using std::to_string;
+
+// Expression lowering: value, address, branch, and effect contexts
+// over the resolved PA12 tree. The statement half and the shared
+// block/slot/temp state live in lower_function.cpp.
+
+namespace {
+
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA14 assignment boundary");
+}
+
+TypePtr StripRef(const TypePtr& type)
+{
+	return IsReferenceType(type) ? type->target : type;
+}
+
+// The computation type of a node: declared type with references and
+// top-level cv stripped.
+TypePtr NodeType(const SemNode& node)
+{
+	return RemoveTopCv(StripRef(node.type));
+}
+
+bool IsPointerish(const TypePtr& type)
+{
+	return type->kind == TK_POINTER || type->kind == TK_ARRAY ||
+		type->kind == TK_FUNCTION || IsNullPtrType(type);
+}
+
+// The binary instruction operator of a token over `type`.
+string BinaryOpName(ETokenType op, const TypePtr& type)
+{
+	bool unsigned_ops = LowerUnsignedOps(type);
+	switch (op)
+	{
+	case OP_PLUS: case OP_PLUSASS: case OP_INC: return "add";
+	case OP_MINUS: case OP_MINUSASS: case OP_DEC: return "sub";
+	case OP_STAR: case OP_STARASS: return "mul";
+	case OP_DIV: case OP_DIVASS: return unsigned_ops ? "udiv" : "div";
+	case OP_MOD: case OP_MODASS: return unsigned_ops ? "umod" : "mod";
+	case OP_AMP: case OP_BANDASS: return "and";
+	case OP_BOR: case OP_BORASS: return "or";
+	case OP_XOR: case OP_XORASS: return "xor";
+	case OP_LSHIFT: case OP_LSHIFTASS: return "shl";
+	case OP_RSHIFT: case OP_RSHIFTASS:
+		return unsigned_ops ? "ushr" : "shr";
+	default:
+		throw OutsideBoundary("binary operator");
+	}
+}
+
+string ComparePredicate(ETokenType op, const TypePtr& type)
+{
+	bool unsigned_ops = LowerUnsignedOps(type) && !LowerFloatType(type);
+	switch (op)
+	{
+	case OP_EQ: return "eq";
+	case OP_NE: return "ne";
+	case OP_LT: return unsigned_ops ? "ult" : "lt";
+	case OP_GT: return unsigned_ops ? "ugt" : "gt";
+	case OP_LE: return unsigned_ops ? "ule" : "le";
+	case OP_GE: return unsigned_ops ? "uge" : "ge";
+	default:
+		throw OutsideBoundary("comparison operator");
+	}
+}
+
+bool IsComparisonOp(ETokenType op)
+{
+	return op == OP_EQ || op == OP_NE || op == OP_LT || op == OP_GT ||
+		op == OP_LE || op == OP_GE;
+}
+
+bool IsCompoundShift(ETokenType op)
+{
+	return op == OP_LSHIFTASS || op == OP_RSHIFTASS;
+}
+
+TypePtr BoolType()
+{
+	return MakeFundamentalType(FT_BOOL);
+}
+
+}  // namespace
+
+const ScopeBinding* FunctionLowerer::EntityBinding(
+	const SemNode& node) const
+{
+	if (!node.entity_scope)
+		return 0;
+	return FindOwnBinding(*node.entity_scope, node.entity_name);
+}
+
+string FunctionLowerer::MaterializeNull()
+{
+	string temp = NewTemp();
+	Emit(temp + " = copy ptr nullptr");
+	return temp;
+}
+
+// The canonical truth value branched on: floats compare against zero,
+// everything else branches on the value directly.
+LowerValue FunctionLowerer::MaterializeTruth(const LowerValue& value)
+{
+	if (LowerFloatType(value.type))
+	{
+		LowerValue truth;
+		truth.text = NewTemp();
+		truth.type = BoolType();
+		Emit(truth.text + " = cmp ne " + LowerValueType(value.type) +
+		     " " + value.text + ", " + LowerFloatZero(value.type));
+		return truth;
+	}
+	if (value.imm_null)
+	{
+		LowerValue made = value;
+		made.text = MaterializeNull();
+		made.imm_null = false;
+		return made;
+	}
+	return value;
+}
+
+void FunctionLowerer::BranchOnValue(const SemNode& node,
+                                    const string& true_label,
+                                    const string& false_label)
+{
+	LowerValue truth = MaterializeTruth(LowerValueExpr(node));
+	ReferenceLabel(true_label);
+	ReferenceLabel(false_label);
+	Terminate("branch " + truth.text + ", ^" + true_label + ", ^" +
+	          false_label);
+}
+
+// Statement-condition lowering: built-in && / || branch through their
+// operand blocks directly (the README-pinned direct short-circuit
+// shape); every other condition branches on its value.
+void FunctionLowerer::LowerCondition(const SemNode& node,
+                                     const string& true_label,
+                                     const string& false_label)
+{
+	if (node.kind == SN_BINARY_EXPRESSION && node.op == OP_LAND)
+	{
+		string rhs_label = NewLabel("land_rhs");
+		LowerCondition(*node.children[0], rhs_label, false_label);
+		OpenBlock(rhs_label);
+		LowerCondition(*node.children[1], true_label, false_label);
+		return;
+	}
+	if (node.kind == SN_BINARY_EXPRESSION && node.op == OP_LOR)
+	{
+		string rhs_label = NewLabel("lor_rhs");
+		LowerCondition(*node.children[0], true_label, rhs_label);
+		OpenBlock(rhs_label);
+		LowerCondition(*node.children[1], true_label, false_label);
+		return;
+	}
+	BranchOnValue(node, true_label, false_label);
+}
+
+// --- values ---------------------------------------------------------------
+
+LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
+{
+	LowerValue value;
+	if (node.is_string_literal)
+	{
+		// 4.2: the literal object's address; no decay instruction is
+		// spelled for string-literal views.
+		string global = program_.StringLiteralRef(node);
+		value.text = NewTemp();
+		Emit(value.text + " = addr " + global);
+		value.type = MakePointerType(node.type->target, false, false);
+		return value;
+	}
+	value.type = NodeType(node);
+	if (node.null_pointer && (value.type->kind == TK_POINTER ||
+	                          IsNullPtrType(value.type)))
+	{
+		value.imm_null = true;
+		return value;
+	}
+	if (node.has_value)
+	{
+		value.imm_int = true;
+		value.value = node.value;
+		value.text = RenderConstValue(node.value);
+		return value;
+	}
+	if (LowerFloatType(value.type))
+	{
+		value.imm_float = true;
+		value.text = node.token;
+		return value;
+	}
+	throw OutsideBoundary("literal form");
+}
+
+LowerValue FunctionLowerer::LowerIdValue(const SemNode& node)
+{
+	const ScopeBinding* binding = EntityBinding(node);
+	if (!binding)
+		throw runtime_error("unresolved id-expression " + node.name);
+	LowerValue value;
+	value.type = NodeType(node);
+	if (binding->kind == SB_FUNCTION)
+	{
+		string name = program_.FunctionRef(node.entity_scope,
+		                                   node.entity_name, node.type);
+		value.text = NewTemp();
+		Emit(value.text + " = addr " + name);
+		return value;
+	}
+	bool global = node.entity_scope->kind == SCOPE_NAMESPACE;
+	string storage = global
+		? program_.GlobalRef(node.entity_scope, node.entity_name)
+		: "$" + SlotRef(node.entity_scope, node.entity_name);
+	if (IsReferenceType(binding->type))
+	{
+		string address = NewTemp();
+		Emit(address + " = load ptr " + storage);
+		if (value.type->kind == TK_FUNCTION ||
+		    value.type->kind == TK_ARRAY)
+		{
+			value.text = address;
+			return value;
+		}
+		value.text = NewTemp();
+		Emit(value.text + " = load " + LowerValueType(value.type) +
+		     " " + address);
+		return value;
+	}
+	if (binding->type->kind == TK_ARRAY)
+	{
+		value.text = NewTemp();
+		value.type = RemoveTopCv(binding->type);
+		Emit(value.text + " = addr " + storage);
+		return value;
+	}
+	value.text = NewTemp();
+	Emit(value.text + " = load " + LowerValueType(value.type) + " " +
+	     storage);
+	return value;
+}
+
+LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
+{
+	switch (node.kind)
+	{
+	case SN_LITERAL:
+		return LowerLiteralValue(node);
+	case SN_ID_EXPRESSION:
+		return LowerIdValue(node);
+	case SN_CALL_EXPRESSION:
+	{
+		LowerValue result = LowerCall(node);
+		if (!IsReferenceType(node.type))
+			return result;
+		LowerValue loaded;
+		loaded.type = NodeType(node);
+		loaded.text = NewTemp();
+		Emit(loaded.text + " = load " + LowerValueType(loaded.type) +
+		     " " + result.text);
+		return loaded;
+	}
+	case SN_UNARY_EXPRESSION:
+		return LowerUnary(node);
+	case SN_POSTFIX_EXPRESSION:
+		return LowerIncDec(node, false);
+	case SN_BINARY_EXPRESSION:
+		if (node.op == OP_LAND || node.op == OP_LOR)
+			return LowerLogicalValue(node);
+		if (IsComparisonOp(node.op))
+			return LowerComparison(node);
+		if (node.op == OP_COMMA)
+		{
+			LowerEffect(*node.children[0]);
+			return LowerValueExpr(*node.children[1]);
+		}
+		return LowerBinary(node);
+	case SN_ASSIGNMENT_EXPRESSION:
+		return LowerAssignment(node);
+	case SN_CONDITIONAL_EXPRESSION:
+		return LowerConditionalValue(node);
+	case SN_SUBSCRIPT_EXPRESSION:
+	{
+		string address = LowerAddressExpr(node);
+		LowerValue value;
+		value.type = NodeType(node);
+		value.text = NewTemp();
+		Emit(value.text + " = load " + LowerValueType(value.type) +
+		     " " + address);
+		return value;
+	}
+	case SN_CAST_EXPRESSION:
+	{
+		if (IsVoidType(node.type))
+		{
+			LowerEffect(*node.children[0]);
+			LowerValue value;
+			value.type = NodeType(node);
+			return value;
+		}
+		LowerValue operand = LowerValueExpr(*node.children[0]);
+		return ConvertValue(operand, NodeType(node), LCC_CAST);
+	}
+	case SN_SIZEOF_EXPRESSION:
+	{
+		// sizeof materializes its constant explicitly.
+		LowerValue value;
+		value.type = NodeType(node);
+		value.text = NewTemp();
+		Emit(value.text + " = const i64 " +
+		     RenderConstValue(node.value));
+		return value;
+	}
+	default:
+		throw OutsideBoundary("expression form");
+	}
+}
+
+LowerValue FunctionLowerer::LowerUnary(const SemNode& node)
+{
+	const SemNode& operand = *node.children[0];
+	LowerValue value;
+	value.type = NodeType(node);
+	switch (node.op)
+	{
+	case OP_STAR:
+	{
+		string pointer = LowerPointerOperand(operand);
+		value.text = NewTemp();
+		Emit(value.text + " = load " + LowerValueType(value.type) +
+		     " " + pointer);
+		return value;
+	}
+	case OP_AMP:
+		value.text = LowerAddressExpr(operand);
+		return value;
+	case OP_INC:
+	case OP_DEC:
+		return LowerIncDec(node, true);
+	case OP_LNOT:
+	{
+		LowerValue inner = LowerValueExpr(operand);
+		value.text = NewTemp();
+		value.type = BoolType();
+		if (LowerFloatType(inner.type))
+			Emit(value.text + " = cmp eq " +
+			     LowerValueType(inner.type) + " " + inner.text +
+			     ", " + LowerFloatZero(inner.type));
+		else
+			Emit(value.text + " = cmp eq i64 " + inner.text + ", 0");
+		return value;
+	}
+	case OP_PLUS:
+	{
+		if (value.type->kind == TK_POINTER &&
+		    NodeType(operand)->kind != TK_POINTER)
+		{
+			value.text = LowerPointerOperand(operand);
+			return value;
+		}
+		LowerValue inner = LowerValueExpr(operand);
+		return ConvertValue(inner, value.type, LCC_OPERAND);
+	}
+	case OP_MINUS:
+	case OP_COMPL:
+	{
+		LowerValue inner = ConvertValue(LowerValueExpr(operand),
+		                                value.type, LCC_OPERAND);
+		value.text = NewTemp();
+		Emit(value.text + " = unary " +
+		     (node.op == OP_MINUS ? "neg " : "bitnot ") +
+		     LowerValueType(value.type) + " " + inner.text);
+		return value;
+	}
+	default:
+		throw OutsideBoundary("unary operator");
+	}
+}
+
+string FunctionLowerer::PointerStep(const string& base,
+                                    const LowerValue& count,
+                                    const TypePtr& element, bool negative)
+{
+	unsigned long long size = TypeSize(RemoveTopCv(element));
+	string offset = count.text;
+	if (size != 1)
+	{
+		offset = NewTemp();
+		Emit(offset + " = binary mul i64 " + count.text + ", " +
+		     to_string(size));
+	}
+	if (negative)
+	{
+		string negated = NewTemp();
+		Emit(negated + " = binary sub i64 0, " + offset);
+		offset = negated;
+	}
+	string result = NewTemp();
+	Emit(result + " = index i8 " + base + ", " + offset);
+	return result;
+}
+
+LowerValue FunctionLowerer::LowerBinary(const SemNode& node)
+{
+	const SemNode& lhs = *node.children[0];
+	const SemNode& rhs = *node.children[1];
+	LowerValue value;
+	value.type = NodeType(node);
+	if (value.type->kind == TK_POINTER)
+	{
+		// 5.7: pointer +/- integer in source order, byte-scaled.
+		bool left_pointer = IsPointerish(NodeType(lhs));
+		string base;
+		LowerValue count;
+		if (left_pointer)
+		{
+			base = LowerPointerOperand(lhs);
+			count = LowerValueExpr(rhs);
+		}
+		else
+		{
+			count = LowerValueExpr(lhs);
+			base = LowerPointerOperand(rhs);
+		}
+		value.text = PointerStep(base, count, value.type->target,
+		                         node.op == OP_MINUS);
+		return value;
+	}
+	if (IsPointerish(NodeType(lhs)) && IsPointerish(NodeType(rhs)) &&
+	    node.op == OP_MINUS)
+	{
+		// 5.7p6: pointer difference scales back by the element size.
+		string a = LowerPointerOperand(lhs);
+		string b = LowerPointerOperand(rhs);
+		string diff = NewTemp();
+		Emit(diff + " = binary sub ptr " + a + ", " + b);
+		TypePtr element = NodeType(lhs)->target;
+		value.text = NewTemp();
+		Emit(value.text + " = binary div i64 " + diff + ", " +
+		     to_string(TypeSize(RemoveTopCv(element))));
+		return value;
+	}
+	LowerValue a = LowerValueExpr(lhs);
+	LowerValue b = LowerValueExpr(rhs);
+	a = ConvertValue(a, value.type, LCC_OPERAND);
+	b = ConvertValue(b, value.type, LCC_OPERAND);
+	value.text = NewTemp();
+	Emit(value.text + " = binary " + BinaryOpName(node.op, value.type) +
+	     " " + LowerValueType(value.type) + " " + a.text + ", " +
+	     b.text);
+	return value;
+}
+
+// One side of a pointer comparison: null constants materialize,
+// arrays and functions decay.
+string FunctionLowerer::LowerPointerCmpOperand(const SemNode& node)
+{
+	TypePtr type = NodeType(node);
+	if (node.null_pointer &&
+	    (IsNullPtrType(type) || IsIntegralType(type)))
+		return MaterializeNull();
+	if (IsNullPtrType(type))
+	{
+		LowerValue value = LowerValueExpr(node);
+		return value.imm_null ? MaterializeNull() : value.text;
+	}
+	return LowerPointerOperand(node);
+}
+
+LowerValue FunctionLowerer::LowerComparison(const SemNode& node)
+{
+	const SemNode& lhs = *node.children[0];
+	const SemNode& rhs = *node.children[1];
+	LowerValue value;
+	value.type = BoolType();
+	if (IsPointerish(NodeType(lhs)) || IsPointerish(NodeType(rhs)))
+	{
+		string a = LowerPointerCmpOperand(lhs);
+		string b = LowerPointerCmpOperand(rhs);
+		value.text = NewTemp();
+		Emit(value.text + " = cmp " +
+		     ComparePredicate(node.op,
+		                      MakePointerType(MakeFundamentalType(
+		                          FT_VOID), false, false)) +
+		     " ptr " + a + ", " + b);
+		return value;
+	}
+	TypePtr lt = NodeType(lhs);
+	TypePtr common;
+	if (lt->kind == TK_ENUM && lt->named->is_scoped)
+		common = lt;
+	else
+		common = UsualArithmeticConversions(lt, NodeType(rhs));
+	LowerValue a = LowerValueExpr(lhs);
+	LowerValue b = LowerValueExpr(rhs);
+	a = ConvertValue(a, common, LCC_OPERAND);
+	b = ConvertValue(b, common, LCC_OPERAND);
+	value.text = NewTemp();
+	Emit(value.text + " = cmp " + ComparePredicate(node.op, common) +
+	     " " + LowerValueType(common) + " " + a.text + ", " + b.text);
+	return value;
+}
+
+LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
+{
+	bool is_and = node.op == OP_LAND;
+	const char* family = is_and ? "land" : "lor";
+	string slot = AddMatSlot(family, "i64");
+	string rhs_label = NewLabel(string(family) + "_rhs");
+	string short_label = NewLabel(string(family) + "_short");
+	string end_label = NewLabel(string(family) + "_end");
+	if (is_and)
+		BranchOnValue(*node.children[0], rhs_label, short_label);
+	else
+		BranchOnValue(*node.children[0], short_label, rhs_label);
+	OpenBlock(rhs_label);
+	LowerValue operand = LowerValueExpr(*node.children[1]);
+	string truth = NewTemp();
+	if (LowerFloatType(operand.type))
+		Emit(truth + " = cmp ne " + LowerValueType(operand.type) +
+		     " " + operand.text + ", " + LowerFloatZero(operand.type));
+	else
+		Emit(truth + " = cmp ne i64 " + operand.text + ", 0");
+	Emit("store i64 " + truth + ", $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(short_label);
+	Emit(string("store i64 ") + (is_and ? "0" : "1") + ", $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(end_label);
+	LowerValue value;
+	value.type = BoolType();
+	value.text = NewTemp();
+	Emit(value.text + " = load i64 $" + slot);
+	return value;
+}
+
+LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
+{
+	string then_label = NewLabel("cond_then");
+	string else_label = NewLabel("cond_else");
+	string end_label = NewLabel("cond_end");
+	if (IsVoidType(node.type))
+	{
+		BranchOnValue(*node.children[0], then_label, else_label);
+		OpenBlock(then_label);
+		LowerEffect(*node.children[1]);
+		CloseInto(else_label);
+		LowerEffect(*node.children[2]);
+		CloseInto(end_label);
+		LowerValue value;
+		value.type = NodeType(node);
+		return value;
+	}
+	TypePtr type = NodeType(node);
+	string slot = AddMatSlot("cond", LowerValueType(type));
+	BranchOnValue(*node.children[0], then_label, else_label);
+	OpenBlock(then_label);
+	string first = LowerValueAs(*node.children[1], type, LCC_INIT);
+	Emit("store " + LowerValueType(type) + " " + first + ", $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(else_label);
+	string second = LowerValueAs(*node.children[2], type, LCC_INIT);
+	Emit("store " + LowerValueType(type) + " " + second + ", $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(end_label);
+	LowerValue value;
+	value.type = type;
+	value.text = NewTemp();
+	Emit(value.text + " = load " + LowerValueType(type) + " $" + slot);
+	return value;
+}
+
+string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
+{
+	string slot = AddMatSlot("condaddr", "ptr");
+	string then_label = NewLabel("condaddr_then");
+	string else_label = NewLabel("condaddr_else");
+	string end_label = NewLabel("condaddr_end");
+	BranchOnValue(*node.children[0], then_label, else_label);
+	OpenBlock(then_label);
+	Emit("store ptr " + LowerAddressExpr(*node.children[1]) + ", $" +
+	     slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(else_label);
+	Emit("store ptr " + LowerAddressExpr(*node.children[2]) + ", $" +
+	     slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(end_label);
+	string result = NewTemp();
+	Emit(result + " = load ptr $" + slot);
+	return result;
+}
+
+// --- increments, assignments ----------------------------------------------
+
+// The directly addressable storage of an id-expression lvalue
+// ("$slot" or "@global"), or "" when an address must be computed.
+string FunctionLowerer::DirectStorage(const SemNode& node)
+{
+	if (node.kind != SN_ID_EXPRESSION)
+		return "";
+	const ScopeBinding* binding = EntityBinding(node);
+	if (!binding || binding->kind == SB_FUNCTION ||
+	    IsReferenceType(binding->type) ||
+	    binding->type->kind == TK_ARRAY)
+		return "";
+	if (node.entity_scope->kind == SCOPE_NAMESPACE)
+		return program_.GlobalRef(node.entity_scope, node.entity_name);
+	return "$" + SlotRef(node.entity_scope, node.entity_name);
+}
+
+LowerValue FunctionLowerer::LowerIncDec(const SemNode& node, bool prefix)
+{
+	const SemNode& operand = *node.children[0];
+	TypePtr type = NodeType(node);
+	string type_text = LowerValueType(type);
+	string storage = DirectStorage(operand);
+	if (storage.empty())
+		storage = LowerAddressExpr(operand);
+	string old_value = NewTemp();
+	Emit(old_value + " = load " + type_text + " " + storage);
+	string new_value;
+	if (type->kind == TK_POINTER)
+	{
+		LowerValue one;
+		one.text = "1";
+		new_value = PointerStep(old_value, one, type->target,
+		                        node.op == OP_DEC);
+	}
+	else
+	{
+		new_value = NewTemp();
+		string one = LowerFloatType(type)
+			? (type->fundamental == FT_FLOAT ? "1.0f"
+			   : type->fundamental == FT_LONG_DOUBLE ? "1.0L" : "1.0")
+			: string("1");
+		Emit(new_value + " = binary " + BinaryOpName(node.op, type) +
+		     " " + type_text + " " + old_value + ", " + one);
+	}
+	Emit("store " + type_text + " " + new_value + ", " + storage);
+	LowerValue value;
+	value.type = type;
+	value.text = prefix ? new_value : old_value;
+	return value;
+}
+
+LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
+{
+	const SemNode& lhs = *node.children[0];
+	const SemNode& rhs = *node.children[1];
+	TypePtr type = NodeType(lhs);
+	string storage = DirectStorage(lhs);
+	if (storage.empty())
+		storage = LowerAddressExpr(lhs);
+	if (node.op != OP_ASS)
+	{
+		LowerValue target;
+		target.text = storage;
+		target.type = type;
+		return LowerCompoundAssignment(node, target);
+	}
+	string value = LowerValueAs(rhs, type, LCC_OPERAND);
+	Emit("store " + LowerValueType(type) + " " + value + ", " +
+	     storage);
+	LowerValue result;
+	result.type = type;
+	result.text = value;
+	return result;
+}
+
+LowerValue FunctionLowerer::LowerCompoundAssignment(
+	const SemNode& node, const LowerValue& target)
+{
+	const SemNode& rhs = *node.children[1];
+	TypePtr type = target.type;
+	string type_text = LowerValueType(type);
+	string old_value = NewTemp();
+	Emit(old_value + " = load " + type_text + " " + target.text);
+	LowerValue result;
+	result.type = type;
+	if (type->kind == TK_POINTER)
+	{
+		// 5.17p7 over 5.7: element-size scaled pointer adjustment.
+		LowerValue count = LowerValueExpr(rhs);
+		result.text = PointerStep(old_value, count, type->target,
+		                          node.op == OP_MINUSASS);
+		Emit("store ptr " + result.text + ", " + target.text);
+		return result;
+	}
+	TypePtr common = IsCompoundShift(node.op)
+		? PromoteForArithmetic(type)
+		: UsualArithmeticConversions(type, NodeType(rhs));
+	LowerValue old_lv;
+	old_lv.text = old_value;
+	old_lv.type = type;
+	LowerValue count = LowerValueExpr(rhs);
+	old_lv = ConvertValue(old_lv, common, LCC_OPERAND);
+	count = ConvertValue(count, common, LCC_OPERAND);
+	string computed = NewTemp();
+	Emit(computed + " = binary " + BinaryOpName(node.op, common) + " " +
+	     LowerValueType(common) + " " + old_lv.text + ", " +
+	     count.text);
+	LowerValue back;
+	back.text = computed;
+	back.type = common;
+	back = ConvertValue(back, type, LCC_OPERAND);
+	Emit("store " + type_text + " " + back.text + ", " + target.text);
+	result.text = back.text;
+	return result;
+}
+
+// --- addresses and pointers -------------------------------------------------
+
+string FunctionLowerer::LowerAddressExpr(const SemNode& node)
+{
+	switch (node.kind)
+	{
+	case SN_ID_EXPRESSION:
+	{
+		const ScopeBinding* binding = EntityBinding(node);
+		if (!binding)
+			throw runtime_error("unresolved lvalue " + node.name);
+		if (binding->kind == SB_FUNCTION)
+		{
+			string name = program_.FunctionRef(
+				node.entity_scope, node.entity_name, node.type);
+			string temp = NewTemp();
+			Emit(temp + " = addr " + name);
+			return temp;
+		}
+		bool global = node.entity_scope->kind == SCOPE_NAMESPACE;
+		string storage = global
+			? program_.GlobalRef(node.entity_scope, node.entity_name)
+			: "$" + SlotRef(node.entity_scope, node.entity_name);
+		string temp = NewTemp();
+		if (IsReferenceType(binding->type))
+			Emit(temp + " = load ptr " + storage);
+		else
+			Emit(temp + " = addr " + storage);
+		return temp;
+	}
+	case SN_SUBSCRIPT_EXPRESSION:
+	{
+		string base = LowerPointerOperand(*node.children[0]);
+		LowerValue index = LowerValueExpr(*node.children[1]);
+		string temp = NewTemp();
+		Emit(temp + " = index " + LowerValueType(NodeType(node)) +
+		     " [projection=array_element] " + base + ", " +
+		     index.text);
+		return temp;
+	}
+	case SN_UNARY_EXPRESSION:
+		if (node.op == OP_STAR)
+			return LowerPointerOperand(*node.children[0]);
+		if (node.op == OP_INC || node.op == OP_DEC)
+		{
+			LowerIncDec(node, true);
+			return LowerAddressExpr(*node.children[0]);
+		}
+		throw OutsideBoundary("address form");
+	case SN_CALL_EXPRESSION:
+		if (!IsReferenceType(node.type))
+			throw OutsideBoundary("address of a call result");
+		return LowerCall(node).text;
+	case SN_CONDITIONAL_EXPRESSION:
+		return LowerConditionalAddress(node);
+	case SN_BINARY_EXPRESSION:
+		if (node.op == OP_COMMA)
+		{
+			LowerEffect(*node.children[0]);
+			return LowerAddressExpr(*node.children[1]);
+		}
+		throw OutsideBoundary("address form");
+	case SN_ASSIGNMENT_EXPRESSION:
+		LowerAssignment(node);
+		return LowerAddressExpr(*node.children[0]);
+	case SN_LITERAL:
+		if (node.is_string_literal)
+			return LowerLiteralValue(node).text;
+		throw OutsideBoundary("address form");
+	default:
+		throw OutsideBoundary("address form");
+	}
+}
+
+string FunctionLowerer::LowerPointerOperand(const SemNode& node)
+{
+	TypePtr type = NodeType(node);
+	if (type->kind == TK_ARRAY)
+	{
+		if (node.is_string_literal)
+			return LowerLiteralValue(node).text;
+		if (node.kind == SN_ID_EXPRESSION)
+		{
+			string address = LowerAddressExpr(node);
+			string decayed = NewTemp();
+			Emit(decayed + " = unary decay ptr " + address);
+			return decayed;
+		}
+		// Synthesized array addresses (glvalue conditionals) are
+		// already pointer-shaped.
+		return LowerAddressExpr(node);
+	}
+	if (type->kind == TK_FUNCTION)
+	{
+		const ScopeBinding* binding = node.kind == SN_ID_EXPRESSION
+			? EntityBinding(node) : 0;
+		string address;
+		if (binding && binding->kind == SB_FUNCTION)
+			address = LowerAddressExpr(node);
+		else
+			address = LowerValueExpr(node).text;
+		string decayed = NewTemp();
+		Emit(decayed + " = unary decay ptr " + address);
+		return decayed;
+	}
+	LowerValue value = LowerValueExpr(node);
+	if (value.imm_null)
+		return MaterializeNull();
+	return value.text;
+}
+
+// --- calls -------------------------------------------------------------------
+
+string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
+                                               const TypePtr& referee)
+{
+	TypePtr bare = RemoveTopCv(referee);
+	bool binds_directly = node.category != VC_PRVALUE &&
+		TypeEquals(RemoveTopCv(StripRef(node.type)), bare);
+	if (binds_directly)
+		return LowerAddressExpr(node);
+	// 8.5.3p5: materialize a temporary with the converted value.
+	string slot = AddMatSlot("refarg", LowerSlotType(bare));
+	string value = LowerValueAs(node, bare, LCC_INIT);
+	Emit("store " + LowerValueType(bare) + " " + value + ", $" + slot);
+	string temp = NewTemp();
+	Emit(temp + " = addr $" + slot);
+	return temp;
+}
+
+string FunctionLowerer::LowerCallArgument(const SemNode& node,
+                                          const TypePtr& param)
+{
+	if (!param)
+	{
+		// 5.2.2p7 default argument promotions for trailing variadic
+		// arguments.
+		TypePtr source = NodeType(node);
+		TypePtr promoted = source;
+		if (source->kind == TK_FUNDAMENTAL &&
+		    source->fundamental == FT_FLOAT)
+			promoted = MakeFundamentalType(FT_DOUBLE);
+		else if (IsIntegralType(source) || IsUnscopedEnum(source))
+			promoted = PromoteForArithmetic(source);
+		else if (source->kind == TK_ARRAY ||
+		         source->kind == TK_FUNCTION)
+			return LowerPointerOperand(node);
+		return LowerValueAs(node, promoted, LCC_INIT);
+	}
+	if (IsReferenceType(param))
+		return LowerReferenceArgument(node, param->target);
+	return LowerValueAs(node, RemoveTopCv(param), LCC_INIT);
+}
+
+LowerValue FunctionLowerer::LowerCall(const SemNode& node)
+{
+	const SemNode& callee = *node.children[0];
+	TypePtr fn_type;
+	bool direct = callee.kind == SN_CALLEE;
+	if (direct)
+		fn_type = callee.type;
+	else
+	{
+		TypePtr through = NodeType(callee);
+		if (through->kind == TK_POINTER)
+			fn_type = through->target;
+		else if (through->kind == TK_FUNCTION)
+			fn_type = through;
+		else
+			throw OutsideBoundary("call form");
+	}
+	string arguments;
+	for (size_t i = 1; i < node.children.size(); i++)
+	{
+		TypePtr param = i - 1 < fn_type->parameters.size()
+			? fn_type->parameters[i - 1] : TypePtr();
+		string text = LowerCallArgument(*node.children[i], param);
+		arguments += (i > 1 ? ", " : "") + text;
+	}
+	// The callee value of an indirect call lowers after the arguments
+	// (the oracle's evaluation order).
+	string callee_text;
+	if (direct)
+		callee_text = program_.FunctionRef(callee.entity_scope,
+		                                   callee.entity_name, fn_type);
+	else if (NodeType(callee)->kind == TK_POINTER)
+		callee_text = LowerValueExpr(callee).text;
+	else
+		callee_text = LowerPointerOperand(callee);
+	string return_text = LowerValueType(fn_type->target);
+	string line;
+	LowerValue result;
+	result.type = StripRef(fn_type->target);
+	if (IsVoidType(fn_type->target))
+		line = "call void " + callee_text + "(" + arguments + ")";
+	else
+	{
+		result.text = NewTemp();
+		line = result.text + " = call " + return_text + " " +
+			callee_text + "(" + arguments + ")";
+	}
+	if (!direct)
+	{
+		string signature;
+		for (size_t i = 0; i < fn_type->parameters.size(); i++)
+		{
+			const TypePtr& param = fn_type->parameters[i];
+			signature += (i ? ", " : "") + string("%arg") +
+				to_string(i) + " : " + LowerValueType(param);
+			if (IsReferenceType(param))
+				signature += " [pass=reference]";
+		}
+		line += " as (" + signature + ") -> " + return_text;
+		if (fn_type->variadic)
+			line += " [arity=variadic]";
+	}
+	Emit(line);
+	return result;
+}
+
+// --- conversions ----------------------------------------------------------
+
+// 4.12 contextual conversion of a non-bool value to bool.
+LowerValue FunctionLowerer::ConvertToBool(LowerValue value,
+                                          const TypePtr& source,
+                                          const TypePtr& target)
+{
+	if (value.imm_int)
+	{
+		value.value = ConstValue(FT_BOOL, value.value.bits != 0);
+		value.text = RenderConstValue(value.value);
+		value.type = target;
+		return value;
+	}
+	if (value.imm_null)
+	{
+		value.imm_null = false;
+		value.imm_int = true;
+		value.value = ConstValue(FT_BOOL, 0);
+		value.text = "0";
+		value.type = target;
+		return value;
+	}
+	string temp = NewTemp();
+	if (LowerFloatType(source))
+		Emit(temp + " = cmp ne " + LowerValueType(source) + " " +
+		     value.text + ", " + LowerFloatZero(source));
+	else
+		Emit(temp + " = cmp ne i64 " + value.text + ", 0");
+	value.text = temp;
+	value.imm_int = false;
+	value.imm_float = false;
+	value.type = target;
+	return value;
+}
+
+// Integral immediates canonicalize to the converted spelling except
+// for width-changing conversions that also change signedness (the
+// oracle keeps those spelled, e.g. int -> unsigned long).
+LowerValue FunctionLowerer::ConvertIntegralImmediate(LowerValue value,
+                                                     const TypePtr& source,
+                                                     const TypePtr& target)
+{
+	EFundamentalType target_fund = target->kind == TK_ENUM
+		? target->named->enum_underlying : target->fundamental;
+	EFundamentalType source_fund = source->kind == TK_ENUM
+		? source->named->enum_underlying : source->fundamental;
+	bool width_change = LowerValueWidth(source) !=
+		LowerValueWidth(target);
+	bool sign_change = IsSignedIntegralFundamental(source_fund) !=
+		IsSignedIntegralFundamental(target_fund);
+	if (width_change && sign_change && source_fund != FT_BOOL)
+	{
+		string temp = NewTemp();
+		Emit(temp + " = convert " + LowerConvertOp(source, target) +
+		     " " + LowerValueType(target) + " " +
+		     LowerValueType(source) + " " + value.text);
+		value.text = temp;
+		value.imm_int = false;
+	}
+	else
+	{
+		value.value = ConvertConstValue(value.value, target_fund);
+		value.text = RenderConstValue(value.value);
+	}
+	value.type = target;
+	return value;
+}
+
+string FunctionLowerer::LowerValueAs(const SemNode& node,
+                                     const TypePtr& dest,
+                                     ELowerConvertContext context)
+{
+	TypePtr target = RemoveTopCv(dest);
+	TypePtr source = NodeType(node);
+	if (target->kind == TK_POINTER &&
+	    (source->kind == TK_ARRAY || source->kind == TK_FUNCTION))
+		return LowerPointerOperand(node);
+	LowerValue value = LowerValueExpr(node);
+	return ConvertValue(value, target, context).text;
+}
+
+LowerValue FunctionLowerer::ConvertValue(LowerValue value,
+                                         const TypePtr& dest,
+                                         ELowerConvertContext context)
+{
+	TypePtr target = RemoveTopCv(dest);
+	TypePtr source = RemoveTopCv(StripRef(value.type));
+	if (target->kind == TK_POINTER || IsNullPtrType(target))
+	{
+		if (value.imm_null)
+		{
+			value.text = MaterializeNull();
+			value.imm_null = false;
+			value.type = target;
+			return value;
+		}
+		if (context == LCC_CAST && !value.imm_null)
+		{
+			string temp = NewTemp();
+			Emit(temp + " = copy ptr " + value.text);
+			value.text = temp;
+		}
+		value.type = target;
+		return value;
+	}
+	bool to_bool = target->kind == TK_FUNDAMENTAL &&
+		target->fundamental == FT_BOOL;
+	bool from_bool = source->kind == TK_FUNDAMENTAL &&
+		source->fundamental == FT_BOOL;
+	if (to_bool && !from_bool)
+		return ConvertToBool(value, source, target);
+	bool float_involved = LowerFloatType(source) ||
+		LowerFloatType(target);
+	if (float_involved)
+	{
+		string op = LowerConvertOp(source, target);
+		if (!op.empty())
+		{
+			string temp = NewTemp();
+			Emit(temp + " = convert " + op + " " +
+			     LowerValueType(target) + " " +
+			     LowerValueType(source) + " " + value.text);
+			value.text = temp;
+			value.imm_int = false;
+			value.imm_float = false;
+		}
+		else if (context == LCC_CAST)
+		{
+			string temp = NewTemp();
+			Emit(temp + " = copy " + LowerValueType(target) + " " +
+			     value.text);
+			value.text = temp;
+		}
+		value.type = target;
+		return value;
+	}
+	// Integral (and enumeration) conversions.
+	if (value.imm_int)
+		return ConvertIntegralImmediate(value, source, target);
+	string op = LowerConvertOp(source, target);
+	if (!op.empty())
+	{
+		string temp = NewTemp();
+		Emit(temp + " = convert " + op + " " + LowerValueType(target) +
+		     " " + LowerValueType(source) + " " + value.text);
+		value.text = temp;
+	}
+	else if (LowerValueType(source) != LowerValueType(target) ||
+	         context == LCC_CAST)
+	{
+		string temp = NewTemp();
+		Emit(temp + " = copy " + LowerValueType(target) + " " +
+		     value.text);
+		value.text = temp;
+	}
+	value.type = target;
+	return value;
+}
+
+// --- effects ---------------------------------------------------------------
+
+void FunctionLowerer::LowerEffect(const SemNode& node)
+{
+	switch (node.kind)
+	{
+	case SN_ASSIGNMENT_EXPRESSION:
+		LowerAssignment(node);
+		return;
+	case SN_CALL_EXPRESSION:
+		LowerCall(node);
+		return;
+	case SN_UNARY_EXPRESSION:
+		if (node.op == OP_INC || node.op == OP_DEC)
+		{
+			LowerIncDec(node, true);
+			return;
+		}
+		break;
+	case SN_POSTFIX_EXPRESSION:
+		LowerIncDec(node, false);
+		return;
+	case SN_CAST_EXPRESSION:
+		if (IsVoidType(node.type))
+		{
+			LowerEffect(*node.children[0]);
+			return;
+		}
+		break;
+	case SN_BINARY_EXPRESSION:
+		if (node.op == OP_COMMA)
+		{
+			LowerEffect(*node.children[0]);
+			LowerEffect(*node.children[1]);
+			return;
+		}
+		break;
+	default:
+		break;
+	}
+	LowerValueExpr(node);
+}

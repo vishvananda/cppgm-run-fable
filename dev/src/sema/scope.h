@@ -58,11 +58,12 @@ struct ConstValue
 };
 
 struct Scope;
+struct AstExpr;
 
 struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
-	                 owner(0) {}
+	                 owner(0), c_linkage(false) {}
 
 	EScopeBindingKind kind;
 	string name;
@@ -81,6 +82,13 @@ struct ScopeBinding
 	// the synthesized storage variable they live in.
 	string anon_storage_name;
 	TypePtr anon_storage_type;
+	// PA14 SB_FUNCTION facts, indexed by overload position (entry 0 is
+	// `type`, entry i+1 is `overloads[i]`): per-parameter default
+	// argument expressions (null when absent; analyzed at call sites
+	// while the AST is alive) and deleted-definition marking.
+	vector<vector<const AstExpr*>> fn_defaults;
+	vector<bool> fn_deleted;
+	bool c_linkage;  // declared inside extern "C"
 };
 
 struct Scope

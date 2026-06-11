@@ -167,6 +167,8 @@ private:
 	AstExprPtr ParseDeleteExpression();
 	AstExprPtr ParsePostfixExpression();
 	AstExprPtr ParsePostfixRoot();
+	// The trailing call/subscript/member/++/-- suffixes over `expr`.
+	AstExprPtr ParsePostfixSuffixes(AstExprPtr expr);
 	AstExprPtr ParsePrimaryExpression();
 	AstExprPtr ParseLambdaExpression();
 	bool ParseLambdaIntroducer(AstLambda& lambda);

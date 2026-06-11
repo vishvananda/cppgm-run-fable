@@ -429,14 +429,16 @@ ImplicitConversion ClassifyConversion(const ConversionSource& source,
 
 size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<ConversionSource>& args,
-                          vector<ImplicitConversion>& conversions)
+                          vector<ImplicitConversion>& conversions,
+                          const vector<size_t>* min_arity)
 {
 	vector<ViableCandidate> viable;
 	for (size_t c = 0; c < candidates.size(); c++)
 	{
 		const TypePtr& fn = candidates[c];
 		const vector<TypePtr>& params = fn->parameters;
-		if (args.size() < params.size() ||
+		size_t required = min_arity ? (*min_arity)[c] : params.size();
+		if (args.size() < required ||
 		    (args.size() > params.size() && !fn->variadic))
 			continue;
 		ViableCandidate candidate;

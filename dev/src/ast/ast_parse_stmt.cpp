@@ -96,7 +96,8 @@ AstStmtPtr AstParser::ParseLabeledStatement()
 		string label = Peek().spelling;
 		Advance();
 		Advance();
-		AstStmtPtr body = ParseStatement();
+		// 6.1/6.7: the labeled statement may itself be a declaration.
+		AstStmtPtr body = ParseBlockItem();
 		if (!body)
 		{
 			Restore(state);

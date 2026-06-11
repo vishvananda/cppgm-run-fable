@@ -42,9 +42,12 @@ int SimpleEscapeValue(int c)
 
 // Decodes the escape-sequence whose backslash is at pos and advances pos
 // past it. False for a malformed escape or a value beyond the Unicode
-// range.
-bool DecodeEscapeSequence(const string& body, size_t& pos, int& cp)
+// range. `numeric` reports octal/hex escapes, whose values are code
+// units rather than code points (2.14.3p4).
+bool DecodeEscapeSequence(const string& body, size_t& pos, int& cp,
+                          bool& numeric)
 {
+	numeric = false;
 	pos++;
 	if (pos >= body.size())
 		return false;
@@ -57,6 +60,7 @@ bool DecodeEscapeSequence(const string& body, size_t& pos, int& cp)
 	}
 	if (IsOctalDigit(c))
 	{
+		numeric = true;
 		cp = 0;
 		for (int digits = 0;
 		     digits < 3 && pos < body.size() &&
@@ -67,6 +71,7 @@ bool DecodeEscapeSequence(const string& body, size_t& pos, int& cp)
 	}
 	if (c == 'x')
 	{
+		numeric = true;
 		pos++;
 		if (pos >= body.size() ||
 		    !IsHexDigit(static_cast<unsigned char>(body[pos])))
@@ -87,20 +92,26 @@ bool DecodeEscapeSequence(const string& body, size_t& pos, int& cp)
 // Decodes a literal body into code points. Raw bodies are plain UTF-8;
 // non-raw bodies interleave escape-sequences (universal-character-names
 // were already decoded in phase 1). False if any element is malformed.
-bool DecodeBody(const string& body, bool raw, std::vector<int>& cps)
+// `numeric`, when given, records which elements came from octal/hex
+// escapes (code-unit values, not code points).
+bool DecodeBody(const string& body, bool raw, std::vector<int>& cps,
+                std::vector<bool>* numeric = 0)
 {
 	size_t pos = 0;
 	while (pos < body.size())
 	{
 		int cp;
+		bool is_numeric = false;
 		if (!raw && body[pos] == '\\')
 		{
-			if (!DecodeEscapeSequence(body, pos, cp))
+			if (!DecodeEscapeSequence(body, pos, cp, is_numeric))
 				return false;
 		}
 		else if (!TryDecodeUtf8Char(body, pos, cp))
 			return false;
 		cps.push_back(cp);
+		if (numeric)
+			numeric->push_back(is_numeric);
 	}
 	return true;
 }
@@ -230,14 +241,24 @@ EFundamentalType StringElementType(const string& prefix, size_t& unit_size)
 
 // Throws (via EncodeUtf8) for code points the narrow execution charset
 // cannot hold; like the reference, that is a translation error rather
-// than an invalid token. UTF-16/32 truncate instead.
-string EncodeStringData(const std::vector<int>& cps, size_t unit_size)
+// than an invalid token. UTF-16/32 truncate instead. Numeric escapes
+// whose value fits one narrow code unit are stored directly (2.14.5p15:
+// the escape value is the code unit, not a code point to re-encode).
+string EncodeStringData(const std::vector<int>& cps,
+                        const std::vector<bool>& numeric, size_t unit_size)
 {
 	string data;
-	for (int cp : cps)
+	for (size_t i = 0; i < cps.size(); i++)
 	{
+		int cp = cps[i];
 		if (unit_size == 1)
-			EncodeUtf8(cp, data);
+		{
+			if (i < numeric.size() && numeric[i] && cp >= 0 &&
+			    cp <= 0xFF)
+				data += static_cast<char>(cp);
+			else
+				EncodeUtf8(cp, data);
+		}
 		else if (unit_size == 2)
 			AppendUtf16(cp, data);
 		else
@@ -341,6 +362,7 @@ PostToken AnalyzeStringSequence(const std::vector<string>& sources)
 	string prefix;
 	string ud_suffix;
 	std::vector<int> cps;
+	std::vector<bool> numeric;
 	for (const string& source : sources)
 	{
 		StringLiteralParts parts;
@@ -349,10 +371,11 @@ PostToken AnalyzeStringSequence(const std::vector<string>& sources)
 		if (!CombineSequenceAttribute(parts.prefix, prefix) ||
 		    !CombineSequenceAttribute(parts.ud_suffix, ud_suffix))
 			return MakeInvalidToken(joined);
-		if (!DecodeBody(parts.body, parts.raw, cps))
+		if (!DecodeBody(parts.body, parts.raw, cps, &numeric))
 			return MakeInvalidToken(joined);
 	}
 	cps.push_back(0);
+	numeric.push_back(false);
 
 	// Reference check order: encode first (a UTF-8 range failure is a
 	// hard translation error even when the suffix below would have made
@@ -360,7 +383,7 @@ PostToken AnalyzeStringSequence(const std::vector<string>& sources)
 	// start with an underscore.
 	size_t unit_size;
 	EFundamentalType type = StringElementType(prefix, unit_size);
-	string data = EncodeStringData(cps, unit_size);
+	string data = EncodeStringData(cps, numeric, unit_size);
 	if (!ud_suffix.empty() && ud_suffix[0] != '_')
 		return MakeInvalidToken(joined);
 

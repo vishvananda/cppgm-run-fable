@@ -105,6 +105,14 @@ protected:
 	// Validates the PA11-supported name shape (plain identifier parts).
 	static const string& PartName(const AstNamePart& part);
 	static const string& TerminalName(const AstName& name);
+	// PA14: the declared name of a function declarator-id terminal,
+	// accepting operator-function-ids ("operator delete").
+	static string DeclaredFunctionName(const AstNamePart& part);
+	// PA14: records per-overload facts (default arguments, deleted
+	// definitions) onto the function binding for the overload whose
+	// parameter list matches `composed.type`.
+	void RecordFunctionFacts(ScopeBinding& binding,
+	                         const DeclaratorInfo& composed, bool deleted);
 	// The scope a nested-name-specifier component designates.
 	Scope* ScopeOfBinding(const ScopeBinding& binding);
 	// The scope of name parts [0, parts.size()-1).
@@ -131,4 +139,6 @@ protected:
 	// (null outside a class-specifier body), for layout completion.
 	std::vector<TypePtr>* current_fields_;
 	int anonymous_enums_;
+	// PA14: inside an extern "C" linkage-specification body.
+	bool in_c_linkage_;
 };

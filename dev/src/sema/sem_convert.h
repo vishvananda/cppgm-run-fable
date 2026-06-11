@@ -87,7 +87,10 @@ bool IsObjectPointer(const TypePtr& type);
 // `arity_exact` candidates must take exactly args.size() parameters
 // unless variadic. Throws when no candidate is viable or the best is
 // ambiguous; returns the index of the winner and fills the winning
-// per-argument conversions.
+// per-argument conversions. `min_arity`, when given, holds each
+// candidate's minimum argument count (parameters minus trailing
+// default arguments, 8.3.6).
 size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<ConversionSource>& args,
-                          vector<ImplicitConversion>& conversions);
+                          vector<ImplicitConversion>& conversions,
+                          const vector<size_t>* min_arity = 0);

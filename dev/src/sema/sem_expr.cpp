@@ -43,6 +43,29 @@ TypePtr DecayToPointer(const TypePtr& type)
 	return RemoveTopCv(type);
 }
 
+// 5.2.11p4 similarity for const_cast: the same type ignoring
+// cv-qualification at every level.
+bool SimilarTypes(const TypePtr& a, const TypePtr& b)
+{
+	TypePtr sa = RemoveTopCv(a);
+	TypePtr sb = RemoveTopCv(b);
+	if (sa->kind != sb->kind)
+		return false;
+	switch (sa->kind)
+	{
+	case TK_POINTER:
+	case TK_LVALUE_REFERENCE:
+	case TK_RVALUE_REFERENCE:
+		return SimilarTypes(sa->target, sb->target);
+	case TK_ARRAY:
+		return sa->bound_known == sb->bound_known &&
+			sa->bound == sb->bound &&
+			SimilarTypes(sa->target, sb->target);
+	default:
+		return TypeEquals(sa, sb);
+	}
+}
+
 }  // namespace
 
 string CanonicalQualifiedName(const Scope* owner, const string& name)
@@ -105,10 +128,10 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
 		                     *expr.operands[0], true, OP_LPAREN, "");
 	case EK_KEYWORD_CAST:
-		if (expr.op != KW_STATIC_CAST)
+		if (expr.op != KW_STATIC_CAST && expr.op != KW_CONST_CAST)
 			throw OutsideBoundary("cast keyword");
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
-		                     *expr.operands[0], true, KW_STATIC_CAST,
+		                     *expr.operands[0], true, expr.op,
 		                     expr.op_spelling);
 	case EK_FUNCTIONAL_CAST:
 	{
@@ -143,6 +166,22 @@ SemValue SemExprAnalyzer::AnalyzeLiteral(const AstExpr& expr)
 		value.null_pointer_literal =
 			IsIntegralFundamental(expr.literal_type) &&
 			LittleEndianValue(expr.literal_data) == 0;
+		if (IsIntegralFundamental(expr.literal_type))
+		{
+			// Decoded value for the lowering: the stored 64 bits are
+			// sign-extended for signed literal types.
+			unsigned long long bits =
+				LittleEndianValue(expr.literal_data);
+			if (IsSignedIntegralFundamental(expr.literal_type))
+			{
+				size_t width = expr.literal_data.size() * 8;
+				if (width < 64 && (bits >> (width - 1)) & 1)
+					bits |= ~0ull << width;
+			}
+			value.node->has_value = true;
+			value.node->value = ConstValue(expr.literal_type, bits);
+			value.node->null_pointer = value.null_pointer_literal;
+		}
 	}
 	else if (expr.literal_kind == PTK_LITERAL_ARRAY)
 	{
@@ -152,6 +191,8 @@ SemValue SemExprAnalyzer::AnalyzeLiteral(const AstExpr& expr)
 			                    true, false),
 			true, expr.literal_elements);
 		value.category = VC_LVALUE;
+		value.node->is_string_literal = true;
+		value.node->string_bytes = expr.literal_data;
 	}
 	else
 		throw OutsideBoundary("user-defined literal");
@@ -170,9 +211,12 @@ SemValue SemExprAnalyzer::AnalyzeKeywordLiteral(const AstExpr& expr)
 	case KW_TRUE:
 	case KW_FALSE:
 		value.type = MakeFundamentalType(FT_BOOL);
+		value.node->has_value = true;
+		value.node->value = ConstValue(FT_BOOL, expr.op == KW_TRUE);
 		break;
 	case KW_NULLPTR:
 		value.type = MakeFundamentalType(FT_NULLPTR_T);
+		value.node->null_pointer = true;
 		break;
 	default:
 		throw OutsideBoundary("this");
@@ -259,6 +303,8 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		value.node->token = RenderConstValue(binding->value);
 		value.node->type = binding->type;
 		value.node->category = VC_PRVALUE;
+		value.node->has_value = true;
+		value.node->value = binding->value;
 		value.type = binding->type;
 		value.category = VC_PRVALUE;
 		return value;
@@ -271,6 +317,8 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	value.node->name = written;
 	value.node->type = value.type;
 	value.node->category = value.category;
+	value.node->entity_scope = binding->owner;
+	value.node->entity_name = binding->name;
 	return value;
 }
 
@@ -319,6 +367,7 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 			? RemoveTopCv(dest->target) : RemoveTopCv(dest);
 		value.type = target;
 		value.node->type = target;
+		value.node->null_pointer = true;
 		value.null_pointer_literal = false;
 	}
 }
@@ -401,18 +450,45 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 		args.push_back(Analyze(*expr.arguments[i]));
 		sources.push_back(MakeConversionSource(args.back()));
 	}
+	// 8.3.6: trailing default arguments lower each candidate's minimum
+	// call arity.
+	vector<size_t> min_arity(candidates.size());
+	for (size_t c = 0; c < candidates.size(); c++)
+	{
+		size_t required = candidates[c]->parameters.size();
+		const vector<const AstExpr*>* defaults =
+			c < binding.fn_defaults.size() ? &binding.fn_defaults[c] : 0;
+		while (defaults && required > 0 &&
+		       required <= defaults->size() && (*defaults)[required - 1])
+			required--;
+		min_arity[c] = required;
+	}
 	vector<ImplicitConversion> conversions;
-	size_t winner = SelectBestOverload(candidates, sources, conversions);
+	size_t winner = SelectBestOverload(candidates, sources, conversions,
+	                                   &min_arity);
+	if (winner < binding.fn_deleted.size() && binding.fn_deleted[winner])
+		throw runtime_error("use of deleted function " + binding.name);
 	const TypePtr& function_type = candidates[winner];
 	for (size_t i = 0; i < args.size(); i++)
 		if (i < function_type->parameters.size())
 			ApplyConversion(args[i], conversions[i],
 			                function_type->parameters[i]);
+	// Synthesize the omitted trailing arguments from the recorded
+	// default expressions (8.3.6p9: evaluated at the call site).
+	for (size_t i = args.size(); i < function_type->parameters.size(); i++)
+	{
+		SemValue filled = Analyze(*binding.fn_defaults[winner][i]);
+		CopyInitialize(filled, function_type->parameters[i],
+		               "default argument");
+		args.push_back(std::move(filled));
+	}
 
 	SemValue value = CallResult(function_type);
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
 	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
 	callee->type = function_type;
+	callee->entity_scope = binding.owner;
+	callee->entity_name = binding.name;
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));
@@ -475,6 +551,8 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinConstantP(const AstExpr& expr)
 	value.category = VC_PRVALUE;
 	value.node->type = value.type;
 	value.node->category = value.category;
+	value.node->has_value = true;
+	value.node->value = ConstValue(FT_INT, constant ? 1 : 0);
 	return value;
 }
 
@@ -856,8 +934,9 @@ TypePtr SemExprAnalyzer::ConditionalResultType(const SemValue& a,
 		return RemoveTopCv(a.type);
 	if (IsVoidType(a.type) && IsVoidType(b.type))
 		return MakeFundamentalType(FT_VOID);
-	if (TypeEquals(RemoveTopCv(a.type), RemoveTopCv(b.type)) &&
-	    !IsArithmeticOrEnum(a.type))
+	// 5.16p6: same-typed prvalue operands keep that type; the usual
+	// arithmetic conversions only reconcile differing operand types.
+	if (TypeEquals(RemoveTopCv(a.type), RemoveTopCv(b.type)))
 		return RemoveTopCv(a.type);
 	return UsualArithmeticConversions(a.type, b.type);
 }
@@ -961,9 +1040,12 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 	{
 		// 5.2.9p3: a cast to reference type adjusts the operand's
 		// category and printed type; no cast node is dumped.
+		// const_cast accepts the 5.2.11 similar types.
 		const TypePtr& referee = dest->target;
-		if (value.function_set || !TypeEquals(RemoveTopCv(referee),
-		                                      RemoveTopCv(value.type)))
+		bool compatible = op == KW_CONST_CAST
+			? SimilarTypes(referee, value.type)
+			: TypeEquals(RemoveTopCv(referee), RemoveTopCv(value.type));
+		if (value.function_set || !compatible)
 			throw OutsideBoundary("reference cast form");
 		if (dest->kind == TK_LVALUE_REFERENCE &&
 		    value.category != VC_LVALUE)
@@ -1030,6 +1112,10 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	value.node->token = "0";
 	value.node->type = to;
 	value.node->category = VC_PRVALUE;
+	value.node->has_value = true;
+	value.node->value = ConstValue(
+		to->kind == TK_ENUM ? to->named->enum_underlying : to->fundamental,
+		0);
 	value.null_pointer_literal = IsIntegralType(to);
 	return value;
 }
@@ -1049,13 +1135,16 @@ SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 		if (!operand_type)
 			operand_type = Analyze(*expr.operands[0]).type;
 	}
-	TypeSize(operand_type);  // 5.3.3p1: requires a complete object type
+	// 5.3.3p1: requires a complete object type; the size is the value.
+	unsigned long long size = TypeSize(operand_type);
 	SemValue value;
 	value.type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
 	value.category = VC_PRVALUE;
 	value.node = MakeSemNode(SN_SIZEOF_EXPRESSION);
 	value.node->type = value.type;
 	value.node->category = VC_PRVALUE;
+	value.node->has_value = true;
+	value.node->value = ConstValue(FT_UNSIGNED_LONG_INT, size);
 	return value;
 }
 

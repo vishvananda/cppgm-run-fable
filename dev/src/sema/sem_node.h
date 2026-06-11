@@ -10,6 +10,7 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
+#include "sema/scope.h"
 #include "sema/type.h"
 
 // The PA12 semantic dump tree: one kind-tagged node per printed line,
@@ -58,6 +59,8 @@ enum ESemNodeKind
 	SN_DEFAULT_STATEMENT,
 	SN_BREAK_STATEMENT,
 	SN_CONTINUE_STATEMENT,
+	SN_GOTO_STATEMENT,    // PA14: name is the target label
+	SN_LABEL_STATEMENT,   // PA14: name is the label, child the statement
 
 	// expressions: <word> <value-category> <type> [extras]
 	SN_LITERAL,                // extra: value token
@@ -93,6 +96,24 @@ struct SemNode
 	string op_spelling;   // text after the colon
 	string token;         // SN_LITERAL value spelling
 	vector<SemNodePtr> children;
+
+	// PA14 lowering facts (never printed by the PA12 dump). The named
+	// entity's identity is its declaring scope plus declared name; both
+	// are stable because scopes are arena-owned by the TypesModel.
+	const Scope* entity_scope;
+	string entity_name;
+	bool has_value;       // decoded constant: literals, enumerator uses,
+	                      // sizeof results, folded case values
+	ConstValue value;
+	bool null_pointer;    // null pointer literal (possibly retyped)
+	bool is_string_literal;
+	string string_bytes;  // string literal object representation
+	// SN_VARIABLE / SN_FUNCTION_DECLARATION / SN_FUNCTION_DEFINITION
+	bool is_static_decl;
+	bool is_extern_decl;
+	bool is_thread_local_decl;
+	bool c_linkage;
+	bool unwind_no;       // simple noexcept marking on the declarator
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);

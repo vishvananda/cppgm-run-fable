@@ -16,7 +16,11 @@ const char* ValueCategoryName(EValueCategory category)
 }
 
 SemNode::SemNode(ESemNodeKind kind_in)
-	: kind(kind_in), category(VC_PRVALUE), has_op(false), op(OP_STAR)
+	: kind(kind_in), category(VC_PRVALUE), has_op(false), op(OP_STAR),
+	  entity_scope(0), has_value(false), null_pointer(false),
+	  is_string_literal(false), is_static_decl(false),
+	  is_extern_decl(false), is_thread_local_decl(false),
+	  c_linkage(false), unwind_no(false)
 {
 }
 
@@ -59,6 +63,8 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_DEFAULT_STATEMENT: return "default-statement";
 	case SN_BREAK_STATEMENT: return "break-statement";
 	case SN_CONTINUE_STATEMENT: return "continue-statement";
+	case SN_GOTO_STATEMENT: return "goto-statement";
+	case SN_LABEL_STATEMENT: return "label-statement";
 	case SN_LITERAL: return "literal";
 	case SN_ID_EXPRESSION: return "id-expression";
 	case SN_CALL_EXPRESSION: return "call-expression";
@@ -96,6 +102,8 @@ string NodeLine(const SemNode& node)
 		return line + " " + node.name + " " + DescribeType(node.type);
 	case SN_NAMESPACE_DEFINITION:
 	case SN_CONSTRUCTOR_ACTION:
+	case SN_GOTO_STATEMENT:
+	case SN_LABEL_STATEMENT:
 		return line + " " + node.name;
 	case SN_LITERAL:
 		return line + " " + ValueCategoryName(node.category) + " " +

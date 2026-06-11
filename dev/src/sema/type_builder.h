@@ -57,14 +57,20 @@ struct DeclSpecifierInfo
 // adjustment - the fixtures pin `function of (array of 3 int)`).
 struct ParameterInfo
 {
+	ParameterInfo() : default_arg(0) {}
+
 	string name;  // empty when unnamed
 	TypePtr type;
+	// PA14: `= expression` default argument (null when absent); points
+	// into the translation unit's AST, used while it is alive.
+	const AstExpr* default_arg;
 };
 
 // The composition result of one declarator over a base type.
 struct DeclaratorInfo
 {
-	DeclaratorInfo() : id(0), declares_function(false) {}
+	DeclaratorInfo() : id(0), declares_function(false),
+	                   noexcept_simple(false) {}
 
 	TypePtr type;
 	const AstName* id;  // declarator-id, null for abstract declarators
@@ -74,6 +80,9 @@ struct DeclaratorInfo
 	// a definition to bind.
 	bool declares_function;
 	vector<ParameterInfo> parameters;
+	// PA14: bare `noexcept` or empty `throw()` on the declarator (the
+	// cheap non-unwinding markings; expressions are not evaluated).
+	bool noexcept_simple;
 };
 
 class TypeBuilder

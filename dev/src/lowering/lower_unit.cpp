@@ -1,0 +1,454 @@
+#include "lowering/lower_program.h"
+
+#include <stdexcept>
+
+#include "lowering/lower_const.h"
+#include "lowering/lower_function.h"
+#include "lowering/lower_name.h"
+#include "lowering/lower_types.h"
+#include "sema/const_expr.h"
+
+using std::runtime_error;
+using std::to_string;
+
+namespace {
+
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA14 assignment boundary");
+}
+
+// The program-wide identity key of a namespace-scope entity.
+string QualifiedKey(const Scope* scope, const string& name)
+{
+	return LowerScopePath(scope) + name;
+}
+
+// The fundamental value space of an integral or enumeration type.
+EFundamentalType ValueFund(const TypePtr& type)
+{
+	if (type->kind == TK_ENUM)
+		return type->named->enum_underlying;
+	return type->fundamental;
+}
+
+// Floating global initializers keep the literal spelling; the type
+// suffix follows the destination type.
+string FloatInitToken(const TypePtr& type, const LowerConst& value)
+{
+	string token = value.float_token;
+	char last = token.empty() ? 0 : token[token.size() - 1];
+	bool suffixed = last == 'f' || last == 'F' || last == 'l' ||
+		last == 'L';
+	if (!suffixed && type->fundamental == FT_FLOAT)
+		token += "f";
+	else if (!suffixed && type->fundamental == FT_LONG_DOUBLE)
+		token += "L";
+	return token;
+}
+
+}  // namespace
+
+LowerProgram::LowerProgram()
+	: has_main_(false)
+{
+	symbols_.insert("main");
+}
+
+void LowerProgram::AddUnit(const SemUnit& unit)
+{
+	for (size_t i = 0; i < unit.items.size(); i++)
+		CollectItem(*unit.items[i]);
+	if (!unit.synthesized.empty())
+		throw OutsideBoundary("synthesized class helper output");
+}
+
+void LowerProgram::CollectItem(const SemNode& item)
+{
+	switch (item.kind)
+	{
+	case SN_NAMESPACE_DEFINITION:
+		for (size_t i = 0; i < item.children.size(); i++)
+			CollectItem(*item.children[i]);
+		return;
+	case SN_VARIABLE:
+		RegisterGlobal(item);
+		return;
+	case SN_FUNCTION_DEFINITION:
+		RegisterFunction(item, true);
+		return;
+	case SN_FUNCTION_DECLARATION:
+		RegisterFunction(item, false);
+		return;
+	case SN_TYPE_ALIAS:
+		return;
+	default:
+		throw OutsideBoundary("namespace-scope item");
+	}
+}
+
+LowGlobalInfo& LowerProgram::GlobalEntry(const Scope* scope,
+                                         const string& name)
+{
+	string key = QualifiedKey(scope, name);
+	map<string, size_t>::iterator found = global_index_.find(key);
+	if (found != global_index_.end())
+		return globals_[found->second];
+	const ScopeBinding* binding = FindOwnBinding(*scope, name);
+	if (!binding)
+		throw runtime_error("unknown namespace-scope object " + name);
+	LowGlobalInfo info;
+	info.type = binding->type;
+	info.low_name = UniqueSymbol(LowerScopePath(scope) +
+	                             LowerSanitizeName(name));
+	info.object_name = MangleVariableObjectName(scope, name);
+	global_index_[key] = globals_.size();
+	globals_.push_back(info);
+	return globals_.back();
+}
+
+void LowerProgram::RegisterGlobal(const SemNode& item)
+{
+	LowGlobalInfo& info = GlobalEntry(item.entity_scope,
+	                                  item.entity_name);
+	const ScopeBinding* binding = FindOwnBinding(*item.entity_scope,
+	                                             item.entity_name);
+	info.type = binding->type;  // redeclarations may complete bounds
+	bool defines = !item.children.empty() || !item.is_extern_decl;
+	if (defines && !info.defined)
+	{
+		info.defined = true;
+		info.node = &item;
+	}
+	bool is_const = false;
+	bool is_volatile = false;
+	TopCv(info.type, is_const, is_volatile);
+	if (item.is_static_decl ||
+	    LowerInUnnamedNamespace(item.entity_scope) ||
+	    (is_const && !item.is_extern_decl))
+		info.internal = true;
+	if (item.is_thread_local_decl)
+		info.is_thread_local = true;
+	if (item.c_linkage)
+	{
+		info.c_linkage = true;
+		info.object_name.clear();
+	}
+}
+
+LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
+                                             const string& name,
+                                             const TypePtr& type)
+{
+	string key = QualifiedKey(scope, name) + "#" + DescribeType(type);
+	map<string, size_t>::iterator found = function_index_.find(key);
+	if (found != function_index_.end())
+		return functions_[found->second];
+	LowFunctionInfo info;
+	info.scope = scope;
+	info.name = name;
+	info.type = type;
+	info.is_main = name == "main" && scope->kind == SCOPE_NAMESPACE &&
+		!scope->parent;
+	size_t overload = LowerOverloadIndex(scope, name, type);
+	string base = LowerScopePath(scope) + LowerSanitizeName(name);
+	if (overload)
+		base += "__ov" + to_string(overload + 1);
+	info.low_name = info.is_main ? "main" : UniqueSymbol(base);
+	info.internal = LowerInUnnamedNamespace(scope);
+	info.deleted = LowerOverloadDeleted(scope, name, type);
+	if (!info.is_main)
+		info.object_name = MangleFunctionObjectName(scope, name, type);
+	function_index_[key] = functions_.size();
+	functions_.push_back(info);
+	return functions_.back();
+}
+
+void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
+{
+	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
+	                                      item.entity_name, item.type);
+	if (item.c_linkage)
+	{
+		info.c_linkage = true;
+		info.object_name.clear();
+	}
+	if (defined)
+	{
+		if (info.defined)
+			throw runtime_error("redefinition of " + item.entity_name);
+		info.defined = true;
+		info.definition = &item;
+		info.unwind_no = item.unwind_no;
+	}
+}
+
+string LowerProgram::UniqueSymbol(const string& base)
+{
+	if (!symbols_.count(base))
+	{
+		symbols_.insert(base);
+		return base;
+	}
+	for (int i = 2;; i++)
+	{
+		string candidate = base + "__ov" + to_string(i);
+		if (!symbols_.count(candidate))
+		{
+			symbols_.insert(candidate);
+			return candidate;
+		}
+	}
+}
+
+string LowerProgram::GlobalRef(const Scope* scope, const string& name)
+{
+	LowGlobalInfo& info = GlobalEntry(scope, name);
+	info.used = true;
+	return "@" + info.low_name;
+}
+
+string LowerProgram::FunctionRef(const Scope* scope, const string& name,
+                                 const TypePtr& type)
+{
+	LowFunctionInfo& info = FunctionEntry(scope, name, type);
+	info.used = true;
+	return "@" + info.low_name;
+}
+
+string LowerProgram::StringLiteralRef(const SemNode& node)
+{
+	TypePtr element = RemoveTopCv(node.type->target);
+	string key = DescribeType(element) + "|" + node.string_bytes;
+	map<string, size_t>::iterator found = string_index_.find(key);
+	if (found != string_index_.end())
+		return "@" + strings_[found->second].low_name;
+	LowStringLiteral literal;
+	literal.low_name =
+		UniqueSymbol("__strlit__" + to_string(strings_.size() + 1));
+	literal.element = element;
+	literal.bytes = node.string_bytes;
+	string_index_[key] = strings_.size();
+	strings_.push_back(literal);
+	return "@" + strings_.back().low_name;
+}
+
+// --- rendering -------------------------------------------------------------
+
+string LowerProgram::GlobalMetadata(const LowGlobalInfo& info) const
+{
+	string meta = info.internal ? "binding=internal" : "binding=strong";
+	if (!info.object_name.empty())
+		meta += ", object=" + info.object_name;
+	if (info.is_thread_local)
+		meta += ", storage=thread_local";
+	return " [" + meta + "]";
+}
+
+string LowerProgram::RenderAddress(const LowerConst& value)
+{
+	string symbol;
+	if (value.kind == LC_STRING)
+		symbol = StringLiteralRef(*value.string_node);
+	else if (value.entity_type->kind == TK_FUNCTION)
+		symbol = FunctionRef(value.entity_scope, value.entity_name,
+		                     value.entity_type);
+	else
+		symbol = GlobalRef(value.entity_scope, value.entity_name);
+	string text = "addr " + symbol;
+	if (value.kind == LC_ADDR && value.offset)
+	{
+		if (value.offset < 0)
+			throw OutsideBoundary("negative address offset");
+		text += " + " + to_string(value.offset);
+	}
+	return text;
+}
+
+// One structured data item; `is_zero_item` marks null pointers, which
+// spell as zero fill.
+string LowerProgram::RenderConstItem(const LowerConst& value,
+                                     const TypePtr& type,
+                                     bool& is_zero_item)
+{
+	is_zero_item = false;
+	if (value.kind == LC_NULL)
+	{
+		is_zero_item = true;
+		return "zero " + to_string(TypeSize(type));
+	}
+	if (value.kind == LC_INT)
+		return LowerValueType(type) + " " +
+			RenderConstValue(ConvertConstValue(value.ival,
+			                                   ValueFund(type)));
+	if (value.kind == LC_FLOAT)
+		return LowerValueType(type) + " " + FloatInitToken(type, value);
+	if (value.offset)
+		throw OutsideBoundary("structured address item offset");
+	return "ptr " + RenderAddress(value);
+}
+
+string LowerProgram::RenderScalarInit(const LowGlobalInfo& info)
+{
+	if (!info.node || info.node->children.empty())
+		return "zero";
+	LowerConst value;
+	if (!EvaluateLowerConst(*info.node->children[0], value))
+		throw OutsideBoundary("non-constant global initializer");
+	switch (value.kind)
+	{
+	case LC_INT:
+		return RenderConstValue(ConvertConstValue(value.ival,
+		                                          ValueFund(info.type)));
+	case LC_FLOAT:
+		return FloatInitToken(info.type, value);
+	case LC_NULL:
+		return "zero";
+	case LC_ADDR:
+	case LC_STRING:
+		return RenderAddress(value);
+	}
+	throw OutsideBoundary("global initializer");
+}
+
+string LowerProgram::RenderArrayItems(const LowGlobalInfo& info)
+{
+	const TypePtr& array = info.type;
+	TypePtr element = RemoveTopCv(array->target);
+	unsigned long long element_size = TypeSize(element);
+	const SemNode* braced = 0;
+	if (info.node && !info.node->children.empty())
+	{
+		braced = info.node->children[0].get();
+		if (braced->kind != SN_BRACED_INIT_LIST)
+			throw OutsideBoundary("global array initializer form");
+	}
+	size_t written = braced ? braced->children.size() : 0;
+	string body;
+	for (size_t i = 0; i < written; i++)
+	{
+		LowerConst value;
+		if (!EvaluateLowerConst(*braced->children[i], value))
+			throw OutsideBoundary("non-constant array element");
+		bool is_zero_item = false;
+		body += "  " + RenderConstItem(value, element, is_zero_item) +
+			"\n";
+	}
+	if (array->bound > written)
+		body += "  zero " +
+			to_string((array->bound - written) * element_size) + "\n";
+	return body;
+}
+
+string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
+{
+	if (info.type->kind == TK_CLASS)
+		throw OutsideBoundary("class-typed global object");
+	if (IsReferenceType(info.type))
+		throw OutsideBoundary("namespace-scope reference");
+	if (info.type->kind == TK_ARRAY)
+		return "global @" + info.low_name + GlobalMetadata(info) +
+			" = {\n" + RenderArrayItems(info) + "}";
+	return "global @" + info.low_name + " : " +
+		LowerValueType(info.type) + GlobalMetadata(info) + " = " +
+		RenderScalarInit(info);
+}
+
+void LowerProgram::Write(ostream& out)
+{
+	// Render global initializers first (string-literal demand order),
+	// then lower the function bodies.
+	vector<string> global_texts(globals_.size());
+	for (size_t i = 0; i < globals_.size(); i++)
+		if (globals_[i].defined)
+			global_texts[i] = RenderGlobal(globals_[i]);
+	for (size_t i = 0; i < functions_.size(); i++)
+	{
+		if (!functions_[i].defined)
+			continue;
+		FunctionLowerer lowerer(*this, *functions_[i].definition,
+		                        functions_[i]);
+		functions_[i].body_text = lowerer.Lower();
+	}
+
+	vector<string> sections[4];
+	for (size_t i = 0; i < globals_.size(); i++)
+	{
+		const LowGlobalInfo& info = globals_[i];
+		if (info.defined || !info.used)
+			continue;
+		string line = "declare global @" + info.low_name;
+		if (info.type->kind != TK_ARRAY)
+			line += " : " + LowerValueType(info.type);
+		line += GlobalMetadata(info);
+		sections[0].push_back(line);
+	}
+	for (size_t i = 0; i < functions_.size(); i++)
+	{
+		const LowFunctionInfo& info = functions_[i];
+		if (info.defined || !info.used || info.deleted)
+			continue;
+		sections[1].push_back(RenderFunctionDeclare(info));
+	}
+	for (size_t i = 0; i < strings_.size(); i++)
+	{
+		string body;
+		const LowStringLiteral& literal = strings_[i];
+		unsigned long long width = TypeSize(literal.element);
+		// String data items render their raw unsigned code units.
+		for (size_t at = 0; at + width <= literal.bytes.size();
+		     at += width)
+			body += "  " + LowerValueType(literal.element) + " " +
+				to_string(LittleEndianValue(
+				    literal.bytes.substr(at, width))) + "\n";
+		sections[2].push_back("global @" + literal.low_name +
+		                      " [binding=internal] = {\n" + body + "}");
+	}
+	for (size_t i = 0; i < globals_.size(); i++)
+		if (globals_[i].defined)
+			sections[2].push_back(global_texts[i]);
+	for (size_t i = 0; i < functions_.size(); i++)
+		if (functions_[i].defined)
+			sections[3].push_back(functions_[i].body_text);
+
+	bool first = true;
+	for (int kind = 0; kind < 4; kind++)
+	{
+		for (size_t i = 0; i < sections[kind].size(); i++)
+		{
+			if (!first && i == 0)
+				out << "\n";
+			out << sections[kind][i] << "\n";
+			first = false;
+		}
+	}
+}
+
+string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
+{
+	string params;
+	for (size_t i = 0; i < info.type->parameters.size(); i++)
+	{
+		const TypePtr& param = info.type->parameters[i];
+		params += (i ? ", " : "") + string("%arg") + to_string(i) +
+			" : " + LowerValueType(param);
+		if (IsReferenceType(param))
+			params += " [pass=reference]";
+	}
+	vector<string> meta;
+	if (info.type->variadic)
+		meta.push_back("arity=variadic");
+	if (info.c_linkage)
+		meta.push_back("linkage=c");
+	meta.push_back(info.internal ? "binding=internal"
+	                             : "binding=strong");
+	if (!info.object_name.empty())
+		meta.push_back("object=" + info.object_name);
+	string metadata;
+	for (size_t i = 0; i < meta.size(); i++)
+		metadata += (i ? ", " : " [") + meta[i];
+	metadata += "]";
+	return "declare function @" + info.low_name + "(" + params +
+		") -> " + LowerValueType(info.type->target) + metadata;
+}

@@ -11,6 +11,7 @@
 #include "ast/ast.h"
 #include "ast/ast_parser.h"
 #include "ast/ast_printer.h"
+#include "lowering/lower_program.h"
 #include "parse/parse_token.h"
 #include "post_token.h"
 #include "post_tokenizer.h"
@@ -594,8 +595,33 @@ int run_emit_semantics_mode(const vector<string> & args)
 
 int run_emit_lowir_mode(const vector<string> & args)
 {
-  parse_source_output_invocation(args, true);
-  return run_unimplemented_mode("--emit-lowir", "PA14");
+  SourceOutputInvocation invocation =
+      parse_source_output_invocation(args, true);
+
+  vector<pair<string, string>> predefined = PredefinedObjectMacros();
+  vector<unique_ptr<SemUnit>> units;
+  // The lowering reads scope identities out of each unit's model, so
+  // the models must outlive the LowIR emission below.
+  vector<unique_ptr<TypesModel>> models;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    EmitAstTask task = run_unit_on_large_stack(invocation.inputs[i],
+                                               predefined,
+                                               BindMode::Semantics);
+    units.push_back(std::move(task.semantics));
+    models.push_back(std::move(task.model));
+  }
+
+  LowerProgram program;
+  for(size_t i = 0; i < units.size(); ++i) {
+    program.AddUnit(*units[i]);
+  }
+
+  ofstream out(invocation.outfile.c_str());
+  if(!out) {
+    throw runtime_error("cannot create output file: " + invocation.outfile);
+  }
+  program.Write(out);
+  return EXIT_SUCCESS;
 }
 
 int run_driver_mode(const vector<string> & args)

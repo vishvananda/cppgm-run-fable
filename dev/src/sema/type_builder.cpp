@@ -177,6 +177,15 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 			result.name = composed.id->parts[0].identifier;
 		}
 		result.type = composed.type;
+		if (parameter.default_arg)
+		{
+			// 8.3.6: only the `= expression` form; recorded for call
+			// sites, analyzed only when an argument is omitted.
+			if (parameter.default_arg->kind != INIT_EQ ||
+			    !parameter.default_arg->expr)
+				throw OutsideBoundary("default argument form");
+			result.default_arg = parameter.default_arg->expr.get();
+		}
 		parameters.push_back(result);
 	}
 	if (NormalizeVoidParameter(parameters, clause.variadic))
@@ -229,9 +238,13 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	case DI_FUNC_QUAL:
 		// Exception specifications do not enter the PA11 type model;
 		// virt-specifiers and ref-qualifiers are member-function
-		// territory.
+		// territory. The cheap non-unwinding markings are kept for the
+		// PA14 LowIR boundary metadata.
 		if (item.qual.kind == FQ_VIRT)
 			throw OutsideBoundary("virt-specifier or ref-qualifier");
+		if ((item.qual.kind == FQ_NOEXCEPT && !item.qual.has_expr) ||
+		    (item.qual.kind == FQ_THROW && item.qual.throw_types.empty()))
+			out.noexcept_simple = true;
 		break;
 	default:
 		throw OutsideBoundary("declarator form");
