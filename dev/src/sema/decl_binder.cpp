@@ -704,6 +704,7 @@ void DeclBinder::BindVariable(const string& name, const TypePtr& type,
 	binding.type = type;
 	binding.access = current_access_;
 	binding.is_mutable = specs.is_mutable;
+	binding.is_thread_local = specs.is_thread_local;
 	RecordConstantValue(binding, init);
 	ScopeBinding& added = AddBinding(*current_, binding);
 	if (current_->kind == SCOPE_CLASS && current_fields_ && !specs.is_static)

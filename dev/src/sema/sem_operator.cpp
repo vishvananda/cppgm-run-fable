@@ -211,8 +211,12 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	result = CallResult(fn);
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
 	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
+	const NamedTypeInfo* member_owner = chosen.is_member
+		? host_.Model().ScopeEntity(binding.owner) : 0;
 	callee->type = chosen.is_member
-		? ThisAdjustedType(operands[0].type->named, fn) : fn;
+		? ThisAdjustedType(member_owner ? member_owner
+		                                : operands[0].type->named, fn)
+		: fn;
 	callee->entity_scope = binding.owner;
 	callee->entity_name = binding.name;
 	callee->is_method = chosen.is_member;
@@ -221,8 +225,23 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 		callee->unwind_no = true;
 	result.node->children.push_back(std::move(callee));
 	if (chosen.is_member)
+	{
+		const NamedTypeInfo* owner_entity = member_owner;
+		int hops = owner_entity
+			? BaseClassDistance(operands[0].type->named, owner_entity)
+			: 0;
+		if (hops > 0)
+		{
+			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+			adjusted->type = MakeNamedType(TK_CLASS, owner_entity);
+			adjusted->category = VC_LVALUE;
+			adjusted->base_hops = hops;
+			adjusted->children.push_back(std::move(operands[0].node));
+			operands[0].node = std::move(adjusted);
+		}
 		result.node->children.push_back(
 			AddressOfObject(std::move(operands[0].node)));
+	}
 	else
 		result.node->children.push_back(std::move(operands[0].node));
 	for (size_t i = 1; i < operands.size(); i++)

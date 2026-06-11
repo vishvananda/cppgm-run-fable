@@ -489,10 +489,10 @@ LowerValue FunctionLowerer::LowerBinary(const SemNode& node)
 string FunctionLowerer::LowerPointerCmpOperand(const SemNode& node)
 {
 	TypePtr type = NodeType(node);
-	if (node.null_pointer && type->kind == TK_POINTER)
-		return "0";
 	if (node.null_pointer &&
-	    (IsNullPtrType(type) || IsIntegralType(type)))
+	    (type->kind == TK_POINTER || IsIntegralType(type)))
+		return "0";
+	if (node.null_pointer && IsNullPtrType(type))
 		return MaterializeNull();
 	if (IsNullPtrType(type))
 	{
@@ -889,7 +889,22 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		 (source->kind == TK_CLASS && bare->kind == TK_CLASS &&
 		  BaseClassDistance(source->named, bare->named) >= 0));
 	if (binds_directly)
-		return LowerAddressExpr(node);
+	{
+		string address = LowerAddressExpr(node);
+		if (source->kind == TK_CLASS && bare->kind == TK_CLASS)
+		{
+			int hops = BaseClassDistance(source->named, bare->named);
+			for (int i = 0; i < hops; i++)
+			{
+				string hopped = NewTemp();
+				Emit(hopped +
+				     " = index i8 [projection=base_subobject] " +
+				     address + ", 0");
+				address = hopped;
+			}
+		}
+		return address;
+	}
 	// 8.5.3p5: materialize a temporary with the converted value.
 	string slot = AddMatSlot("refarg", LowerSlotType(bare));
 	string value = LowerValueAs(node, bare, LCC_INIT);
@@ -1111,6 +1126,23 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 			value.type = target;
 			return value;
 		}
+		// 4.10p3: a derived-class pointer adjusts to the base
+		// subobject (offset 0 in the single-inheritance model).
+		if (source->kind == TK_POINTER &&
+		    source->target->kind == TK_CLASS &&
+		    target->target->kind == TK_CLASS)
+		{
+			int hops = BaseClassDistance(source->target->named,
+			                             target->target->named);
+			for (int i = 0; i < hops; i++)
+			{
+				string hopped = NewTemp();
+				Emit(hopped +
+				     " = index i8 [projection=base_subobject] " +
+				     value.text + ", 0");
+				value.text = hopped;
+			}
+		}
 		if (context == LCC_CAST && !value.imm_null)
 		{
 			string temp = NewTemp();
@@ -1188,9 +1220,12 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 		return;
 	case SN_ID_EXPRESSION:
 	case SN_MEMBER_EXPRESSION:
-		// A discarded class lvalue evaluates no code.
+		// A discarded class lvalue evaluates to its address.
 		if (NodeType(node)->kind == TK_CLASS)
+		{
+			LowerAddressExpr(node);
 			return;
+		}
 		break;
 	case SN_CALL_EXPRESSION:
 		LowerCall(node);

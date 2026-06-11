@@ -610,10 +610,12 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	}
 
 	SemValue value = CallResult(fn);
+	const NamedTypeInfo* callee_class =
+		owner_entity ? owner_entity : object_entity;
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
 	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
 	callee->type = is_static ? fn
-	                         : ThisAdjustedType(object_entity, fn);
+	                         : ThisAdjustedType(callee_class, fn);
 	callee->entity_scope = binding.owner;
 	callee->entity_name = binding.name;
 	callee->is_method = !is_static;
@@ -622,8 +624,21 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		callee->unwind_no = true;
 	value.node->children.push_back(std::move(callee));
 	if (!is_static)
+	{
+		// An inherited method receives the base subobject's address.
+		int hops = BaseClassDistance(object_entity, callee_class);
+		if (hops > 0)
+		{
+			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+			adjusted->type = MakeNamedType(TK_CLASS, callee_class);
+			adjusted->category = VC_LVALUE;
+			adjusted->base_hops = hops;
+			adjusted->children.push_back(std::move(object.node));
+			object.node = std::move(adjusted);
+		}
 		value.node->children.push_back(
 			AddressOfObject(std::move(object.node)));
+	}
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));
 	return value;

@@ -87,7 +87,8 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		return;
 	}
 	// Static member functions and hidden friends register as ordinary
-	// entries with weak demand-driven emission.
+	// entries; friend definitions emit unconditionally, static members
+	// on demand.
 	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
 	                                      item.entity_name, item.type);
 	if (!info.defined)
@@ -96,6 +97,8 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		info.weak = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
+		if (item.entity_scope->kind == SCOPE_NAMESPACE)
+			info.used = true;
 	}
 }
 
@@ -135,6 +138,7 @@ LowGlobalInfo& LowerProgram::GlobalEntry(const Scope* scope,
 		throw runtime_error("unknown namespace-scope object " + name);
 	LowGlobalInfo info;
 	info.type = binding->type;
+	info.is_thread_local = binding->is_thread_local;
 	info.low_name = UniqueSymbol(LowerScopePath(scope) +
 	                             LowerSanitizeName(name));
 	info.object_name = MangleVariableObjectName(scope, name);

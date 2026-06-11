@@ -477,6 +477,23 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 	if (IsReferenceType(return_type_))
 	{
 		string address = LowerAddressExpr(value);
+		TypePtr source = value.type;
+		if (IsReferenceType(source))
+			source = source->target;
+		source = RemoveTopCv(source);
+		TypePtr referee = RemoveTopCv(return_type_->target);
+		if (source->kind == TK_CLASS && referee->kind == TK_CLASS)
+		{
+			int hops = BaseClassDistance(source->named, referee->named);
+			for (int i = 0; i < hops; i++)
+			{
+				string hopped = NewTemp();
+				Emit(hopped +
+				     " = index i8 [projection=base_subobject] " +
+				     address + ", 0");
+				address = hopped;
+			}
+		}
 		CloseEhRegion();
 		EmitCleanupsFrom(0);
 		Terminate("return ptr " + address);

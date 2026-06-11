@@ -73,7 +73,8 @@ struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
 	                 owner(0), home(0), c_linkage(false),
-	                 access(MA_PUBLIC), is_mutable(false) {}
+	                 access(MA_PUBLIC), is_mutable(false),
+	                 is_thread_local(false) {}
 
 	EScopeBindingKind kind;
 	string name;
@@ -108,6 +109,7 @@ struct ScopeBinding
 	// entry per overload position in the fn_* vectors below.
 	EMemberAccess access;
 	bool is_mutable;            // mutable non-static data member
+	bool is_thread_local;       // declared thread_local
 	vector<EMemberAccess> fn_access;
 	vector<bool> fn_static;      // static member function
 	vector<bool> fn_inline_def;  // defined in-class: weak, demand-emitted

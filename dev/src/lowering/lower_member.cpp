@@ -112,35 +112,22 @@ LowerValue FunctionLowerer::LowerBitFieldValue(const SemNode& node)
 	string address = MemberAddress(node);
 	string loaded = NewTemp();
 	Emit(loaded + " = load " + unit_text + " " + address);
+	(void)unsigned_field;
+	(void)unit_bits;
+	// The canonical read shifts the unit down and masks the width
+	// (bit-field reads zero-extend in the reference presentation).
 	LowerValue value;
 	value.type = unit;
-	if (unsigned_field)
+	string shifted = loaded;
+	if (node.bit_offset)
 	{
-		string shifted = loaded;
-		if (node.bit_offset)
-		{
-			shifted = NewTemp();
-			Emit(shifted + " = binary ushr " + unit_text + " " + loaded +
-			     ", " + to_string(node.bit_offset));
-		}
-		value.text = NewTemp();
-		Emit(value.text + " = binary and " + unit_text + " " + shifted +
-		     ", " + MaskText(BitMask(node.bit_width), unit));
-		return value;
-	}
-	// Signed extraction: shift the field to the top, then arithmetic
-	// shift back down.
-	unsigned long long up = unit_bits - node.bit_offset - node.bit_width;
-	string high = loaded;
-	if (up)
-	{
-		high = NewTemp();
-		Emit(high + " = binary shl " + unit_text + " " + loaded + ", " +
-		     to_string(up));
+		shifted = NewTemp();
+		Emit(shifted + " = binary ushr " + unit_text + " " + loaded +
+		     ", " + to_string(node.bit_offset));
 	}
 	value.text = NewTemp();
-	Emit(value.text + " = binary shr " + unit_text + " " + high + ", " +
-	     to_string(unit_bits - node.bit_width));
+	Emit(value.text + " = binary and " + unit_text + " " + shifted +
+	     ", " + MaskText(BitMask(node.bit_width), unit));
 	return value;
 }
 
@@ -300,8 +287,12 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 	string slot = AddSlot(node.entity_scope, node.entity_name,
 	                      LowerSlotType(declared));
 	bool is_array = declared->kind == TK_ARRAY;
+	bool any_init = false;
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (node.children[i]->kind != SN_DESTRUCTOR_ACTION)
+			any_init = true;
 	string decl_address;
-	if (!is_array)
+	if (!is_array && any_init)
 	{
 		decl_address = NewTemp();
 		Emit(decl_address + " = addr $" + slot);
