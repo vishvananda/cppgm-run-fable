@@ -182,11 +182,16 @@ void SemBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
 void SemBinder::BindSpecialMember(const AstDecl& decl)
 {
 	ClassInfo* cls = OpenClass();
+	const AstName* id = decl.declarator->IdName();
+	if (!id || id->parts.empty())
+		throw OutsideBoundary("special member name form");
+	if (id->parts.size() > 1)
+	{
+		BindQualifiedSpecialMember(decl, *id);
+		return;
+	}
 	if (!cls || current_ != cls->members)
 		throw OutsideBoundary("out-of-class special member definition");
-	const AstName* id = decl.declarator->IdName();
-	if (!id || id->parts.size() != 1)
-		throw OutsideBoundary("special member name form");
 	const AstNamePart& part = id->parts[0];
 	if (part.kind != NP_IDENTIFIER)
 		throw OutsideBoundary("conversion function");
@@ -297,6 +302,59 @@ Scope* SemBinder::MakeSpecialMemberScope(const string& name,
 	return fn_scope;
 }
 
+// An out-of-class constructor definition with a qualified name
+// (`Outer::Buffer::Buffer(Token) {}`): the declaration must already
+// exist in the named class; the body analyzes against that class.
+void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
+                                           const AstName& id)
+{
+	if (decl.kind != DK_SPECIAL_MEMBER_DEFINITION)
+		throw OutsideBoundary("qualified special member declaration");
+	Scope* declaring = ResolvePrefixScope(id);
+	if (declaring->kind != SCOPE_CLASS)
+		throw OutsideBoundary("qualified special member scope");
+	const AstNamePart& part = id.parts.back();
+	if (part.kind != NP_IDENTIFIER || part.tilde)
+		throw OutsideBoundary("out-of-class destructor definition");
+	if (part.identifier != declaring->name)
+		throw runtime_error("special member does not name its class");
+	const NamedTypeInfo* entity = model_.ScopeEntity(declaring);
+	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
+	if (!cls)
+		throw runtime_error("constructor of an unknown class");
+	// Parameters resolve against the class's lexical scope.
+	Scope* saved = current_;
+	current_ = declaring;
+	DeclaratorInfo composed;
+	try
+	{
+		composed = builder_.ComposeDeclarator(
+			decl.declarator.get(), MakeFundamentalType(FT_VOID));
+	}
+	catch (...)
+	{
+		current_ = saved;
+		throw;
+	}
+	current_ = saved;
+	int index = ClassCtorIndex(*cls, composed.type);
+	if (index < 0)
+		throw runtime_error("constructor definition matches no "
+		                    "declaration");
+	if (cls->ctors[index].definition)
+		throw runtime_error("redefinition of constructor");
+	cls->ctors[index].definition = &decl;
+	DeferredBody body;
+	body.decl = &decl;
+	body.composed = composed;
+	body.name = declaring->name;
+	body.fn_scope = MakeSpecialMemberScope(body.name, composed, *cls);
+	body.declaring = declaring;
+	body.cls = cls;
+	body.out_of_class = true;  // source-owned: both entries print
+	AnalyzeDeferredBody(body);
+}
+
 // --- friends ------------------------------------------------------------
 
 void SemBinder::BindFriendDeclaration(const AstDecl& decl)
@@ -328,11 +386,7 @@ void SemBinder::BindFriendDeclaration(const AstDecl& decl)
 		}
 		current_ = saved;
 		if (specs.type->kind == TK_CLASS)
-		{
-			Scope* members = model_.MemberScope(specs.type->named);
-			if (members)
-				cls->friend_classes.push_back(members);
-		}
+			cls->friend_classes.push_back(specs.type->named);
 		return;
 	}
 	BindFriendFunction(decl, *cls);
@@ -616,10 +670,15 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	method_ = saved_method;
 	current_return_ = saved_return;
 
-	if (body.out_of_class)
+	if (body.out_of_class && special == SF_NONE)
 		AppendItem(std::move(item));
 	else
+	{
+		if (body.out_of_class)
+			// A source-owned constructor prints unconditionally.
+			node->inline_def = false;
 		unit_.deferred.push_back(std::move(item));
+	}
 }
 
 void SemBinder::BindInheritingConstructors(Scope* base_scope)
@@ -762,7 +821,7 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 					return;
 		// A friend class's members access everything (11.3).
 		for (size_t j = 0; j < owner_cls->friend_classes.size(); j++)
-			if (owner_cls->friend_classes[j] == contexts[i]->members)
+			if (owner_cls->friend_classes[j] == contexts[i]->entity)
 				return;
 	}
 	if (!method_.fn_name.empty())
@@ -2287,7 +2346,7 @@ bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
 		if (contexts[i]->members == naming->members)
 			return true;
 		for (size_t j = 0; j < naming->friend_classes.size(); j++)
-			if (naming->friend_classes[j] == contexts[i]->members)
+			if (naming->friend_classes[j] == contexts[i]->entity)
 				return true;
 	}
 	if (!method_.fn_name.empty())

@@ -48,7 +48,9 @@ string FunctionLowerer::Lower()
 		param.low_name = child.name.empty()
 			? "__param" + to_string(i) : child.name;
 		param.by_reference = IsReferenceType(child.type);
-		param.type_text = LowerValueType(child.type);
+		param.type_text = RemoveTopCv(child.type)->kind == TK_CLASS
+			? LowerSlotType(RemoveTopCv(child.type))
+			: LowerValueType(child.type);
 		params_.push_back(param);
 		param_names_.insert(param.low_name);
 	}
@@ -105,6 +107,10 @@ void FunctionLowerer::EmitParameterStores()
 		const Scope* scope = child.entity_scope;
 		string slot = AddSlot(scope, params_[i].low_name,
 		                      params_[i].type_text);
+		// Object-typed (by-value class) parameters own their slot
+		// directly; no store materializes them.
+		if (RemoveTopCv(child.type)->kind == TK_CLASS)
+			continue;
 		Emit("store " + params_[i].type_text + " %" +
 		     params_[i].low_name + ", $" + slot);
 	}

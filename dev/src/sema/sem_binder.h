@@ -123,6 +123,8 @@ private:
 	                            const string& name);
 	void FlushDeferredBodies();
 	void AnalyzeDeferredBody(const DeferredBody& body);
+	void BindQualifiedSpecialMember(const AstDecl& decl,
+	                                const AstName& id);
 	Scope* MakeSpecialMemberScope(const string& name,
 	                              const DeclaratorInfo& composed,
 	                              ClassInfo& cls);

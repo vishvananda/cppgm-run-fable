@@ -220,22 +220,39 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 	case TK_ENUM:
 	{
 		// Substitution keys stay name-based ("T:n::E") so the same
-		// entity declared in two translation units compresses alike.
+		// entity declared in two translation units compresses alike;
+		// a substituted prefix compresses the nested spelling (NS_...).
 		vector<string> parts = EntityComponents(*type->named);
 		if (parts.size() == 1)
 			return MangleSubstitutable("T:" + parts[0],
 			                           SourceName(parts[0]), subs);
-		string spelling = "N";
-		string prefix_key = "T:";
-		for (size_t i = 0; i + 1 < parts.size(); i++)
+		vector<string> keys(parts.size());
+		for (size_t i = 0; i < parts.size(); i++)
+			keys[i] = (i ? keys[i - 1] + "::" : string("T:")) + parts[i];
+		string found = subs.Find(keys.back());
+		if (!found.empty())
+			return found;
+		size_t start = 0;
+		string head;
+		for (size_t k = parts.size() - 1; k > 0; k--)
 		{
-			prefix_key += parts[i] + "::";
-			spelling += SourceName(parts[i]);
-			subs.Add(prefix_key);
+			string sub = subs.Find(keys[k - 1]);
+			if (!sub.empty())
+			{
+				head = sub;
+				start = k;
+				break;
+			}
 		}
-		spelling += SourceName(parts.back()) + "E";
-		return MangleSubstitutable(prefix_key + parts.back(), spelling,
-		                           subs);
+		string spelling = "N" + head;
+		for (size_t i = start; i < parts.size(); i++)
+		{
+			spelling += SourceName(parts[i]);
+			if (i + 1 < parts.size())
+				subs.Add(keys[i]);
+		}
+		spelling += "E";
+		return MangleSubstitutable(keys.back(), spelling, subs);
 	}
 	default:
 		throw OutsideBoundary("mangled type form");
@@ -392,12 +409,12 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 	else
 	{
 		encoding = "N";
-		string prefix_key = "T:";
+		string entity_key = "T:";
 		for (size_t i = 0; i < parts.size(); i++)
 		{
-			prefix_key += parts[i] + "::";
+			entity_key += (i ? "::" : "") + parts[i];
 			encoding += SourceName(parts[i]);
-			subs.Add(prefix_key);
+			subs.Add(entity_key);
 		}
 		encoding += MangleTerminalName(name, type->parameters.size()) +
 			"E";

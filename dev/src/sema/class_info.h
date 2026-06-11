@@ -107,9 +107,9 @@ struct ClassInfo
 	EMemberAccess dtor_access;
 	const AstDecl* dtor_definition;  // user destructor body (null: implicit)
 	bool dtor_unwind_no;
-	// 11.3 friends: member scopes of friend classes and the declared
-	// (scope, name) of friend functions.
-	vector<const Scope*> friend_classes;
+	// 11.3 friends: entities of friend classes (forward declarations
+	// included) and the declared (scope, name) of friend functions.
+	vector<const NamedTypeInfo*> friend_classes;
 	vector<std::pair<const Scope*, string>> friend_functions;
 
 	// Layout cursor state used while the class is still open.

@@ -954,6 +954,27 @@ string FunctionLowerer::LowerCallArgument(const SemNode& node,
 	}
 	if (IsReferenceType(param))
 		return LowerReferenceArgument(node, param->target);
+	if (RemoveTopCv(param)->kind == TK_CLASS)
+	{
+		// A by-value class argument materializes a fresh object slot
+		// passed by name (the PA15 empty-class subset; full value
+		// semantics belong to PA16).
+		TypePtr bare = RemoveTopCv(param);
+		string slot = AddMatSlot("argobj", LowerSlotType(bare));
+		string copy_address = NewTemp();
+		Emit(copy_address + " = addr $" + slot);
+		if (node.kind == SN_CONSTRUCTOR_ACTION)
+			LowerConstructorCall(node, copy_address);
+		else
+		{
+			LowerAddressExpr(node);
+			if (bare->named->size > 1 ||
+			    (bare->named->class_record &&
+			     !bare->named->class_record->is_empty))
+				throw OutsideBoundary("by-value class argument copy");
+		}
+		return "$" + slot;
+	}
 	return LowerValueAs(node, RemoveTopCv(param), LCC_INIT);
 }
 

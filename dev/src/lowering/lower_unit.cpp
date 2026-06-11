@@ -76,6 +76,16 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		                                 item.entity_name, item.type,
 		                                 item.special);
 		member_defs_[key] = &item;
+		if (!item.inline_def &&
+		    (item.special == SF_CONSTRUCTOR ||
+		     item.special == SF_CONSTRUCTOR_BASE))
+		{
+			// An out-of-class constructor prints both ABI entries.
+			MemberFunctionEntry(item.entity_scope, item.entity_name,
+			                    item.type, "C2").used = true;
+			MemberFunctionEntry(item.entity_scope, item.entity_name,
+			                    item.type, "C1").used = true;
+		}
 		return;
 	}
 	if (item.is_method)
@@ -530,23 +540,30 @@ string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 		RenderScalarInit(info);
 }
 
-// Lowers every definition: source-owned ones print unconditionally;
-// weak (in-class) bodies lower too - their references count as
-// semantic demand - but print only once used.
+// Lowers the reachable definitions: source-owned roots first, then
+// hidden-friend bodies (whose references count as semantic demand even
+// when the friend itself never prints), then whatever those marked.
 void LowerProgram::LowerUsedFunctions()
 {
-	bool progress = true;
-	while (progress)
+	for (int phase = 0; phase < 2; phase++)
 	{
-		progress = false;
-		for (size_t i = 0; i < functions_.size(); i++)
+		bool progress = true;
+		while (progress)
 		{
-			LowFunctionInfo& info = functions_[i];
-			if (!info.defined || !info.body_text.empty())
-				continue;
-			FunctionLowerer lowerer(*this, *info.definition, info);
-			info.body_text = lowerer.Lower();
-			progress = true;
+			progress = false;
+			for (size_t i = 0; i < functions_.size(); i++)
+			{
+				LowFunctionInfo& info = functions_[i];
+				if (!info.defined || !info.body_text.empty())
+					continue;
+				bool friend_body = phase > 0 && info.scope &&
+					info.scope->kind == SCOPE_NAMESPACE;
+				if (info.weak && !info.used && !friend_body)
+					continue;
+				FunctionLowerer lowerer(*this, *info.definition, info);
+				info.body_text = lowerer.Lower();
+				progress = true;
+			}
 		}
 	}
 }
