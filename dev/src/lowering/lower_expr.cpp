@@ -123,7 +123,7 @@ LowerValue FunctionLowerer::MaterializeTruth(const LowerValue& value)
 		     " " + value.text + ", " + LowerFloatZero(value.type));
 		return truth;
 	}
-	if (value.imm_null)
+	if (value.imm_null && value.text.empty())
 	{
 		LowerValue made = value;
 		made.text = MaterializeNull();
@@ -186,8 +186,15 @@ LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
 		return value;
 	}
 	value.type = NodeType(node);
-	if (node.null_pointer && (value.type->kind == TK_POINTER ||
-	                          IsNullPtrType(value.type)))
+	if (node.null_pointer && value.type->kind == TK_POINTER)
+	{
+		// A null pointer constant the semantics retyped: the canonical
+		// spelling is the immediate 0.
+		value.imm_null = true;
+		value.text = "0";
+		return value;
+	}
+	if (node.null_pointer && IsNullPtrType(value.type))
 	{
 		value.imm_null = true;
 		return value;
@@ -482,6 +489,8 @@ LowerValue FunctionLowerer::LowerBinary(const SemNode& node)
 string FunctionLowerer::LowerPointerCmpOperand(const SemNode& node)
 {
 	TypePtr type = NodeType(node);
+	if (node.null_pointer && type->kind == TK_POINTER)
+		return "0";
 	if (node.null_pointer &&
 	    (IsNullPtrType(type) || IsIntegralType(type)))
 		return MaterializeNull();
@@ -860,7 +869,7 @@ string FunctionLowerer::LowerPointerOperand(const SemNode& node)
 		return decayed;
 	}
 	LowerValue value = LowerValueExpr(node);
-	if (value.imm_null)
+	if (value.imm_null && value.text.empty())
 		return MaterializeNull();
 	return value.text;
 }
@@ -1096,7 +1105,8 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 	{
 		if (value.imm_null)
 		{
-			value.text = MaterializeNull();
+			if (value.text.empty())
+				value.text = MaterializeNull();
 			value.imm_null = false;
 			value.type = target;
 			return value;

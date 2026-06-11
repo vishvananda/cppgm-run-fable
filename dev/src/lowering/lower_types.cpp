@@ -53,7 +53,7 @@ string FundamentalSpelling(EFundamentalType type)
 	case FT_FLOAT: return "f32";
 	case FT_DOUBLE: return "f64";
 	case FT_LONG_DOUBLE: return "f80";
-	case FT_NULLPTR_T: return "ptr";
+	case FT_NULLPTR_T: return "i64";
 	}
 	throw OutsideBoundary("fundamental type");
 }

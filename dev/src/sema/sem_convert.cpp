@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+#include "sema/class_info.h"
+
 using std::runtime_error;
 
 namespace {
@@ -187,9 +189,37 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		result.viable = true;
 		result.rank = CR_CONVERSION;
 		result.null_to_pointer = true;
+		return result;
 	}
-	// Enumerations, classes, and member pointers convert only by
-	// identity in the PA12 subset (handled by the TypeEquals fast path).
+	// 13.3.3.1.2/12.3.1: a class destination accepts sources its
+	// non-explicit converting constructors take through one standard
+	// conversion (the PA15 user-defined-conversion subset).
+	if (dest->kind == TK_CLASS && dest->named->class_record &&
+	    !(from->kind == TK_CLASS &&
+	      BaseClassDistance(from->named, dest->named) >= 0))
+	{
+		const ClassInfo& cls = *dest->named->class_record;
+		for (size_t i = 0; i < cls.ctors.size(); i++)
+		{
+			const ClassCtor& ctor = cls.ctors[i];
+			if (ctor.is_explicit || ctor.deleted ||
+			    ctor.type->parameters.size() != 1)
+				continue;
+			const TypePtr& param = ctor.type->parameters[0];
+			if (param->kind == TK_CLASS ||
+			    (IsReferenceType(param) &&
+			     param->target->kind == TK_CLASS))
+				continue;  // no chained user conversions
+			ImplicitConversion inner = ClassifyConversion(source, param);
+			if (!inner.viable || inner.rank == CR_USER)
+				continue;
+			result.viable = true;
+			result.rank = CR_USER;
+			result.user_class = dest->named;
+			result.user_ctor = (int)i;
+			return result;
+		}
+	}
 	return result;
 }
 
@@ -271,6 +301,8 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	result.null_to_pointer = value.null_to_pointer;
 	result.bool_from_pointer = value.bool_from_pointer;
 	result.selected_overload = value.selected_overload;
+	result.user_class = value.user_class;
+	result.user_ctor = value.user_ctor;
 	return result;
 }
 

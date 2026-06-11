@@ -33,6 +33,7 @@ void SemBinder::OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
 	ClassInfo& cls = unit_.classes.Create(info);
 	cls.members = scope;
 	cls.is_union = info->is_union;
+	model_.MutableInfo(info)->class_record = &cls;
 	BeginClassLayout(cls);
 	open_classes_.push_back(&cls);
 }

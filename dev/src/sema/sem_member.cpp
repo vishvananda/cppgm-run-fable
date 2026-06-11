@@ -316,12 +316,40 @@ SemValue SemExprAnalyzer::AnalyzeImplicitMember(const ScopeBinding& binding,
 		if (!have_this)
 			throw runtime_error("member " + written +
 			                    " used without an object");
-		SemValue object;
-		object.node = ImplicitThisObject();
-		object.type = object.node->type;
-		object.category = VC_LVALUE;
-		return AnalyzeMemberAccess(std::move(object), binding.name,
-		                           OP_DOT, true);
+		// The binding already names the exact member (a qualified use
+		// may reach a base field the derived class hides), so the
+		// member node builds directly over *this.
+		host_.CheckMemberAccess(binding.home, binding.access,
+		                        binding.name);
+		SemNodePtr object = ImplicitThisObject();
+		const NamedTypeInfo* this_entity = this_type->target->named;
+		bool object_const = false;
+		bool object_volatile = false;
+		TopCv(this_type->target, object_const, object_volatile);
+		if (binding.is_mutable)
+			object_const = false;
+		SemValue value;
+		if (IsReferenceType(field->type))
+			value.type = field->type->target;
+		else
+			value.type = MakeCvQualifiedType(field->type, object_const,
+			                                 object_volatile);
+		value.category = VC_LVALUE;
+		value.node = MakeSemNode(SN_MEMBER_EXPRESSION);
+		value.node->name = binding.name;
+		value.node->type = value.type;
+		value.node->member_ref = IsReferenceType(field->type);
+		value.node->category = VC_LVALUE;
+		value.node->member_offset = field->offset;
+		value.node->base_hops = BaseClassDistance(
+			this_entity, host_.Model().ScopeEntity(binding.owner));
+		value.node->is_bit_field = field->is_bit_field;
+		value.node->bit_offset = field->bit_offset;
+		value.node->bit_width = field->bit_width;
+		value.node->entity_scope = binding.owner;
+		value.node->entity_name = binding.name;
+		value.node->children.push_back(std::move(object));
+		return value;
 	}
 	if (binding.kind != SB_FUNCTION)
 		throw runtime_error(written + " does not name a value");

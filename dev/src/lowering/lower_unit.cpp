@@ -518,7 +518,8 @@ string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 		return "global @" + info.low_name + GlobalMetadata(info) +
 			" = {\n  zero " + to_string(TypeSize(info.type)) + "\n}";
 	if (IsReferenceType(info.type))
-		throw OutsideBoundary("namespace-scope reference");
+		return "global @" + info.low_name + " : ptr" +
+			GlobalMetadata(info) + " = " + RenderScalarInit(info);
 	if (info.type->kind == TK_ARRAY)
 		return "global @" + info.low_name + GlobalMetadata(info) +
 			" = {\n" + RenderArrayItems(info) + "}";
@@ -595,6 +596,35 @@ void LowerProgram::BuildLifetimeHelpers()
 			else if (child.kind == SN_EXPRESSION_STATEMENT)
 				// Aggregate member stores run dynamically.
 				init_def->children.push_back(CloneSemNode(child));
+			else if (IsReferenceType(info.type) && j == 0)
+			{
+				LowerConst value;
+				if (EvaluateLowerConst(child, value))
+					continue;
+				info.dynamic_init = true;
+				SemNodePtr target = MakeSemNode(SN_ID_EXPRESSION);
+				target->name = info.node->entity_name;
+				target->type = info.type;
+				target->category = VC_LVALUE;
+				target->entity_scope = info.node->entity_scope;
+				target->entity_name = info.node->entity_name;
+				// The reference binds dynamically: the helper stores
+				// the referent's address into the pointer object.
+				SemNodePtr statement =
+					MakeSemNode(SN_EXPRESSION_STATEMENT);
+				SemNodePtr assign =
+					MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
+				assign->type = info.type;
+				assign->category = VC_LVALUE;
+				assign->has_op = true;
+				assign->op = OP_ASS;
+				assign->op_spelling = "=";
+				assign->member_ref = true;
+				assign->children.push_back(std::move(target));
+				assign->children.push_back(CloneSemNode(child));
+				statement->children.push_back(std::move(assign));
+				init_def->children.push_back(std::move(statement));
+			}
 			else if (!is_class && info.type->kind != TK_ARRAY &&
 			         !IsReferenceType(info.type) && j == 0 &&
 			         child.kind != SN_BRACED_INIT_LIST)
@@ -678,7 +708,11 @@ void LowerProgram::Write(ostream& out)
 		if (info.defined || !info.used)
 			continue;
 		string line = "declare global @" + info.low_name;
-		if (info.type->kind != TK_ARRAY)
+		TypePtr declared_inner = info.type;
+		while (declared_inner->kind == TK_ARRAY)
+			declared_inner = declared_inner->target;
+		if (info.type->kind != TK_ARRAY &&
+		    RemoveTopCv(declared_inner)->kind != TK_CLASS)
 			line += " : " + LowerValueType(info.type);
 		line += GlobalMetadata(info);
 		sections[0].push_back(line);

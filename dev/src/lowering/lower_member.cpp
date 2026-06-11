@@ -207,7 +207,13 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	if (node.member_ref)
 	{
 		string value = LowerAddressExpr(rhs);
-		string storage = MemberAddress(lhs, true);
+		string storage;
+		if (lhs.kind == SN_MEMBER_EXPRESSION)
+			storage = MemberAddress(lhs, true);
+		else
+			// A namespace-scope reference binds its pointer object.
+			storage = program_.GlobalRef(lhs.entity_scope,
+			                             lhs.entity_name);
 		Emit("store ptr " + value + ", " + storage);
 		LowerValue result;
 		result.type = RemoveTopCv(lhs.type);

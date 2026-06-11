@@ -200,6 +200,13 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 			MangleType(type->target, subs);
 		return MangleSubstitutable(spelling, spelling, subs);
 	}
+	case TK_ARRAY:
+	{
+		string spelling = "A" +
+			(type->bound_known ? to_string(type->bound) : string()) +
+			"_" + MangleType(type->target, subs);
+		return MangleSubstitutable(spelling, spelling, subs);
+	}
 	case TK_FUNCTION:
 	{
 		// Sequenced explicitly: the return type registers its

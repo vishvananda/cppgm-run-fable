@@ -276,6 +276,20 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	    binding->home->kind == SCOPE_CLASS &&
 	    (binding->kind == SB_VARIABLE || binding->kind == SB_FUNCTION))
 		return AnalyzeImplicitMember(*binding, written);
+	// A qualified field name inside a member function also reads
+	// through this (9.3.1p3 with an explicit nested-name-specifier).
+	if (member_class && binding->kind == SB_VARIABLE &&
+	    host_.CurrentThisType() &&
+	    BaseClassDistance(host_.CurrentThisType()->target->named,
+	                      member_class) >= 0)
+	{
+		const ClassInfo* owner_cls = 0;
+		if (const NamedTypeInfo* owner_entity =
+		        host_.Model().ScopeEntity(binding->owner))
+			owner_cls = host_.Classes().Find(owner_entity);
+		if (owner_cls && FindClassField(*owner_cls, binding->name))
+			return AnalyzeImplicitMember(*binding, written);
+	}
 	SemValue value;
 	switch (binding->kind)
 	{
@@ -379,6 +393,32 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
                                       const ImplicitConversion& conv,
                                       const TypePtr& dest)
 {
+	if (conv.user_ctor >= 0 && conv.user_class)
+	{
+		// 12.3.1: the converting constructor builds a temporary of the
+		// destination class from the (standard-converted) source.
+		const ClassInfo* cls = host_.Classes().Find(conv.user_class);
+		if (!cls)
+			throw runtime_error("converting constructor class record "
+			                    "missing");
+		const TypePtr& param =
+			cls->ctors[conv.user_ctor].type->parameters[0];
+		ImplicitConversion inner =
+			ClassifyConversion(MakeConversionSource(value), param);
+		ApplyConversion(value, inner, param);
+		vector<SemNodePtr> args;
+		args.push_back(std::move(value.node));
+		SemNodePtr action = host_.MakeConstructorCall(
+			*cls, conv.user_ctor, false, SemNodePtr(), std::move(args));
+		action->category = VC_PRVALUE;
+		TypePtr class_type = MakeNamedType(TK_CLASS, conv.user_class);
+		action->type = class_type;
+		value.node = std::move(action);
+		value.type = class_type;
+		value.category = VC_PRVALUE;
+		value.null_pointer_literal = false;
+		return;
+	}
 	if (conv.selected_overload >= 0)
 	{
 		// 13.4: the target type picked one overload; the id-expression
@@ -984,6 +1024,12 @@ TypePtr SemExprAnalyzer::CompositePointerType(const SemValue& a,
 		pointee = MakeFundamentalType(FT_VOID);
 	else if (IsVoidType(RemoveTopCv(tb)) && ta->kind != TK_FUNCTION)
 		pointee = MakeFundamentalType(FT_VOID);
+	else if (ta->kind == TK_CLASS && tb->kind == TK_CLASS &&
+	         BaseClassDistance(ta->named, tb->named) > 0)
+		pointee = RemoveTopCv(tb);
+	else if (ta->kind == TK_CLASS && tb->kind == TK_CLASS &&
+	         BaseClassDistance(tb->named, ta->named) > 0)
+		pointee = RemoveTopCv(ta);
 	else
 		return TypePtr();
 	pointee = MakeCvQualifiedType(pointee, merged_const, merged_volatile);
@@ -1002,6 +1048,23 @@ TypePtr SemExprAnalyzer::ConditionalResultType(const SemValue& a,
 	{
 		category = VC_LVALUE;
 		return a.type;
+	}
+	if (a.type->kind == TK_CLASS && b.type->kind == TK_CLASS &&
+	    a.category == VC_LVALUE && b.category == VC_LVALUE &&
+	    !TypeEquals(RemoveTopCv(a.type), RemoveTopCv(b.type)))
+	{
+		// One operand converts to the other's (base) type; the result
+		// stays an lvalue of the base.
+		if (BaseClassDistance(a.type->named, b.type->named) > 0)
+		{
+			category = VC_LVALUE;
+			return b.type;
+		}
+		if (BaseClassDistance(b.type->named, a.type->named) > 0)
+		{
+			category = VC_LVALUE;
+			return a.type;
+		}
 	}
 	bool a_pointer = IsPointerAfterDecay(a.type) || IsNullPtrType(a.type) ||
 		a.null_pointer_literal;

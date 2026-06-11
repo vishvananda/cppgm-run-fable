@@ -18,6 +18,7 @@ enum EConversionRank
 	CR_EXACT,       // identity, lvalue-to-rvalue, decay, qualification
 	CR_PROMOTION,   // 4.5 / 4.6
 	CR_CONVERSION,  // 4.7-4.12 subset
+	CR_USER,        // 13.3.3.1.2 converting-constructor sequence
 	CR_ELLIPSIS     // matched a trailing ... (13.3.3.1.3)
 };
 
@@ -46,7 +47,7 @@ struct ImplicitConversion
 		: viable(false), rank(CR_EXACT), null_to_pointer(false),
 		  bool_from_pointer(false), reference_binding(false),
 		  binds_rvalue_reference(false), base_distance(0),
-		  selected_overload(-1)
+		  selected_overload(-1), user_class(0), user_ctor(-1)
 	{}
 
 	bool viable;
@@ -66,6 +67,10 @@ struct ImplicitConversion
 	TypePtr referee;  // referenced type of a reference binding
 	// Function-set sources: index of the overload the target selected.
 	int selected_overload;
+	// CR_USER: the destination class and its selected converting
+	// constructor (12.3.1).
+	const NamedTypeInfo* user_class;
+	int user_ctor;
 };
 
 // Classifies the conversion of `source` to the destination type (a
