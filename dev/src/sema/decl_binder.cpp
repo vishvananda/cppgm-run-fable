@@ -756,8 +756,8 @@ void DeclBinder::BindTemplateDeclaration(const AstDecl& decl)
 			continue;
 		const char* prefix = parameter.kind == TP_TYPE
 			? "typename " : "template-parameter ";
-		NamedTypeInfo* info =
-			model_.CreateNamedTypeInfo(prefix + parameter.name);
+		NamedTypeInfo* info = model_.CreateNamedTypeInfo(
+			prefix + parameter.name, scope, parameter.name);
 		ScopeBinding binding;
 		binding.kind = SB_TYPE;
 		binding.name = parameter.name;
@@ -892,7 +892,8 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 	else
 	{
 		info = model_.CreateNamedTypeInfo(
-			TypeDisplayName(decl.class_key_spelling, name));
+			TypeDisplayName(decl.class_key_spelling, name), current_,
+			name);
 		info->is_union = is_union;
 		type = MakeNamedType(TK_CLASS, info);
 		if (!anonymous)
@@ -949,7 +950,7 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 		return found->type;
 	}
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-		TypeDisplayName(decl.class_key_spelling, name));
+		TypeDisplayName(decl.class_key_spelling, name), current_, name);
 	info->is_union = is_union;
 	TypePtr type = MakeNamedType(TK_CLASS, info);
 	ScopeBinding binding;
@@ -979,7 +980,8 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 		return existing->type;
 	}
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-		TypeDisplayName(scoped ? "enum class" : "enum", name));
+		TypeDisplayName(scoped ? "enum class" : "enum", name), current_,
+		name);
 	info->complete = true;
 	info->is_scoped = scoped;
 	info->enum_underlying = underlying->fundamental;

@@ -1,5 +1,6 @@
 #include "lowering/lower_name.h"
 
+#include <cstdio>
 #include <stdexcept>
 #include <vector>
 
@@ -23,6 +24,21 @@ vector<string> ScopeComponents(const Scope* scope)
 	for (; scope && scope->parent; scope = scope->parent)
 		if (scope->kind == SCOPE_NAMESPACE && !scope->name.empty())
 			parts.insert(parts.begin(), scope->name);
+	return parts;
+}
+
+// The named enclosing components (namespaces and classes) of a
+// named-type entity, outermost first; unnamed components are skipped
+// like the PA12 display qualification.
+vector<string> EntityComponents(const NamedTypeInfo& info)
+{
+	vector<string> parts;
+	for (const Scope* scope = info.scope; scope && scope->parent;
+	     scope = scope->parent)
+		if ((scope->kind == SCOPE_NAMESPACE ||
+		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
+			parts.insert(parts.begin(), scope->name);
+	parts.push_back(info.name);
 	return parts;
 }
 
@@ -192,23 +208,11 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 	case TK_CLASS:
 	case TK_ENUM:
 	{
-		// The display spelling is "enum [class] [path::]Name"; recover
-		// the path components after the keyword prefix.
-		const string& display = type->named->display;
-		size_t space = display.rfind(' ');
-		string qualified = space == string::npos
-			? display : display.substr(space + 1);
-		vector<string> parts;
-		size_t start = 0;
-		for (size_t sep = qualified.find("::"); sep != string::npos;
-		     sep = qualified.find("::", start))
-		{
-			parts.push_back(qualified.substr(start, sep - start));
-			start = sep + 2;
-		}
-		parts.push_back(qualified.substr(start));
+		// Substitution keys stay name-based ("T:n::E") so the same
+		// entity declared in two translation units compresses alike.
+		vector<string> parts = EntityComponents(*type->named);
 		if (parts.size() == 1)
-			return MangleSubstitutable("T:" + qualified,
+			return MangleSubstitutable("T:" + parts[0],
 			                           SourceName(parts[0]), subs);
 		string spelling = "N";
 		string prefix_key = "T:";
@@ -219,7 +223,8 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 			subs.Add(prefix_key);
 		}
 		spelling += SourceName(parts.back()) + "E";
-		return MangleSubstitutable("T:" + qualified, spelling, subs);
+		return MangleSubstitutable(prefix_key + parts.back(), spelling,
+		                           subs);
 	}
 	default:
 		throw OutsideBoundary("mangled type form");
@@ -242,6 +247,26 @@ string LowerScopePath(const Scope* scope)
 	for (size_t i = 0; i < parts.size(); i++)
 		path += parts[i] + "__";
 	return path;
+}
+
+string LowerScopeKey(const Scope* scope)
+{
+	string key;
+	for (; scope && scope->parent; scope = scope->parent)
+	{
+		if (scope->kind != SCOPE_NAMESPACE)
+			continue;
+		string part = scope->name;
+		if (part.empty())
+		{
+			char tagged[32];
+			snprintf(tagged, sizeof(tagged), "<anon:%p>",
+			         (const void*)scope);
+			part = tagged;
+		}
+		key = part + "::" + key;
+	}
+	return key;
 }
 
 string LowerSanitizeName(const string& name)

@@ -127,7 +127,11 @@ public:
 	// Creates a scope and appends it to `parent`'s child (print) list.
 	Scope* CreateScope(EScopeKind kind, const string& name, Scope* parent);
 
-	NamedTypeInfo* CreateNamedTypeInfo(const string& display);
+	// `scope` and `name` record the entity's structural identity
+	// (declaring scope, bare declared name) alongside the display text.
+	NamedTypeInfo* CreateNamedTypeInfo(const string& display,
+	                                   const Scope* scope,
+	                                   const string& name);
 
 	// Every NamedTypeInfo is owned mutably by its model; Type nodes
 	// carry a const view. The binder completes entities found through

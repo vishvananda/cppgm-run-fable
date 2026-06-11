@@ -42,6 +42,8 @@ enum ETypeKind
 	TK_MEMBER_POINTER
 };
 
+struct Scope;
+
 // One record per named-type entity, owned by the semantic model that
 // declared it and shared by every Type node naming it, so completing
 // the entity (class definition, enum definition) is visible through
@@ -49,12 +51,16 @@ enum ETypeKind
 struct NamedTypeInfo
 {
 	NamedTypeInfo()
-		: complete(false), is_union(false), is_scoped(false),
+		: scope(0), complete(false), is_union(false), is_scoped(false),
 		  is_defined(false), enum_underlying(FT_INT), size(0), alignment(0)
 	{}
 
 	string display;  // canonical spelling: "struct C", "enum class FY",
 	                 // "typename T", "template-parameter TT"
+	// Structural identity: the declaring scope and the bare declared
+	// name (the PA14 mangler walks these instead of parsing `display`).
+	const Scope* scope;
+	string name;
 	bool complete;
 	bool is_union;   // classes
 	// Enumeration facts (7.2): scoped-ness and the (PA11 int-fixed)

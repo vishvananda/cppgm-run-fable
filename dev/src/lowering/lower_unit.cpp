@@ -22,7 +22,7 @@ runtime_error OutsideBoundary(const char* what)
 // The program-wide identity key of a namespace-scope entity.
 string QualifiedKey(const Scope* scope, const string& name)
 {
-	return LowerScopePath(scope) + name;
+	return LowerScopeKey(scope) + name;
 }
 
 // The fundamental value space of an integral or enumeration type.
@@ -359,10 +359,9 @@ void LowerProgram::Write(ostream& out)
 {
 	// Render global initializers first (string-literal demand order),
 	// then lower the function bodies.
-	vector<string> global_texts(globals_.size());
 	for (size_t i = 0; i < globals_.size(); i++)
 		if (globals_[i].defined)
-			global_texts[i] = RenderGlobal(globals_[i]);
+			globals_[i].init_text = RenderGlobal(globals_[i]);
 	for (size_t i = 0; i < functions_.size(); i++)
 	{
 		if (!functions_[i].defined)
@@ -407,7 +406,7 @@ void LowerProgram::Write(ostream& out)
 	}
 	for (size_t i = 0; i < globals_.size(); i++)
 		if (globals_[i].defined)
-			sections[2].push_back(global_texts[i]);
+			sections[2].push_back(globals_[i].init_text);
 	for (size_t i = 0; i < functions_.size(); i++)
 		if (functions_[i].defined)
 			sections[3].push_back(functions_[i].body_text);

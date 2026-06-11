@@ -103,6 +103,53 @@ semantic tree, never the printed dump text.
 - Spot-check the runnable scaffold on a couple of tests:
   `cppgm++ --emit-lowir` -> `lowir2cy86` -> `cy86`.
 
+## Architecture Review
+
+The implementation matches the plan's ownership story: `dev/src/sema/`
+analyzes once and stamps typed lowering facts onto `SemNode`
+(entity_scope/entity_name identity, decoded constants, string bytes,
+declaration flags), and `dev/src/lowering/` consumes only that typed
+state plus the scope model. The lowering's only lookups are
+`FindOwnBinding` keyed by the resolved (scope, name) identity — direct
+keyed access, not re-resolution — and the shared typed helpers
+(`UsualArithmeticConversions`, `TypeSize`, `RenderConstValue`).
+
+Review findings, fixed during the audit (details in `audit.md`):
+
+- The Itanium mangler recovered enum/class scope paths by parsing
+  `NamedTypeInfo::display` text. `NamedTypeInfo` now records its
+  declaring scope and bare name structurally at creation, and the
+  mangler walks those.
+- The cross-translation-unit entity registry keyed identity on the
+  "__"-joined display path, which is ambiguous (`a::b` vs an `a__b`
+  identifier) and merged unnamed-namespace entities across units.
+  Identity now uses a "::"-joined key with unnamed namespaces keyed by
+  their per-unit scope object; symbol *spelling* still uses the "__"
+  path with `UniqueSymbol` disambiguation.
+- The registry containers are deques and global definitions render onto
+  the entry itself, so references handed out while lowering (which can
+  register new demand-driven entries) stay valid.
+
+## Final Architecture Review
+
+- One writer per concern: `LowerProgram` owns entity identity, naming,
+  and top-level emission; `FunctionLowerer` owns per-body block/slot/
+  label state; `lower_types` owns every C++->LowIR type and conversion
+  spelling; `lower_const` owns global-initializer folding. No facts are
+  derived from printed text anywhere in the pass.
+- Unsupported constructs throw `OutsideBoundary` and the driver exits
+  with failure: there are no fallback success paths, canned outputs, or
+  test-shape gates, and `AddUnit` rejects synthesized class-helper
+  output so the stage stays purely procedural per the README.
+- Costs scale with program size: map-keyed registries, one pre-scan per
+  switch subtree, per-mangling substitution tables, and string builds
+  that append in place.
+- PA15+ extension points are the ones the plan promised: the entity
+  registry (add class members/helpers), `FunctionLowerer`'s expression
+  walker (member access, this), and the centralized type/conversion
+  spelling layer — all keyed off the same structural scope/type state,
+  which now also carries named-type identity for mangling growth.
+
 ## Later-Stage Fit
 
 - The lowering keys everything off resolved scope/type state, so PA15+ can

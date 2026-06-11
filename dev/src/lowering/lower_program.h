@@ -1,11 +1,13 @@
 #pragma once
 
+#include <deque>
 #include <map>
 #include <ostream>
 #include <set>
 #include <string>
 #include <vector>
 
+using std::deque;
 using std::map;
 using std::ostream;
 using std::set;
@@ -61,6 +63,7 @@ struct LowGlobalInfo
 	bool is_thread_local;
 	bool c_linkage;
 	const SemNode* node;  // defining SN_VARIABLE (init children)
+	string init_text;     // rendered definition text
 };
 
 struct LowStringLiteral
@@ -110,9 +113,12 @@ private:
 	string GlobalMetadata(const LowGlobalInfo& info) const;
 	string RenderFunctionDeclare(const LowFunctionInfo& info);
 
-	vector<LowGlobalInfo> globals_;
-	vector<LowFunctionInfo> functions_;
-	vector<LowStringLiteral> strings_;
+	// deques: lowering one entity can register more (demand-driven
+	// declares, string literals), so references handed out by the
+	// entry accessors must survive growth.
+	deque<LowGlobalInfo> globals_;
+	deque<LowFunctionInfo> functions_;
+	deque<LowStringLiteral> strings_;
 	map<string, size_t> global_index_;    // qualified key -> index
 	map<string, size_t> function_index_;  // qualified key + signature
 	map<string, size_t> string_index_;    // element|bytes -> index

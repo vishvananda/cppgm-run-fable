@@ -15,6 +15,13 @@ using std::string;
 // (trailing separator included; unnamed components are skipped).
 string LowerScopePath(const Scope* scope);
 
+// The program-wide identity key of the namespace path of `scope`:
+// components joined with "::" (which no identifier can contain, so
+// nested paths cannot collide with longer names), with each unnamed
+// namespace keyed by its per-translation-unit scope object so internal
+// entities of different units stay distinct.
+string LowerScopeKey(const Scope* scope);
+
 // A declared name reduced to LowIR identifier characters
 // ("operator delete" -> "operatordelete").
 string LowerSanitizeName(const string& name);

@@ -23,10 +23,14 @@ Scope* TypesModel::CreateScope(EScopeKind kind, const string& name,
 	return scope;
 }
 
-NamedTypeInfo* TypesModel::CreateNamedTypeInfo(const string& display)
+NamedTypeInfo* TypesModel::CreateNamedTypeInfo(const string& display,
+                                               const Scope* scope,
+                                               const string& name)
 {
 	infos_.push_back(unique_ptr<NamedTypeInfo>(new NamedTypeInfo()));
 	infos_.back()->display = display;
+	infos_.back()->scope = scope;
+	infos_.back()->name = name;
 	return infos_.back().get();
 }
 
