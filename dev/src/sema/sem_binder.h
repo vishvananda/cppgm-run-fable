@@ -172,6 +172,22 @@ private:
 	                         const SemNode& target_proto,
 	                         const AstExpr& braced,
 	                         vector<SemNodePtr>& out);
+	size_t ConsumeAggregateItems(const ClassInfo& cls,
+	                             const SemNode& target_proto,
+	                             const vector<AstExprPtr>& items,
+	                             size_t at, bool top_braced,
+	                             vector<SemNodePtr>& out);
+	size_t ConsumeArrayItems(const ClassField& field,
+	                         const SemNode& member_proto,
+	                         const vector<AstExprPtr>& items,
+	                         size_t at, bool top_braced,
+	                         vector<SemNodePtr>& out);
+	// The synthesized field-wise constructor used by aggregate array
+	// elements; returns its this-adjusted type.
+	TypePtr EnsureAggregateCtor(const ClassInfo& cls);
+	void AppendAggregateArrayInit(SemNode& item, ScopeBinding& binding,
+	                              const ClassInfo& cls,
+	                              const AstExpr& braced);
 	SemNodePtr VariableObjectExpr(const ScopeBinding& binding);
 	// The set of bit-field storage units already written by the open
 	// constructor synthesis (first writes store plainly).

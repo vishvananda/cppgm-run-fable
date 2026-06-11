@@ -38,12 +38,14 @@ struct ITypeBuilderHost
 struct DeclSpecifierInfo
 {
 	DeclSpecifierInfo()
-		: is_typedef(false), is_static(false), is_extern(false),
-		  is_thread_local(false), is_inline(false), is_virtual(false),
-		  is_constexpr(false), is_friend(false), is_mutable(false)
+		: is_auto(false), is_typedef(false), is_static(false),
+		  is_extern(false), is_thread_local(false), is_inline(false),
+		  is_virtual(false), is_constexpr(false), is_friend(false),
+		  is_mutable(false)
 	{}
 
 	TypePtr type;
+	bool is_auto;  // `auto` placeholder (trailing-return declarators)
 	bool is_typedef;
 	bool is_static;
 	bool is_extern;
@@ -76,6 +78,9 @@ struct DeclaratorInfo
 	                   noexcept_simple(false) {}
 
 	TypePtr type;
+	// 8.3.5p2: a pending trailing-return-type replacing an `auto`
+	// placeholder return (consumed by the parameter-clause suffix).
+	TypePtr trailing_return;
 	const AstName* id;  // declarator-id, null for abstract declarators
 	// Set when the declarator's outermost type came directly from a
 	// parameter clause (a function declarator, not a pointer/array of

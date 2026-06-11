@@ -1595,28 +1595,40 @@ void SemBinder::AppendAggregateInit(const ClassInfo& cls,
                                     const AstExpr& braced,
                                     vector<SemNodePtr>& out)
 {
-	// 8.5.1: members in declaration order; trailing members
-	// value-initialize. Private members or user constructors already
-	// disqualified the class from this path.
-	size_t next = 0;
 	bf_units_written_.clear();
+	size_t used = ConsumeAggregateItems(cls, target_proto,
+	                                    braced.arguments, 0, true, out);
+	if (used < braced.arguments.size())
+		throw runtime_error("too many initializers for aggregate");
+}
+
+// 8.5.1 with brace elision: members initialize in declaration order
+// from `items`, a nested braced item initializes one subaggregate
+// fully, and a non-braced item starts an elided subaggregate that
+// consumes following items. Returns the next unused position.
+size_t SemBinder::ConsumeAggregateItems(const ClassInfo& cls,
+                                        const SemNode& target_proto,
+                                        const vector<AstExprPtr>& items,
+                                        size_t at, bool top_braced,
+                                        vector<SemNodePtr>& out)
+{
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassField& field = cls.fields[i];
 		if (field.name.empty())
 			continue;
-		SemNodePtr target = CloneSemNode(target_proto);
 		SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
 		member->name = field.name;
-		member->type = field.type;
+		member->type = IsReferenceType(field.type) ? field.type->target
+		                                           : field.type;
+		member->member_ref = IsReferenceType(field.type);
 		member->category = VC_LVALUE;
 		member->member_offset = field.offset;
 		member->is_bit_field = field.is_bit_field;
 		member->bit_offset = field.bit_offset;
 		member->bit_width = field.bit_width;
-		member->children.push_back(std::move(target));
-		const AstExpr* element = next < braced.arguments.size()
-			? braced.arguments[next].get() : 0;
+		member->children.push_back(CloneSemNode(target_proto));
+		const AstExpr* element = at < items.size() ? items[at].get() : 0;
 		TypePtr bare = RemoveTopCv(field.type);
 		const ClassInfo* member_cls = bare->kind == TK_CLASS
 			? unit_.classes.Find(bare->named) : 0;
@@ -1624,89 +1636,86 @@ void SemBinder::AppendAggregateInit(const ClassInfo& cls,
 		{
 			if (element && element->kind == EK_BRACED)
 			{
-				next++;
-				AppendAggregateInit(*member_cls, *member, *element, out);
+				at++;
+				if (member_cls->is_aggregate)
+				{
+					size_t used = ConsumeAggregateItems(
+						*member_cls, *member, element->arguments, 0,
+						true, out);
+					if (used < element->arguments.size())
+						throw runtime_error("too many initializers "
+						                    "for aggregate member");
+				}
+				else
+				{
+					vector<SemValue> values;
+					for (size_t j = 0;
+					     j < element->arguments.size(); j++)
+						values.push_back(analyzer_.Analyze(
+							*element->arguments[j]));
+					int index = ResolveClassConstructor(
+						*member_cls, values, true, field.name.c_str());
+					vector<SemNodePtr> arg_nodes;
+					for (size_t j = 0; j < values.size(); j++)
+						arg_nodes.push_back(std::move(values[j].node));
+					out.push_back(MakeConstructorCall(
+						*member_cls, index, false,
+						AddressOfNode(std::move(member)),
+						std::move(arg_nodes)));
+				}
+				continue;
 			}
-			else if (member_cls->is_aggregate)
+			if (member_cls->is_aggregate)
 			{
 				// Brace elision: the nested aggregate consumes the
-				// following initializers in order.
-				AstExpr empty(EK_BRACED);
-				if (element)
-					throw OutsideBoundary("brace-elided aggregate member");
-				AppendAggregateInit(*member_cls, *member, empty, out);
+				// following items in place.
+				at = ConsumeAggregateItems(*member_cls, *member, items,
+				                           at, false, out);
+				continue;
 			}
-			else
+			// A non-aggregate member without its own braces: one item
+			// copy-initializes it (or it default-constructs).
+			vector<SemValue> values;
+			if (element)
 			{
-				vector<SemValue> values;
-				if (element)
-				{
-					next++;
-					values.push_back(analyzer_.Analyze(*element));
-				}
-				int index = ResolveClassConstructor(
-					*member_cls, values, true, field.name.c_str());
-				vector<SemNodePtr> arg_nodes;
-				for (size_t j = 0; j < values.size(); j++)
-					arg_nodes.push_back(std::move(values[j].node));
-				out.push_back(MakeConstructorCall(
-					*member_cls, index, false,
-					AddressOfNode(std::move(member)),
-					std::move(arg_nodes)));
+				at++;
+				values.push_back(analyzer_.Analyze(*element));
 			}
+			if (!values.empty() && values[0].node &&
+			    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
+			    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+			    RemoveTopCv(values[0].type)->named == member_cls->entity)
+			{
+				SemNodePtr action = std::move(values[0].node);
+				SemNode& call = *action->children[0];
+				call.children.insert(
+					call.children.begin() + 1,
+					AddressOfNode(std::move(member)));
+				out.push_back(std::move(action));
+				continue;
+			}
+			int index = ResolveClassConstructor(*member_cls, values,
+			                                    true,
+			                                    field.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < values.size(); j++)
+				arg_nodes.push_back(std::move(values[j].node));
+			out.push_back(MakeConstructorCall(
+				*member_cls, index, false,
+				AddressOfNode(std::move(member)),
+				std::move(arg_nodes)));
 			continue;
 		}
 		if (bare->kind == TK_ARRAY)
 		{
-			TypePtr element_type = RemoveTopCv(bare->target);
-			if (element_type->kind == TK_CLASS)
-				throw OutsideBoundary("aggregate class array member");
-			if (element && element->kind == EK_BRACED)
-			{
-				next++;
-				for (unsigned long long j = 0; j < bare->bound; j++)
-				{
-					ClassField element_field;
-					element_field.name = field.name;
-					element_field.type = element_type;
-					SemNodePtr target_element =
-						SubscriptNode(CloneSemNode(*member), j);
-					if (j < element->arguments.size())
-					{
-						SemValue value = analyzer_.Analyze(
-							*element->arguments[j]);
-						CheckListInitNarrowing(value, element_type);
-						out.push_back(MemberAssignAction(
-							element_field, std::move(target_element),
-							std::move(value)));
-					}
-					else
-						out.push_back(MemberAssignAction(
-							element_field, std::move(target_element),
-							ZeroValue(element_type)));
-				}
-			}
-			else if (!element)
-			{
-				for (unsigned long long j = 0; j < bare->bound; j++)
-				{
-					ClassField element_field;
-					element_field.name = field.name;
-					element_field.type = element_type;
-					out.push_back(MemberAssignAction(
-						element_field,
-						SubscriptNode(CloneSemNode(*member), j),
-						ZeroValue(element_type)));
-				}
-			}
-			else
-				throw OutsideBoundary("brace-elided array member");
+			at = ConsumeArrayItems(field, *member, items, at,
+			                       top_braced, out);
 			continue;
 		}
 		ClassField row = field;
 		if (element)
 		{
-			next++;
+			at++;
 			SemValue value = analyzer_.Analyze(*element);
 			if (!IsReferenceType(field.type))
 				CheckListInitNarrowing(value, bare);
@@ -1716,15 +1725,233 @@ void SemBinder::AppendAggregateInit(const ClassInfo& cls,
 		else
 		{
 			if (IsReferenceType(field.type))
-				throw runtime_error("reference member is not initialized");
+				throw runtime_error("reference member is not "
+				                    "initialized");
 			out.push_back(MemberAssignAction(row, std::move(member),
 			                                 ZeroValue(bare)));
 		}
 	}
-	if (next < braced.arguments.size())
-		throw runtime_error("too many initializers for aggregate");
+	return at;
 }
 
+// One array member inside an aggregate: a braced item initializes it
+// fully; otherwise the elements consume following items (elision).
+size_t SemBinder::ConsumeArrayItems(const ClassField& field,
+                                    const SemNode& member_proto,
+                                    const vector<AstExprPtr>& items,
+                                    size_t at, bool top_braced,
+                                    vector<SemNodePtr>& out)
+{
+	TypePtr array = RemoveTopCv(field.type);
+	TypePtr element_type = RemoveTopCv(array->target);
+	if (element_type->kind == TK_CLASS)
+		throw OutsideBoundary("aggregate class array member");
+	const AstExpr* element = at < items.size() ? items[at].get() : 0;
+	const vector<AstExprPtr>* source = &items;
+	size_t inner_at = at;
+	bool own_braces = element && element->kind == EK_BRACED;
+	if (own_braces)
+		source = &element->arguments;
+	if (own_braces)
+		inner_at = 0;
+	for (unsigned long long j = 0; j < array->bound; j++)
+	{
+		ClassField element_field;
+		element_field.name = field.name;
+		element_field.type = element_type;
+		SemNodePtr target =
+			SubscriptNode(CloneSemNode(member_proto), j);
+		const AstExpr* item_expr = inner_at < source->size()
+			? (*source)[inner_at].get() : 0;
+		if (item_expr && (own_braces || inner_at < source->size()))
+		{
+			if (!own_braces && item_expr->kind == EK_BRACED)
+				throw OutsideBoundary("nested braces in an elided "
+				                      "array member");
+			inner_at++;
+			SemValue value = analyzer_.Analyze(*item_expr);
+			CheckListInitNarrowing(value, element_type);
+			out.push_back(MemberAssignAction(element_field,
+			                                 std::move(target),
+			                                 std::move(value)));
+		}
+		else
+			out.push_back(MemberAssignAction(element_field,
+			                                 std::move(target),
+			                                 ZeroValue(element_type)));
+	}
+	if (own_braces)
+	{
+		if (inner_at < source->size())
+			throw runtime_error("too many initializers for array "
+			                    "member");
+		return at + 1;
+	}
+	return inner_at;
+}
+
+// The synthesized field-wise constructor that aggregate array elements
+// call: one parameter per named field, stored in order.
+TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in)
+{
+	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
+	vector<TypePtr> params;
+	vector<string> names;
+	for (size_t i = 0; i < cls.fields.size(); i++)
+	{
+		if (cls.fields[i].name.empty())
+			continue;
+		params.push_back(AdjustParameterType(cls.fields[i].type));
+		names.push_back(cls.fields[i].name);
+	}
+	TypePtr ctor_type = MakeFunctionType(MakeFundamentalType(FT_VOID),
+	                                     params, false);
+	TypePtr adjusted = MethodAdjustedType(cls, ctor_type);
+	if (cls.aggregate_ctor_built)
+		return adjusted;
+	cls.aggregate_ctor_built = true;
+	const string& base_name = cls.members->name;
+	Scope* fn_scope =
+		model_.CreateScope(SCOPE_FUNCTION, base_name, cls.members);
+	DeferredBody body;
+	body.name = base_name;
+	body.fn_scope = fn_scope;
+	body.declaring = cls.members;
+	body.cls = &cls;
+	body.composed.type = ctor_type;
+	for (size_t i = 0; i < params.size(); i++)
+	{
+		ParameterInfo parameter;
+		parameter.name = names[i];
+		parameter.type = params[i];
+		body.composed.parameters.push_back(parameter);
+		ScopeBinding param_binding;
+		param_binding.kind = SB_PARAMETER;
+		param_binding.name = parameter.name;
+		param_binding.type = parameter.type;
+		AddBinding(*fn_scope, param_binding);
+	}
+	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
+	SemNode* node = item.get();
+	Scope* saved_scope = current_;
+	MethodContext saved_method = method_;
+	current_ = fn_scope;
+	method_ = MethodContext();
+	method_.cls = &cls;
+	method_.fn_scope = fn_scope;
+	method_.fn_owner = cls.members;
+	method_.fn_name = base_name;
+	method_.this_type = node->type->parameters[0];
+	bf_units_written_.clear();
+	size_t param_at = 0;
+	vector<SemNodePtr> actions;
+	for (size_t i = 0; i < cls.fields.size(); i++)
+	{
+		const ClassField& field = cls.fields[i];
+		if (field.name.empty())
+			continue;
+		SemValue value;
+		value.node = MakeSemNode(SN_ID_EXPRESSION);
+		value.node->name = names[param_at];
+		value.node->type = params[param_at];
+		value.node->category = VC_LVALUE;
+		value.node->entity_scope = fn_scope;
+		value.node->entity_name = names[param_at];
+		value.type = IsReferenceType(params[param_at])
+			? params[param_at]->target : params[param_at];
+		value.category = VC_LVALUE;
+		actions.push_back(MemberAssignAction(field, ThisFieldExpr(field),
+		                                     std::move(value)));
+		param_at++;
+	}
+	for (size_t i = 0; i < actions.size(); i++)
+		node->children.push_back(std::move(actions[i]));
+	current_ = saved_scope;
+	method_ = saved_method;
+	bool may_throw = false;
+	for (size_t i = 0; i < node->children.size(); i++)
+		if (NodeMayThrow(*node->children[i]))
+			may_throw = true;
+	node->unwind_no = !may_throw;
+	unit_.deferred.push_back(std::move(item));
+	return adjusted;
+}
+
+// A braced array of aggregates: each element runs the synthesized
+// field-wise constructor at its byte offset (the action records the
+// offset; the lowering shares one base address).
+void SemBinder::AppendAggregateArrayInit(SemNode& item,
+                                         ScopeBinding& binding,
+                                         const ClassInfo& cls,
+                                         const AstExpr& braced)
+{
+	TypePtr array = binding.type;
+	if (!array->bound_known)
+	{
+		array = MakeArrayType(array->target, true,
+		                      braced.arguments.size());
+		binding.type = array;
+		item.type = array;
+	}
+	if (braced.arguments.size() > array->bound)
+		throw runtime_error("too many initializers for " + binding.name);
+	TypePtr adjusted = EnsureAggregateCtor(cls);
+	unsigned long long size = cls.size;
+	const string& base_name = cls.members->name;
+	string qualified = QualifiedScopePath(cls.members->parent) +
+		base_name + "::" + base_name;
+	for (size_t i = 0; i < braced.arguments.size(); i++)
+	{
+		const AstExpr* element = braced.arguments[i].get();
+		if (element->kind != EK_BRACED)
+			throw OutsideBoundary("array aggregate element form");
+		vector<SemValue> values;
+		size_t value_at = 0;
+		SemNodePtr action = MakeSemNode(SN_CONSTRUCTOR_ACTION);
+		action->name = qualified;
+		action->special = SF_CONSTRUCTOR;
+		action->has_value = true;
+		action->value = ConstValue(FT_UNSIGNED_LONG_INT, i * size);
+		SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
+		call->type = MakeFundamentalType(FT_VOID);
+		call->category = VC_PRVALUE;
+		SemNodePtr callee = MakeSemNode(SN_CALLEE);
+		callee->name = qualified;
+		callee->type = adjusted;
+		callee->entity_scope = cls.members;
+		callee->entity_name = base_name;
+		callee->is_method = true;
+		callee->special = SF_CONSTRUCTOR;
+		callee->unwind_no = true;
+		call->children.push_back(std::move(callee));
+		for (size_t j = 0; j < element->arguments.size(); j++)
+		{
+			SemValue value = analyzer_.Analyze(*element->arguments[j]);
+			if (value_at + 1 < adjusted->parameters.size())
+				analyzer_.CopyInitialize(
+					value,
+					adjusted->parameters[value_at + 1],
+					"aggregate element");
+			value_at++;
+			call->children.push_back(std::move(value.node));
+		}
+		if (element->arguments.size() + 1 > adjusted->parameters.size())
+			throw runtime_error("too many initializers for array "
+			                    "element");
+		// Trailing fields value-initialize through zero arguments.
+		for (size_t j = element->arguments.size() + 1;
+		     j < adjusted->parameters.size(); j++)
+		{
+			TypePtr param = adjusted->parameters[j];
+			SemValue zero = ZeroValue(
+				IsReferenceType(param) ? param->target
+				                       : RemoveTopCv(param));
+			call->children.push_back(std::move(zero.node));
+		}
+		action->children.push_back(std::move(call));
+		item.children.push_back(std::move(action));
+	}
+}
 
 void SemBinder::AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
                                      const AstInitializer* init,
@@ -1779,7 +2006,58 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	if (type->kind == TK_ARRAY)
 	{
 		if (init)
-			throw OutsideBoundary("class array initializer");
+		{
+			const AstExpr* braced = 0;
+			if (init->kind == INIT_BRACED)
+				braced = init->expr.get();
+			else if (init->kind == INIT_EQ &&
+			         init->expr->kind == EK_BRACED)
+				braced = init->expr.get();
+			if (!braced)
+				throw OutsideBoundary("class array initializer form");
+			if (cls.ctors.empty() && cls.is_aggregate &&
+			    binding.home && binding.home->kind != SCOPE_NAMESPACE)
+			{
+				AppendAggregateArrayInit(item, binding, cls, *braced);
+				return;
+			}
+			// Elements list-initialize through their constructors at
+			// subscripted addresses.
+			TypePtr completed = binding.type;
+			if (!completed->bound_known)
+			{
+				completed = MakeArrayType(completed->target, true,
+				                          braced->arguments.size());
+				binding.type = completed;
+				item.type = completed;
+			}
+			if (braced->arguments.size() > completed->bound)
+				throw runtime_error("too many initializers for " +
+				                    binding.name);
+			for (size_t i = 0; i < braced->arguments.size(); i++)
+			{
+				const AstExpr* element = braced->arguments[i].get();
+				vector<SemValue> values;
+				if (element->kind == EK_BRACED)
+					for (size_t j = 0;
+					     j < element->arguments.size(); j++)
+						values.push_back(analyzer_.Analyze(
+							*element->arguments[j]));
+				else
+					values.push_back(analyzer_.Analyze(*element));
+				int index = ResolveClassConstructor(
+					cls, values, true, binding.name.c_str());
+				vector<SemNodePtr> arg_nodes;
+				for (size_t j = 0; j < values.size(); j++)
+					arg_nodes.push_back(std::move(values[j].node));
+				item.children.push_back(MakeConstructorCall(
+					cls, index, false,
+					AddressOfNode(SubscriptNode(
+						VariableObjectExpr(binding), i)),
+					std::move(arg_nodes)));
+			}
+			return;
+		}
 		if (!cls.has_user_ctor && !unit_.classes.NeedsConstruction(cls))
 			return;
 		for (unsigned long long i = 0; i < type->bound; i++)
@@ -1877,8 +2155,18 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		return;
 	}
 	if (copy_init && !braced && values.size() == 1 &&
-	    RemoveTopCv(values[0].type)->kind == TK_CLASS)
-		throw OutsideBoundary("class copy-initialization");
+	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+	    BaseClassDistance(RemoveTopCv(values[0].type)->named,
+	                      cls.entity) >= 0)
+	{
+		// Same-class copy-initialization keeps the PA12 dump shape;
+		// the value-semantics lowering belongs to PA16.
+		analyzer_.CopyInitialize(values[0],
+		                         MakeNamedType(TK_CLASS, cls.entity),
+		                         "initialization");
+		item.children.push_back(std::move(values[0].node));
+		return;
+	}
 	int index = ResolveClassConstructor(cls, values, copy_init,
 	                                    binding.name.c_str());
 	vector<SemNodePtr> arg_nodes;

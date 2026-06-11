@@ -80,6 +80,7 @@ void TypeBuilder::ConsumeSpecifierKeyword(const AstSpecifier& spec,
 	case KW_CONSTEXPR: SetOnce(info.is_constexpr, "constexpr"); break;
 	case KW_FRIEND: SetOnce(info.is_friend, "friend"); break;
 	case KW_MUTABLE: SetOnce(info.is_mutable, "mutable"); break;
+	case KW_AUTO: SetOnce(info.is_auto, "auto"); break;
 	default:
 		storage = false;
 		break;
@@ -154,8 +155,18 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 	    (info.is_static || info.is_extern || info.is_thread_local ||
 	     info.is_constexpr || info.is_inline || info.is_virtual))
 		throw runtime_error("typedef combined with another specifier");
-	TypePtr base = named ? named
-		: MakeFundamentalType(CombineSimpleTypeSpecifiers(simple));
+	TypePtr base;
+	if (info.is_auto)
+	{
+		if (named || AnySimpleTypeSpecifier(simple))
+			throw runtime_error("auto combined with a type specifier");
+		// The placeholder resolves from the trailing-return-type
+		// (8.3.5p2); the void stand-in is replaced at composition.
+		base = MakeFundamentalType(FT_VOID);
+	}
+	else
+		base = named ? named
+			: MakeFundamentalType(CombineSimpleTypeSpecifiers(simple));
 	info.type = MakeCvQualifiedType(base, is_const, is_volatile);
 	return info;
 }
@@ -220,6 +231,13 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		vector<ParameterInfo> parameters;
 		vector<TypePtr> types;
 		BuildParameters(*item.params, parameters, types);
+		if (out.trailing_return)
+		{
+			// 8.3.5p2: the trailing-return-type replaces the `auto`
+			// placeholder return.
+			out.type = out.trailing_return;
+			out.trailing_return = TypePtr();
+		}
 		out.type = MakeFunctionType(out.type, types, item.params->variadic);
 		// 8.3.5p6: trailing cv-qualifiers belong to the function type
 		// (member functions; the binder rejects them elsewhere).
@@ -237,6 +255,9 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		out.declares_function = false;
 		break;
 	}
+	case DI_TRAILING_RETURN:
+		out.trailing_return = ResolveTypeId(*item.trailing_type);
+		break;
 	case DI_FUNC_QUAL:
 		// Exception specifications do not enter the PA11 type model;
 		// virt-specifiers and ref-qualifiers are member-function

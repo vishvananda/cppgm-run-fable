@@ -299,6 +299,7 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 	}
 	vector<const SemNode*> dtor_actions;
 	bool saved = in_lifetime_action_;
+	string aggregate_base;
 	for (size_t i = 0; i < node.children.size(); i++)
 	{
 		const SemNode& child = *node.children[i];
@@ -307,7 +308,25 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 		case SN_CONSTRUCTOR_ACTION:
 			if (child.trivial_init)
 				break;
-			if (is_array)
+			if (is_array && child.has_value)
+			{
+				// The field-wise aggregate form: elements share one
+				// base address and index by byte offset.
+				if (aggregate_base.empty())
+				{
+					aggregate_base = NewTemp();
+					Emit(aggregate_base + " = addr $" + slot);
+				}
+				string element = aggregate_base;
+				if (child.value.bits)
+				{
+					element = NewTemp();
+					Emit(element + " = index i8 " + aggregate_base +
+					     ", " + to_string(child.value.bits));
+				}
+				LowerConstructorCall(child, element);
+			}
+			else if (is_array)
 			{
 				in_lifetime_action_ = true;
 				LowerCall(*child.children[0]);
