@@ -156,6 +156,8 @@ private:
 	// definitions, built on first demand into unit_.deferred.
 	void EnsureImplicitDefaultCtor(const ClassInfo& cls);
 	void EnsureImplicitDtor(const ClassInfo& cls);
+	void EnsureInheritedCtor(const ClassInfo& cls, int index);
+	virtual void BindInheritingConstructors(Scope* base_scope);
 	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
 	                              SemNodePtr address);
 	bool NodeMayThrow(const SemNode& node) const;

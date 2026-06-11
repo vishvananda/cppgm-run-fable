@@ -242,6 +242,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	}
 	ClassCtor ctor;
 	ctor.type = composed.type;
+	for (size_t i = 0; i < composed.parameters.size(); i++)
+		ctor.param_names.push_back(composed.parameters[i].name);
 	ctor.access = current_access_;
 	ctor.is_explicit = is_explicit;
 	ctor.deleted = deleted;
@@ -619,6 +621,98 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 		unit_.deferred.push_back(std::move(item));
 }
 
+void SemBinder::BindInheritingConstructors(Scope* base_scope)
+{
+	ClassInfo* cls = OpenClass();
+	if (!cls || current_ != cls->members)
+		throw runtime_error("using Base::Base outside a class");
+	if (!cls->base || cls->base->members != base_scope)
+		throw runtime_error("using Base::Base does not name the direct "
+		                    "base");
+	for (size_t i = 0; i < cls->base->ctors.size(); i++)
+	{
+		ClassCtor ctor = cls->base->ctors[i];
+		ctor.definition = 0;
+		ctor.inherited_base = cls->base->entity;
+		ctor.inherited_built = false;
+		cls->ctors.push_back(ctor);
+	}
+	cls->has_user_ctor = !cls->base->ctors.empty() || cls->has_user_ctor;
+	cls->is_aggregate = false;
+}
+
+// The forwarding definition of an inherited constructor (12.9p8): the
+// declared parameters pass through to the base constructor; members
+// still default-initialize.
+void SemBinder::EnsureInheritedCtor(const ClassInfo& cls_in, int index)
+{
+	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
+	ClassCtor& ctor = cls.ctors[index];
+	if (ctor.inherited_built)
+		return;
+	ctor.inherited_built = true;
+	const ClassInfo* base = unit_.classes.Find(ctor.inherited_base);
+	const string& base_name = cls.members->name;
+	Scope* fn_scope =
+		model_.CreateScope(SCOPE_FUNCTION, base_name, cls.members);
+	DeferredBody body;
+	body.name = base_name;
+	body.fn_scope = fn_scope;
+	body.declaring = cls.members;
+	body.cls = &cls;
+	body.composed.type = ctor.type;
+	for (size_t i = 0; i < ctor.type->parameters.size(); i++)
+	{
+		ParameterInfo parameter;
+		parameter.name = i < ctor.param_names.size()
+			? ctor.param_names[i] : "";
+		parameter.type = ctor.type->parameters[i];
+		body.composed.parameters.push_back(parameter);
+		if (parameter.name.empty())
+			continue;
+		ScopeBinding param_binding;
+		param_binding.kind = SB_PARAMETER;
+		param_binding.name = parameter.name;
+		param_binding.type = parameter.type;
+		AddBinding(*fn_scope, param_binding);
+	}
+	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
+	SemNode* node = item.get();
+
+	Scope* saved_scope = current_;
+	MethodContext saved_method = method_;
+	current_ = fn_scope;
+	method_ = MethodContext();
+	method_.cls = &cls;
+	method_.fn_scope = fn_scope;
+	method_.fn_owner = cls.members;
+	method_.fn_name = base_name;
+	method_.this_type = node->type->parameters[0];
+	int base_index = base ? ClassCtorIndex(*base, ctor.type) : -1;
+	vector<SemNodePtr> args;
+	for (size_t i = 0; i < body.composed.parameters.size(); i++)
+	{
+		SemNodePtr arg = MakeSemNode(SN_ID_EXPRESSION);
+		arg->name = body.composed.parameters[i].name;
+		arg->type = body.composed.parameters[i].type;
+		arg->category = VC_LVALUE;
+		arg->entity_scope = fn_scope;
+		arg->entity_name = arg->name;
+		args.push_back(std::move(arg));
+	}
+	node->children.push_back(MakeConstructorCall(
+		*base, base_index, true, ThisBaseAddress(cls), std::move(args)));
+	vector<SemNodePtr> actions;
+	for (size_t i = 0; i < cls.fields.size(); i++)
+		if (!cls.fields[i].name.empty() || !cls.fields[i].is_bit_field)
+			AppendFieldDefaultInit(cls, cls.fields[i], actions);
+	for (size_t i = 0; i < actions.size(); i++)
+		node->children.push_back(std::move(actions[i]));
+	current_ = saved_scope;
+	method_ = saved_method;
+	unit_.deferred.push_back(std::move(item));
+}
+
 // --- object-model host services -----------------------------------------
 
 ClassRegistry& SemBinder::Classes()
@@ -886,6 +980,8 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	{
 		ctor_type = cls.ctors[ctor_index].type;
 		callee_unwind_no = cls.ctors[ctor_index].unwind_no;
+		if (cls.ctors[ctor_index].inherited_base)
+			EnsureInheritedCtor(cls, ctor_index);
 	}
 	TypePtr adjusted = MethodAdjustedType(cls, ctor_type);
 	const string& base_name = cls.members->name;

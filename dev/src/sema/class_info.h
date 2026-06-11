@@ -53,8 +53,11 @@ struct ClassCtor
 	ClassCtor()
 		: access(MA_PUBLIC), is_explicit(false), deleted(false),
 		  defaulted(false), unwind_no(false), definition(0),
-		  inherited_base(0)
+		  inherited_base(0), inherited_built(false)
 	{}
+
+	vector<string> param_names;  // declared parameter names
+	bool inherited_built;        // forwarding definition synthesized
 
 	TypePtr type;  // function type over the declared parameters
 	EMemberAccess access;

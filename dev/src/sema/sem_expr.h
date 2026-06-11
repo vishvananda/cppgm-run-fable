@@ -195,6 +195,9 @@ private:
 	bool TryUnaryOperator(const string& spelling, SemValue& operand,
 	                      bool postfix, SemValue& result);
 	SemValue AnalyzeFunctorCall(SemValue object, const AstExpr& expr);
+	static AstName MakeDestructorTypeName(const AstName& name);
+	SemValue MakeExplicitDestructorCall(SemValue object,
+	                                    const ClassInfo& cls, bool arrow);
 	SemValue DereferenceObject(SemValue object);
 	SemNodePtr ImplicitThisObject();
 	SemNodePtr AddressOfObject(SemNodePtr object);

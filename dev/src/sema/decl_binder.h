@@ -49,6 +49,10 @@ protected:
 	void BindNamespaceAlias(const AstDecl& decl);
 	void BindUsingDirective(const AstDecl& decl);
 	void BindUsingDeclaration(const AstDecl& decl);
+	// PA15: `using Base::Base` (12.9); PA11 rejects it.
+	virtual void BindInheritingConstructors(Scope* base_scope);
+	void MergeImportedOverloads(ScopeBinding& own,
+	                            const ScopeBinding& imported);
 	void BindStaticAssert(const AstDecl& decl);
 	virtual void BindSimpleDeclaration(const AstDecl& decl);
 	void BindInitDeclarator(const DeclSpecifierInfo& specs,

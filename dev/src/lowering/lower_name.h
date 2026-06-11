@@ -50,6 +50,11 @@ string MangleVariableObjectName(const Scope* scope, const string& name);
 // type (the implicit object pointer first); `special_code` is
 // "C1"/"C2"/"D1"/"D2" for constructor/destructor entries, "" for
 // ordinary methods.
+// The declaration-position overload index of a member function whose
+// entry type is this-adjusted (0 for the primary declaration).
+size_t LowerMemberOverloadIndex(const Scope* scope, const string& name,
+                                const TypePtr& adjusted);
+
 string MangleMemberFunctionObjectName(const Scope* scope,
                                       const string& name,
                                       const TypePtr& type,

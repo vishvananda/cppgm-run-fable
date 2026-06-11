@@ -498,16 +498,89 @@ void DeclBinder::BindUsingDeclaration(const AstDecl& decl)
 	// TerminalName rejects template-ids, operators, and destructor
 	// names (7.3.3p5 and the PA11 boundary).
 	const string& name = TerminalName(target);
-	const ScopeBinding* found =
-		QualifiedLookup(*ResolvePrefixScope(target), name, SLF_ANY);
+	Scope* prefix = ResolvePrefixScope(target);
+	if (prefix->kind == SCOPE_CLASS && prefix->name == name)
+	{
+		// 12.9: `using Base::Base` inherits the base constructors.
+		BindInheritingConstructors(prefix);
+		return;
+	}
+	const ScopeBinding* found = QualifiedLookup(*prefix, name, SLF_ANY);
 	if (!found)
 		throw runtime_error("using-declaration target not found: " + name);
 	if (found->kind == SB_NAMESPACE || found->kind == SB_NAMESPACE_ALIAS)
 		throw runtime_error("using-declaration shall not name a namespace");
 	// The imported binding shares the entity's type, value, and member
-	// scope, and prints in the current scope under its own kind.
+	// scope, and prints in the current scope under its own kind. In a
+	// class, the import re-exposes the member under the current access.
 	ScopeBinding imported = *found;
+	if (current_->kind == SCOPE_CLASS)
+	{
+		imported.access = current_access_;
+		for (size_t i = 0; i < imported.fn_access.size(); i++)
+			imported.fn_access[i] = current_access_;
+	}
+	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
+	{
+		// 7.3.3p15: the class's own function declarations and the
+		// imported overloads form one set.
+		if (current_->kind != SCOPE_CLASS ||
+		    existing->kind != SB_FUNCTION ||
+		    imported.kind != SB_FUNCTION)
+			throw runtime_error("redeclaration of " + name);
+		MergeImportedOverloads(*existing, imported);
+		return;
+	}
 	AddBinding(*current_, imported);
+}
+
+void DeclBinder::BindInheritingConstructors(Scope* base_scope)
+{
+	(void)base_scope;
+	throw OutsideBoundary("inheriting constructors");
+}
+
+// Appends the imported overloads that no own declaration replaces
+// (an own member with the same parameter list wins, 7.3.3p15).
+void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
+                                        const ScopeBinding& imported)
+{
+	vector<TypePtr> incoming;
+	incoming.push_back(imported.type);
+	for (size_t i = 0; i < imported.overloads.size(); i++)
+		incoming.push_back(imported.overloads[i]);
+	for (size_t i = 0; i < incoming.size(); i++)
+	{
+		bool replaced = TypeEquals(RemoveTopCv(own.type),
+		                           RemoveTopCv(incoming[i]));
+		for (size_t j = 0; !replaced && j < own.overloads.size(); j++)
+			if (TypeEquals(RemoveTopCv(own.overloads[j]),
+			               RemoveTopCv(incoming[i])))
+				replaced = true;
+		if (replaced)
+			continue;
+		own.overloads.push_back(incoming[i]);
+		size_t count = own.overloads.size() + 1;
+		own.fn_defaults.resize(count);
+		own.fn_deleted.resize(count, false);
+		own.fn_access.resize(count, MA_PUBLIC);
+		own.fn_static.resize(count, false);
+		own.fn_inline_def.resize(count, false);
+		own.fn_adl_only.resize(count, false);
+		own.fn_unwind_no.resize(count, false);
+		size_t at = count - 1;
+		own.fn_access[at] = current_access_;
+		if (i < imported.fn_defaults.size())
+			own.fn_defaults[at] = imported.fn_defaults[i];
+		if (i < imported.fn_deleted.size())
+			own.fn_deleted[at] = imported.fn_deleted[i];
+		if (i < imported.fn_static.size())
+			own.fn_static[at] = imported.fn_static[i];
+		if (i < imported.fn_inline_def.size())
+			own.fn_inline_def[at] = imported.fn_inline_def[i];
+		if (i < imported.fn_unwind_no.size())
+			own.fn_unwind_no[at] = imported.fn_unwind_no[i];
+	}
 }
 
 void DeclBinder::BindStaticAssert(const AstDecl& decl)

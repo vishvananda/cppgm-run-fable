@@ -258,9 +258,16 @@ ScopeBinding& SemBinder::BindFunctionName(const string& name,
 	     !(allow_block && current_->kind == SCOPE_BLOCK)))
 		throw runtime_error("redeclaration of " + name);
 	// 13.1: a matching parameter list redeclares (and must agree in
-	// full); a new parameter list extends the overload set.
+	// full); a new parameter list extends the overload set. An own
+	// class member replaces a same-signature using-import (7.3.3p15).
 	if (SameParameterList(*existing->type, *type))
 	{
+		if (current_->kind == SCOPE_CLASS && existing->owner != current_)
+		{
+			existing->type = type;
+			existing->owner = current_;
+			return *existing;
+		}
 		existing->type = MergeRedeclaredType(existing->type, type);
 		return *existing;
 	}

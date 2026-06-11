@@ -202,8 +202,11 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 	}
 	case TK_FUNCTION:
 	{
-		string spelling = "F" + MangleType(type->target, subs) +
-			MangleBareParameters(type, subs) + "E";
+		// Sequenced explicitly: the return type registers its
+		// substitutions before the parameters.
+		string return_part = MangleType(type->target, subs);
+		string param_part = MangleBareParameters(type, subs);
+		string spelling = "F" + return_part + param_part + "E";
 		return MangleSubstitutable(spelling, spelling, subs);
 	}
 	case TK_CLASS:
@@ -287,6 +290,43 @@ string LowerSanitizeName(const string& name)
 			out += '_';
 	}
 	return out;
+}
+
+size_t LowerMemberOverloadIndex(const Scope* scope, const string& name,
+                                const TypePtr& adjusted)
+{
+	const ScopeBinding* binding = FindOwnBinding(*scope, name);
+	if (!binding || binding->kind != SB_FUNCTION ||
+	    adjusted->parameters.empty())
+		return 0;
+	TypePtr object = adjusted->parameters[0]->target;
+	bool is_const = false;
+	bool is_volatile = false;
+	TopCv(object, is_const, is_volatile);
+	vector<TypePtr> declared_params(adjusted->parameters.begin() + 1,
+	                                adjusted->parameters.end());
+	TypePtr declared = MakeFunctionType(adjusted->target, declared_params,
+	                                    adjusted->variadic);
+	for (size_t i = 0; i <= binding->overloads.size(); i++)
+	{
+		const TypePtr& candidate =
+			i == 0 ? binding->type : binding->overloads[i - 1];
+		if (candidate->is_const == is_const &&
+		    candidate->is_volatile == is_volatile &&
+		    candidate->parameters.size() == declared_params.size() &&
+		    TypeEquals(RemoveTopCv(candidate->target),
+		               RemoveTopCv(declared->target)))
+		{
+			bool same = true;
+			for (size_t j = 0; j < declared_params.size(); j++)
+				if (!TypeEquals(candidate->parameters[j],
+				                declared_params[j]))
+					same = false;
+			if (same)
+				return i;
+		}
+	}
+	return 0;
 }
 
 size_t LowerOverloadIndex(const Scope* scope, const string& name,

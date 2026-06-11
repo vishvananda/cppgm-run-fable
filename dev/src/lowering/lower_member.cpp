@@ -266,8 +266,7 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 	string slot = AddMatSlot(kind, LowerSlotType(type));
 	string address = NewTemp();
 	Emit(address + " = addr $" + slot);
-	if (!action.trivial_init || action.children[0]->children.size() > 1)
-		LowerConstructorCall(action, address);
+	LowerConstructorCall(action, address);
 	return address;
 }
 

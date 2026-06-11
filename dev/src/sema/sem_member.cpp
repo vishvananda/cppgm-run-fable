@@ -35,6 +35,56 @@ const ScopeBinding* FindMemberBinding(TypesModel& model,
 
 }  // namespace
 
+// The type-name of `~T` / `p->~N::T` with the tilde dropped, for
+// resolution against the scope model.
+AstName SemExprAnalyzer::MakeDestructorTypeName(const AstName& name)
+{
+	AstName type_name;
+	type_name.global_scope = name.global_scope;
+	for (size_t i = 0; i + 1 < name.parts.size(); i++)
+	{
+		AstNamePart part;
+		part.kind = NP_IDENTIFIER;
+		part.identifier = name.parts[i].identifier;
+		type_name.parts.push_back(std::move(part));
+	}
+	AstNamePart terminal;
+	terminal.kind = NP_IDENTIFIER;
+	terminal.identifier = name.parts.back().identifier;
+	type_name.parts.push_back(std::move(terminal));
+	return type_name;
+}
+
+// An explicit destructor call on a (possibly const) class object.
+SemValue SemExprAnalyzer::MakeExplicitDestructorCall(SemValue object,
+                                                     const ClassInfo& cls,
+                                                     bool arrow)
+{
+	SemValue value;
+	value.type = MakeFundamentalType(FT_VOID);
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_CALL_EXPRESSION);
+	value.node->type = value.type;
+	value.node->category = VC_PRVALUE;
+	TypePtr dtor_type = MakeFunctionType(MakeFundamentalType(FT_VOID),
+	                                     vector<TypePtr>(), false);
+	const string& base_name = cls.members->name;
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = base_name + "::~" + base_name;
+	callee->type = ThisAdjustedType(cls.entity, dtor_type);
+	callee->entity_scope = cls.members;
+	callee->entity_name = "~" + base_name;
+	callee->is_method = true;
+	callee->special = SF_DESTRUCTOR;
+	value.node->children.push_back(std::move(callee));
+	if (arrow)
+		value.node->children.push_back(std::move(object.node));
+	else
+		value.node->children.push_back(
+			AddressOfObject(std::move(object.node)));
+	return value;
+}
+
 SemNodePtr SemExprAnalyzer::ImplicitThisObject()
 {
 	TypePtr this_type = host_.CurrentThisType();
@@ -64,9 +114,11 @@ SemNodePtr SemExprAnalyzer::ImplicitThisObject()
 
 SemNodePtr SemExprAnalyzer::AddressOfObject(SemNodePtr object)
 {
+	TypePtr bare = object->type;
+	if (IsReferenceType(bare))
+		bare = bare->target;
 	SemNodePtr address = MakeSemNode(SN_UNARY_EXPRESSION);
-	address->type = MakePointerType(RemoveTopCv(object->type), false,
-	                                false);
+	address->type = MakePointerType(RemoveTopCv(bare), false, false);
 	address->category = VC_PRVALUE;
 	address->has_op = true;
 	address->op = OP_AMP;
@@ -367,6 +419,41 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
                                             const AstExpr& callee)
 {
 	SemValue object = Analyze(*callee.operands[0]);
+	if (!callee.name.parts.empty() && callee.name.parts.back().tilde)
+	{
+		// 5.2.4 pseudo-destructor / 12.4p15 explicit destructor call.
+		if (!expr.arguments.empty())
+			throw runtime_error("destructor call takes no arguments");
+		if (callee.op == OP_ARROW && object.type->kind != TK_POINTER)
+			throw runtime_error("arrow destructor call on a non-pointer");
+		TypePtr named = host_.TryResolveCalleeType(
+			MakeDestructorTypeName(callee.name));
+		TypePtr object_type = callee.op == OP_ARROW
+			? object.type->target : object.type;
+		if (!named ||
+		    !TypeEquals(RemoveTopCv(named), RemoveTopCv(object_type)))
+			throw runtime_error("destructor name does not match the "
+			                    "object type");
+		if (RemoveTopCv(object_type)->kind == TK_CLASS)
+		{
+			const ClassInfo* cls = host_.Classes().Find(
+				RemoveTopCv(object_type)->named);
+			if (cls && host_.Classes().NeedsDestruction(*cls))
+				return MakeExplicitDestructorCall(std::move(object),
+				                                  *cls,
+				                                  callee.op == OP_ARROW);
+		}
+		// A scalar pseudo-destructor (or trivial class destructor)
+		// evaluates its object expression and yields void.
+		SemValue value;
+		value.type = MakeFundamentalType(FT_VOID);
+		value.category = VC_PRVALUE;
+		value.node = MakeSemNode(SN_CAST_EXPRESSION);
+		value.node->type = value.type;
+		value.node->category = VC_PRVALUE;
+		value.node->children.push_back(std::move(object.node));
+		return value;
+	}
 	if (callee.op == OP_ARROW)
 		object = DereferenceObject(std::move(object));
 	if (!callee.name.IsPlainIdentifier())
@@ -384,6 +471,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		// indirect through the member value.
 		SemValue fn = AnalyzeMemberAccess(std::move(object), name,
 		                                  callee.op, false);
+		if (fn.type->kind == TK_CLASS)
+			return AnalyzeFunctorCall(std::move(fn), expr);
 		TypePtr function_type;
 		if (fn.type->kind == TK_POINTER &&
 		    fn.type->target->kind == TK_FUNCTION)

@@ -230,6 +230,10 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	info.is_method = true;
 	info.special_code = special_code;
 	string base = LowerScopePath(scope) + LowerSanitizeName(name);
+	size_t overload = special_code.empty()
+		? LowerMemberOverloadIndex(scope, name, type) : 0;
+	if (overload)
+		base += "__ov" + to_string(overload + 1);
 	if (special_code == "C2" || special_code == "D2")
 		base += "__base_entry";
 	info.low_name = UniqueSymbol(base);
