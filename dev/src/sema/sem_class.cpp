@@ -254,10 +254,11 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	// 8.5.1p1/12.1p5: user-provided or deleted constructors disqualify
 	// aggregates; `= default` on the default constructor keeps the
 	// class an aggregate (C++11 semantics pinned by the fixtures).
-	if (!defaulted)
-		cls->is_aggregate = false;
 	if (!defaulted && !deleted)
+	{
+		cls->is_aggregate = false;
 		cls->has_user_ctor = true;
+	}
 	if (defined)
 	{
 		DeferredBody body;
@@ -907,7 +908,8 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	callee->special = action->special;
 	callee->unwind_no = callee_unwind_no;
 	call->children.push_back(std::move(callee));
-	call->children.push_back(std::move(address));
+	if (address)
+		call->children.push_back(std::move(address));
 	for (size_t i = 0; i < args.size(); i++)
 		call->children.push_back(std::move(args[i]));
 	action->children.push_back(std::move(call));
@@ -997,6 +999,19 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 		else
 			for (size_t i = 0; i < args.size(); i++)
 				values.push_back(analyzer_.Analyze(*args[i]));
+		if (values.size() == 1 && values[0].node &&
+		    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
+		    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+		    RemoveTopCv(values[0].type)->named == member_cls->entity)
+		{
+			SemNodePtr action = std::move(values[0].node);
+			SemNode& call = *action->children[0];
+			call.children.insert(
+				call.children.begin() + 1,
+				AddressOfNode(ThisFieldExpr(field)));
+			out.push_back(std::move(action));
+			return;
+		}
 		int index = ResolveClassConstructor(*member_cls, values, false,
 		                                    field.name.c_str());
 		vector<SemNodePtr> arg_nodes;
@@ -1160,10 +1175,13 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 			int index = ResolveClassConstructor(*member_cls, no_args,
 			                                    false,
 			                                    field.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
 			out.push_back(MakeConstructorCall(
 				*member_cls, index, false,
 				AddressOfNode(ThisFieldExpr(field)),
-				vector<SemNodePtr>()));
+				std::move(arg_nodes)));
 		}
 		return;
 	}
@@ -1186,10 +1204,13 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 			int index = ResolveClassConstructor(*member_cls, no_args,
 			                                    false,
 			                                    field.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
 			out.push_back(MakeConstructorCall(
 				*member_cls, index, false,
 				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)),
-				vector<SemNodePtr>()));
+				std::move(arg_nodes)));
 		}
 		return;
 	}
@@ -1255,9 +1276,12 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 			vector<SemValue> no_args;
 			int index = ResolveClassConstructor(*cls.base, no_args, false,
 			                                    "base initializer");
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
 			actions.push_back(MakeConstructorCall(*cls.base, index, true,
 			                                      ThisBaseAddress(cls),
-			                                      vector<SemNodePtr>()));
+			                                      std::move(arg_nodes)));
 		}
 	}
 	else if (base_init)
@@ -1377,9 +1401,12 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in)
 			vector<SemValue> no_args;
 			int index = ResolveClassConstructor(*cls.base, no_args, false,
 			                                    "base subobject");
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
 			actions.push_back(MakeConstructorCall(*cls.base, index, true,
 			                                      ThisBaseAddress(cls),
-			                                      vector<SemNodePtr>()));
+			                                      std::move(arg_nodes)));
 		}
 		for (size_t i = 0; i < cls.fields.size(); i++)
 			if (!cls.fields[i].name.empty() || !cls.fields[i].is_bit_field)
@@ -1663,11 +1690,14 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 			vector<SemValue> no_args;
 			int index = ResolveClassConstructor(cls, no_args, false,
 			                                    binding.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
 			item.children.push_back(MakeConstructorCall(
 				cls, index, false,
 				AddressOfNode(SubscriptNode(VariableObjectExpr(binding),
 				                            i)),
-				vector<SemNodePtr>()));
+				std::move(arg_nodes)));
 		}
 		return;
 	}
@@ -1685,10 +1715,13 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		vector<SemValue> no_args;
 		int index = ResolveClassConstructor(cls, no_args, false,
 		                                    binding.name.c_str());
+		vector<SemNodePtr> arg_nodes;
+		for (size_t j = 0; j < no_args.size(); j++)
+			arg_nodes.push_back(std::move(no_args[j].node));
 		item.children.push_back(MakeConstructorCall(
 			cls, index, false,
 			AddressOfNode(VariableObjectExpr(binding)),
-			vector<SemNodePtr>()));
+			std::move(arg_nodes)));
 		return;
 	}
 	// Initialized class object: direct (paren), list (braced), or
@@ -1731,6 +1764,21 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	else
 		for (size_t i = 0; i < args.size(); i++)
 			values.push_back(analyzer_.Analyze(*args[i]));
+	if (values.size() == 1 && values[0].node &&
+	    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
+	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+	    RemoveTopCv(values[0].type)->named == cls.entity)
+	{
+		// 12.8p31: the temporary elides; the constructor runs directly
+		// on the declared object.
+		SemNodePtr action = std::move(values[0].node);
+		SemNode& call = *action->children[0];
+		call.children.insert(
+			call.children.begin() + 1,
+			AddressOfNode(VariableObjectExpr(binding)));
+		item.children.push_back(std::move(action));
+		return;
+	}
 	if (copy_init && !braced && values.size() == 1 &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS)
 		throw OutsideBoundary("class copy-initialization");
@@ -1749,4 +1797,32 @@ void SemBinder::CheckQualifiedDefinitionScope(const Scope* declaring)
 	if (declaring->kind != SCOPE_NAMESPACE &&
 	    declaring->kind != SCOPE_CLASS)
 		throw OutsideBoundary("qualified function definition scope");
+}
+
+// A qualified declarator at namespace scope: the out-of-class
+// definition of a static data member (9.4.2p2).
+void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
+                                        const AstInitDeclarator& declarator,
+                                        const DeclaratorInfo& composed)
+{
+	if (composed.type->kind == TK_FUNCTION)
+		throw OutsideBoundary("qualified function declarator");
+	Scope* declaring = ResolvePrefixScope(*composed.id);
+	if (declaring->kind != SCOPE_CLASS)
+		throw OutsideBoundary("qualified declarator scope");
+	const string& name = PartName(composed.id->parts.back());
+	ScopeBinding* member = FindOwnBinding(*declaring, name);
+	if (!member || member->kind != SB_VARIABLE)
+		throw runtime_error(name + " is not a static data member");
+	member->type = MergeRedeclaredType(member->type, composed.type);
+	// The definition emits like a namespace-scope object owned by the
+	// class scope.
+	SemNode* item = AppendItem(SN_VARIABLE);
+	item->name = QualifiedScopePath(declaring) + name;
+	item->type = member->type;
+	item->entity_scope = declaring;
+	item->entity_name = name;
+	item->is_static_decl = specs.is_static;
+	item->is_thread_local_decl = specs.is_thread_local;
+	AttachObjectLifetime(*item, *member, declarator.init.get(), specs);
 }

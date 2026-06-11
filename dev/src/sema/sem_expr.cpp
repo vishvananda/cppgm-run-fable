@@ -454,7 +454,11 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 			if (callee->name.IsPlainIdentifier() &&
 			    callee->name.parts[0].identifier == "__builtin_constant_p")
 				return AnalyzeBuiltinConstantP(expr);
-			throw;
+			if (callee->name.IsPlainIdentifier())
+				binding = host_.ResolveBuiltinFunction(
+					callee->name.parts[0].identifier);
+			if (!binding)
+				throw;
 		}
 		if (binding->kind == SB_FUNCTION)
 			return AnalyzeNamedCall(expr, *binding, member_class);
@@ -565,6 +569,8 @@ void SemExprAnalyzer::CheckCallArguments(const TypePtr& function_type,
 SemValue SemExprAnalyzer::AnalyzeIndirectCall(const AstExpr& expr)
 {
 	SemValue fn = Analyze(*expr.operands[0]);
+	if (fn.type->kind == TK_CLASS)
+		return AnalyzeFunctorCall(std::move(fn), expr);
 	TypePtr function_type;
 	if (fn.type->kind == TK_FUNCTION)
 		function_type = fn.type;
@@ -612,6 +618,12 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinConstantP(const AstExpr& expr)
 SemValue SemExprAnalyzer::AnalyzeAddressOf(const AstExpr& expr)
 {
 	SemValue operand = Analyze(*expr.operands[0]);
+	if (!operand.member_class || !operand.function_set)
+	{
+		SemValue overloaded;
+		if (TryUnaryOperator("&", operand, false, overloaded))
+			return overloaded;
+	}
 	SemValue value;
 	if (operand.member_class)
 	{
@@ -647,6 +659,12 @@ SemValue SemExprAnalyzer::AnalyzeAddressOf(const AstExpr& expr)
 SemValue SemExprAnalyzer::AnalyzeIncDec(const AstExpr& expr, bool prefix)
 {
 	SemValue operand = Analyze(*expr.operands[0]);
+	{
+		SemValue overloaded;
+		if (TryUnaryOperator(expr.op_spelling, operand, !prefix,
+		                     overloaded))
+			return overloaded;
+	}
 	RequireModifiableLvalue(operand, "increment or decrement");
 	bool arithmetic = IsArithmeticType(operand.type) &&
 		!(operand.type->kind == TK_FUNDAMENTAL &&
@@ -675,6 +693,12 @@ SemValue SemExprAnalyzer::AnalyzeUnary(const AstExpr& expr)
 		return AnalyzeIncDec(expr, true);
 
 	SemValue operand = Analyze(*expr.operands[0]);
+	{
+		SemValue overloaded;
+		if (TryUnaryOperator(expr.op_spelling, operand, false,
+		                     overloaded))
+			return overloaded;
+	}
 	SemValue value;
 	switch (expr.op)
 	{
@@ -829,6 +853,11 @@ SemValue SemExprAnalyzer::AnalyzeBinary(const AstExpr& expr)
 {
 	SemValue lhs = Analyze(*expr.operands[0]);
 	SemValue rhs = Analyze(*expr.operands[1]);
+	{
+		SemValue overloaded;
+		if (TryBinaryOperator(expr.op_spelling, lhs, rhs, overloaded))
+			return overloaded;
+	}
 	switch (expr.op)
 	{
 	case OP_PLUS:
@@ -881,6 +910,20 @@ SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 {
 	SemValue lhs = Analyze(*expr.operands[0]);
 	SemValue rhs = Analyze(*expr.operands[1]);
+	if (lhs.type->kind == TK_CLASS || lhs.type->kind == TK_ENUM)
+	{
+		// 13.5.3: operator= must be a member; compound forms also
+		// consider namespace-scope operators.
+		vector<SemValue> operands;
+		operands.push_back(std::move(lhs));
+		operands.push_back(std::move(rhs));
+		SemValue overloaded;
+		if (ResolveOperatorCall(expr.op_spelling, operands,
+		                        expr.op == OP_ASS, overloaded))
+			return overloaded;
+		lhs = std::move(operands[0]);
+		rhs = std::move(operands[1]);
+	}
 	RequireModifiableLvalue(lhs, "assignment");
 	if (lhs.type->kind == TK_CLASS)
 		throw OutsideBoundary("class assignment");
@@ -1016,6 +1059,17 @@ SemValue SemExprAnalyzer::AnalyzeSubscript(const AstExpr& expr)
 {
 	SemValue first = Analyze(*expr.operands[0]);
 	SemValue second = Analyze(*expr.operands[1]);
+	if (first.type->kind == TK_CLASS)
+	{
+		// 13.5.5: operator[] is a member function.
+		vector<SemValue> operands;
+		operands.push_back(std::move(first));
+		operands.push_back(std::move(second));
+		SemValue overloaded;
+		if (ResolveOperatorCall("[]", operands, true, overloaded))
+			return overloaded;
+		throw runtime_error("no operator[] for the class operand");
+	}
 	// 5.2.1: one operand is the array/pointer, the other the index; the
 	// dump normalizes the commuted form to array-first order.
 	bool first_is_pointer = IsPointerAfterDecay(first.type);

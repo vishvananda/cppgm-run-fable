@@ -96,6 +96,53 @@ TypePtr SemBinder::ResolveCastTypeId(const AstTypeId& type_id)
 	return builder_.ResolveTypeId(type_id);
 }
 
+const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
+{
+	TypePtr void_type = MakeFundamentalType(FT_VOID);
+	TypePtr size_type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
+	TypePtr byte_ptr = MakePointerType(MakeFundamentalType(FT_VOID),
+	                                   false, false);
+	TypePtr const_char_ptr = MakePointerType(
+		MakeCvQualifiedType(MakeFundamentalType(FT_CHAR), true, false),
+		false, false);
+	TypePtr type;
+	vector<TypePtr> params;
+	if (name == "__builtin_strlen")
+	{
+		params.push_back(const_char_ptr);
+		type = MakeFunctionType(size_type, params, false);
+	}
+	else if (name == "__builtin_memcpy" || name == "__builtin_memmove")
+	{
+		params.push_back(byte_ptr);
+		params.push_back(MakePointerType(
+			MakeCvQualifiedType(MakeFundamentalType(FT_VOID), true,
+			                    false), false, false));
+		params.push_back(size_type);
+		type = MakeFunctionType(byte_ptr, params, false);
+	}
+	else if (name == "__builtin_unreachable")
+		type = MakeFunctionType(void_type, params, false);
+	else
+		return 0;
+	if (const ScopeBinding* existing =
+	        FindOwnBinding(*model_.global(), name))
+		return existing;
+	ScopeBinding binding;
+	binding.kind = SB_FUNCTION;
+	binding.name = name;
+	binding.type = type;
+	binding.c_linkage = true;
+	binding.fn_defaults.resize(1);
+	binding.fn_deleted.resize(1, false);
+	binding.fn_access.resize(1, MA_PUBLIC);
+	binding.fn_static.resize(1, false);
+	binding.fn_inline_def.resize(1, false);
+	binding.fn_adl_only.resize(1, false);
+	binding.fn_unwind_no.resize(1, true);
+	return &AddBinding(*model_.global(), binding);
+}
+
 bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 {
 	try
@@ -441,9 +488,15 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	}
 	parents_.push_back(item);
 	TypePtr saved_return = current_return_;
+	MethodContext saved_method = method_;
+	method_ = MethodContext();
+	method_.fn_scope = current_;
+	method_.fn_owner = declaring;
+	method_.fn_name = name;
 	current_return_ = composed.type->target;
 	DeclBinder::BindFunctionBody(decl, composed, name);
 	current_return_ = saved_return;
+	method_ = saved_method;
 	parents_.pop_back();
 }
 

@@ -1176,6 +1176,12 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 	case SN_CONSTRUCTOR_ACTION:
 		MaterializeTemporary(node, "tmpobj");
 		return;
+	case SN_ID_EXPRESSION:
+	case SN_MEMBER_EXPRESSION:
+		// A discarded class lvalue evaluates no code.
+		if (NodeType(node)->kind == TK_CLASS)
+			return;
+		break;
 	case SN_CALL_EXPRESSION:
 		LowerCall(node);
 		return;

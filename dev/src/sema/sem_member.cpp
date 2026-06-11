@@ -76,8 +76,19 @@ SemNodePtr SemExprAnalyzer::AddressOfObject(SemNodePtr object)
 }
 
 // `pointer->member`: the object expression is the dereferenced pointer.
+// A class operand drills down through its operator-> (13.5.6).
 SemValue SemExprAnalyzer::DereferenceObject(SemValue object)
 {
+	for (int depth = 0; object.type->kind == TK_CLASS && depth < 16;
+	     depth++)
+	{
+		vector<SemValue> operands;
+		operands.push_back(std::move(object));
+		SemValue overloaded;
+		if (!ResolveOperatorCall("->", operands, true, overloaded))
+			throw runtime_error("no operator-> for the class operand");
+		object = std::move(overloaded);
+	}
 	TypePtr type = object.type;
 	if (type->kind == TK_ARRAY)
 		throw runtime_error("arrow member access on an array");

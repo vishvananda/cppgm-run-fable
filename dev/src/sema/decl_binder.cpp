@@ -564,7 +564,10 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	if (!composed.id)
 		throw runtime_error("declarator requires a name");
 	if (composed.id->parts.size() != 1 || composed.id->global_scope)
-		throw OutsideBoundary("qualified declarator-id");
+	{
+		BindQualifiedDeclarator(specs, declarator, composed);
+		return;
+	}
 	if (!composed.id->IsPlainIdentifier() &&
 	    composed.type->kind != TK_FUNCTION)
 		throw OutsideBoundary("declarator-id form");
@@ -688,6 +691,16 @@ void DeclBinder::RecordConstantValue(ScopeBinding& binding,
 	}
 }
 
+void DeclBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
+                                         const AstInitDeclarator& declarator,
+                                         const DeclaratorInfo& composed)
+{
+	(void)specs;
+	(void)declarator;
+	(void)composed;
+	throw OutsideBoundary("qualified declarator-id");
+}
+
 void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 {
 	if (HasFriendSpecifier(decl))
@@ -706,10 +719,6 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	if (!composed.declares_function || composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function definition requires a function "
 		                    "declarator");
-	// 8.3.5p6: cv-qualifiers only on non-static member functions.
-	if ((composed.type->is_const || composed.type->is_volatile) &&
-	    current_->kind != SCOPE_CLASS)
-		throw runtime_error("cv-qualified non-member function");
 	const string name =
 		DeclaredFunctionName(composed.id->parts.back());
 	// 8.3p1: a qualified declarator-id defines an already-declared
@@ -723,6 +732,10 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 			throw runtime_error(name + " is not a member of the "
 			                    "named scope");
 	}
+	// 8.3.5p6: cv-qualifiers only on non-static member functions.
+	if ((composed.type->is_const || composed.type->is_volatile) &&
+	    declaring->kind != SCOPE_CLASS)
+		throw runtime_error("cv-qualified non-member function");
 	Scope* saved = current_;
 	current_ = declaring;
 	ScopeBinding& binding = BindFunctionName(name, composed.type, false);

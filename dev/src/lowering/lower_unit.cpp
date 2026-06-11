@@ -686,6 +686,21 @@ void LowerProgram::Write(ostream& out)
 			continue;
 		sections[1].push_back(RenderFunctionDeclare(info));
 	}
+	// Thread-local objects expose their access wrapper (the backend's
+	// TLS entry point).
+	for (size_t i = 0; i < globals_.size(); i++)
+	{
+		const LowGlobalInfo& info = globals_[i];
+		if (!info.is_thread_local || (!info.defined && !info.used))
+			continue;
+		string object = info.object_name;
+		if (object.compare(0, 2, "_Z") == 0)
+			object = "_ZTW" + object.substr(2);
+		sections[1].push_back(
+			"declare function @" + info.low_name +
+			"__tls_wrapper() -> ptr [binding=strong, object=" + object +
+			", tls_for=@" + info.low_name + "]");
+	}
 	for (size_t i = 0; i < strings_.size(); i++)
 	{
 		string body;

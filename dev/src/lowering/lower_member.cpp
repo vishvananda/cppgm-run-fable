@@ -234,15 +234,24 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 void FunctionLowerer::LowerConstructorCall(const SemNode& action,
                                            const string& this_text)
 {
+	// A declared object's action holds [callee, &object, args...]; a
+	// temporary's holds [callee, args...].
 	const SemNode& call = *action.children[0];
 	const SemNode& callee = *call.children[0];
+	size_t first_arg = 1;
+	if (call.children.size() > 1 &&
+	    call.children[1]->kind == SN_UNARY_EXPRESSION &&
+	    call.children[1]->op == OP_AMP &&
+	    call.children[1]->has_op)
+		first_arg = 2;
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
 	string arguments = this_text;
-	for (size_t i = 2; i < call.children.size(); i++)
+	for (size_t i = first_arg; i < call.children.size(); i++)
 	{
-		TypePtr param = i - 1 < callee.type->parameters.size()
-			? callee.type->parameters[i - 1] : TypePtr();
+		size_t param_at = i - first_arg + 1;
+		TypePtr param = param_at < callee.type->parameters.size()
+			? callee.type->parameters[param_at] : TypePtr();
 		arguments += ", " + LowerCallArgument(*call.children[i], param);
 	}
 	string callee_text = program_.MemberFunctionRef(callee);
@@ -257,7 +266,7 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 	string slot = AddMatSlot(kind, LowerSlotType(type));
 	string address = NewTemp();
 	Emit(address + " = addr $" + slot);
-	if (!action.trivial_init || !action.children.empty())
+	if (!action.trivial_init || action.children[0]->children.size() > 1)
 		LowerConstructorCall(action, address);
 	return address;
 }

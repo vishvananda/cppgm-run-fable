@@ -36,6 +36,10 @@ struct ISemExprHost
 	// Constant evaluation attempt for the __builtin_constant_p fold.
 	virtual bool TryEvaluateConstant(const AstExpr& expr,
 	                                 ConstValue& value) = 0;
+	// PA15: the lazily declared __builtin_* functions (null when the
+	// name is not a known builtin).
+	virtual const ScopeBinding* ResolveBuiltinFunction(
+		const string& name) = 0;
 	// --- PA15 object-model context ---
 	virtual ClassRegistry& Classes() = 0;
 	// The class whose member body is being analyzed (null otherwise).
@@ -86,6 +90,17 @@ struct SemValue
 	// analyzed object expression (null for static/unbound uses).
 	const ScopeBinding* member_fn;
 	SemNodePtr member_object;
+};
+
+// One user-declared operator candidate (sem_operator.cpp).
+struct OperatorCandidate
+{
+	OperatorCandidate() : binding(0), index(0), is_member(false) {}
+
+	const ScopeBinding* binding;
+	size_t index;     // overload position in the binding
+	bool is_member;
+	TypePtr declared; // declared function type
 };
 
 // The canonical qualified name of a binding declared in `owner`: the
@@ -166,6 +181,20 @@ private:
 	                                  const string& written);
 	SemValue MakeTemporaryObject(const TypePtr& class_type,
 	                             const vector<AstExprPtr>& arguments);
+	// --- PA15 operator overloading (sem_operator.cpp) ---
+	void CollectOperatorCandidates(const string& op_name,
+	                               const vector<SemValue>& operands,
+	                               bool member_only,
+	                               vector<OperatorCandidate>& out);
+	bool ResolveOperatorCall(const string& spelling,
+	                         vector<SemValue>& operands, bool member_only,
+	                         SemValue& result);
+	static bool OperatorOperand(const SemValue& value);
+	bool TryBinaryOperator(const string& spelling, SemValue& lhs,
+	                       SemValue& rhs, SemValue& result);
+	bool TryUnaryOperator(const string& spelling, SemValue& operand,
+	                      bool postfix, SemValue& result);
+	SemValue AnalyzeFunctorCall(SemValue object, const AstExpr& expr);
 	SemValue DereferenceObject(SemValue object);
 	SemNodePtr ImplicitThisObject();
 	SemNodePtr AddressOfObject(SemNodePtr object);
@@ -184,3 +213,4 @@ private:
 
 // The conversion-relevant facts of an analyzed value.
 ConversionSource MakeConversionSource(const SemValue& value);
+

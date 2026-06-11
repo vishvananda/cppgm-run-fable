@@ -107,6 +107,11 @@ protected:
 	virtual void BindFriendDeclaration(const AstDecl& decl);
 	// PA15 admits class scopes for qualified function definitions.
 	virtual void CheckQualifiedDefinitionScope(const Scope* declaring);
+	// PA15: qualified non-function declarators (static data member
+	// definitions); PA11 rejects them.
+	virtual void BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
+	                                     const AstInitDeclarator& declarator,
+	                                     const DeclaratorInfo& composed);
 	// 9.5p5 member injection of a standalone anonymous union; PA12 also
 	// synthesizes the storage variable and its construction.
 	virtual void BindAnonymousUnionMembers(const AstDecl& decl,

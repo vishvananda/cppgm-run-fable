@@ -24,6 +24,7 @@ public:
 	virtual TypePtr TryResolveCalleeType(const AstName& name);
 	virtual TypePtr ResolveCastTypeId(const AstTypeId& type_id);
 	virtual bool TryEvaluateConstant(const AstExpr& expr, ConstValue& value);
+	virtual const ScopeBinding* ResolveBuiltinFunction(const string& name);
 	virtual ClassRegistry& Classes();
 	virtual const ClassInfo* CurrentClass();
 	virtual TypePtr CurrentThisType();
@@ -73,6 +74,9 @@ protected:
 	virtual void BindBitFieldDeclaration(const AstDecl& decl);
 	virtual void BindFriendDeclaration(const AstDecl& decl);
 	virtual void CheckQualifiedDefinitionScope(const Scope* declaring);
+	virtual void BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
+	                                     const AstInitDeclarator& declarator,
+	                                     const DeclaratorInfo& composed);
 
 private:
 	// --- dump recording ---
