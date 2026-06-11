@@ -73,7 +73,6 @@ protected:
 	                              const DeclaratorInfo& composed,
 	                              const string& name);
 	void BindTemplateDeclaration(const AstDecl& decl);
-	void BindBitFieldDeclaration(const AstDecl& decl);
 
 	// --- declaration events (PA12 dump recording; no-ops in PA11) ---
 	virtual void OnTypeAliasBound(const string& name, const TypePtr& type);
@@ -88,6 +87,26 @@ protected:
 	TypePtr BindClassForward(const AstDecl& decl, bool elaborated);
 	void CompleteClassLayout(NamedTypeInfo& info,
 	                         const std::vector<TypePtr>& fields);
+	// PA15 seams: base-clause binding (PA11 rejects bases), class
+	// open/close events, and completion. The default completion runs
+	// the PA11 field-sequential layout.
+	virtual void BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
+	                            Scope* scope);
+	virtual void OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
+	                           Scope* scope);
+	virtual void CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
+	                           Scope* scope,
+	                           const std::vector<TypePtr>& fields);
+	// PA15: constructors and destructors (PA11 skips them silently).
+	virtual void BindSpecialMember(const AstDecl& decl);
+	// PA15 reimplements bit-field binding with widths and layout.
+	virtual void BindBitFieldDeclaration(const AstDecl& decl);
+	// PA15: friend declarations and hidden-friend definitions (11.3).
+	// PA11 rejects every friend form.
+	static bool HasFriendSpecifier(const AstDecl& decl);
+	virtual void BindFriendDeclaration(const AstDecl& decl);
+	// PA15 admits class scopes for qualified function definitions.
+	virtual void CheckQualifiedDefinitionScope(const Scope* declaring);
 	// 9.5p5 member injection of a standalone anonymous union; PA12 also
 	// synthesizes the storage variable and its construction.
 	virtual void BindAnonymousUnionMembers(const AstDecl& decl,
@@ -110,9 +129,13 @@ protected:
 	static string DeclaredFunctionName(const AstNamePart& part);
 	// PA14: records per-overload facts (default arguments, deleted
 	// definitions) onto the function binding for the overload whose
-	// parameter list matches `composed.type`.
+	// parameter list matches `composed.type`. PA15 adds the member
+	// facts: access, static-ness, in-class definition, friend-only
+	// visibility, and simple-noexcept marking.
 	void RecordFunctionFacts(ScopeBinding& binding,
-	                         const DeclaratorInfo& composed, bool deleted);
+	                         const DeclaratorInfo& composed, bool deleted,
+	                         const DeclSpecifierInfo* specs = 0,
+	                         bool inline_def = false, bool adl_only = false);
 	// The scope a nested-name-specifier component designates.
 	Scope* ScopeOfBinding(const ScopeBinding& binding);
 	// The scope of name parts [0, parts.size()-1).
@@ -141,4 +164,7 @@ protected:
 	int anonymous_enums_;
 	// PA14: inside an extern "C" linkage-specification body.
 	bool in_c_linkage_;
+	// PA15: the access of the current member-specification region
+	// (11p1: private for `class`, public for `struct`/`union`).
+	EMemberAccess current_access_;
 };

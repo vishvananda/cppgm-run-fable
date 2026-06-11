@@ -16,13 +16,14 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA14 assignment boundary");
 }
 
-// The named-namespace components from the global scope down to
-// `scope`, outermost first.
+// The named components (namespaces and classes) from the global scope
+// down to `scope`, outermost first.
 vector<string> ScopeComponents(const Scope* scope)
 {
 	vector<string> parts;
 	for (; scope && scope->parent; scope = scope->parent)
-		if (scope->kind == SCOPE_NAMESPACE && !scope->name.empty())
+		if ((scope->kind == SCOPE_NAMESPACE ||
+		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
 			parts.insert(parts.begin(), scope->name);
 	return parts;
 }
@@ -254,7 +255,7 @@ string LowerScopeKey(const Scope* scope)
 	string key;
 	for (; scope && scope->parent; scope = scope->parent)
 	{
-		if (scope->kind != SCOPE_NAMESPACE)
+		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
 			continue;
 		string part = scope->name;
 		if (part.empty())
@@ -271,6 +272,9 @@ string LowerScopeKey(const Scope* scope)
 
 string LowerSanitizeName(const string& name)
 {
+	// Spaces drop ("operator new" -> "operatornew"); other non-word
+	// characters become underscores ("operator==" -> "operator__",
+	// "~C" -> "_C").
 	string out;
 	for (size_t i = 0; i < name.size(); i++)
 	{
@@ -279,6 +283,8 @@ string LowerSanitizeName(const string& name)
 			(c >= '0' && c <= '9') || c == '_';
 		if (word)
 			out += c;
+		else if (c != ' ')
+			out += '_';
 	}
 	return out;
 }
@@ -348,4 +354,43 @@ string MangleVariableObjectName(const Scope* scope, const string& name)
 	for (size_t i = 0; i < parts.size(); i++)
 		encoding += SourceName(parts[i]);
 	return "_Z" + encoding + SourceName(name) + "E";
+}
+
+string MangleMemberFunctionObjectName(const Scope* scope,
+                                      const string& name,
+                                      const TypePtr& type,
+                                      const string& special_code)
+{
+	Substitutions subs;
+	vector<string> parts = ScopeComponents(scope);
+	// The implicit object parameter carries the method cv-qualifiers
+	// and is dropped from the bare signature.
+	bool is_const = false;
+	bool is_volatile = false;
+	TypePtr bare = type;
+	if (!type->parameters.empty())
+	{
+		TopCv(type->parameters[0]->target, is_const, is_volatile);
+		vector<TypePtr> params(type->parameters.begin() + 1,
+		                       type->parameters.end());
+		bare = MakeFunctionType(type->target, params, type->variadic);
+	}
+	string encoding = "N";
+	if (is_volatile)
+		encoding += "V";
+	if (is_const)
+		encoding += "K";
+	string entity_key = "T:";
+	for (size_t i = 0; i < parts.size(); i++)
+	{
+		entity_key += (i ? "::" : "") + parts[i];
+		encoding += SourceName(parts[i]);
+		subs.Add(entity_key);
+	}
+	if (!special_code.empty())
+		encoding += special_code;
+	else
+		encoding += MangleTerminalName(name);
+	encoding += "E";
+	return "_Z" + encoding + MangleBareParameters(bare, subs);
 }

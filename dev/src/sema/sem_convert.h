@@ -45,11 +45,16 @@ struct ImplicitConversion
 	ImplicitConversion()
 		: viable(false), rank(CR_EXACT), null_to_pointer(false),
 		  bool_from_pointer(false), reference_binding(false),
-		  binds_rvalue_reference(false), selected_overload(-1)
+		  binds_rvalue_reference(false), base_distance(0),
+		  selected_overload(-1)
 	{}
 
 	bool viable;
 	EConversionRank rank;
+	// 13.3.3.2p4 derivation-distance tie-break: 0 for non-hierarchy
+	// conversions, the base-chain distance for derived-to-base pointer
+	// and reference forms, large for conversions to void pointers.
+	int base_distance;
 	// The source is a null pointer literal converting to a pointer or
 	// nullptr_t destination: the dump retypes the literal in place.
 	bool null_to_pointer;

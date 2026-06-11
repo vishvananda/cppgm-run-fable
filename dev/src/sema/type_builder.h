@@ -40,7 +40,7 @@ struct DeclSpecifierInfo
 	DeclSpecifierInfo()
 		: is_typedef(false), is_static(false), is_extern(false),
 		  is_thread_local(false), is_inline(false), is_virtual(false),
-		  is_constexpr(false)
+		  is_constexpr(false), is_friend(false), is_mutable(false)
 	{}
 
 	TypePtr type;
@@ -51,6 +51,9 @@ struct DeclSpecifierInfo
 	bool is_inline;
 	bool is_virtual;
 	bool is_constexpr;
+	// PA15 member specifiers.
+	bool is_friend;
+	bool is_mutable;
 };
 
 // One declared parameter (PA11 keeps the declared type; no 8.3.5p5

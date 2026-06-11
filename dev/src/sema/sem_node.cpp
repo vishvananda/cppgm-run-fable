@@ -20,7 +20,11 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  entity_scope(0), has_value(false), null_pointer(false),
 	  is_string_literal(false), is_static_decl(false),
 	  is_extern_decl(false), is_thread_local_decl(false),
-	  c_linkage(false), unwind_no(false)
+	  c_linkage(false), unwind_no(false), member_offset(0),
+	  base_hops(0), is_bit_field(false), bit_offset(0), bit_width(0),
+	  is_method(false), special(SF_NONE), inline_def(false),
+	  needs_dtor(false), trivial_init(false), bf_plain_store(false),
+	  member_ref(false)
 {
 }
 
@@ -44,6 +48,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_NAMESPACE_DEFINITION: return "namespace-definition";
 	case SN_PARAMETER: return "parameter";
 	case SN_CONSTRUCTOR_ACTION: return "constructor-action";
+	case SN_DESTRUCTOR_ACTION: return "destructor-action";
 	case SN_COMPOUND_STATEMENT: return "compound-statement";
 	case SN_SIMPLE_DECLARATION: return "simple-declaration";
 	case SN_EXPRESSION_STATEMENT: return "expression-statement";
@@ -159,4 +164,44 @@ void PrintSemanticsOutput(const SemUnit& unit, ostream& out)
 		PrintNode(*unit.items[i], out, 1);
 	for (size_t i = 0; i < unit.synthesized.size(); i++)
 		PrintNode(*unit.synthesized[i], out, 1);
+}
+
+SemNodePtr CloneSemNode(const SemNode& node)
+{
+	SemNodePtr copy = MakeSemNode(node.kind);
+	SemNode& out = *copy;
+	out.name = node.name;
+	out.type = node.type;
+	out.category = node.category;
+	out.has_op = node.has_op;
+	out.op = node.op;
+	out.op_spelling = node.op_spelling;
+	out.token = node.token;
+	out.entity_scope = node.entity_scope;
+	out.entity_name = node.entity_name;
+	out.has_value = node.has_value;
+	out.value = node.value;
+	out.null_pointer = node.null_pointer;
+	out.is_string_literal = node.is_string_literal;
+	out.string_bytes = node.string_bytes;
+	out.is_static_decl = node.is_static_decl;
+	out.is_extern_decl = node.is_extern_decl;
+	out.is_thread_local_decl = node.is_thread_local_decl;
+	out.c_linkage = node.c_linkage;
+	out.unwind_no = node.unwind_no;
+	out.member_offset = node.member_offset;
+	out.base_hops = node.base_hops;
+	out.is_bit_field = node.is_bit_field;
+	out.bit_offset = node.bit_offset;
+	out.bit_width = node.bit_width;
+	out.is_method = node.is_method;
+	out.special = node.special;
+	out.inline_def = node.inline_def;
+	out.needs_dtor = node.needs_dtor;
+	out.trivial_init = node.trivial_init;
+	out.bf_plain_store = node.bf_plain_store;
+	out.member_ref = node.member_ref;
+	for (size_t i = 0; i < node.children.size(); i++)
+		out.children.push_back(CloneSemNode(*node.children[i]));
+	return copy;
 }

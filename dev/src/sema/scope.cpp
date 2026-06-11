@@ -87,6 +87,7 @@ ScopeBinding& AddBinding(Scope& scope, const ScopeBinding& binding)
 	scope.bindings.push_back(binding);
 	if (!scope.bindings.back().owner)
 		scope.bindings.back().owner = &scope;
+	scope.bindings.back().home = &scope;
 	return scope.bindings.back();
 }
 

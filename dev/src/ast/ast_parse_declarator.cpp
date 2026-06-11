@@ -36,7 +36,7 @@ bool IsDeclOnlySpecifier(ETokenType type)
 	{
 	case KW_TYPEDEF: case KW_EXTERN: case KW_STATIC: case KW_INLINE:
 	case KW_VIRTUAL: case KW_CONSTEXPR: case KW_THREAD_LOCAL:
-	case KW_FRIEND:
+	case KW_FRIEND: case KW_MUTABLE:
 		return true;
 	default:
 		return false;

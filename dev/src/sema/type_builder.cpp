@@ -78,6 +78,8 @@ void TypeBuilder::ConsumeSpecifierKeyword(const AstSpecifier& spec,
 	case KW_INLINE: SetOnce(info.is_inline, "inline"); break;
 	case KW_VIRTUAL: SetOnce(info.is_virtual, "virtual"); break;
 	case KW_CONSTEXPR: SetOnce(info.is_constexpr, "constexpr"); break;
+	case KW_FRIEND: SetOnce(info.is_friend, "friend"); break;
+	case KW_MUTABLE: SetOnce(info.is_mutable, "mutable"); break;
 	default:
 		storage = false;
 		break;

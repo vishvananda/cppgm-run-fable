@@ -10,6 +10,7 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
+#include "sema/class_info.h"
 #include "sema/scope.h"
 #include "sema/type.h"
 
@@ -38,6 +39,9 @@ enum ESemNodeKind
 	SN_NAMESPACE_DEFINITION,  // namespace-definition <name>
 	SN_PARAMETER,             // parameter <name> <type>
 	SN_CONSTRUCTOR_ACTION,    // constructor-action <name>
+	// PA15 lifetime action: destroys the object addressed by the call
+	// subtree (never printed by the PA12 dump).
+	SN_DESTRUCTOR_ACTION,
 
 	// statements
 	SN_COMPOUND_STATEMENT,
@@ -80,6 +84,19 @@ enum ESemNodeKind
 	SN_BRACED_INIT_LIST
 };
 
+// PA15: which ABI entry a function definition / callee names. Complete
+// and base entries are identical without virtual bases, so one
+// definition serves both; the lowering picks the emitted spelling from
+// the demanded variant.
+enum ESpecialFunction
+{
+	SF_NONE,
+	SF_CONSTRUCTOR,       // complete-object entry (C1)
+	SF_CONSTRUCTOR_BASE,  // base-subobject entry (C2)
+	SF_DESTRUCTOR,        // complete-object entry (D1)
+	SF_DESTRUCTOR_BASE    // base-subobject entry (D2)
+};
+
 struct SemNode;
 typedef unique_ptr<SemNode> SemNodePtr;
 
@@ -114,9 +131,43 @@ struct SemNode
 	bool is_thread_local_decl;
 	bool c_linkage;
 	bool unwind_no;       // simple noexcept marking on the declarator
+
+	// --- PA15 object-model facts (never printed by the PA12 dump) ---
+	// SN_MEMBER_EXPRESSION: resolved layout of the named field. The
+	// address is children[0]'s address plus `base_hops` base-subobject
+	// projections (all at offset 0) and then `member_offset` bytes.
+	unsigned long long member_offset;
+	int base_hops;
+	bool is_bit_field;
+	unsigned long long bit_offset;  // within the unit at member_offset
+	unsigned long long bit_width;
+	// The field is declared as a reference: uses read through the
+	// stored pointer; on an SN_ASSIGNMENT_EXPRESSION the store binds
+	// the reference (constructor member initialization).
+	bool member_ref;
+	// SN_FUNCTION_DEFINITION / SN_CALLEE: non-static member function
+	// with the hidden `this` first parameter / argument.
+	bool is_method;
+	ESpecialFunction special;  // constructor / destructor entry kind
+	// SN_FUNCTION_DEFINITION: defined in-class (weak, demand-emitted).
+	bool inline_def;
+	// SN_VARIABLE: the object's lifetime ends at scope exit; the
+	// attached SN_DESTRUCTOR_ACTION child holds the destruction call.
+	bool needs_dtor;
+	// SN_CONSTRUCTOR_ACTION: the implicit default constructor does
+	// nothing, so default-initialization emits no call.
+	bool trivial_init;
+	// PA15 bit-field stores: the first write to a storage unit inside a
+	// constructor stores the masked value directly instead of
+	// read-modify-write.
+	bool bf_plain_store;
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);
+
+// A deep copy of a node tree (PA15: aggregate-target prototypes and
+// the synthesized init/fini helper bodies).
+SemNodePtr CloneSemNode(const SemNode& node);
 
 // One translation unit's dump: the declaration-order items plus the
 // implicit member functions synthesized while analyzing them (printed
@@ -125,6 +176,12 @@ struct SemUnit
 {
 	vector<SemNodePtr> items;
 	vector<SemNodePtr> synthesized;
+	// PA15: class metadata and the demand-emitted definitions (in-class
+	// methods, hidden friends, constructors/destructors). Deferred
+	// definitions are emitted by the lowering only when referenced, in
+	// first-demand order.
+	ClassRegistry classes;
+	vector<SemNodePtr> deferred;
 };
 
 // Writes the `translation-unit` line and the tree below it.

@@ -154,6 +154,22 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 			result.rank = CR_EXACT;
 			return result;
 		}
+		// 4.10p3: pointer to derived converts to pointer to a (no less
+		// qualified) base; nearer bases rank better (13.3.3.2p4).
+		if (from->target->kind == TK_CLASS &&
+		    dest->target->kind == TK_CLASS &&
+		    CvSuperset(dest->target, from->target))
+		{
+			int distance = BaseClassDistance(from->target->named,
+			                                 dest->target->named);
+			if (distance > 0)
+			{
+				result.viable = true;
+				result.rank = CR_CONVERSION;
+				result.base_distance = distance;
+				return result;
+			}
+		}
 		// 4.10p2: object pointer to (cv-compatible) void pointer.
 		if (IsVoidType(RemoveTopCv(dest->target)) &&
 		    from->target->kind != TK_FUNCTION &&
@@ -162,6 +178,7 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		{
 			result.viable = true;
 			result.rank = CR_CONVERSION;
+			result.base_distance = 1 << 20;
 		}
 		return result;
 	}
@@ -221,6 +238,21 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	}
 	if (ReferenceRelated(referee, source.type))
 		return result;  // related but lesser-qualified: ill-formed
+	// 8.5.3p4 with 13.3.3.1.4p1: a base-class reference binds a derived
+	// object directly with Conversion rank.
+	if (referee->kind == TK_CLASS && source.type->kind == TK_CLASS &&
+	    CvSuperset(referee, source.type))
+	{
+		int distance = BaseClassDistance(source.type->named,
+		                                 referee->named);
+		if (distance > 0)
+		{
+			result.viable = true;
+			result.rank = CR_CONVERSION;
+			result.base_distance = distance;
+			return result;
+		}
+	}
 	// Not reference-related: a const lvalue reference (or an rvalue
 	// reference over an rvalue) binds a temporary created by the value
 	// conversion, which carries the conversion's rank (13.3.3.1.4p2).
@@ -252,6 +284,8 @@ int CompareConversions(const ImplicitConversion& a,
 		return a.rank < b.rank ? -1 : 1;
 	if (a.bool_from_pointer != b.bool_from_pointer)
 		return a.bool_from_pointer ? 1 : -1;
+	if (a.base_distance != b.base_distance)
+		return a.base_distance < b.base_distance ? -1 : 1;
 	if (!a.reference_binding || !b.reference_binding)
 		return 0;
 	if (a.binds_rvalue_reference != b.binds_rvalue_reference)

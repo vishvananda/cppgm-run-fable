@@ -60,10 +60,20 @@ struct ConstValue
 struct Scope;
 struct AstExpr;
 
+// PA15 member access control (clause 11). Bindings outside class
+// scopes stay MA_PUBLIC.
+enum EMemberAccess
+{
+	MA_PUBLIC,
+	MA_PROTECTED,
+	MA_PRIVATE
+};
+
 struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
-	                 owner(0), c_linkage(false) {}
+	                 owner(0), home(0), c_linkage(false),
+	                 access(MA_PUBLIC), is_mutable(false) {}
 
 	EScopeBindingKind kind;
 	string name;
@@ -75,6 +85,10 @@ struct ScopeBinding
 	// using-declaration import keeps the original owner). Powers the
 	// PA12 canonical qualified names.
 	const Scope* owner;
+	// PA15: the scope the binding physically lives in (always stamped
+	// by AddBinding); a using-declaration import is checked against the
+	// importing class's access here.
+	const Scope* home;
 	// PA12 SB_FUNCTION overload set: the types declared for this name
 	// beyond `type`, in declaration order (PA11 never populates it).
 	vector<TypePtr> overloads;
@@ -89,16 +103,30 @@ struct ScopeBinding
 	vector<vector<const AstExpr*>> fn_defaults;
 	vector<bool> fn_deleted;
 	bool c_linkage;  // declared inside extern "C"
+	// PA15 member facts. `access` is the declared access of a non-function
+	// member (and of the first function overload); functions carry one
+	// entry per overload position in the fn_* vectors below.
+	EMemberAccess access;
+	bool is_mutable;            // mutable non-static data member
+	vector<EMemberAccess> fn_access;
+	vector<bool> fn_static;      // static member function
+	vector<bool> fn_inline_def;  // defined in-class: weak, demand-emitted
+	vector<bool> fn_adl_only;    // hidden friend: visible to ADL only
+	vector<bool> fn_unwind_no;   // simple-noexcept declarator
 };
 
 struct Scope
 {
-	Scope() : kind(SCOPE_NAMESPACE), parent(0), unnamed_member(0) {}
+	Scope() : kind(SCOPE_NAMESPACE), parent(0), unnamed_member(0),
+	          class_base(0) {}
 
 	EScopeKind kind;
 	string name;  // empty for the global namespace, blocks, and
 	              // template-parameter scopes
 	Scope* parent;
+	// PA15 single inheritance: the direct base class's member scope
+	// (null otherwise); member lookup searches the base chain (10.2).
+	Scope* class_base;
 
 	vector<ScopeBinding> bindings;      // first-binding (print) order
 	map<string, size_t> binding_index;  // name -> bindings position

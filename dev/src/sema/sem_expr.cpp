@@ -218,6 +218,28 @@ SemValue SemExprAnalyzer::AnalyzeKeywordLiteral(const AstExpr& expr)
 		value.type = MakeFundamentalType(FT_NULLPTR_T);
 		value.node->null_pointer = true;
 		break;
+	case KW_THIS:
+	{
+		// 9.3.2: prvalue pointer to the cv-qualified class inside a
+		// non-static member function.
+		TypePtr this_type = host_.CurrentThisType();
+		if (!this_type)
+			throw runtime_error("this outside a member function");
+		value.type = this_type;
+		value.node->kind = SN_ID_EXPRESSION;
+		value.node->name = "this";
+		value.node->token.clear();
+		value.node->entity_scope = host_.CurrentScope();
+		for (const Scope* scope = host_.CurrentScope(); scope;
+		     scope = scope->parent)
+			if (FindOwnBinding(*scope, "this"))
+			{
+				value.node->entity_scope = scope;
+				break;
+			}
+		value.node->entity_name = "this";
+		break;
+	}
 	default:
 		throw OutsideBoundary("this");
 	}
@@ -248,6 +270,12 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	const NamedTypeInfo* member_class = 0;
 	const ScopeBinding* binding = host_.ResolveValue(expr.name, member_class);
 	string written = FlattenNameTopLevel(expr.name);
+	// An unqualified name found in a class scope is an implicit member
+	// use (9.3.1p3); qualified uses keep the PA12 member facts.
+	if (!member_class && binding->home &&
+	    binding->home->kind == SCOPE_CLASS &&
+	    (binding->kind == SB_VARIABLE || binding->kind == SB_FUNCTION))
+		return AnalyzeImplicitMember(*binding, written);
 	SemValue value;
 	switch (binding->kind)
 	{
@@ -409,6 +437,8 @@ void SemExprAnalyzer::RequireModifiableLvalue(const SemValue& value,
 SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 {
 	const AstExpr* callee = StripParens(expr.operands[0].get());
+	if (callee->kind == EK_MEMBER)
+		return AnalyzeMemberCall(expr, *callee);
 	if (callee->kind == EK_ID)
 	{
 		if (TypePtr as_type = host_.TryResolveCalleeType(callee->name))
@@ -436,8 +466,29 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
                                            const ScopeBinding& binding,
                                            const NamedTypeInfo* member_class)
 {
-	if (member_class)
-		throw OutsideBoundary("member function call");
+	// A member function named without an object: bind the implicit
+	// *this when the context provides one; otherwise only static
+	// members are callable (9.3.1p3).
+	const NamedTypeInfo* home_entity = 0;
+	if (binding.home && binding.home->kind == SCOPE_CLASS)
+		home_entity = host_.Model().ScopeEntity(binding.home);
+	if (member_class || home_entity)
+	{
+		const NamedTypeInfo* target = member_class ? member_class
+		                                           : home_entity;
+		TypePtr this_type = host_.CurrentThisType();
+		if (this_type &&
+		    BaseClassDistance(this_type->target->named, target) >= 0)
+		{
+			SemValue object;
+			object.node = ImplicitThisObject();
+			object.type = object.node->type;
+			object.category = VC_LVALUE;
+			return AnalyzeMethodCall(std::move(object), binding,
+			                         expr.arguments);
+		}
+		return AnalyzeStaticMethodCall(expr, binding);
+	}
 	vector<TypePtr> candidates;
 	candidates.push_back(binding.type);
 	for (size_t i = 0; i < binding.overloads.size(); i++)
@@ -992,40 +1043,14 @@ SemValue SemExprAnalyzer::AnalyzeSubscript(const AstExpr& expr)
 
 SemValue SemExprAnalyzer::AnalyzeMember(const AstExpr& expr)
 {
-	if (expr.op != OP_DOT)
-		throw OutsideBoundary("arrow member access");
 	SemValue object = Analyze(*expr.operands[0]);
-	if (object.type->kind != TK_CLASS)
-		throw runtime_error("member access on a non-class value");
-	if (object.category != VC_LVALUE)
-		throw OutsideBoundary("member access on an rvalue");
+	if (expr.op == OP_ARROW)
+		object = DereferenceObject(std::move(object));
 	if (!expr.name.IsPlainIdentifier())
 		throw OutsideBoundary("member name form");
-	const string& member_name = expr.name.parts[0].identifier;
-	Scope* members = host_.Model().MemberScope(object.type->named);
-	const ScopeBinding* member = members
-		? FindOwnBinding(*members, member_name) : 0;
-	if (!member)
-		throw runtime_error("no member named " + member_name);
-	if (member->kind != SB_VARIABLE)
-		throw OutsideBoundary("non-data-member access");
-	// 5.2.5p4: the member lvalue carries the union of the object's and
-	// the member's cv-qualification.
-	bool object_const = false;
-	bool object_volatile = false;
-	TopCv(object.type, object_const, object_volatile);
-	SemValue value;
-	value.type = MakeCvQualifiedType(member->type, object_const,
-	                                 object_volatile);
-	value.category = VC_LVALUE;
-	value.node = MakeSemNode(SN_MEMBER_EXPRESSION);
-	value.node->name = member_name;
-	value.node->type = value.type;
-	value.node->category = VC_LVALUE;
-	value.node->has_op = true;
-	value.node->op = expr.op;
-	value.node->children.push_back(std::move(object.node));
-	return value;
+	return AnalyzeMemberAccess(std::move(object),
+	                           expr.name.parts[0].identifier, expr.op,
+	                           false);
 }
 
 // --- casts and sizeof -------------------------------------------------------
@@ -1096,6 +1121,9 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	const TypePtr& dest, const vector<AstExprPtr>& arguments)
 {
+	if (RemoveTopCv(dest)->kind == TK_CLASS)
+		// T(args) over a class: a constructed temporary object.
+		return MakeTemporaryObject(RemoveTopCv(dest), arguments);
 	if (arguments.size() == 1)
 		return AnalyzeCastTo(dest, *arguments[0], false, OP_LPAREN, "");
 	if (!arguments.empty())

@@ -44,3 +44,13 @@ bool LowerInUnnamedNamespace(const Scope* scope);
 string MangleFunctionObjectName(const Scope* scope, const string& name,
                                 const TypePtr& type);
 string MangleVariableObjectName(const Scope* scope, const string& name);
+
+// PA15: the Itanium spelling of a non-static member function,
+// constructor, or destructor. `type` is the this-adjusted function
+// type (the implicit object pointer first); `special_code` is
+// "C1"/"C2"/"D1"/"D2" for constructor/destructor entries, "" for
+// ordinary methods.
+string MangleMemberFunctionObjectName(const Scope* scope,
+                                      const string& name,
+                                      const TypePtr& type,
+                                      const string& special_code);

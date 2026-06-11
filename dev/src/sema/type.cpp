@@ -544,3 +544,15 @@ EFundamentalType CombineSimpleTypeSpecifiers(
 		return is_unsigned ? FT_UNSIGNED_INT : FT_INT;
 	}
 }
+
+int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to)
+{
+	int distance = 0;
+	for (const NamedTypeInfo* link = from; link; link = link->base_entity)
+	{
+		if (link == to)
+			return distance;
+		distance++;
+	}
+	return -1;
+}

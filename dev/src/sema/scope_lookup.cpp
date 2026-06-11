@@ -10,9 +10,25 @@ using std::vector;
 
 namespace {
 
+// 7.3.1.2p3: a function declared only by friend declarations is
+// invisible to ordinary lookup (argument-dependent lookup still
+// considers it).
+bool HiddenFriendOnly(const ScopeBinding& binding)
+{
+	if (binding.kind != SB_FUNCTION || binding.fn_adl_only.empty())
+		return false;
+	size_t count = binding.overloads.size() + 1;
+	for (size_t i = 0; i < count; i++)
+		if (i >= binding.fn_adl_only.size() || !binding.fn_adl_only[i])
+			return false;
+	return true;
+}
+
 bool BindingPassesFilter(const ScopeBinding& binding,
                          EScopeLookupFilter filter)
 {
+	if (HiddenFriendOnly(binding))
+		return false;
 	if (filter == SLF_ANY)
 		return true;
 	switch (binding.kind)
@@ -25,6 +41,21 @@ bool BindingPassesFilter(const ScopeBinding& binding,
 	default:
 		return false;
 	}
+}
+
+// 10.2 single-inheritance member lookup: the class's own declarations
+// hide base declarations; otherwise the search continues up the base
+// chain.
+const ScopeBinding* ClassChainLookup(const Scope& scope, const string& name,
+                                     EScopeLookupFilter filter)
+{
+	for (const Scope* link = &scope; link; link = link->class_base)
+	{
+		const ScopeBinding* own = FindOwnBinding(*link, name);
+		if (own && BindingPassesFilter(*own, filter))
+			return own;
+	}
+	return 0;
 }
 
 const Scope* EnclosingNamespace(const Scope* scope)
@@ -122,7 +153,9 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 	vector<ActiveDirective> closure = DirectiveClosure(from);
 	for (const Scope* scope = from; scope; scope = scope->parent)
 	{
-		const ScopeBinding* own = FindOwnBinding(*scope, name);
+		const ScopeBinding* own = scope->kind == SCOPE_CLASS
+			? ClassChainLookup(*scope, name, filter)
+			: FindOwnBinding(*scope, name);
 		if (own && BindingPassesFilter(*own, filter))
 			return own;
 		if (scope->kind != SCOPE_NAMESPACE)
@@ -174,6 +207,8 @@ const ScopeBinding* QualifiedNamespaceSearch(const Scope& scope,
 const ScopeBinding* QualifiedLookup(const Scope& scope, const string& name,
                                     EScopeLookupFilter filter)
 {
+	if (scope.kind == SCOPE_CLASS)
+		return ClassChainLookup(scope, name, filter);
 	if (scope.kind != SCOPE_NAMESPACE)
 	{
 		const ScopeBinding* own = FindOwnBinding(scope, name);

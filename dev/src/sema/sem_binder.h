@@ -2,6 +2,7 @@
 
 #include <map>
 
+#include "sema/class_info.h"
 #include "sema/decl_binder.h"
 #include "sema/sem_expr.h"
 #include "sema/sem_node.h"
@@ -23,6 +24,15 @@ public:
 	virtual TypePtr TryResolveCalleeType(const AstName& name);
 	virtual TypePtr ResolveCastTypeId(const AstTypeId& type_id);
 	virtual bool TryEvaluateConstant(const AstExpr& expr, ConstValue& value);
+	virtual ClassRegistry& Classes();
+	virtual const ClassInfo* CurrentClass();
+	virtual TypePtr CurrentThisType();
+	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
+	                               const string& what);
+	virtual SemNodePtr MakeConstructorCall(const ClassInfo& cls,
+	                                       int ctor_index, bool base_entry,
+	                                       SemNodePtr address,
+	                                       vector<SemNodePtr> args);
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
@@ -50,6 +60,19 @@ protected:
 	virtual string TypeDisplayName(const string& key,
 	                               const string& name) const;
 	virtual string AnonymousTypeName(const AstDecl& decl);
+
+	// --- PA15 class machinery (sem_class.cpp) ---
+	virtual void OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
+	                           Scope* scope);
+	virtual void BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
+	                            Scope* scope);
+	virtual void CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
+	                           Scope* scope,
+	                           const std::vector<TypePtr>& fields);
+	virtual void BindSpecialMember(const AstDecl& decl);
+	virtual void BindBitFieldDeclaration(const AstDecl& decl);
+	virtual void BindFriendDeclaration(const AstDecl& decl);
+	virtual void CheckQualifiedDefinitionScope(const Scope* declaring);
 
 private:
 	// --- dump recording ---
@@ -80,6 +103,74 @@ private:
 	const string& EnsureDefaultConstructor(const TypePtr& type,
 	                                       TypePtr& ctor_type);
 
+	// --- PA15 class machinery (sem_class.cpp) ---
+	struct DeferredBody;
+	ClassInfo* OpenClass() const;
+	Scope* EnclosingNamespace();
+	void RecordMemberField(ScopeBinding& binding,
+	                       const AstInitializer* init,
+	                       const DeclSpecifierInfo& specs);
+	void BindFriendFunction(const AstDecl& decl, ClassInfo& cls);
+	void BindMemberFunctionBody(const AstDecl& decl,
+	                            const DeclaratorInfo& composed,
+	                            const string& name);
+	void FlushDeferredBodies();
+	void AnalyzeDeferredBody(const DeferredBody& body);
+	Scope* MakeSpecialMemberScope(const string& name,
+	                              const DeclaratorInfo& composed,
+	                              ClassInfo& cls);
+	TypePtr MethodAdjustedType(const ClassInfo& cls, const TypePtr& member);
+	SemNodePtr BuildFunctionNode(const DeferredBody& body,
+	                             ESpecialFunction special);
+	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);
+	void AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item);
+	void AppendMemberInit(const ClassInfo& cls, const ClassField& field,
+	                      const AstInitializer* init,
+	                      vector<SemNodePtr>& out);
+	void AppendFieldDefaultInit(const ClassInfo& cls,
+	                            const ClassField& field,
+	                            vector<SemNodePtr>& out);
+	void AppendArrayMemberInit(const ClassField& field,
+	                           const AstExpr* braced,
+	                           vector<SemNodePtr>& out);
+	SemValue ZeroValue(const TypePtr& type);
+	void CheckListInitNarrowing(const SemValue& value, const TypePtr& dest);
+	SemNodePtr ThisObjectExpr();
+	SemNodePtr ThisFieldExpr(const ClassField& field);
+	SemNodePtr ThisBaseAddress(const ClassInfo& cls);
+	SemNodePtr AddressOfNode(SemNodePtr operand);
+	SemNodePtr SubscriptNode(SemNodePtr array, unsigned long long index);
+	SemNodePtr MemberAssignAction(const ClassField& field,
+	                              SemNodePtr lhs, SemValue value);
+	// Overload resolution over the class's declared constructors;
+	// applies conversions and synthesizes default arguments. Returns -1
+	// when initialization uses the implicit default constructor.
+	int ResolveClassConstructor(const ClassInfo& cls,
+	                            vector<SemValue>& args, bool copy_init,
+	                            const char* what);
+	// The synthesized implicit default constructor / destructor
+	// definitions, built on first demand into unit_.deferred.
+	void EnsureImplicitDefaultCtor(const ClassInfo& cls);
+	void EnsureImplicitDtor(const ClassInfo& cls);
+	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
+	                              SemNodePtr address);
+	bool NodeMayThrow(const SemNode& node) const;
+	bool DerivedToBaseClass(const TypePtr& from, const TypePtr& to);
+	void AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
+	                          const AstInitializer* init,
+	                          const DeclSpecifierInfo& specs);
+	void AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
+	                           const AstInitializer* init,
+	                           const ClassInfo& cls);
+	void AppendAggregateInit(const ClassInfo& cls,
+	                         const SemNode& target_proto,
+	                         const AstExpr& braced,
+	                         vector<SemNodePtr>& out);
+	SemNodePtr VariableObjectExpr(const ScopeBinding& binding);
+	// The set of bit-field storage units already written by the open
+	// constructor synthesis (first writes store plainly).
+	std::map<unsigned long long, bool> bf_units_written_;
+
 	SemUnit& unit_;
 	SemExprAnalyzer analyzer_;
 	// The open container chain; items append to the innermost node (or
@@ -91,4 +182,44 @@ private:
 	TypePtr current_return_;  // return type of the open function body
 	int local_types_;
 	bool pending_local_type_;
+
+	// --- PA15 class state (sem_class.cpp) ---
+	// One queued in-class member-function (or hidden-friend) body,
+	// analyzed when the outermost enclosing class completes (9.2p2).
+	struct DeferredBody
+	{
+		DeferredBody() : decl(0), fn_scope(0), declaring(0), cls(0),
+		                 is_friend(false), is_static(false),
+		                 out_of_class(false) {}
+
+		const AstDecl* decl;
+		DeclaratorInfo composed;  // DK_FUNCTION methods / friends
+		string name;
+		Scope* fn_scope;
+		Scope* declaring;   // class scope (methods) / namespace (friends)
+		ClassInfo* cls;     // lexical class context
+		bool is_friend;
+		bool is_static;
+		bool out_of_class;  // qualified definition: strong emission
+	};
+	// The current function context while a body is analyzed: the member
+	// class (methods), the lexical class (hidden friends), and the
+	// function's own identity for friendship checks.
+	struct MethodContext
+	{
+		MethodContext() : cls(0), lexical_cls(0), fn_scope(0), fn_owner(0)
+		{}
+
+		const ClassInfo* cls;          // null outside member functions
+		const ClassInfo* lexical_cls;  // hidden friend's lexical class
+		TypePtr this_type;  // pointer to cv class (null outside methods)
+		Scope* fn_scope;
+		const Scope* fn_owner;  // declaring scope of the open function
+		string fn_name;
+	};
+
+	vector<ClassInfo*> open_classes_;
+	vector<DeferredBody> deferred_bodies_;
+	MethodContext method_;
+	bool in_bit_field_;
 };

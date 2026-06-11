@@ -223,7 +223,8 @@ LowerValue FunctionLowerer::LowerIdValue(const SemNode& node)
 		Emit(value.text + " = addr " + name);
 		return value;
 	}
-	bool global = node.entity_scope->kind == SCOPE_NAMESPACE;
+	bool global = node.entity_scope->kind == SCOPE_NAMESPACE ||
+		node.entity_scope->kind == SCOPE_CLASS;
 	string storage = global
 		? program_.GlobalRef(node.entity_scope, node.entity_name)
 		: "$" + SlotRef(node.entity_scope, node.entity_name);
@@ -302,6 +303,16 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 		value.text = NewTemp();
 		Emit(value.text + " = load " + LowerValueType(value.type) +
 		     " " + address);
+		return value;
+	}
+	case SN_MEMBER_EXPRESSION:
+		return LowerMemberValue(node);
+	case SN_CONSTRUCTOR_ACTION:
+	{
+		// A constructed temporary used as a value: its address temp.
+		LowerValue value;
+		value.type = RemoveTopCv(node.type);
+		value.text = MaterializeTemporary(node, "tmpobj");
 		return value;
 	}
 	case SN_CAST_EXPRESSION:
@@ -625,7 +636,8 @@ string FunctionLowerer::DirectStorage(const SemNode& node)
 	    IsReferenceType(binding->type) ||
 	    binding->type->kind == TK_ARRAY)
 		return "";
-	if (node.entity_scope->kind == SCOPE_NAMESPACE)
+	if (node.entity_scope->kind == SCOPE_NAMESPACE ||
+	    node.entity_scope->kind == SCOPE_CLASS)
 		return program_.GlobalRef(node.entity_scope, node.entity_name);
 	return "$" + SlotRef(node.entity_scope, node.entity_name);
 }
@@ -669,6 +681,9 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 {
 	const SemNode& lhs = *node.children[0];
 	const SemNode& rhs = *node.children[1];
+	if (node.op == OP_ASS &&
+	    (node.member_ref || lhs.kind == SN_MEMBER_EXPRESSION))
+		return LowerMemberAssignment(node);
 	TypePtr type = NodeType(lhs);
 	string storage = DirectStorage(lhs);
 	if (storage.empty())
@@ -749,7 +764,8 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 			Emit(temp + " = addr " + name);
 			return temp;
 		}
-		bool global = node.entity_scope->kind == SCOPE_NAMESPACE;
+		bool global = node.entity_scope->kind == SCOPE_NAMESPACE ||
+			node.entity_scope->kind == SCOPE_CLASS;
 		string storage = global
 			? program_.GlobalRef(node.entity_scope, node.entity_name)
 			: "$" + SlotRef(node.entity_scope, node.entity_name);
@@ -764,12 +780,19 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	{
 		string base = LowerPointerOperand(*node.children[0]);
 		LowerValue index = LowerValueExpr(*node.children[1]);
+		TypePtr element = NodeType(node);
+		if (element->kind == TK_CLASS)
+			return ClassArrayElement(base, index, element);
 		string temp = NewTemp();
-		Emit(temp + " = index " + LowerValueType(NodeType(node)) +
+		Emit(temp + " = index " + LowerValueType(element) +
 		     " [projection=array_element] " + base + ", " +
 		     index.text);
 		return temp;
 	}
+	case SN_MEMBER_EXPRESSION:
+		return MemberAddress(node);
+	case SN_CONSTRUCTOR_ACTION:
+		return MaterializeTemporary(node, "tmpobj");
 	case SN_UNARY_EXPRESSION:
 		if (node.op == OP_STAR)
 			return LowerPointerOperand(*node.children[0]);
@@ -811,7 +834,8 @@ string FunctionLowerer::LowerPointerOperand(const SemNode& node)
 	{
 		if (node.is_string_literal)
 			return LowerLiteralValue(node).text;
-		if (node.kind == SN_ID_EXPRESSION)
+		if (node.kind == SN_ID_EXPRESSION ||
+		    node.kind == SN_MEMBER_EXPRESSION)
 		{
 			string address = LowerAddressExpr(node);
 			string decayed = NewTemp();
@@ -847,8 +871,14 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
                                                const TypePtr& referee)
 {
 	TypePtr bare = RemoveTopCv(referee);
+	if (node.kind == SN_CONSTRUCTOR_ACTION && bare->kind == TK_CLASS)
+		// A class temporary binding a reference parameter.
+		return MaterializeTemporary(node, "arg");
+	TypePtr source = RemoveTopCv(StripRef(node.type));
 	bool binds_directly = node.category != VC_PRVALUE &&
-		TypeEquals(RemoveTopCv(StripRef(node.type)), bare);
+		(TypeEquals(source, bare) ||
+		 (source->kind == TK_CLASS && bare->kind == TK_CLASS &&
+		  BaseClassDistance(source->named, bare->named) >= 0));
 	if (binds_directly)
 		return LowerAddressExpr(node);
 	// 8.5.3p5: materialize a temporary with the converted value.
@@ -901,6 +931,18 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node)
 		else
 			throw OutsideBoundary("call form");
 	}
+	// A call that can unwind while destructor-protected objects are
+	// alive runs under an unwind-dispatch region.
+	bool protected_call = !in_lifetime_action_ && HaveCleanups() &&
+		(!direct || program_.CalleeMayUnwind(callee));
+	if (protected_call && !eh_open_)
+	{
+		eh_dispatch_ = NewLabel("call_unwind_dispatch");
+		eh_end_ = NewLabel("call_unwind_end");
+		ReferenceLabel(eh_dispatch_);
+		Emit("eh_try ^" + eh_dispatch_);
+		eh_open_ = true;
+	}
 	string arguments;
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
@@ -912,7 +954,9 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node)
 	// The callee value of an indirect call lowers after the arguments
 	// (the oracle's evaluation order).
 	string callee_text;
-	if (direct)
+	if (direct && (callee.is_method || callee.special != SF_NONE))
+		callee_text = program_.MemberFunctionRef(callee);
+	else if (direct)
 		callee_text = program_.FunctionRef(callee.entity_scope,
 		                                   callee.entity_name, fn_type);
 	else if (NodeType(callee)->kind == TK_POINTER)
@@ -947,6 +991,16 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node)
 			line += " [arity=variadic]";
 	}
 	Emit(line);
+	if (protected_call && eh_open_ && !IsVoidType(fn_type->target))
+	{
+		// A protected call's result survives the region in a slot.
+		string slot = AddMatSlot("call", LowerValueType(
+			StripRef(fn_type->target)));
+		Emit("store " + return_text + " " + result.text + ", $" + slot);
+		string reloaded = NewTemp();
+		Emit(reloaded + " = load " + return_text + " $" + slot);
+		result.text = reloaded;
+	}
 	return result;
 }
 
@@ -1118,6 +1172,9 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 	{
 	case SN_ASSIGNMENT_EXPRESSION:
 		LowerAssignment(node);
+		return;
+	case SN_CONSTRUCTOR_ACTION:
+		MaterializeTemporary(node, "tmpobj");
 		return;
 	case SN_CALL_EXPRESSION:
 		LowerCall(node);

@@ -30,7 +30,8 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
                                  const LowFunctionInfo& info)
 	: program_(program), def_(definition), info_(info),
 	  return_type_(definition.type->target),
-	  temp_counter_(0), label_counter_(0), mat_counter_(0)
+	  temp_counter_(0), label_counter_(0), mat_counter_(0),
+	  eh_open_(false), in_lifetime_action_(false)
 {
 }
 
@@ -72,14 +73,17 @@ string FunctionLowerer::Header() const
 	vector<string> meta;
 	if (info_.is_main)
 		meta.push_back("role=entry");
+	if (!info_.role.empty())
+		meta.push_back("role=" + info_.role);
 	if (def_.type->variadic)
 		meta.push_back("arity=variadic");
 	if (info_.unwind_no)
 		meta.push_back("unwind=no");
 	if (info_.c_linkage)
 		meta.push_back("linkage=c");
-	meta.push_back(info_.internal ? "binding=internal"
-	                              : "binding=strong");
+	meta.push_back(info_.weak ? "binding=weak"
+	               : info_.internal ? "binding=internal"
+	                                : "binding=strong");
 	if (!info_.object_name.empty())
 		meta.push_back("object=" + info_.object_name);
 	if (info_.is_main)
@@ -139,6 +143,8 @@ void FunctionLowerer::Emit(const string& line)
 
 void FunctionLowerer::Terminate(const string& line)
 {
+	if (eh_open_)
+		CloseEhRegion();
 	Block& block = blocks_.back();
 	if (block.terminated)
 		return;
@@ -256,7 +262,9 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 	switch (node.kind)
 	{
 	case SN_COMPOUND_STATEMENT:
+		PushCleanupScope();
 		LowerStatementList(node.children, 0);
+		PopCleanupScope(true);
 		return;
 	case SN_SIMPLE_DECLARATION:
 		LowerLocalDeclaration(node);
@@ -269,7 +277,27 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		return;
 	case SN_EXPRESSION_STATEMENT:
 		LowerEffect(*node.children[0]);
+		CloseEhRegion();
 		return;
+	case SN_CONSTRUCTOR_ACTION:
+	{
+		// Subobject construction inside synthesized bodies.
+		if (node.trivial_init)
+			return;
+		bool saved = in_lifetime_action_;
+		in_lifetime_action_ = true;
+		LowerCall(*node.children[0]);
+		in_lifetime_action_ = saved;
+		return;
+	}
+	case SN_DESTRUCTOR_ACTION:
+	{
+		bool saved = in_lifetime_action_;
+		in_lifetime_action_ = true;
+		LowerCall(*node.children[0]);
+		in_lifetime_action_ = saved;
+		return;
+	}
 	case SN_RETURN_STATEMENT:
 		LowerReturn(node);
 		return;
@@ -303,12 +331,14 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 	case SN_BREAK_STATEMENT:
 		if (break_stack_.empty())
 			throw runtime_error("break outside a loop or switch");
+		EmitCleanupsFrom(break_cleanup_.back());
 		ReferenceLabel(break_stack_.back());
 		Terminate("jump ^" + break_stack_.back());
 		return;
 	case SN_CONTINUE_STATEMENT:
 		if (continue_stack_.empty())
 			throw runtime_error("continue outside a loop");
+		EmitCleanupsFrom(continue_cleanup_.back());
 		ReferenceLabel(continue_stack_.back());
 		Terminate("jump ^" + continue_stack_.back());
 		return;
@@ -348,8 +378,18 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 		return;
 	}
 	const TypePtr& declared = node.type;
-	if (declared->kind == TK_CLASS)
-		throw OutsideBoundary("class-typed local object");
+	{
+		TypePtr inner = declared;
+		while (inner->kind == TK_ARRAY)
+			inner = inner->target;
+		if (RemoveTopCv(inner)->kind == TK_CLASS &&
+		    !IsReferenceType(declared))
+		{
+			LowerClassLocal(node);
+			CloseEhRegion();
+			return;
+		}
+	}
 	if (IsReferenceType(declared))
 	{
 		string slot = AddSlot(node.entity_scope, node.entity_name,
@@ -421,6 +461,7 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 {
 	if (node.children.empty())
 	{
+		EmitCleanupsFrom(0);
 		Terminate("return void");
 		return;
 	}
@@ -428,16 +469,23 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 	if (IsVoidType(return_type_))
 	{
 		LowerEffect(value);
+		CloseEhRegion();
+		EmitCleanupsFrom(0);
 		Terminate("return void");
 		return;
 	}
 	if (IsReferenceType(return_type_))
 	{
-		Terminate("return ptr " + LowerAddressExpr(value));
+		string address = LowerAddressExpr(value);
+		CloseEhRegion();
+		EmitCleanupsFrom(0);
+		Terminate("return ptr " + address);
 		return;
 	}
 	string text = LowerValueAs(value, RemoveTopCv(return_type_),
 	                           LCC_INIT);
+	CloseEhRegion();
+	EmitCleanupsFrom(0);
 	Terminate("return " + LowerValueType(return_type_) + " " + text);
 }
 
@@ -475,9 +523,13 @@ void FunctionLowerer::LowerWhile(const SemNode& node)
 	OpenBlock(body_label);
 	break_stack_.push_back(end_label);
 	continue_stack_.push_back(cond_label);
+	break_cleanup_.push_back(cleanup_scopes_.size());
+	continue_cleanup_.push_back(cleanup_scopes_.size());
 	LowerStatement(*node.children[1]);
 	break_stack_.pop_back();
 	continue_stack_.pop_back();
+	break_cleanup_.pop_back();
+	continue_cleanup_.pop_back();
 	if (!blocks_.back().terminated)
 	{
 		ReferenceLabel(cond_label);
@@ -494,9 +546,13 @@ void FunctionLowerer::LowerDo(const SemNode& node)
 	CloseInto(body_label);
 	break_stack_.push_back(end_label);
 	continue_stack_.push_back(cond_label);
+	break_cleanup_.push_back(cleanup_scopes_.size());
+	continue_cleanup_.push_back(cleanup_scopes_.size());
 	LowerStatement(*node.children[0]);
 	break_stack_.pop_back();
 	continue_stack_.pop_back();
+	break_cleanup_.pop_back();
+	continue_cleanup_.pop_back();
 	CloseInto(cond_label);
 	LowerConditionInto(*node.children[1], body_label, end_label);
 	OpenBlock(end_label);
@@ -534,9 +590,13 @@ void FunctionLowerer::LowerFor(const SemNode& node)
 	OpenBlock(body_label);
 	break_stack_.push_back(end_label);
 	continue_stack_.push_back(iter_label);
+	break_cleanup_.push_back(cleanup_scopes_.size());
+	continue_cleanup_.push_back(cleanup_scopes_.size());
 	LowerStatement(*node.children[next]);
 	break_stack_.pop_back();
 	continue_stack_.pop_back();
+	break_cleanup_.pop_back();
+	continue_cleanup_.pop_back();
 	CloseInto(iter_label);
 	if (iteration)
 		LowerEffect(*iteration->children[0]);
@@ -604,8 +664,10 @@ void FunctionLowerer::LowerSwitch(const SemNode& node)
 		line += ", " + arms[i];
 	Terminate(line);
 	break_stack_.push_back(end_label);
+	break_cleanup_.push_back(cleanup_scopes_.size());
 	LowerStatement(*node.children[1]);
 	break_stack_.pop_back();
+	break_cleanup_.pop_back();
 	CloseInto(end_label);
 }
 

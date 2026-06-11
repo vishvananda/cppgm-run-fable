@@ -72,7 +72,8 @@ ConstValue SuccessorValue(const ConstValue& value, EFundamentalType type)
 
 DeclBinder::DeclBinder(TypesModel& model)
 	: model_(model), builder_(*this), current_(model.global()),
-	  current_fields_(0), anonymous_enums_(0), in_c_linkage_(false)
+	  current_fields_(0), anonymous_enums_(0), in_c_linkage_(false),
+	  current_access_(MA_PUBLIC)
 {
 }
 
@@ -100,7 +101,9 @@ string DeclBinder::DeclaredFunctionName(const AstNamePart& part)
 
 void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
                                      const DeclaratorInfo& composed,
-                                     bool deleted)
+                                     bool deleted,
+                                     const DeclSpecifierInfo* specs,
+                                     bool inline_def, bool adl_only)
 {
 	// Locate the overload slot whose parameter list matches this
 	// declaration (entry 0 is binding.type).
@@ -108,11 +111,33 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	for (size_t i = 0; i < binding.overloads.size(); i++)
 		if (TypeEquals(binding.overloads[i], composed.type))
 			index = i + 1;
+	size_t old_count = binding.fn_defaults.size();
 	size_t count = binding.overloads.size() + 1;
 	binding.fn_defaults.resize(count);
 	binding.fn_deleted.resize(count, false);
+	binding.fn_access.resize(count, MA_PUBLIC);
+	binding.fn_static.resize(count, false);
+	binding.fn_inline_def.resize(count, false);
+	binding.fn_adl_only.resize(count, false);
+	binding.fn_unwind_no.resize(count, false);
 	if (deleted)
 		binding.fn_deleted[index] = true;
+	if (index >= old_count)
+	{
+		binding.fn_access[index] = current_access_;
+		// 11.3/7.3.1.2p3: a name declared only by friend declarations
+		// is invisible to ordinary lookup; any ordinary declaration
+		// makes it visible.
+		binding.fn_adl_only[index] = adl_only;
+	}
+	else if (!adl_only)
+		binding.fn_adl_only[index] = false;
+	if (specs && specs->is_static)
+		binding.fn_static[index] = true;
+	if (inline_def)
+		binding.fn_inline_def[index] = true;
+	if (composed.noexcept_simple)
+		binding.fn_unwind_no[index] = true;
 	// 8.3.6p4: later declarations may add default arguments.
 	vector<const AstExpr*>& defaults = binding.fn_defaults[index];
 	defaults.resize(composed.parameters.size(), 0);
@@ -322,10 +347,16 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 	switch (decl.kind)
 	{
 	case DK_EMPTY:
+		return;
 	case DK_ACCESS_LABEL:
-	// Special members do not enter the PA11 declaration model.
+		current_access_ = decl.access == KW_PRIVATE ? MA_PRIVATE
+			: decl.access == KW_PROTECTED ? MA_PROTECTED : MA_PUBLIC;
+		return;
+	// Special members do not enter the PA11 declaration model; the
+	// PA15 binder overrides the seam.
 	case DK_SPECIAL_MEMBER_DECLARATION:
 	case DK_SPECIAL_MEMBER_DEFINITION:
+		BindSpecialMember(decl);
 		return;
 	case DK_TRANSLATION_UNIT:
 		BindDeclarations(decl.body_decls);
@@ -485,8 +516,28 @@ void DeclBinder::BindStaticAssert(const AstDecl& decl)
 		throw runtime_error("static_assert failed " + decl.message);
 }
 
+bool DeclBinder::HasFriendSpecifier(const AstDecl& decl)
+{
+	for (size_t i = 0; i < decl.specifiers.size(); i++)
+		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
+		    decl.specifiers[i].keyword == KW_FRIEND)
+			return true;
+	return false;
+}
+
+void DeclBinder::BindFriendDeclaration(const AstDecl& decl)
+{
+	(void)decl;
+	throw OutsideBoundary("friend declaration");
+}
+
 void DeclBinder::BindSimpleDeclaration(const AstDecl& decl)
 {
+	if (HasFriendSpecifier(decl))
+	{
+		BindFriendDeclaration(decl);
+		return;
+	}
 	bool has_nested_type = false;
 	for (size_t i = 0; i < decl.specifiers.size(); i++)
 		if (decl.specifiers[i].kind == SPEC_NESTED_DECL)
@@ -538,7 +589,7 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 		    current_->kind != SCOPE_CLASS)
 			throw runtime_error("cv-qualified non-member function");
 		ScopeBinding& binding = BindFunctionName(name, composed.type, true);
-		RecordFunctionFacts(binding, composed, deleted);
+		RecordFunctionFacts(binding, composed, deleted, &specs);
 		if (in_c_linkage_)
 			binding.c_linkage = true;
 		OnFunctionDeclared(binding, composed.type);
@@ -575,6 +626,8 @@ void DeclBinder::BindVariable(const string& name, const TypePtr& type,
 	binding.kind = SB_VARIABLE;
 	binding.name = name;
 	binding.type = type;
+	binding.access = current_access_;
+	binding.is_mutable = specs.is_mutable;
 	RecordConstantValue(binding, init);
 	ScopeBinding& added = AddBinding(*current_, binding);
 	if (current_->kind == SCOPE_CLASS && current_fields_ && !specs.is_static)
@@ -601,6 +654,7 @@ void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 	binding.kind = SB_TYPE_ALIAS;
 	binding.name = name;
 	binding.type = type;
+	binding.access = current_access_;
 	AddBinding(*current_, binding);
 	OnTypeAliasBound(name, type);
 }
@@ -636,6 +690,11 @@ void DeclBinder::RecordConstantValue(ScopeBinding& binding,
 
 void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 {
+	if (HasFriendSpecifier(decl))
+	{
+		BindFriendDeclaration(decl);
+		return;
+	}
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(decl.specifiers, true);
 	if (specs.is_typedef)
@@ -659,16 +718,16 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	if (composed.id->parts.size() > 1 || composed.id->global_scope)
 	{
 		declaring = ResolvePrefixScope(*composed.id);
-		if (declaring->kind != SCOPE_NAMESPACE)
-			throw OutsideBoundary("member function definition");
+		CheckQualifiedDefinitionScope(declaring);
 		if (!FindOwnBinding(*declaring, name))
 			throw runtime_error(name + " is not a member of the "
-			                    "named namespace");
+			                    "named scope");
 	}
 	Scope* saved = current_;
 	current_ = declaring;
 	ScopeBinding& binding = BindFunctionName(name, composed.type, false);
-	RecordFunctionFacts(binding, composed, false);
+	RecordFunctionFacts(binding, composed, false, &specs,
+	                    declaring->kind == SCOPE_CLASS);
 	if (in_c_linkage_)
 		binding.c_linkage = true;
 	Scope* scope = model_.CreateScope(SCOPE_FUNCTION, name, declaring);
@@ -708,6 +767,7 @@ ScopeBinding& DeclBinder::BindFunctionName(const string& name,
 	binding.kind = SB_FUNCTION;
 	binding.name = name;
 	binding.type = type;
+	binding.access = current_access_;
 	return AddBinding(*current_, binding);
 }
 
@@ -718,6 +778,12 @@ void DeclBinder::BindFunctionBody(const AstDecl& decl,
 	(void)composed;
 	(void)name;
 	BindStatement(*decl.body);
+}
+
+void DeclBinder::CheckQualifiedDefinitionScope(const Scope* declaring)
+{
+	if (declaring->kind != SCOPE_NAMESPACE)
+		throw OutsideBoundary("member function definition");
 }
 
 void DeclBinder::OnTypeAliasBound(const string& name, const TypePtr& type)
@@ -760,6 +826,7 @@ void DeclBinder::BindTemplateDeclaration(const AstDecl& decl)
 			prefix + parameter.name, scope, parameter.name);
 		ScopeBinding binding;
 		binding.kind = SB_TYPE;
+		binding.access = current_access_;
 		binding.name = parameter.name;
 		binding.type = MakeNamedType(TK_TYPE_PARAM, info);
 		AddBinding(*scope, binding);
@@ -855,10 +922,38 @@ void DeclBinder::BindAnonymousUnionMembers(const AstDecl& decl,
 	}
 }
 
+void DeclBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
+                                Scope* scope)
+{
+	(void)decl;
+	(void)info;
+	(void)scope;
+	throw OutsideBoundary("base classes");
+}
+
+void DeclBinder::OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
+                               Scope* scope)
+{
+	(void)decl;
+	(void)info;
+	(void)scope;
+}
+
+void DeclBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
+                               Scope* scope, const vector<TypePtr>& fields)
+{
+	(void)decl;
+	(void)scope;
+	CompleteClassLayout(*info, fields);
+}
+
+void DeclBinder::BindSpecialMember(const AstDecl& decl)
+{
+	(void)decl;
+}
+
 TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 {
-	if (!decl.bases.empty())
-		throw OutsideBoundary("base classes");
 	bool is_union = decl.class_key == KW_UNION;
 	bool anonymous = !decl.has_name;
 	string name;
@@ -900,6 +995,7 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 		{
 			ScopeBinding binding;
 			binding.kind = SB_TYPE;
+			binding.access = current_access_;
 			binding.name = name;
 			binding.type = type;
 			AddBinding(*current_, binding);
@@ -908,18 +1004,24 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 
 	Scope* scope = model_.CreateScope(SCOPE_CLASS, name, current_);
 	model_.SetMemberScope(info, scope);
+	OnClassOpened(decl, info, scope);
+	if (!decl.bases.empty())
+		BindBaseClause(decl, info, scope);
 	vector<TypePtr> fields;
 	Scope* saved_scope = current_;
 	vector<TypePtr>* saved_fields = current_fields_;
+	EMemberAccess saved_access = current_access_;
 	current_ = scope;
 	current_fields_ = &fields;
+	current_access_ = decl.class_key == KW_CLASS ? MA_PRIVATE : MA_PUBLIC;
 	BindDeclarations(decl.members);
 	current_ = saved_scope;
 	current_fields_ = saved_fields;
+	current_access_ = saved_access;
 	// Layout runs before the entity completes so a by-value member of
 	// the class itself still reads as incomplete (9.2p9) and fails in
 	// TypeSize rather than completing with no layout.
-	CompleteClassLayout(*info, fields);
+	CompleteClass(decl, info, scope, fields);
 	info->complete = true;
 
 	if (standalone && anonymous)
@@ -955,6 +1057,7 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 	TypePtr type = MakeNamedType(TK_CLASS, info);
 	ScopeBinding binding;
 	binding.kind = SB_TYPE;
+	binding.access = current_access_;
 	binding.name = name;
 	binding.type = type;
 	AddBinding(*current_, binding);
@@ -992,6 +1095,7 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 	{
 		ScopeBinding binding;
 		binding.kind = SB_TYPE;
+		binding.access = current_access_;
 		binding.name = name;
 		binding.type = type;
 		AddBinding(*current_, binding);
@@ -1031,6 +1135,7 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
 		}
 		ScopeBinding binding;
 		binding.kind = SB_ENUMERATOR;
+		binding.access = current_access_;
 		binding.name = enumerator.name;
 		binding.type = enum_type;
 		binding.has_value = true;

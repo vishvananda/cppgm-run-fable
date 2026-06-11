@@ -155,6 +155,35 @@ private:
 	string DirectStorage(const SemNode& node);
 	const ScopeBinding* EntityBinding(const SemNode& node) const;
 
+	// --- PA15 object model (lower_member.cpp) ---
+	// The address of a member lvalue: base-subobject hops, the field
+	// projection, and the indirection of reference members (skipped
+	// when the store binds the reference itself).
+	string MemberAddress(const SemNode& node, bool skip_ref_load = false);
+	LowerValue LowerMemberValue(const SemNode& node);
+	LowerValue LowerBitFieldValue(const SemNode& node);
+	LowerValue LowerBitFieldAssignment(const SemNode& node);
+	LowerValue LowerMemberAssignment(const SemNode& node);
+	void LowerClassLocal(const SemNode& node);
+	void LowerConstructorCall(const SemNode& action,
+	                          const string& this_text);
+	// A class temporary: a fresh object slot plus its constructor run;
+	// returns the address temp ("%tN").
+	string MaterializeTemporary(const SemNode& action, const char* kind);
+	string ClassArrayElement(const string& base, const LowerValue& index,
+	                         const TypePtr& element);
+
+	// --- PA15 lifetime (lower_member.cpp) ---
+	void PushCleanupScope();
+	void PopCleanupScope(bool emit);
+	void RegisterCleanup(const vector<const SemNode*>& actions);
+	// Emits the destructor actions of the scopes at depth >= `from`,
+	// innermost scope first; later objects destroy before earlier ones,
+	// array elements in their recorded order.
+	void EmitCleanupsFrom(size_t from);
+	bool HaveCleanups() const;
+	void CloseEhRegion();
+
 	LowerProgram& program_;
 	const SemNode& def_;
 	const LowFunctionInfo& info_;
@@ -174,4 +203,18 @@ private:
 	vector<string> continue_stack_;
 	map<const SemNode*, string> case_labels_;
 	map<string, string> goto_labels_;
+
+	// --- PA15 lifetime state ---
+	// Cleanup scopes parallel the lowered compound statements; each
+	// scope holds per-object action groups in declaration order.
+	vector<vector<vector<const SemNode*>>> cleanup_scopes_;
+	vector<size_t> break_cleanup_;
+	vector<size_t> continue_cleanup_;
+	// The open unwind-dispatch region of the current full-expression.
+	bool eh_open_;
+	string eh_dispatch_;
+	string eh_end_;
+	// Lifetime-machinery calls (constructor actions, cleanups) never
+	// open unwind regions.
+	bool in_lifetime_action_;
 };

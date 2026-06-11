@@ -99,7 +99,7 @@ string LowerValueType(const TypePtr& type)
 
 string LowerSlotType(const TypePtr& type)
 {
-	if (type->kind == TK_ARRAY)
+	if (type->kind == TK_ARRAY || type->kind == TK_CLASS)
 		return "obj<" + to_string(TypeSize(type)) + "x" +
 			to_string(TypeAlignment(type)) + ">";
 	return LowerValueType(type);

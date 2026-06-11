@@ -52,7 +52,8 @@ struct NamedTypeInfo
 {
 	NamedTypeInfo()
 		: scope(0), complete(false), is_union(false), is_scoped(false),
-		  is_defined(false), enum_underlying(FT_INT), size(0), alignment(0)
+		  is_defined(false), enum_underlying(FT_INT), size(0), alignment(0),
+		  base_entity(0)
 	{}
 
 	string display;  // canonical spelling: "struct C", "enum class FY",
@@ -71,7 +72,15 @@ struct NamedTypeInfo
 	EFundamentalType enum_underlying;
 	unsigned long long size;       // valid when complete
 	unsigned long long alignment;  // valid when complete
+	// PA15 single inheritance: the direct base class entity (null when
+	// none); the clause 4 conversions walk this chain.
+	const NamedTypeInfo* base_entity;
 };
+
+// 4.10p3/4.11p2 derivation distance from `from` to `to` along the
+// single-inheritance chain: 0 for the same entity, -1 when `to` is not
+// a (possibly indirect) base of `from`.
+int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to);
 
 struct Type;
 typedef shared_ptr<const Type> TypePtr;

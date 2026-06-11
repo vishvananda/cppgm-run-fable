@@ -38,7 +38,7 @@ bool SameParameterList(const Type& a, const Type& b)
 
 SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	: DeclBinder(model), unit_(unit), analyzer_(*this),
-	  local_types_(0), pending_local_type_(false)
+	  local_types_(0), pending_local_type_(false), in_bit_field_(false)
 {
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.
@@ -207,6 +207,7 @@ ScopeBinding& SemBinder::BindFunctionName(const string& name,
 		return DeclBinder::BindFunctionName(name, type, allow_block);
 	if (existing->kind != SB_FUNCTION ||
 	    (current_->kind != SCOPE_NAMESPACE &&
+	     current_->kind != SCOPE_CLASS &&
 	     !(allow_block && current_->kind == SCOPE_BLOCK)))
 		throw runtime_error("redeclaration of " + name);
 	// 13.1: a matching parameter list redeclares (and must agree in
@@ -255,7 +256,10 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
                                 const DeclSpecifierInfo& specs)
 {
 	if (current_->kind == SCOPE_CLASS)
+	{
+		RecordMemberField(binding, init, specs);
 		return;
+	}
 	SemNode* item = AppendItem(SN_VARIABLE);
 	item->name = binding.name;
 	item->type = binding.type;
@@ -265,15 +269,7 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 	item->is_extern_decl = specs.is_extern;
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->c_linkage = in_c_linkage_;
-	if (init)
-	{
-		AnalyzeVariableInit(*item, binding, init);
-		return;
-	}
-	// Default-initialization of a class object runs the implicit
-	// default constructor; extern declarations define nothing.
-	if (binding.type->kind == TK_CLASS && !specs.is_extern)
-		EmitConstructorAction(*item, binding.name, binding.type);
+	AttachObjectLifetime(*item, binding, init, specs);
 }
 
 void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
@@ -422,7 +418,10 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	// current_ is the new function scope; its parent declared the name.
 	const Scope* declaring = current_->parent;
 	if (declaring && declaring->kind == SCOPE_CLASS)
-		throw OutsideBoundary("member function definition");
+	{
+		BindMemberFunctionBody(decl, composed, name);
+		return;
+	}
 	SemNode* item = AppendItem(SN_FUNCTION_DEFINITION);
 	item->name = CanonicalQualifiedName(declaring, name);
 	item->type = composed.type;

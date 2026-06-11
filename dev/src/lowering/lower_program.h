@@ -28,10 +28,10 @@ struct LowFunctionInfo
 	LowFunctionInfo()
 		: scope(0), is_main(false), defined(false), used(false),
 		  deleted(false), c_linkage(false), unwind_no(false),
-		  internal(false), definition(0)
+		  internal(false), weak(false), is_method(false), definition(0)
 	{}
 
-	const Scope* scope;  // declaring namespace scope
+	const Scope* scope;  // declaring namespace or class scope
 	string name;         // declared name
 	TypePtr type;
 	string low_name;     // LowIR symbol (no sigil)
@@ -43,6 +43,16 @@ struct LowFunctionInfo
 	bool c_linkage;
 	bool unwind_no;
 	bool internal;
+	// PA15: in-class definitions emit weak and only on demand; methods
+	// carry the hidden `this` first parameter.
+	bool weak;
+	bool is_method;
+	// Constructor/destructor ABI entry: "C1"/"C2"/"D1"/"D2" ("" for
+	// ordinary functions); C1/D1 definitions emit an alias for the
+	// identical base entry.
+	string special_code;
+	string alias_object;
+	string role;  // role=init / role=fini helpers
 	const SemNode* definition;
 	string body_text;    // lowered definition text
 };
@@ -51,8 +61,13 @@ struct LowGlobalInfo
 {
 	LowGlobalInfo()
 		: type(), defined(false), used(false), internal(false),
-		  is_thread_local(false), c_linkage(false), node(0)
+		  is_thread_local(false), c_linkage(false), dynamic_init(false),
+		  node(0)
 	{}
+
+	// PA15: the initializer is not a constant expression; the object
+	// zero-fills statically and @__cppgm_init stores the value.
+	bool dynamic_init;
 
 	TypePtr type;
 	string low_name;
@@ -91,18 +106,38 @@ public:
 	// The "@name" spelling of the (scope, name, type) overload.
 	string FunctionRef(const Scope* scope, const string& name,
 	                   const TypePtr& type);
+	// The "@name" spelling of a method / constructor / destructor
+	// callee node (PA15: demand-marks the weak definition).
+	string MemberFunctionRef(const SemNode& callee);
 	// The "@__strlit__N" object of a string-literal node.
 	string StringLiteralRef(const SemNode& node);
 	// Registers a namespace-scope object declaration (also used for
 	// block-scope extern declarations naming the global entity).
 	void RegisterGlobal(const SemNode& item);
+	// PA15: a lowered function registered an automatic-object cleanup;
+	// the unwind runtime declares are emitted once.
+	void RequireEhRuntime();
+	// Whether a direct callee may unwind (drives eh_try placement).
+	bool CalleeMayUnwind(const SemNode& callee);
 
 private:
 	void CollectItem(const SemNode& item);
 	void RegisterFunction(const SemNode& item, bool defined);
+	void RegisterDeferred(const SemNode& item);
 	LowGlobalInfo& GlobalEntry(const Scope* scope, const string& name);
 	LowFunctionInfo& FunctionEntry(const Scope* scope, const string& name,
 	                               const TypePtr& type);
+	LowFunctionInfo& MemberFunctionEntry(const Scope* scope,
+	                                     const string& name,
+	                                     const TypePtr& type,
+	                                     const string& special_code);
+	// The variant-independent definition key of a member function.
+	string MemberDefinitionKey(const Scope* scope, const string& name,
+	                           const TypePtr& type,
+	                           ESpecialFunction special) const;
+	void LowerUsedFunctions();
+	void BuildLifetimeHelpers();
+	void LowerHelper(LowFunctionInfo& info, const SemNode& definition);
 	string UniqueSymbol(const string& base);
 	string RenderGlobal(const LowGlobalInfo& info);
 	string RenderScalarInit(const LowGlobalInfo& info);
@@ -124,4 +159,9 @@ private:
 	map<string, size_t> string_index_;    // element|bytes -> index
 	set<string> symbols_;                 // taken top-level names
 	bool has_main_;
+	// PA15: demand-emitted member/friend/special definitions, keyed by
+	// MemberDefinitionKey; lifetime helper state.
+	map<string, const SemNode*> member_defs_;
+	bool needs_eh_runtime_;
+	vector<SemNodePtr> helper_defs_;  // synthesized init/fini trees
 };

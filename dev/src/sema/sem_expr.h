@@ -7,6 +7,7 @@ using std::string;
 using std::vector;
 
 #include "ast/ast.h"
+#include "sema/class_info.h"
 #include "sema/scope.h"
 #include "sema/sem_convert.h"
 #include "sema/sem_node.h"
@@ -35,6 +36,23 @@ struct ISemExprHost
 	// Constant evaluation attempt for the __builtin_constant_p fold.
 	virtual bool TryEvaluateConstant(const AstExpr& expr,
 	                                 ConstValue& value) = 0;
+	// --- PA15 object-model context ---
+	virtual ClassRegistry& Classes() = 0;
+	// The class whose member body is being analyzed (null otherwise).
+	virtual const ClassInfo* CurrentClass() = 0;
+	// The `this` type inside a non-static member body (null otherwise).
+	virtual TypePtr CurrentThisType() = 0;
+	// Throws unless a member with the given declared access, found in
+	// the class scope `owner`, is accessible from the current context
+	// (clause 11 with friendship).
+	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
+	                               const string& what) = 0;
+	// A constructor-call action over `cls` (ctor_index -1 selects the
+	// synthesized implicit default constructor).
+	virtual SemNodePtr MakeConstructorCall(const ClassInfo& cls,
+	                                       int ctor_index, bool base_entry,
+	                                       SemNodePtr address,
+	                                       vector<SemNodePtr> args) = 0;
 	virtual ~ISemExprHost() {}
 };
 
@@ -46,7 +64,7 @@ struct SemValue
 {
 	SemValue()
 		: category(VC_PRVALUE), null_pointer_literal(false),
-		  function_set(false), fn_owner(0), member_class(0)
+		  function_set(false), fn_owner(0), member_class(0), member_fn(0)
 	{}
 
 	SemNodePtr node;
@@ -64,6 +82,10 @@ struct SemValue
 	// cv here; the node shows the this-adjusted spelling).
 	const NamedTypeInfo* member_class;
 	TypePtr member_type;
+	// PA15 bound member function set: the method's binding plus the
+	// analyzed object expression (null for static/unbound uses).
+	const ScopeBinding* member_fn;
+	SemNodePtr member_object;
 };
 
 // The canonical qualified name of a binding declared in `owner`: the
@@ -90,6 +112,12 @@ public:
 	SemNodePtr AnalyzeBracedInit(const AstExpr& braced, TypePtr& dest);
 
 	void RequireContextualBool(const SemValue& value, const char* what);
+
+	// PA15: applies a classified conversion's dump effects (overload
+	// selection, null-pointer retyping) for callers that ranked the
+	// conversion themselves (constructor selection, operator calls).
+	void ApplyConversion(SemValue& value, const ImplicitConversion& conv,
+	                     const TypePtr& dest);
 
 private:
 	SemValue AnalyzeLiteral(const AstExpr& expr);
@@ -122,6 +150,25 @@ private:
 	                               const vector<AstExprPtr>& arguments);
 	SemValue AnalyzeSizeof(const AstExpr& expr);
 	SemValue CallResult(const TypePtr& function_type);
+
+	// --- PA15 member access and method calls (sem_member.cpp) ---
+	SemValue AnalyzeMemberAccess(SemValue object, const string& name,
+	                             ETokenType op, bool implicit_this);
+	SemValue AnalyzeImplicitMember(const ScopeBinding& binding,
+	                               const string& written);
+	SemValue AnalyzeMemberCall(const AstExpr& expr,
+	                           const AstExpr& callee);
+	SemValue AnalyzeMethodCall(SemValue object, const ScopeBinding& binding,
+	                           const vector<AstExprPtr>& arguments);
+	SemValue AnalyzeStaticMethodCall(const AstExpr& expr,
+	                                 const ScopeBinding& binding);
+	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,
+	                                  const string& written);
+	SemValue MakeTemporaryObject(const TypePtr& class_type,
+	                             const vector<AstExprPtr>& arguments);
+	SemValue DereferenceObject(SemValue object);
+	SemNodePtr ImplicitThisObject();
+	SemNodePtr AddressOfObject(SemNodePtr object);
 	SemValue MakeBinaryNode(const AstExpr& expr, SemValue& lhs,
 	                        SemValue& rhs, EValueCategory category,
 	                        const TypePtr& type);
@@ -129,8 +176,6 @@ private:
 	                        vector<SemValue>& args);
 	TypePtr CompositePointerType(const SemValue& a, const SemValue& b);
 	void RequireModifiableLvalue(const SemValue& value, const char* what);
-	void ApplyConversion(SemValue& value, const ImplicitConversion& conv,
-	                     const TypePtr& dest);
 	TypePtr ThisAdjustedType(const NamedTypeInfo* cls,
 	                         const TypePtr& member) const;
 

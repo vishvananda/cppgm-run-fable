@@ -51,7 +51,7 @@ string FloatInitToken(const TypePtr& type, const LowerConst& value)
 }  // namespace
 
 LowerProgram::LowerProgram()
-	: has_main_(false)
+	: has_main_(false), needs_eh_runtime_(false)
 {
 	symbols_.insert("main");
 }
@@ -60,8 +60,43 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 {
 	for (size_t i = 0; i < unit.items.size(); i++)
 		CollectItem(*unit.items[i]);
-	if (!unit.synthesized.empty())
-		throw OutsideBoundary("synthesized class helper output");
+	// unit.synthesized is the PA12 dump artifact; the real demand-driven
+	// member definitions arrive through unit.deferred.
+	for (size_t i = 0; i < unit.deferred.size(); i++)
+		RegisterDeferred(*unit.deferred[i]);
+}
+
+// A deferred in-class definition (method, hidden friend, constructor,
+// destructor): registered as a weak definition, emitted on demand.
+void LowerProgram::RegisterDeferred(const SemNode& item)
+{
+	if (item.special != SF_NONE)
+	{
+		string key = MemberDefinitionKey(item.entity_scope,
+		                                 item.entity_name, item.type,
+		                                 item.special);
+		member_defs_[key] = &item;
+		return;
+	}
+	if (item.is_method)
+	{
+		string key = MemberDefinitionKey(item.entity_scope,
+		                                 item.entity_name, item.type,
+		                                 SF_NONE);
+		member_defs_[key] = &item;
+		return;
+	}
+	// Static member functions and hidden friends register as ordinary
+	// entries with weak demand-driven emission.
+	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
+	                                      item.entity_name, item.type);
+	if (!info.defined)
+	{
+		info.defined = true;
+		info.weak = true;
+		info.definition = &item;
+		info.unwind_no = item.unwind_no;
+	}
 }
 
 void LowerProgram::CollectItem(const SemNode& item)
@@ -165,8 +200,86 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 	return functions_.back();
 }
 
+string LowerProgram::MemberDefinitionKey(const Scope* scope,
+                                         const string& name,
+                                         const TypePtr& type,
+                                         ESpecialFunction special) const
+{
+	const char* kind = "fn";
+	if (special == SF_CONSTRUCTOR || special == SF_CONSTRUCTOR_BASE)
+		kind = "ctor";
+	else if (special == SF_DESTRUCTOR || special == SF_DESTRUCTOR_BASE)
+		kind = "dtor";
+	return LowerScopeKey(scope) + name + "#" + DescribeType(type) + "#" +
+		kind;
+}
+
+LowFunctionInfo& LowerProgram::MemberFunctionEntry(
+	const Scope* scope, const string& name, const TypePtr& type,
+	const string& special_code)
+{
+	string key = QualifiedKey(scope, name) + "#" + DescribeType(type) +
+		"#" + special_code;
+	map<string, size_t>::iterator found = function_index_.find(key);
+	if (found != function_index_.end())
+		return functions_[found->second];
+	LowFunctionInfo info;
+	info.scope = scope;
+	info.name = name;
+	info.type = type;
+	info.is_method = true;
+	info.special_code = special_code;
+	string base = LowerScopePath(scope) + LowerSanitizeName(name);
+	if (special_code == "C2" || special_code == "D2")
+		base += "__base_entry";
+	info.low_name = UniqueSymbol(base);
+	info.internal = LowerInUnnamedNamespace(scope);
+	info.object_name = MangleMemberFunctionObjectName(scope, name, type,
+	                                                  special_code);
+	// Complete and base entries are identical without virtual bases;
+	// an emitted complete entry carries the base-entry alias.
+	if (special_code == "C1")
+		info.alias_object =
+			MangleMemberFunctionObjectName(scope, name, type, "C2");
+	else if (special_code == "D1")
+		info.alias_object =
+			MangleMemberFunctionObjectName(scope, name, type, "D2");
+	ESpecialFunction special = SF_NONE;
+	if (special_code == "C1" || special_code == "C2")
+		special = SF_CONSTRUCTOR;
+	else if (special_code == "D1" || special_code == "D2")
+		special = SF_DESTRUCTOR;
+	map<string, const SemNode*>::iterator def = member_defs_.find(
+		MemberDefinitionKey(scope, name, type, special));
+	if (def != member_defs_.end())
+	{
+		info.defined = true;
+		info.weak = def->second->inline_def;
+		info.definition = def->second;
+		info.unwind_no = def->second->unwind_no;
+	}
+	function_index_[key] = functions_.size();
+	functions_.push_back(info);
+	return functions_.back();
+}
+
 void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 {
+	if (item.is_method)
+	{
+		// An out-of-class member function definition: source-owned,
+		// emitted unconditionally.
+		LowFunctionInfo& member = MemberFunctionEntry(
+			item.entity_scope, item.entity_name, item.type, "");
+		if (defined)
+		{
+			member.defined = true;
+			member.weak = false;
+			member.definition = &item;
+			member.unwind_no = item.unwind_no;
+		}
+		return;
+	}
 	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
 	                                      item.entity_name, item.type);
 	if (item.c_linkage)
@@ -215,6 +328,55 @@ string LowerProgram::FunctionRef(const Scope* scope, const string& name,
 	LowFunctionInfo& info = FunctionEntry(scope, name, type);
 	info.used = true;
 	return "@" + info.low_name;
+}
+
+string LowerProgram::MemberFunctionRef(const SemNode& callee)
+{
+	const char* code = "";
+	switch (callee.special)
+	{
+	case SF_CONSTRUCTOR: code = "C1"; break;
+	case SF_CONSTRUCTOR_BASE: code = "C2"; break;
+	case SF_DESTRUCTOR: code = "D1"; break;
+	case SF_DESTRUCTOR_BASE: code = "D2"; break;
+	default:
+		break;
+	}
+	LowFunctionInfo& info = MemberFunctionEntry(
+		callee.entity_scope, callee.entity_name, callee.type, code);
+	info.used = true;
+	return "@" + info.low_name;
+}
+
+void LowerProgram::RequireEhRuntime()
+{
+	needs_eh_runtime_ = true;
+}
+
+bool LowerProgram::CalleeMayUnwind(const SemNode& callee)
+{
+	if (callee.unwind_no)
+		return false;
+	if (callee.kind != SN_CALLEE || !callee.entity_scope)
+		return true;
+	if (callee.is_method || callee.special != SF_NONE)
+	{
+		const char* code = "";
+		switch (callee.special)
+		{
+		case SF_CONSTRUCTOR: code = "C1"; break;
+		case SF_CONSTRUCTOR_BASE: code = "C2"; break;
+		case SF_DESTRUCTOR: code = "D1"; break;
+		case SF_DESTRUCTOR_BASE: code = "D2"; break;
+		default:
+			break;
+		}
+		return !MemberFunctionEntry(callee.entity_scope,
+		                            callee.entity_name, callee.type,
+		                            code).unwind_no;
+	}
+	return !FunctionEntry(callee.entity_scope, callee.entity_name,
+	                      callee.type).unwind_no;
 }
 
 string LowerProgram::StringLiteralRef(const SemNode& node)
@@ -291,7 +453,7 @@ string LowerProgram::RenderConstItem(const LowerConst& value,
 
 string LowerProgram::RenderScalarInit(const LowGlobalInfo& info)
 {
-	if (!info.node || info.node->children.empty())
+	if (!info.node || info.node->children.empty() || info.dynamic_init)
 		return "zero";
 	LowerConst value;
 	if (!EvaluateLowerConst(*info.node->children[0], value))
@@ -343,8 +505,14 @@ string LowerProgram::RenderArrayItems(const LowGlobalInfo& info)
 
 string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 {
-	if (info.type->kind == TK_CLASS)
-		throw OutsideBoundary("class-typed global object");
+	TypePtr inner = info.type;
+	while (inner->kind == TK_ARRAY)
+		inner = inner->target;
+	if (RemoveTopCv(inner)->kind == TK_CLASS)
+		// Class objects zero-fill statically; construction runs in
+		// @__cppgm_init.
+		return "global @" + info.low_name + GlobalMetadata(info) +
+			" = {\n  zero " + to_string(TypeSize(info.type)) + "\n}";
 	if (IsReferenceType(info.type))
 		throw OutsideBoundary("namespace-scope reference");
 	if (info.type->kind == TK_ARRAY)
@@ -355,23 +523,151 @@ string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 		RenderScalarInit(info);
 }
 
+// Lowers every reachable definition: source-owned definitions always,
+// weak (in-class) definitions only once demanded; lowering one body can
+// demand more, so the loop runs to a fixpoint in first-demand order.
+void LowerProgram::LowerUsedFunctions()
+{
+	bool progress = true;
+	while (progress)
+	{
+		progress = false;
+		for (size_t i = 0; i < functions_.size(); i++)
+		{
+			LowFunctionInfo& info = functions_[i];
+			if (!info.defined || !info.body_text.empty())
+				continue;
+			if (info.weak && !info.used)
+				continue;
+			FunctionLowerer lowerer(*this, *info.definition, info);
+			info.body_text = lowerer.Lower();
+			progress = true;
+		}
+	}
+}
+
+void LowerProgram::LowerHelper(LowFunctionInfo& info,
+                               const SemNode& definition)
+{
+	info.definition = &definition;
+	info.defined = true;
+	FunctionLowerer lowerer(*this, definition, info);
+	info.body_text = lowerer.Lower();
+}
+
+// Builds @__cppgm_init / @__cppgm_fini from the registered
+// namespace-scope objects: construction in declaration order,
+// destruction in reverse declaration order (3.6.2/3.6.3 subset).
+void LowerProgram::BuildLifetimeHelpers()
+{
+	SemNodePtr init_def = MakeSemNode(SN_FUNCTION_DEFINITION);
+	init_def->type = MakeFunctionType(MakeFundamentalType(FT_VOID),
+	                                  vector<TypePtr>(), false);
+	SemNodePtr fini_def = MakeSemNode(SN_FUNCTION_DEFINITION);
+	fini_def->type = init_def->type;
+	bool any_class_object = false;
+	for (size_t i = 0; i < globals_.size(); i++)
+	{
+		LowGlobalInfo& info = globals_[i];
+		if (!info.defined || !info.node)
+			continue;
+		TypePtr inner = info.type;
+		while (inner->kind == TK_ARRAY)
+			inner = inner->target;
+		bool is_class = RemoveTopCv(inner)->kind == TK_CLASS;
+		if (is_class)
+			any_class_object = true;
+		const SemNode& item = *info.node;
+		for (size_t j = 0; j < item.children.size(); j++)
+		{
+			const SemNode& child = *item.children[j];
+			if (child.kind == SN_CONSTRUCTOR_ACTION)
+			{
+				if (!child.trivial_init)
+					init_def->children.push_back(CloneSemNode(child));
+			}
+			else if (child.kind == SN_DESTRUCTOR_ACTION)
+				fini_def->children.push_back(CloneSemNode(child));
+			else if (child.kind == SN_EXPRESSION_STATEMENT)
+				// Aggregate member stores run dynamically.
+				init_def->children.push_back(CloneSemNode(child));
+			else if (!is_class && info.type->kind != TK_ARRAY &&
+			         !IsReferenceType(info.type) && j == 0 &&
+			         child.kind != SN_BRACED_INIT_LIST)
+			{
+				// A scalar initializer: constant expressions render
+				// statically, everything else stores in @__cppgm_init.
+				LowerConst value;
+				if (EvaluateLowerConst(child, value))
+					continue;
+				info.dynamic_init = true;
+				SemNodePtr target = MakeSemNode(SN_ID_EXPRESSION);
+				target->name = info.node->entity_name;
+				target->type = info.type;
+				target->category = VC_LVALUE;
+				target->entity_scope = info.node->entity_scope;
+				target->entity_name = info.node->entity_name;
+				SemNodePtr assign =
+					MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
+				assign->type = RemoveTopCv(info.type);
+				assign->category = VC_LVALUE;
+				assign->has_op = true;
+				assign->op = OP_ASS;
+				assign->op_spelling = "=";
+				assign->children.push_back(std::move(target));
+				assign->children.push_back(CloneSemNode(child));
+				SemNodePtr statement =
+					MakeSemNode(SN_EXPRESSION_STATEMENT);
+				statement->children.push_back(std::move(assign));
+				init_def->children.push_back(std::move(statement));
+			}
+		}
+	}
+	// Finalization actions run in reverse declaration order.
+	for (size_t i = 0, j = fini_def->children.size(); i < j / 2; i++)
+		fini_def->children[i].swap(fini_def->children[j - 1 - i]);
+	bool want_init = any_class_object || !init_def->children.empty();
+	bool want_fini = !fini_def->children.empty();
+	if (want_init)
+	{
+		LowFunctionInfo info;
+		info.scope = 0;
+		info.name = "__cppgm_init";
+		info.type = init_def->type;
+		info.low_name = UniqueSymbol("__cppgm_init");
+		info.internal = true;
+		info.role = "init";
+		functions_.push_back(info);
+		LowerHelper(functions_.back(), *init_def);
+		helper_defs_.push_back(std::move(init_def));
+	}
+	if (want_fini)
+	{
+		LowFunctionInfo info;
+		info.scope = 0;
+		info.name = "__cppgm_fini";
+		info.type = fini_def->type;
+		info.low_name = UniqueSymbol("__cppgm_fini");
+		info.internal = true;
+		info.role = "fini";
+		functions_.push_back(info);
+		LowerHelper(functions_.back(), *fini_def);
+		helper_defs_.push_back(std::move(fini_def));
+	}
+}
+
 void LowerProgram::Write(ostream& out)
 {
-	// Render global initializers first (string-literal demand order),
-	// then lower the function bodies.
+	// Lifetime helpers register dynamic-init facts before the globals
+	// render; globals render before bodies lower so string-literal
+	// demand order matches the canonical presentation.
+	BuildLifetimeHelpers();
 	for (size_t i = 0; i < globals_.size(); i++)
 		if (globals_[i].defined)
 			globals_[i].init_text = RenderGlobal(globals_[i]);
-	for (size_t i = 0; i < functions_.size(); i++)
-	{
-		if (!functions_[i].defined)
-			continue;
-		FunctionLowerer lowerer(*this, *functions_[i].definition,
-		                        functions_[i]);
-		functions_[i].body_text = lowerer.Lower();
-	}
+	LowerUsedFunctions();
 
-	vector<string> sections[4];
+	vector<string> sections[5];
 	for (size_t i = 0; i < globals_.size(); i++)
 	{
 		const LowGlobalInfo& info = globals_[i];
@@ -408,15 +704,44 @@ void LowerProgram::Write(ostream& out)
 		if (globals_[i].defined)
 			sections[2].push_back(globals_[i].init_text);
 	for (size_t i = 0; i < functions_.size(); i++)
-		if (functions_[i].defined)
-			sections[3].push_back(functions_[i].body_text);
-
-	bool first = true;
-	for (int kind = 0; kind < 4; kind++)
 	{
+		const LowFunctionInfo& info = functions_[i];
+		if (!info.defined || info.body_text.empty())
+			continue;
+		sections[3].push_back(info.body_text);
+	}
+	if (needs_eh_runtime_)
+	{
+		vector<string> declares;
+		declares.push_back(
+			"declare function @__external_runtime___Unwind_Resume() -> "
+			"void [return=noreturn, role=eh_resume, linkage=c, "
+			"binding=strong, object=_Unwind_Resume]");
+		declares.push_back(
+			"declare function @__external_runtime____gxx_personality_v0()"
+			" -> void [role=eh_personality, linkage=c, binding=strong, "
+			"object=__gxx_personality_v0]");
+		sections[1].insert(sections[1].begin(), declares.begin(),
+		                   declares.end());
+	}
+
+	// Aliases follow the definitions without a separating blank line.
+	for (size_t i = 0; i < functions_.size(); i++)
+	{
+		const LowFunctionInfo& info = functions_[i];
+		if (!info.defined || info.body_text.empty() ||
+		    info.alias_object.empty())
+			continue;
+		sections[4].push_back("alias object " + info.alias_object +
+		                      " = @" + info.low_name);
+	}
+	bool first = true;
+	for (int kind = 0; kind < 5; kind++)
+	{
+		bool separate = kind != 4;
 		for (size_t i = 0; i < sections[kind].size(); i++)
 		{
-			if (!first && i == 0)
+			if (!first && i == 0 && separate)
 				out << "\n";
 			out << sections[kind][i] << "\n";
 			first = false;
