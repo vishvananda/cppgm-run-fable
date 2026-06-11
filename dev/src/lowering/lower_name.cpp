@@ -242,10 +242,22 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 	}
 }
 
-string MangleTerminalName(const string& name)
+string MangleTerminalName(const string& name, size_t arity)
 {
 	if (name.compare(0, 9, "operator ") == 0)
-		return OperatorCode(name.substr(9));
+	{
+		string text = name.substr(9);
+		// 5.1.2: the unary forms of the dual-meaning operators carry
+		// their own codes.
+		if (arity == 1)
+		{
+			if (text == "+") return "ps";
+			if (text == "-") return "ng";
+			if (text == "&") return "ad";
+			if (text == "*") return "de";
+		}
+		return OperatorCode(text);
+	}
 	return SourceName(name);
 }
 
@@ -376,7 +388,7 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 	vector<string> parts = ScopeComponents(scope);
 	string encoding;
 	if (parts.empty())
-		encoding = MangleTerminalName(name);
+		encoding = MangleTerminalName(name, type->parameters.size());
 	else
 	{
 		encoding = "N";
@@ -387,7 +399,8 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 			encoding += SourceName(parts[i]);
 			subs.Add(prefix_key);
 		}
-		encoding += MangleTerminalName(name) + "E";
+		encoding += MangleTerminalName(name, type->parameters.size()) +
+			"E";
 	}
 	return "_Z" + encoding + MangleBareParameters(type, subs);
 }
@@ -437,7 +450,9 @@ string MangleMemberFunctionObjectName(const Scope* scope,
 	if (!special_code.empty())
 		encoding += special_code;
 	else
-		encoding += MangleTerminalName(name);
+		// Member operators count the implicit object argument.
+		encoding += MangleTerminalName(name,
+		                               bare->parameters.size() + 1);
 	encoding += "E";
 	return "_Z" + encoding + MangleBareParameters(bare, subs);
 }

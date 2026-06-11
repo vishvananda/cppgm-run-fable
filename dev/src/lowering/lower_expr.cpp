@@ -197,6 +197,10 @@ LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
 	if (node.null_pointer && IsNullPtrType(value.type))
 	{
 		value.imm_null = true;
+		// A retyped integer zero keeps the immediate spelling; the
+		// nullptr keyword materializes.
+		if (node.has_value)
+			value.text = "0";
 		return value;
 	}
 	if (node.has_value)
@@ -615,17 +619,32 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 	string then_label = NewLabel("condaddr_then");
 	string else_label = NewLabel("condaddr_else");
 	string end_label = NewLabel("condaddr_end");
+	TypePtr result_type = NodeType(node);
 	BranchOnValue(*node.children[0], then_label, else_label);
-	OpenBlock(then_label);
-	Emit("store ptr " + LowerAddressExpr(*node.children[1]) + ", $" +
-	     slot);
-	ReferenceLabel(end_label);
-	Terminate("jump ^" + end_label);
-	OpenBlock(else_label);
-	Emit("store ptr " + LowerAddressExpr(*node.children[2]) + ", $" +
-	     slot);
-	ReferenceLabel(end_label);
-	Terminate("jump ^" + end_label);
+	for (int arm = 1; arm <= 2; arm++)
+	{
+		OpenBlock(arm == 1 ? then_label : else_label);
+		const SemNode& operand = *node.children[arm];
+		string address = LowerAddressExpr(operand);
+		TypePtr source = NodeType(operand);
+		// A derived arm adjusts to the common base result (5.16p3).
+		if (source->kind == TK_CLASS && result_type->kind == TK_CLASS)
+		{
+			int hops = BaseClassDistance(source->named,
+			                             result_type->named);
+			for (int i = 0; i < hops; i++)
+			{
+				string hopped = NewTemp();
+				Emit(hopped +
+				     " = index i8 [projection=base_subobject] " +
+				     address + ", 0");
+				address = hopped;
+			}
+		}
+		Emit("store ptr " + address + ", $" + slot);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+	}
 	OpenBlock(end_label);
 	string result = NewTemp();
 	Emit(result + " = load ptr $" + slot);

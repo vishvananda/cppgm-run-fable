@@ -51,6 +51,10 @@ struct ISemExprHost
 	// (clause 11 with friendship).
 	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
 	                               const string& what) = 0;
+	// 11.2p4: whether the current context is `cls` itself, one of its
+	// members, or one of its friends (the naming-class rule grants such
+	// contexts full access along the inheritance chain).
+	virtual bool InClassContextOrFriend(const NamedTypeInfo* cls) = 0;
 	// A constructor-call action over `cls` (ctor_index -1 selects the
 	// synthesized implicit default constructor).
 	virtual SemNodePtr MakeConstructorCall(const ClassInfo& cls,

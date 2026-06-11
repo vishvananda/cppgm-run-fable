@@ -332,6 +332,19 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 				LowerCall(*child.children[0]);
 				in_lifetime_action_ = saved;
 			}
+			else if (child.children[0]->children.size() > 1 &&
+			         child.children[0]->children[1]->kind ==
+			             SN_UNARY_EXPRESSION &&
+			         child.children[0]->children[1]->op == OP_AMP &&
+			         !child.children[0]->children[1]->children.empty() &&
+			         child.children[0]->children[1]->children[0]->kind ==
+			             SN_MEMBER_EXPRESSION)
+			{
+				// A subobject-targeted action addresses its own member.
+				in_lifetime_action_ = true;
+				LowerCall(*child.children[0]);
+				in_lifetime_action_ = saved;
+			}
 			else
 				LowerConstructorCall(child, decl_address);
 			break;

@@ -97,8 +97,6 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		info.weak = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
-		if (item.entity_scope->kind == SCOPE_NAMESPACE)
-			info.used = true;
 	}
 }
 
@@ -532,9 +530,9 @@ string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 		RenderScalarInit(info);
 }
 
-// Lowers every reachable definition: source-owned definitions always,
-// weak (in-class) definitions only once demanded; lowering one body can
-// demand more, so the loop runs to a fixpoint in first-demand order.
+// Lowers every definition: source-owned ones print unconditionally;
+// weak (in-class) bodies lower too - their references count as
+// semantic demand - but print only once used.
 void LowerProgram::LowerUsedFunctions()
 {
 	bool progress = true;
@@ -545,8 +543,6 @@ void LowerProgram::LowerUsedFunctions()
 		{
 			LowFunctionInfo& info = functions_[i];
 			if (!info.defined || !info.body_text.empty())
-				continue;
-			if (info.weak && !info.used)
 				continue;
 			FunctionLowerer lowerer(*this, *info.definition, info);
 			info.body_text = lowerer.Lower();
@@ -765,6 +761,8 @@ void LowerProgram::Write(ostream& out)
 		const LowFunctionInfo& info = functions_[i];
 		if (!info.defined || info.body_text.empty())
 			continue;
+		if (info.weak && !info.used)
+			continue;
 		sections[3].push_back(info.body_text);
 	}
 	if (needs_eh_runtime_)
@@ -787,7 +785,7 @@ void LowerProgram::Write(ostream& out)
 	{
 		const LowFunctionInfo& info = functions_[i];
 		if (!info.defined || info.body_text.empty() ||
-		    info.alias_object.empty())
+		    (info.weak && !info.used) || info.alias_object.empty())
 			continue;
 		sections[4].push_back("alias object " + info.alias_object +
 		                      " = @" + info.low_name);

@@ -172,7 +172,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 		FindMemberBinding(host_.Model(), object_entity, name);
 	if (!member)
 		throw runtime_error("no member named " + name);
-	host_.CheckMemberAccess(member->home, member->access, name);
+	if (!host_.InClassContextOrFriend(object_entity))
+		host_.CheckMemberAccess(member->home, member->access, name);
 	if (member->kind == SB_ENUMERATOR)
 	{
 		SemValue value;
@@ -521,7 +522,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	}
 	if (member->kind != SB_FUNCTION)
 		throw runtime_error(name + " is not a member function");
-	host_.CheckMemberAccess(member->home, member->access, name);
+	if (!host_.InClassContextOrFriend(object.type->named))
+		host_.CheckMemberAccess(member->home, member->access, name);
 	return AnalyzeMethodCall(std::move(object), *member, expr.arguments);
 }
 

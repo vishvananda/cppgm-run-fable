@@ -1121,6 +1121,24 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 	}
 	if (bare->kind == TK_ARRAY)
 	{
+		if (!braced && args.empty())
+		{
+			// 8.5p10: `arr()` value-initializes every element.
+			TypePtr element = RemoveTopCv(bare->target);
+			if (element->kind == TK_CLASS)
+				throw OutsideBoundary("class array member initializer");
+			for (unsigned long long i = 0; i < bare->bound; i++)
+			{
+				ClassField element_field;
+				element_field.name = field.name;
+				element_field.type = element;
+				out.push_back(MemberAssignAction(
+					element_field,
+					SubscriptNode(ThisFieldExpr(field), i),
+					ZeroValue(element)));
+			}
+			return;
+		}
 		if (!braced)
 			throw OutsideBoundary("array member initializer form");
 		AppendArrayMemberInit(field, braced, out);
@@ -1747,6 +1765,43 @@ size_t SemBinder::ConsumeArrayItems(const ClassField& field,
 	if (element_type->kind == TK_CLASS)
 		throw OutsideBoundary("aggregate class array member");
 	const AstExpr* element = at < items.size() ? items[at].get() : 0;
+	if (element && element->kind == EK_LITERAL &&
+	    element->literal_kind == PTK_LITERAL_ARRAY &&
+	    IsIntegralType(element_type))
+	{
+		// 8.5.2: a string literal initializes the character array
+		// element-wise (trailing elements zero).
+		SemValue value = analyzer_.Analyze(*element);
+		const string& bytes = value.node->string_bytes;
+		unsigned long long width = TypeSize(element_type);
+		if (bytes.size() / width > array->bound)
+			throw runtime_error("string literal exceeds the array "
+			                    "member");
+		for (unsigned long long j = 0; j < array->bound; j++)
+		{
+			unsigned long long code = 0;
+			if ((j + 1) * width <= bytes.size())
+				code = LittleEndianValue(
+					bytes.substr(j * width, width));
+			ClassField element_field;
+			element_field.name = field.name;
+			element_field.type = element_type;
+			SemValue item_value;
+			item_value.node = MakeSemNode(SN_LITERAL);
+			item_value.node->token = std::to_string(code);
+			item_value.node->type = element_type;
+			item_value.node->category = VC_PRVALUE;
+			item_value.node->has_value = true;
+			item_value.node->value = ConstValue(
+				element_type->fundamental, code);
+			item_value.type = element_type;
+			out.push_back(MemberAssignAction(
+				element_field,
+				SubscriptNode(CloneSemNode(member_proto), j),
+				std::move(item_value)));
+		}
+		return at + 1;
+	}
 	const vector<AstExprPtr>* source = &items;
 	size_t inner_at = at;
 	bool own_braces = element && element->kind == EK_BRACED;
@@ -2210,4 +2265,51 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->is_static_decl = specs.is_static;
 	item->is_thread_local_decl = specs.is_thread_local;
 	AttachObjectLifetime(*item, *member, declarator.init.get(), specs);
+}
+
+bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
+{
+	const ClassInfo* naming = unit_.classes.Find(cls);
+	if (!naming)
+		return false;
+	vector<const ClassInfo*> contexts;
+	if (method_.cls)
+		contexts.push_back(method_.cls);
+	if (method_.lexical_cls)
+		contexts.push_back(method_.lexical_cls);
+	for (const Scope* scope = current_; scope; scope = scope->parent)
+		if (scope->kind == SCOPE_CLASS)
+			if (const NamedTypeInfo* entity = model_.ScopeEntity(scope))
+				if (const ClassInfo* context = unit_.classes.Find(entity))
+					contexts.push_back(context);
+	for (size_t i = 0; i < contexts.size(); i++)
+	{
+		if (contexts[i]->members == naming->members)
+			return true;
+		for (size_t j = 0; j < naming->friend_classes.size(); j++)
+			if (naming->friend_classes[j] == contexts[i]->members)
+				return true;
+	}
+	if (!method_.fn_name.empty())
+		for (size_t i = 0; i < naming->friend_functions.size(); i++)
+			if (naming->friend_functions[i].first == method_.fn_owner &&
+			    naming->friend_functions[i].second == method_.fn_name)
+				return true;
+	return false;
+}
+
+TypePtr SemBinder::ResolveTypeName(const AstName& name)
+{
+	const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
+	if (!found)
+		throw runtime_error("undeclared type name " + TerminalName(name));
+	if (found->kind != SB_TYPE && found->kind != SB_TYPE_ALIAS)
+		throw runtime_error(found->name + " does not name a type");
+	if (found->home && found->home->kind == SCOPE_CLASS)
+	{
+		const NamedTypeInfo* entity = model_.ScopeEntity(found->home);
+		if (!entity || !InClassContextOrFriend(entity))
+			CheckMemberAccess(found->home, found->access, found->name);
+	}
+	return found->type;
 }

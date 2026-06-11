@@ -30,6 +30,7 @@ public:
 	virtual TypePtr CurrentThisType();
 	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
 	                               const string& what);
+	virtual bool InClassContextOrFriend(const NamedTypeInfo* cls);
 	virtual SemNodePtr MakeConstructorCall(const ClassInfo& cls,
 	                                       int ctor_index, bool base_entry,
 	                                       SemNodePtr address,
@@ -37,6 +38,8 @@ public:
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
+	// PA15: type-name resolution checks member access (11.8 subset).
+	virtual TypePtr ResolveTypeName(const AstName& name);
 
 protected:
 	// DeclBinder seams
