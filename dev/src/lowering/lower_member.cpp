@@ -106,7 +106,16 @@ LowerValue FunctionLowerer::LowerMemberValue(const SemNode& node)
 LowerValue FunctionLowerer::LowerBitFieldValue(const SemNode& node)
 {
 	TypePtr unit = RemoveTopCv(node.type);
-	string unit_text = LowerValueType(unit);
+	// Reads spell the signed view of the storage unit; the value type
+	// keeps the declared signedness for later conversions.
+	string unit_text;
+	switch (TypeSize(unit))
+	{
+	case 1: unit_text = "i8"; break;
+	case 2: unit_text = "i16"; break;
+	case 4: unit_text = "i32"; break;
+	default: unit_text = "i64"; break;
+	}
 	bool unsigned_field = LowerUnsignedOps(unit);
 	unsigned long long unit_bits = TypeSize(unit) * 8;
 	string address = MemberAddress(node);

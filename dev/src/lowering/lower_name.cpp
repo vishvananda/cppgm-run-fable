@@ -142,19 +142,34 @@ string SourceName(const string& name)
 	return to_string(name.size()) + name;
 }
 
-string MangleType(const TypePtr& type, Substitutions& subs);
+string MangleType(const TypePtr& type, Substitutions& subs,
+                  string* key_out = 0);
 
 // Appends the parameter encodings of a function type ("v" when empty,
 // trailing "z" when variadic).
-string MangleBareParameters(const TypePtr& fn, Substitutions& subs)
+string MangleBareParameters(const TypePtr& fn, Substitutions& subs,
+                            string* key_out = 0)
 {
 	if (fn->parameters.empty() && !fn->variadic)
+	{
+		if (key_out)
+			*key_out += "v";
 		return "v";
+	}
 	string out;
 	for (size_t i = 0; i < fn->parameters.size(); i++)
-		out += MangleType(fn->parameters[i], subs);
+	{
+		string key;
+		out += MangleType(fn->parameters[i], subs, &key);
+		if (key_out)
+			*key_out += key + ",";
+	}
 	if (fn->variadic)
+	{
 		out += "z";
+		if (key_out)
+			*key_out += "z";
+	}
 	return out;
 }
 
@@ -168,53 +183,99 @@ string MangleSubstitutable(const string& key, const string& spelling,
 	return spelling;
 }
 
-string MangleType(const TypePtr& type, Substitutions& subs)
+// The substitution keys are structural (composed from the entity
+// identities, not the possibly substituted spellings), so the same
+// type always finds its earlier registration.
+string MangleType(const TypePtr& type, Substitutions& subs,
+                  string* key_out)
 {
 	bool is_const = type->is_const;
 	bool is_volatile = type->is_volatile;
-	if (is_const || is_volatile)
+	if ((is_const || is_volatile) && type->kind != TK_FUNCTION)
 	{
 		Type bare = *type;
 		bare.is_const = false;
 		bare.is_volatile = false;
 		TypePtr unqualified(new Type(bare));
-		string inner = MangleType(unqualified, subs);
+		string inner_key;
+		string inner = MangleType(unqualified, subs, &inner_key);
+		string key = string(is_volatile ? "V" : "") +
+			(is_const ? "K" : "") + "|" + inner_key;
+		if (key_out)
+			*key_out = key;
 		string spelling = string(is_volatile ? "V" : "") +
 			(is_const ? "K" : "") + inner;
-		return MangleSubstitutable(spelling, spelling, subs);
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return spelling;
 	}
 	switch (type->kind)
 	{
 	case TK_FUNDAMENTAL:
+		if (key_out)
+			*key_out = BuiltinCode(type->fundamental);
 		return BuiltinCode(type->fundamental);
 	case TK_POINTER:
 	{
-		string spelling = "P" + MangleType(type->target, subs);
-		return MangleSubstitutable(spelling, spelling, subs);
+		string inner_key;
+		string inner = MangleType(type->target, subs, &inner_key);
+		string key = "P|" + inner_key;
+		if (key_out)
+			*key_out = key;
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return "P" + inner;
 	}
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
 	{
-		string spelling =
-			(type->kind == TK_LVALUE_REFERENCE ? "R" : "O") +
-			MangleType(type->target, subs);
-		return MangleSubstitutable(spelling, spelling, subs);
+		const char* mark = type->kind == TK_LVALUE_REFERENCE ? "R" : "O";
+		string inner_key;
+		string inner = MangleType(type->target, subs, &inner_key);
+		string key = string(mark) + "|" + inner_key;
+		if (key_out)
+			*key_out = key;
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return mark + inner;
 	}
 	case TK_ARRAY:
 	{
-		string spelling = "A" +
-			(type->bound_known ? to_string(type->bound) : string()) +
-			"_" + MangleType(type->target, subs);
-		return MangleSubstitutable(spelling, spelling, subs);
+		string bound = type->bound_known ? to_string(type->bound)
+		                                 : string();
+		string inner_key;
+		string inner = MangleType(type->target, subs, &inner_key);
+		string key = "A" + bound + "|" + inner_key;
+		if (key_out)
+			*key_out = key;
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return "A" + bound + "_" + inner;
 	}
 	case TK_FUNCTION:
 	{
 		// Sequenced explicitly: the return type registers its
 		// substitutions before the parameters.
-		string return_part = MangleType(type->target, subs);
-		string param_part = MangleBareParameters(type, subs);
-		string spelling = "F" + return_part + param_part + "E";
-		return MangleSubstitutable(spelling, spelling, subs);
+		string return_key;
+		string return_part = MangleType(type->target, subs, &return_key);
+		string param_key;
+		string param_part = MangleBareParameters(type, subs, &param_key);
+		string key = "F|" + return_key + "|" + param_key;
+		if (key_out)
+			*key_out = key;
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return "F" + return_part + param_part + "E";
 	}
 	case TK_CLASS:
 	case TK_ENUM:
@@ -224,11 +285,17 @@ string MangleType(const TypePtr& type, Substitutions& subs)
 		// a substituted prefix compresses the nested spelling (NS_...).
 		vector<string> parts = EntityComponents(*type->named);
 		if (parts.size() == 1)
+		{
+			if (key_out)
+				*key_out = "T:" + parts[0];
 			return MangleSubstitutable("T:" + parts[0],
 			                           SourceName(parts[0]), subs);
+		}
 		vector<string> keys(parts.size());
 		for (size_t i = 0; i < parts.size(); i++)
 			keys[i] = (i ? keys[i - 1] + "::" : string("T:")) + parts[i];
+		if (key_out)
+			*key_out = keys.back();
 		string found = subs.Find(keys.back());
 		if (!found.empty())
 			return found;

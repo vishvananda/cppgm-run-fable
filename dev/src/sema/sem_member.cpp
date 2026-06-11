@@ -240,9 +240,14 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 		value.node->op = op;
 	}
 	value.node->member_offset = field->offset;
+	// A using-imported member belongs to the importing class for
+	// addressing (its base sits at offset zero either way).
 	value.node->base_hops =
 		BaseClassDistance(object_entity,
-		                  host_.Model().ScopeEntity(member->owner));
+		                  host_.Model().ScopeEntity(member->home));
+	if (value.node->base_hops < 0)
+		value.node->base_hops = BaseClassDistance(
+			object_entity, host_.Model().ScopeEntity(member->owner));
 	value.node->is_bit_field = field->is_bit_field;
 	value.node->bit_offset = field->bit_offset;
 	value.node->bit_width = field->bit_width;

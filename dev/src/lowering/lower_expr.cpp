@@ -900,8 +900,28 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 {
 	TypePtr bare = RemoveTopCv(referee);
 	if (node.kind == SN_CONSTRUCTOR_ACTION && bare->kind == TK_CLASS)
-		// A class temporary binding a reference parameter.
-		return MaterializeTemporary(node, "arg");
+	{
+		// A class temporary binding a reference parameter: an exact
+		// binding materializes as an argument object; a derived
+		// temporary adjusts to the base referee.
+		TypePtr made = RemoveTopCv(node.type);
+		bool exact = TypeEquals(made, bare);
+		string address =
+			MaterializeTemporary(node, exact ? "arg" : "tmpobj");
+		if (!exact && made->kind == TK_CLASS)
+		{
+			int hops = BaseClassDistance(made->named, bare->named);
+			for (int i = 0; i < hops; i++)
+			{
+				string hopped = NewTemp();
+				Emit(hopped +
+				     " = index i8 [projection=base_subobject] " +
+				     address + ", 0");
+				address = hopped;
+			}
+		}
+		return address;
+	}
 	TypePtr source = RemoveTopCv(StripRef(node.type));
 	bool binds_directly = node.category != VC_PRVALUE &&
 		(TypeEquals(source, bare) ||
