@@ -981,9 +981,13 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 	{
 		// A class temporary binding a reference parameter: an exact
 		// binding materializes as an argument object; a derived
-		// temporary adjusts to the base referee.
+		// temporary adjusts to the base referee (and keeps its own
+		// dispatch region while live cleanups may unwind past it).
 		TypePtr made = RemoveTopCv(node.type);
 		bool exact = TypeEquals(made, bare);
+		if (!exact && eh_armed_ && !eh_open_ && !in_cleanup_emission_ &&
+		    program_.CalleeMayUnwind(*node.children[0]->children[0]))
+			OpenEhRegion();
 		string address =
 			MaterializeTemporary(node, exact ? "arg" : "tmpobj");
 		if (!exact && made->kind == TK_CLASS)

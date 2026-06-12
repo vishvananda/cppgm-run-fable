@@ -487,6 +487,13 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 			BeginFullExpression(node);
 			LowerClassLocal(node);
 			EndFullExpression();
+			// The object's own scope cleanup arms only once its
+			// initialization completed.
+			if (!pending_cleanup_.empty())
+			{
+				RegisterCleanup(pending_cleanup_);
+				pending_cleanup_.clear();
+			}
 			return;
 		}
 	}

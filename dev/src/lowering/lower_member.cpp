@@ -262,12 +262,6 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	    call.children[1]->op == OP_AMP &&
 	    call.children[1]->has_op)
 		first_arg = 2;
-	// In a full expression with destructible temporaries every
-	// may-unwind construction runs under a dispatch region (opened
-	// before its arguments lower).
-	if (eh_armed_ && !in_cleanup_emission_ && !eh_open_ &&
-	    program_.CalleeMayUnwind(callee))
-		OpenEhRegion();
 	ctor_depth_++;
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
@@ -279,6 +273,13 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 			? callee.type->parameters[param_at] : TypePtr();
 		arguments += ", " + LowerCallArgument(*call.children[i], param);
 	}
+	// A may-unwind construction runs under a dispatch region once
+	// destructible objects (argument temporaries, live locals) need
+	// cleanup on unwind.
+	if (eh_armed_ && !in_cleanup_emission_ && !eh_open_ &&
+	    (!temp_cleanups_.empty() || HaveCleanups()) &&
+	    program_.CalleeMayUnwind(callee))
+		OpenEhRegion();
 	string callee_text = program_.MemberFunctionRef(callee);
 	Emit("call void " + callee_text + "(" + arguments + ")");
 	in_lifetime_action_ = saved;
@@ -567,7 +568,7 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 		}
 	}
 	if (!dtor_actions.empty())
-		RegisterCleanup(dtor_actions);
+		pending_cleanup_ = dtor_actions;
 }
 
 // --- lifetime ----------------------------------------------------------------

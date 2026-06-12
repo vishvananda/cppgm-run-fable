@@ -266,6 +266,10 @@ private:
 	vector<vector<vector<const SemNode*>>> cleanup_scopes_;
 	vector<size_t> break_cleanup_;
 	vector<size_t> continue_cleanup_;
+	// Destructor actions of the local just lowered, registered only
+	// after its initializing full expression closes (the object is not
+	// destroyed on unwind out of its own construction).
+	vector<const SemNode*> pending_cleanup_;
 	// The open unwind-dispatch region of the current full-expression.
 	bool eh_open_;
 	string eh_dispatch_;
