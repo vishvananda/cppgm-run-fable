@@ -304,6 +304,15 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 			return MangleSubstitutable("T:" + parts[0],
 			                           SourceName(parts[0]), subs);
 		}
+		if (parts.size() == 2 && parts[0] == "std")
+		{
+			// 5.1.4.2: the abbreviation St spells the std prefix.
+			string key = "T:std::" + parts[1];
+			if (key_out)
+				*key_out = key;
+			return MangleSubstitutable(key, "St" + SourceName(parts[1]),
+			                           subs);
+		}
 		vector<string> keys(parts.size());
 		for (size_t i = 0; i < parts.size(); i++)
 			keys[i] = (i ? keys[i - 1] + "::" : string("T:")) + parts[i];
@@ -510,6 +519,9 @@ string MangleVariableObjectName(const Scope* scope, const string& name)
 	vector<string> parts = ScopeComponents(scope);
 	if (parts.empty())
 		return "_Z" + SourceName(name);
+	if (parts.size() == 1 && parts[0] == "std")
+		// 5.1.4.2: the abbreviation St spells the std prefix.
+		return "_ZSt" + SourceName(name);
 	string encoding = "N";
 	for (size_t i = 0; i < parts.size(); i++)
 		encoding += SourceName(parts[i]);

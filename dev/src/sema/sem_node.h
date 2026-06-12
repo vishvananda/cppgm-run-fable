@@ -86,7 +86,25 @@ enum ESemNodeKind
 	// bytes (alignment in `bit_width`) from the address of children[1]
 	// to the address of children[0]. Lowering-only; never printed by
 	// the PA12 dump.
-	SN_STORAGE_COPY
+	SN_STORAGE_COPY,
+	// PA16 scalar new of a non-class type: children[0] is the
+	// allocation call, children[1] (optional) the converted
+	// initializer value stored into the result. `null_pointer` marks a
+	// non-throwing allocation function (construction branches on the
+	// result).
+	SN_NEW_INIT,
+	// PA16 array new: children[0] is the allocation-function callee,
+	// children[1] the element-count value, children[2] (optional) the
+	// per-element constructor action. `value.bits` is the element
+	// size, `member_offset` the count-header bytes (class elements),
+	// `trivial_init` requests `()` zero-fill of non-class elements.
+	SN_NEW_ARRAY,
+	// PA16 delete / delete[]: children[0] is the operand pointer,
+	// children[1] the deallocation-function callee, children[2]
+	// (optional) the element destructor action. `value.bits` is the
+	// element size, `member_offset` the count-header bytes.
+	SN_DELETE_EXPRESSION,
+	SN_DELETE_ARRAY
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete

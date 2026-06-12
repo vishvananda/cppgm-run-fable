@@ -318,29 +318,57 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 	}
 	case SN_MEMBER_EXPRESSION:
 		return LowerMemberValue(node);
+	case SN_NEW_ARRAY:
+		return LowerNewArray(node);
+	case SN_NEW_INIT:
+		return LowerNewInit(node);
 	case SN_CONSTRUCTOR_ACTION:
 	{
 		if (RemoveTopCv(node.type)->kind == TK_POINTER)
 		{
-			// Placement new: the allocation call provides the object
-			// address; the constructor runs on it.
+			// New-expression: the allocation call provides the object
+			// address; the constructor runs on it (a non-throwing
+			// allocation branches around construction on null).
 			const SemNode& call = *node.children[0];
 			LowerValue address = LowerValueExpr(*call.children[1]);
-			bool saved = in_lifetime_action_;
-			in_lifetime_action_ = true;
-			const SemNode& callee = *call.children[0];
-			string arguments = address.text;
-			for (size_t i = 2; i < call.children.size(); i++)
+			string init_label;
+			string end_label;
+			if (node.null_pointer)
 			{
-				TypePtr param =
-					i - 1 < callee.type->parameters.size()
-						? callee.type->parameters[i - 1] : TypePtr();
-				arguments += ", " +
-					LowerCallArgument(*call.children[i], param);
+				string c = NewTemp();
+				Emit(c + " = cmp ne ptr " + address.text + ", 0");
+				init_label = NewLabel("new_init");
+				end_label = NewLabel("new_end");
+				ReferenceLabel(init_label);
+				ReferenceLabel(end_label);
+				Terminate("branch " + c + ", ^" + init_label + ", ^" +
+				          end_label);
+				OpenBlock(init_label);
 			}
-			Emit("call void " + program_.MemberFunctionRef(callee) +
-			     "(" + arguments + ")");
-			in_lifetime_action_ = saved;
+			if (!node.trivial_init)
+			{
+				bool saved = in_lifetime_action_;
+				in_lifetime_action_ = true;
+				const SemNode& callee = *call.children[0];
+				string arguments = address.text;
+				for (size_t i = 2; i < call.children.size(); i++)
+				{
+					TypePtr param =
+						i - 1 < callee.type->parameters.size()
+							? callee.type->parameters[i - 1] : TypePtr();
+					arguments += ", " +
+						LowerCallArgument(*call.children[i], param);
+				}
+				Emit("call void " + program_.MemberFunctionRef(callee) +
+				     "(" + arguments + ")");
+				in_lifetime_action_ = saved;
+			}
+			if (!init_label.empty())
+			{
+				ReferenceLabel(end_label);
+				Terminate("jump ^" + end_label);
+				OpenBlock(end_label);
+			}
 			LowerValue value;
 			value.type = RemoveTopCv(node.type);
 			value.text = address.text;
@@ -1365,16 +1393,35 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		     " " + LowerValueType(source) + " " + value.text);
 		value.text = temp;
 	}
-	else if (LowerValueType(source) != LowerValueType(target) ||
-	         (context == LCC_CAST &&
-	          !(source->kind == TK_ENUM || target->kind == TK_ENUM)))
+	else
 	{
-		// An enumeration cast that keeps the spelling emits nothing
-		// (the canonical reference shape).
+		// An enumeration cast to exactly its underlying type (or back)
+		// is an identity and emits nothing; every other spelled cast
+		// copies (the canonical reference shapes).
+		bool enum_identity = false;
+		if (source->kind == TK_ENUM && target->kind == TK_FUNDAMENTAL)
+			enum_identity =
+				source->named->enum_underlying == target->fundamental;
+		else if (target->kind == TK_ENUM &&
+		         source->kind == TK_FUNDAMENTAL)
+			enum_identity =
+				target->named->enum_underlying == source->fundamental;
+		else if (source->kind == TK_ENUM && target->kind == TK_ENUM)
+			enum_identity = source->named->enum_underlying ==
+				target->named->enum_underlying;
+		// An 8-byte unsigned destination spells i64 (LowIR has no
+		// u64); the reference keeps the spelled cast copy there.
+		if (enum_identity && LowerUnsignedOps(target) &&
+		    TypeSize(target) == 8)
+			enum_identity = false;
+		if (LowerValueType(source) != LowerValueType(target) ||
+		    (context == LCC_CAST && !enum_identity))
+		{
 		string temp = NewTemp();
 		Emit(temp + " = copy " + LowerValueType(target) + " " +
 		     value.text);
 		value.text = temp;
+		}
 	}
 	value.type = target;
 	return value;
@@ -1411,6 +1458,16 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 			return;
 		}
 		LowerCall(node);
+		return;
+	case SN_DELETE_EXPRESSION:
+	case SN_DELETE_ARRAY:
+		LowerDelete(node);
+		return;
+	case SN_NEW_ARRAY:
+		LowerNewArray(node);
+		return;
+	case SN_NEW_INIT:
+		LowerNewInit(node);
 		return;
 	case SN_UNARY_EXPRESSION:
 		if (node.op == OP_INC || node.op == OP_DEC)

@@ -47,6 +47,45 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	nullptr_alias.name = "nullptr_t";
 	nullptr_alias.type = MakeFundamentalType(FT_NULLPTR_T);
 	AddBinding(*model.global(), nullptr_alias);
+	// 3.7.4: the global allocation and deallocation functions are
+	// implicitly declared in every translation unit.
+	TypePtr size_type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
+	TypePtr byte_ptr = MakePointerType(MakeFundamentalType(FT_VOID),
+	                                   false, false);
+	TypePtr void_type = MakeFundamentalType(FT_VOID);
+	const char* alloc_names[2] = {"operator new", "operator new[]"};
+	const char* free_names[2] = {"operator delete", "operator delete[]"};
+	for (int i = 0; i < 2; i++)
+	{
+		ScopeBinding alloc;
+		alloc.kind = SB_FUNCTION;
+		alloc.name = alloc_names[i];
+		vector<TypePtr> params;
+		params.push_back(size_type);
+		alloc.type = MakeFunctionType(byte_ptr, params, false);
+		alloc.fn_defaults.resize(1);
+		alloc.fn_deleted.resize(1, false);
+		alloc.fn_access.resize(1, MA_PUBLIC);
+		alloc.fn_static.resize(1, false);
+		alloc.fn_inline_def.resize(1, false);
+		alloc.fn_adl_only.resize(1, false);
+		alloc.fn_unwind_no.resize(1, false);
+		AddBinding(*model.global(), alloc);
+		ScopeBinding dealloc;
+		dealloc.kind = SB_FUNCTION;
+		dealloc.name = free_names[i];
+		vector<TypePtr> free_params;
+		free_params.push_back(byte_ptr);
+		dealloc.type = MakeFunctionType(void_type, free_params, false);
+		dealloc.fn_defaults.resize(1);
+		dealloc.fn_deleted.resize(1, false);
+		dealloc.fn_access.resize(1, MA_PUBLIC);
+		dealloc.fn_static.resize(1, false);
+		dealloc.fn_inline_def.resize(1, false);
+		dealloc.fn_adl_only.resize(1, false);
+		dealloc.fn_unwind_no.resize(1, true);
+		AddBinding(*model.global(), dealloc);
+	}
 }
 
 // --- ISemExprHost ----------------------------------------------------------

@@ -201,6 +201,39 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 	info.type = type;
 	info.is_main = name == "main" && scope->kind == SCOPE_NAMESPACE &&
 		!scope->parent;
+	// The implicitly declared global allocation functions carry their
+	// builtin object names (3.7.4).
+	bool global_scope = scope->kind == SCOPE_NAMESPACE && !scope->parent;
+	string builtin;
+	if (global_scope && type->parameters.size() == 1)
+	{
+		if (name == "operator new" &&
+		    type->parameters[0]->kind == TK_FUNDAMENTAL)
+			builtin = "operator_new";
+		else if (name == "operator new[]" &&
+		         type->parameters[0]->kind == TK_FUNDAMENTAL)
+			builtin = "operator_new__";
+		else if (name == "operator delete" &&
+		         type->parameters[0]->kind == TK_POINTER)
+			builtin = "operator_delete";
+		else if (name == "operator delete[]" &&
+		         type->parameters[0]->kind == TK_POINTER)
+			builtin = "operator_delete__";
+	}
+	if (!builtin.empty())
+	{
+		info.low_name = UniqueSymbol(builtin);
+		info.object_name = "cppgm_builtin_" +
+			(builtin == "operator_new" ? string("operator_new")
+			 : builtin == "operator_new__" ? string("operator_new_array")
+			 : builtin == "operator_delete" ? string("operator_delete")
+			 : string("operator_delete_array"));
+		info.unwind_no = builtin.compare(0, 15, "operator_delete") == 0;
+		info.index = functions_.size();
+		function_index_[key] = functions_.size();
+		functions_.push_back(info);
+		return functions_.back();
+	}
 	size_t overload = LowerOverloadIndex(scope, name, type);
 	string base = LowerScopePath(scope) + LowerSanitizeName(name);
 	if (overload)

@@ -151,6 +151,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeSizeof(expr);
 	case EK_NEW:
 		return AnalyzeNew(expr);
+	case EK_DELETE:
+		return AnalyzeDelete(expr);
 	default:
 		throw OutsideBoundary("expression form");
 	}

@@ -777,15 +777,17 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 		return;
 	}
 	Scope* declaring = ResolvePrefixScope(*composed.id);
-	if (declaring->kind != SCOPE_CLASS)
+	if (declaring->kind != SCOPE_CLASS &&
+	    declaring->kind != SCOPE_NAMESPACE)
 		throw OutsideBoundary("qualified declarator scope");
 	const string& name = PartName(composed.id->parts.back());
 	ScopeBinding* member = FindOwnBinding(*declaring, name);
 	if (!member || member->kind != SB_VARIABLE)
-		throw runtime_error(name + " is not a static data member");
+		throw runtime_error(name + " is not a declared object");
 	member->type = MergeRedeclaredType(member->type, composed.type);
 	// The definition emits like a namespace-scope object owned by the
-	// class scope.
+	// declaring scope. A qualified definition completes an earlier
+	// (extern) declaration, so const-ness does not make it internal.
 	SemNode* item = AppendItem(SN_VARIABLE);
 	item->name = QualifiedScopePath(declaring) + name;
 	item->type = member->type;
@@ -793,6 +795,7 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->entity_name = name;
 	item->is_static_decl = specs.is_static;
 	item->is_thread_local_decl = specs.is_thread_local;
+	item->is_extern_decl = declaring->kind == SCOPE_NAMESPACE;
 	AttachObjectLifetime(*item, *member, declarator.init.get(), specs);
 }
 

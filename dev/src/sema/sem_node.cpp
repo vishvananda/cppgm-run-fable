@@ -86,6 +86,10 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_SIZEOF_EXPRESSION: return "sizeof-expression";
 	case SN_BRACED_INIT_LIST: return "braced-init-list";
 	case SN_STORAGE_COPY: return "storage-copy";
+	case SN_NEW_INIT: return "new-init";
+	case SN_NEW_ARRAY: return "new-array";
+	case SN_DELETE_EXPRESSION: return "delete-expression";
+	case SN_DELETE_ARRAY: return "delete-array";
 	}
 	throw runtime_error("unknown semantic node kind");
 }

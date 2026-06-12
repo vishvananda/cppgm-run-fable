@@ -393,6 +393,10 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		in_lifetime_action_ = saved;
 		return;
 	}
+	case SN_DELETE_EXPRESSION:
+	case SN_DELETE_ARRAY:
+		LowerDelete(node);
+		return;
 	case SN_RETURN_STATEMENT:
 		LowerReturn(node);
 		return;

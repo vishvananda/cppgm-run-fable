@@ -219,7 +219,14 @@ private:
 	                                  const string& written);
 	SemValue MakeTemporaryObject(const TypePtr& class_type,
 	                             const vector<AstExprPtr>& arguments);
+	// --- PA16 allocation expressions (sem_new.cpp) ---
 	SemValue AnalyzeNew(const AstExpr& expr);
+	SemValue AnalyzeNewArray(const AstExpr& expr, size_t bound_item);
+	SemValue AnalyzeDelete(const AstExpr& expr);
+	SemValue MakeAllocationCall(const char* name, vector<SemValue> args,
+	                            const TypePtr& result_type,
+	                            bool& unwind_no);
+	SemValue MakeSizeLiteral(unsigned long long size);
 	SemValue AnalyzeStringUdl(const AstExpr& expr);
 	// --- PA15 operator overloading (sem_operator.cpp) ---
 	void CollectOperatorCandidates(const string& op_name,

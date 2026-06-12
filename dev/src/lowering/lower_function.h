@@ -155,6 +155,10 @@ private:
 	                              const string& dest);
 	// One by_address call argument object (slot kind "arg").
 	string MaterializeClassArg(const SemNode& node, const TypePtr& bare);
+	// --- PA16 allocation expressions (lower_new.cpp) ---
+	LowerValue LowerNewArray(const SemNode& node);
+	LowerValue LowerNewInit(const SemNode& node);
+	void LowerDelete(const SemNode& node);
 	LowerValue LowerComparison(const SemNode& node);
 	LowerValue LowerBinary(const SemNode& node);
 	LowerValue LowerLogicalValue(const SemNode& node);
