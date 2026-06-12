@@ -90,6 +90,9 @@ struct ClassCtor
 	// A defaulted move constructor defined as deleted is ignored by
 	// overload resolution (12.8p9).
 	bool ignore_in_overload;
+	// 8.4.2p4: defaulted after its first declaration is user-provided
+	// (non-trivial), though it still synthesizes the implicit body.
+	bool defaulted_outside;
 	bool built;            // synthesized definition pushed (implicit/defaulted)
 	bool built_unwind_no;  // synthesized body cannot throw
 };

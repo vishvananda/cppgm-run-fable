@@ -478,6 +478,7 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		if (ctor.kind == CK_ORDINARY && !ctor.type->parameters.empty())
 			throw runtime_error("defaulted non-special constructor");
 		ctor.defaulted = true;
+		ctor.defaulted_outside = true;
 		RecomputeUserCtorFact(*cls);
 		if (ctor.kind == CK_ORDINARY)
 			EnsureImplicitDefaultCtor(*cls, true);

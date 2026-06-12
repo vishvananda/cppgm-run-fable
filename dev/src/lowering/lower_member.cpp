@@ -271,8 +271,10 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	// A may-unwind construction runs under a dispatch region once
 	// destructible objects (argument temporaries, live locals) need
 	// cleanup on unwind.
-	if (eh_armed_ && !in_cleanup_emission_ && !eh_open_ &&
-	    (!temp_cleanups_.empty() || HaveCleanups()) &&
+	bool guarded = eh_armed_
+		? (!temp_cleanups_.empty() || HaveCleanups())
+		: (!saved && HaveCleanups());
+	if (guarded && !in_cleanup_emission_ && !eh_open_ &&
 	    program_.CalleeMayUnwind(callee))
 		OpenEhRegion();
 	string callee_text = program_.MemberFunctionRef(callee);

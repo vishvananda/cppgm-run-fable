@@ -634,8 +634,11 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	value.node->children.push_back(std::move(callee));
 	if (!is_static)
 	{
-		// An inherited method receives the base subobject's address.
-		int hops = BaseClassDistance(object_entity, callee_class);
+		// An inherited method receives the base subobject's address; a
+		// using-imported one belongs to the importing class for
+		// addressing (its base sits at offset zero either way).
+		int hops = binding.home != binding.owner
+			? 0 : BaseClassDistance(object_entity, callee_class);
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);

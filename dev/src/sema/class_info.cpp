@@ -309,8 +309,9 @@ bool UserProvidedCtor(const ClassInfo& info, ECtorKind kind)
 	for (size_t i = 0; i < info.ctors.size(); i++)
 	{
 		const ClassCtor& ctor = info.ctors[i];
-		if (ctor.kind == kind && !ctor.implicit && !ctor.defaulted &&
-		    !ctor.deleted)
+		if (ctor.kind != kind || ctor.implicit || ctor.deleted)
+			continue;
+		if (!ctor.defaulted || ctor.defaulted_outside)
 			return true;
 	}
 	return false;
