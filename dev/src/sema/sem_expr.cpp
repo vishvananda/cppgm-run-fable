@@ -381,6 +381,14 @@ SemValue SemExprAnalyzer::CallResult(const TypePtr& function_type)
 	const TypePtr& result = function_type->target;
 	value.node = MakeSemNode(SN_CALL_EXPRESSION);
 	value.node->type = result;
+	// 12.2: a class-valued result is a destructible temporary at its
+	// materialization point.
+	if (!IsReferenceType(result) && RemoveTopCv(result)->kind == TK_CLASS)
+		if (const ClassInfo* cls =
+		        host_.Classes().Find(RemoveTopCv(result)->named))
+			if (host_.Classes().NeedsDestruction(*cls) &&
+			    host_.Classes().DestructionHasEffects(*cls))
+				value.node->needs_dtor = true;
 	if (result->kind == TK_LVALUE_REFERENCE)
 	{
 		value.category = VC_LVALUE;

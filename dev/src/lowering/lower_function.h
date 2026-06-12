@@ -155,6 +155,9 @@ private:
 	                              const string& dest);
 	// One by_address call argument object (slot kind "arg").
 	string MaterializeClassArg(const SemNode& node, const TypePtr& bare);
+	// A lowering-owned destructor action for a materialized class
+	// call result.
+	const SemNode* MakeResultCleanup(const TypePtr& bare);
 	// --- PA16 allocation expressions (lower_new.cpp) ---
 	LowerValue LowerNewArray(const SemNode& node);
 	LowerValue LowerNewInit(const SemNode& node);
@@ -279,6 +282,8 @@ private:
 	bool in_lifetime_action_;
 	// --- full-expression temporary state ---
 	vector<TempCleanup> temp_cleanups_;
+	// Nodes the lowering itself owns (call-result cleanups).
+	vector<SemNodePtr> owned_nodes_;
 	vector<size_t> fe_marks_;
 	vector<char> fe_armed_;
 	// The open full expression constructs destructible temporaries:

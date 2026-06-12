@@ -357,7 +357,46 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 	}
 	else
 		LowerCall(call, address);
+	if (call.needs_dtor && dest.empty())
+	{
+		// The materialized result is a destructible temporary of the
+		// enclosing full expression.
+		if (eh_open_)
+			CloseEhRegion();
+		TempCleanup cleanup;
+		cleanup.address = address;
+		cleanup.action = MakeResultCleanup(RemoveTopCv(bare));
+		temp_cleanups_.push_back(cleanup);
+	}
 	return address;
+}
+
+// A lowering-owned destructor action for a materialized class call
+// result (the callee facts mirror MakeDestructorCall's).
+const SemNode* FunctionLowerer::MakeResultCleanup(const TypePtr& bare)
+{
+	const ClassInfo* cls = bare->named->class_record;
+	const string& base_name = cls->members->name;
+	SemNodePtr action = MakeSemNode(SN_DESTRUCTOR_ACTION);
+	action->special = SF_DESTRUCTOR;
+	SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
+	call->type = MakeFundamentalType(FT_VOID);
+	call->category = VC_PRVALUE;
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = base_name + "::~" + base_name;
+	TypePtr class_type = MakeNamedType(TK_CLASS, bare->named);
+	vector<TypePtr> params;
+	params.push_back(MakePointerType(class_type, false, false));
+	callee->type = MakeFunctionType(MakeFundamentalType(FT_VOID), params,
+	                                false);
+	callee->entity_scope = cls->members;
+	callee->entity_name = "~" + base_name;
+	callee->is_method = true;
+	callee->special = SF_DESTRUCTOR;
+	call->children.push_back(std::move(callee));
+	action->children.push_back(std::move(call));
+	owned_nodes_.push_back(std::move(action));
+	return owned_nodes_.back().get();
 }
 
 // A trivial copy/move construction: the source object's bytes copy
@@ -663,7 +702,9 @@ void FunctionLowerer::OpenEhRegion()
 
 bool FunctionLowerer::TreeHasTempCleanups(const SemNode& node) const
 {
-	if (node.kind == SN_CONSTRUCTOR_ACTION && node.needs_dtor)
+	if (node.needs_dtor &&
+	    (node.kind == SN_CONSTRUCTOR_ACTION ||
+	     node.kind == SN_CALL_EXPRESSION))
 		return true;
 	for (size_t i = 0; i < node.children.size(); i++)
 		if (TreeHasTempCleanups(*node.children[i]))

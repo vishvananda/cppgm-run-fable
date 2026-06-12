@@ -1343,10 +1343,14 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		}
 		if (IsIntegralType(source))
 		{
-			// 5.2.10p5: an integral value reinterpreted as a pointer.
-			string temp = NewTemp();
-			Emit(temp + " = copy ptr " + value.text);
-			value.text = temp;
+			// 5.2.10p5: an integral value reinterpreted as a pointer;
+			// a zero immediate stays the null spelling.
+			if (!(value.imm_int && value.value.bits == 0))
+			{
+				string temp = NewTemp();
+				Emit(temp + " = copy ptr " + value.text);
+				value.text = temp;
+			}
 			value.imm_int = false;
 			value.type = target;
 			return value;
