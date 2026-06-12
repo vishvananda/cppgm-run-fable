@@ -706,7 +706,11 @@ TypePtr SemBinder::MethodAdjustedType(const ClassInfo& cls,
 	parameters.push_back(MakePointerType(class_type, false, false));
 	for (size_t i = 0; i < member->parameters.size(); i++)
 		parameters.push_back(member->parameters[i]);
-	return MakeFunctionType(member->target, parameters, member->variadic);
+	TypePtr adjusted = MakeFunctionType(member->target, parameters,
+	                                    member->variadic);
+	if (member->ref_qual)
+		adjusted = MakeRefQualifiedType(adjusted, member->ref_qual);
+	return adjusted;
 }
 
 SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,

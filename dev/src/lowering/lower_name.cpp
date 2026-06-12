@@ -441,6 +441,7 @@ size_t LowerMemberOverloadIndex(const Scope* scope, const string& name,
 			i == 0 ? binding->type : binding->overloads[i - 1];
 		if (candidate->is_const == is_const &&
 		    candidate->is_volatile == is_volatile &&
+		    candidate->ref_qual == adjusted->ref_qual &&
 		    candidate->parameters.size() == declared_params.size() &&
 		    TypeEquals(RemoveTopCv(candidate->target),
 		               RemoveTopCv(declared->target)))
@@ -552,6 +553,10 @@ string MangleMemberFunctionObjectName(const Scope* scope,
 		encoding += "V";
 	if (is_const)
 		encoding += "K";
+	if (type->ref_qual == 1)
+		encoding += "R";
+	else if (type->ref_qual == 2)
+		encoding += "O";
 	string entity_key = "T:";
 	for (size_t i = 0; i < parts.size(); i++)
 	{

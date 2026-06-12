@@ -131,6 +131,90 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 	}
 }
 
+// 3.4.2: an unqualified call merges the visible overloads with the
+// candidates argument-dependent lookup finds in the arguments'
+// associated namespaces (hidden friends included; using-declaration
+// imports into an associated namespace are not its own declarations).
+SemValue SemExprAnalyzer::AnalyzeAdlCall(const AstExpr& expr,
+                                         const string& name,
+                                         const ScopeBinding* visible)
+{
+	vector<SemValue> args;
+	vector<ConversionSource> sources;
+	for (size_t i = 0; i < expr.arguments.size(); i++)
+	{
+		args.push_back(Analyze(*expr.arguments[i]));
+		sources.push_back(MakeConversionSource(args.back()));
+	}
+	set<const void*> seen;
+	vector<OperatorCandidate> candidates;
+	if (visible)
+		AppendBindingOverloads(*visible, false, false, candidates, seen);
+	vector<const Scope*> namespaces;
+	for (size_t i = 0; i < args.size(); i++)
+		CollectAssociatedNamespaces(host_.Model(), args[i].type,
+		                            namespaces);
+	set<const Scope*> visited;
+	for (size_t i = 0; i < namespaces.size(); i++)
+	{
+		if (!visited.insert(namespaces[i]).second)
+			continue;
+		const ScopeBinding* found = FindOwnBinding(*namespaces[i], name);
+		if (found && found->kind == SB_FUNCTION &&
+		    found->owner == namespaces[i])
+			AppendBindingOverloads(*found, false, true, candidates, seen);
+	}
+	if (candidates.empty())
+		throw runtime_error("undeclared name " + name);
+	vector<TypePtr> ranking;
+	vector<size_t> min_arity;
+	for (size_t c = 0; c < candidates.size(); c++)
+	{
+		ranking.push_back(candidates[c].declared);
+		size_t required = candidates[c].declared->parameters.size();
+		const ScopeBinding& binding = *candidates[c].binding;
+		const vector<const AstExpr*>* defaults =
+			candidates[c].index < binding.fn_defaults.size()
+				? &binding.fn_defaults[candidates[c].index] : 0;
+		while (defaults && required > 0 && required <= defaults->size() &&
+		       (*defaults)[required - 1])
+			required--;
+		min_arity.push_back(required);
+	}
+	vector<ImplicitConversion> conversions;
+	size_t winner = SelectBestOverload(ranking, sources, conversions,
+	                                   &min_arity);
+	const OperatorCandidate& chosen = candidates[winner];
+	const ScopeBinding& binding = *chosen.binding;
+	if (chosen.index < binding.fn_deleted.size() &&
+	    binding.fn_deleted[chosen.index])
+		throw runtime_error("use of deleted function " + name);
+	const TypePtr& fn = chosen.declared;
+	for (size_t i = 0; i < args.size(); i++)
+		if (i < fn->parameters.size())
+			ApplyConversion(args[i], conversions[i], fn->parameters[i]);
+	for (size_t i = args.size(); i < fn->parameters.size(); i++)
+	{
+		SemValue filled =
+			Analyze(*binding.fn_defaults[chosen.index][i]);
+		CopyInitialize(filled, fn->parameters[i], "default argument");
+		args.push_back(std::move(filled));
+	}
+	SemValue value = CallResult(fn);
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
+	callee->type = fn;
+	callee->entity_scope = binding.owner;
+	callee->entity_name = binding.name;
+	if (chosen.index < binding.fn_unwind_no.size() &&
+	    binding.fn_unwind_no[chosen.index])
+		callee->unwind_no = true;
+	value.node->children.push_back(std::move(callee));
+	for (size_t i = 0; i < args.size(); i++)
+		value.node->children.push_back(std::move(args[i].node));
+	return value;
+}
+
 // 13.3.1.2 selection over the collected candidates; false when no
 // user-declared candidate is viable (the caller falls back to the
 // built-in meaning).
@@ -162,9 +246,12 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 			class_type = MakeCvQualifiedType(
 				class_type, candidate.declared->is_const,
 				candidate.declared->is_volatile);
+			bool rvalue_param = candidate.declared->ref_qual == 2 ||
+				(candidate.declared->ref_qual == 0 &&
+				 operands[0].category != VC_LVALUE);
 			vector<TypePtr> parameters;
 			parameters.push_back(
-				MakeReferenceType(class_type, false, true));
+				MakeReferenceType(class_type, rvalue_param, true));
 			for (size_t i = 0;
 			     i < candidate.declared->parameters.size(); i++)
 				parameters.push_back(candidate.declared->parameters[i]);

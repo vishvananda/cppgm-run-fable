@@ -125,7 +125,7 @@ private:
 	                  bool collapsible, DeclaratorInfo& out);
 	void ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	                           bool fn_const, bool fn_volatile,
-	                           DeclaratorInfo& out);
+	                           int fn_ref, DeclaratorInfo& out);
 	void BuildParameters(const AstParameterClause& clause,
 	                     vector<ParameterInfo>& parameters,
 	                     vector<TypePtr>& types);

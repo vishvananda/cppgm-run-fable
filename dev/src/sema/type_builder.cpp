@@ -222,7 +222,7 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 
 void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
                                         bool fn_const, bool fn_volatile,
-                                        DeclaratorInfo& out)
+                                        int fn_ref, DeclaratorInfo& out)
 {
 	switch (item.kind)
 	{
@@ -239,9 +239,12 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 			out.trailing_return = TypePtr();
 		}
 		out.type = MakeFunctionType(out.type, types, item.params->variadic);
-		// 8.3.5p6: trailing cv-qualifiers belong to the function type
-		// (member functions; the binder rejects them elsewhere).
+		// 8.3.5p6: trailing cv-qualifiers and the ref-qualifier belong
+		// to the function type (member functions; the binder rejects
+		// them elsewhere).
 		out.type = MakeCvQualifiedType(out.type, fn_const, fn_volatile);
+		if (fn_ref)
+			out.type = MakeRefQualifiedType(out.type, fn_ref);
 		out.declares_function = true;
 		out.parameters.swap(parameters);
 		break;
@@ -260,11 +263,11 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		break;
 	case DI_FUNC_QUAL:
 		// Exception specifications do not enter the PA11 type model;
-		// virt-specifiers and ref-qualifiers are member-function
-		// territory. The cheap non-unwinding markings are kept for the
-		// PA14 LowIR boundary metadata.
+		// virt-specifiers are PA17 territory (ref-qualifiers are
+		// consumed by the suffix walk). The cheap non-unwinding
+		// markings are kept for the PA14 LowIR boundary metadata.
 		if (item.qual.kind == FQ_VIRT)
-			throw OutsideBoundary("virt-specifier or ref-qualifier");
+			throw OutsideBoundary("virt-specifier");
 		if ((item.qual.kind == FQ_NOEXCEPT && !item.qual.has_expr) ||
 		    (item.qual.kind == FQ_THROW && item.qual.throw_types.empty()))
 			out.noexcept_simple = true;
@@ -337,6 +340,7 @@ void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items,
 	}
 	bool fn_const = false;
 	bool fn_volatile = false;
+	int fn_ref = 0;
 	for (size_t i = items.size(); i > suffix_begin; i--)
 	{
 		const AstDeclaratorItem& item = items[i - 1];
@@ -350,9 +354,18 @@ void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items,
 				fn_volatile = true;
 			continue;
 		}
-		ApplyDeclaratorSuffix(item, fn_const, fn_volatile, out);
+		if (item.kind == DI_FUNC_QUAL && item.qual.kind == FQ_VIRT &&
+		    (item.qual.spelling == "&" || item.qual.spelling == "&&"))
+		{
+			// 8.3.5p6: the ref-qualifier of the parameter clause it
+			// follows.
+			fn_ref = item.qual.spelling == "&" ? 1 : 2;
+			continue;
+		}
+		ApplyDeclaratorSuffix(item, fn_const, fn_volatile, fn_ref, out);
 		fn_const = false;
 		fn_volatile = false;
+		fn_ref = 0;
 		collapsible = false;
 	}
 	if (fn_const || fn_volatile)

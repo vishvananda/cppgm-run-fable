@@ -268,7 +268,11 @@ TypePtr SemExprAnalyzer::ThisAdjustedType(const NamedTypeInfo* cls,
 	parameters.push_back(MakePointerType(class_type, false, false));
 	for (size_t i = 0; i < member->parameters.size(); i++)
 		parameters.push_back(member->parameters[i]);
-	return MakeFunctionType(member->target, parameters, member->variadic);
+	TypePtr adjusted = MakeFunctionType(member->target, parameters,
+	                                    member->variadic);
+	if (member->ref_qual)
+		adjusted = MakeRefQualifiedType(adjusted, member->ref_qual);
+	return adjusted;
 }
 
 SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
@@ -627,6 +631,10 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 		return AnalyzeMemberCall(expr, *callee);
 	if (callee->kind == EK_ID)
 	{
+		// 3.4.2p1: a parenthesized callee suppresses argument-dependent
+		// lookup.
+		bool paren_callee = expr.operands[0]->kind == EK_PAREN;
+		bool plain = callee->name.IsPlainIdentifier();
 		if (TypePtr as_type = host_.TryResolveCalleeType(callee->name))
 			return AnalyzeFunctionalCast(as_type, expr.arguments);
 		const NamedTypeInfo* member_class = 0;
@@ -637,17 +645,28 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 		}
 		catch (const std::exception&)
 		{
-			if (callee->name.IsPlainIdentifier() &&
+			if (plain &&
 			    callee->name.parts[0].identifier == "__builtin_constant_p")
 				return AnalyzeBuiltinConstantP(expr);
-			if (callee->name.IsPlainIdentifier())
+			if (plain)
 				binding = host_.ResolveBuiltinFunction(
 					callee->name.parts[0].identifier);
+			if (!binding && plain && !paren_callee)
+				// Only argument-dependent lookup can name the callee
+				// (hidden friends, associated namespaces).
+				return AnalyzeAdlCall(
+					expr, callee->name.parts[0].identifier, 0);
 			if (!binding)
 				throw;
 		}
 		if (binding->kind == SB_FUNCTION)
+		{
+			if (plain && !paren_callee && binding->home &&
+			    binding->home->kind == SCOPE_NAMESPACE)
+				return AnalyzeAdlCall(
+					expr, callee->name.parts[0].identifier, binding);
 			return AnalyzeNamedCall(expr, *binding, member_class);
+		}
 	}
 	return AnalyzeIndirectCall(expr);
 }

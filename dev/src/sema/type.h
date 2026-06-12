@@ -93,7 +93,7 @@ struct Type
 	Type()
 		: kind(TK_FUNDAMENTAL), is_const(false), is_volatile(false),
 		  fundamental(FT_VOID), bound_known(false), bound(0),
-		  variadic(false), named(0)
+		  variadic(false), ref_qual(0), named(0)
 	{}
 
 	ETypeKind kind;
@@ -110,6 +110,9 @@ struct Type
 	unsigned long long bound;      // TK_ARRAY when bound_known
 	vector<TypePtr> parameters;    // TK_FUNCTION, already adjusted (8.3.5p5)
 	bool variadic;                 // TK_FUNCTION
+	// TK_FUNCTION: the member-function ref-qualifier (8.3.5p6):
+	// 0 none, 1 `&`, 2 `&&`.
+	int ref_qual;
 	// TK_FUNCTION: member-function cv-qualifiers (8.3.5p6) are stored as
 	// the node's is_const/is_volatile and print after the parameter list.
 	const NamedTypeInfo* named;    // TK_CLASS / TK_ENUM / TK_TYPE_PARAM /
@@ -158,6 +161,9 @@ TypePtr MakeArrayType(const TypePtr& element, bool bound_known,
 // Throws when the return type is a function or array (8.3.5p8).
 TypePtr MakeFunctionType(const TypePtr& return_type,
                          const vector<TypePtr>& parameters, bool variadic);
+
+// PA16: the function type with a member ref-qualifier (8.3.5p6).
+TypePtr MakeRefQualifiedType(const TypePtr& function, int ref_qual);
 
 // 8.3.3: pointer to member of `cls` of type `member`. Throws on
 // reference or void member types (8.3.3p3).

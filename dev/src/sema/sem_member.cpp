@@ -527,7 +527,8 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	vector<ConversionSource> sources;
 	ConversionSource object_source;
 	object_source.type = object.type;
-	object_source.category = VC_LVALUE;
+	object_source.category = object.category == VC_PRVALUE
+		? VC_XVALUE : object.category;
 	sources.push_back(object_source);
 	for (size_t i = 0; i < arguments.size(); i++)
 	{
@@ -551,11 +552,17 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 			                                 false, true);
 		else
 		{
+			// 13.3.1p4 with 8.3.5p6: the implicit object parameter
+			// carries the ref-qualifier; without one it binds either
+			// value category.
 			TypePtr class_type = MakeNamedType(
 				TK_CLASS, owner_entity ? owner_entity : object_entity);
 			class_type = MakeCvQualifiedType(class_type, fn->is_const,
 			                                 fn->is_volatile);
-			object_param = MakeReferenceType(class_type, false, true);
+			bool rvalue_param = fn->ref_qual == 2 ||
+				(fn->ref_qual == 0 && object.category != VC_LVALUE);
+			object_param = MakeReferenceType(class_type, rvalue_param,
+			                                 true);
 		}
 		vector<TypePtr> parameters;
 		parameters.push_back(object_param);

@@ -58,6 +58,12 @@ SemValue SemExprAnalyzer::MakeAllocationCall(const char* name,
 		ApplyConversion(args[i], conversions[i], fn->parameters[i]);
 	unwind_no = winner < binding->fn_unwind_no.size() &&
 		binding->fn_unwind_no[winner];
+	// 18.6.1.3: the reserved placement form returns its pointer
+	// argument and cannot fail; no null check guards construction.
+	if (fn->parameters.size() == 2 &&
+	    fn->parameters[1]->kind == TK_POINTER &&
+	    IsVoidType(RemoveTopCv(fn->parameters[1]->target)))
+		unwind_no = false;
 	SemValue value;
 	value.type = result_type;
 	value.category = VC_PRVALUE;

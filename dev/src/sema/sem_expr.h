@@ -176,6 +176,10 @@ private:
 	                          const ScopeBinding& binding,
 	                          const NamedTypeInfo* member_class);
 	SemValue AnalyzeIndirectCall(const AstExpr& expr);
+	// PA16: an unqualified call with argument-dependent lookup
+	// (sem_operator.cpp); `visible` is the ordinary-lookup binding.
+	SemValue AnalyzeAdlCall(const AstExpr& expr, const string& name,
+	                        const ScopeBinding* visible);
 	SemValue AnalyzeBuiltinConstantP(const AstExpr& expr);
 	SemValue AnalyzeUnary(const AstExpr& expr);
 	SemValue AnalyzeAddressOf(const AstExpr& expr);

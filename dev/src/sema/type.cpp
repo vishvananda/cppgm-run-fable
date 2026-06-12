@@ -149,6 +149,13 @@ TypePtr MakeArrayType(const TypePtr& element, bool bound_known,
 	return make_shared<Type>(type);
 }
 
+TypePtr MakeRefQualifiedType(const TypePtr& function, int ref_qual)
+{
+	Type qualified = *function;
+	qualified.ref_qual = ref_qual;
+	return TypePtr(new Type(qualified));
+}
+
 TypePtr MakeFunctionType(const TypePtr& return_type,
                          const vector<TypePtr>& parameters, bool variadic)
 {
@@ -247,7 +254,7 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 			return false;
 		break;
 	case TK_FUNCTION:
-		if (a->variadic != b->variadic ||
+		if (a->variadic != b->variadic || a->ref_qual != b->ref_qual ||
 		    a->parameters.size() != b->parameters.size())
 			return false;
 		for (size_t i = 0; i < a->parameters.size(); i++)
@@ -480,6 +487,10 @@ string DescribeType(const TypePtr& type)
 		qualifiers += " const";
 	if (type->is_volatile)
 		qualifiers += " volatile";
+	if (type->ref_qual == 1)
+		qualifiers += " &";
+	else if (type->ref_qual == 2)
+		qualifiers += " &&";
 	return "function of (" + parameters + ")" + qualifiers + " returning " +
 		DescribeType(type->target);
 }
