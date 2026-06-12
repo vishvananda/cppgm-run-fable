@@ -616,6 +616,7 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	else
 		BranchOnValue(*node.children[0], short_label, rhs_label);
 	OpenBlock(rhs_label);
+	size_t rhs_mark = temp_cleanups_.size();
 	LowerValue operand = LowerValueExpr(*node.children[1]);
 	string truth = NewTemp();
 	if (LowerFloatType(operand.type))
@@ -624,6 +625,13 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	else
 		Emit(truth + " = cmp ne i64 " + operand.text + ", 0");
 	Emit("store i64 " + truth + ", $" + slot);
+	// 12.2: temporaries of the conditionally evaluated operand die
+	// inside its arm.
+	if (temp_cleanups_.size() > rhs_mark && !blocks_.back().terminated)
+		EmitTempCleanups(rhs_mark);
+	if (eh_open_)
+		CloseEhRegion();
+	temp_cleanups_.resize(rhs_mark);
 	ReferenceLabel(end_label);
 	Terminate("jump ^" + end_label);
 	OpenBlock(short_label);
@@ -1133,12 +1141,18 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 			throw OutsideBoundary("call form");
 	}
 	// A call that can unwind while destructor-protected objects are
-	// alive runs under an unwind-dispatch region.
+	// alive runs under an unwind-dispatch region. The result
+	// preservation slot allocates at region entry.
 	bool protected_call = !in_cleanup_emission_ &&
 		(eh_armed_ || (!in_lifetime_action_ && HaveCleanups())) &&
 		(!direct || program_.CalleeMayUnwind(callee));
+	string preserve_slot;
 	if (protected_call && !eh_open_)
 		OpenEhRegion();
+	if (protected_call && !IsVoidType(fn_type->target) &&
+	    RemoveTopCv(fn_type->target)->kind != TK_CLASS)
+		preserve_slot = AddMatSlot("call",
+		                           LowerValueType(fn_type->target));
 	string arguments;
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
@@ -1184,6 +1198,10 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		line = result.text + " = call " + return_text + " " +
 			callee_text + "(" + arguments + ")";
 	}
+	// Argument-temporary registration may have closed the region; the
+	// call itself still runs protected.
+	if (protected_call && !eh_open_ && !in_cleanup_emission_)
+		OpenEhRegion();
 	if (!direct)
 	{
 		string signature;
@@ -1212,14 +1230,14 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&
 		!IsReferenceType(fn_type->target);
 	if (protected_call && eh_open_ && !IsVoidType(fn_type->target) &&
-	    !class_result)
+	    !class_result && !preserve_slot.empty())
 	{
 		// A protected call's result survives the region in a slot (a
 		// reference result survives as its pointer).
-		string slot = AddMatSlot("call", LowerValueType(fn_type->target));
-		Emit("store " + return_text + " " + result.text + ", $" + slot);
+		Emit("store " + return_text + " " + result.text + ", $" +
+		     preserve_slot);
 		string reloaded = NewTemp();
-		Emit(reloaded + " = load " + return_text + " $" + slot);
+		Emit(reloaded + " = load " + return_text + " $" + preserve_slot);
 		result.text = reloaded;
 	}
 	return result;

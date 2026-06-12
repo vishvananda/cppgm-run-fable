@@ -305,9 +305,9 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 		return;
 	case SN_CONDITIONAL_EXPRESSION:
 	{
-		string then_label = NewLabel("cond_then");
-		string else_label = NewLabel("cond_else");
-		string end_label = NewLabel("cond_end");
+		string then_label = NewLabel("condobj_then");
+		string else_label = NewLabel("condobj_else");
+		string end_label = NewLabel("condobj_end");
 		BranchOnValue(*node.children[0], then_label, else_label);
 		OpenBlock(then_label);
 		LowerClassInit(*node.children[1], dest);
