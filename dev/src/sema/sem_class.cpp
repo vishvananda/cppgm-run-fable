@@ -438,9 +438,11 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		}
 		DeferredBody body;
 		body.decl = &decl;
+		body.composed.type = MakeFunctionType(
+			MakeFundamentalType(FT_VOID), vector<TypePtr>(), false);
 		body.name = "~" + declaring->name;
 		body.fn_scope = MakeSpecialMemberScope(body.name,
-		                                       DeclaratorInfo(), *cls);
+		                                       body.composed, *cls);
 		body.declaring = declaring;
 		body.cls = cls;
 		body.out_of_class = true;
@@ -1252,7 +1254,10 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	callee->unwind_no = callee_unwind_no;
 	call->children.push_back(std::move(callee));
 	if (address)
+	{
 		call->children.push_back(std::move(address));
+		action->ctor_addressed = true;
+	}
 	for (size_t i = 0; i < args.size(); i++)
 		call->children.push_back(std::move(args[i]));
 	action->children.push_back(std::move(call));

@@ -152,6 +152,7 @@ size_t SemBinder::ConsumeAggregateClassItem(const ClassInfo& member_cls,
 		call.children.insert(
 			call.children.begin() + 1,
 			AddressOfNode(std::move(member)));
+		action->ctor_addressed = true;
 		out.push_back(std::move(action));
 		return at;
 	}
@@ -816,6 +817,7 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		call.children.insert(
 			call.children.begin() + 1,
 			AddressOfNode(VariableObjectExpr(binding)));
+		action->ctor_addressed = true;
 		item.children.push_back(std::move(action));
 		return;
 	}

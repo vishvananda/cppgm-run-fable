@@ -199,6 +199,10 @@ struct SemNode
 	// trivial implicit one; the lowering emits a raw `copyobj` of the
 	// whole object instead of demanding a helper definition.
 	bool trivial_copy;
+	// SN_CONSTRUCTOR_ACTION: the call's second child is the target
+	// object address (declared objects, members, placement results),
+	// not the first constructor argument.
+	bool ctor_addressed;
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);

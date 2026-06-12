@@ -219,13 +219,12 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		{
 			const ClassCtor& ctor = cls.ctors[i];
 			if (ctor.is_explicit || ctor.deleted ||
+			    ctor.kind != CK_ORDINARY ||
 			    ctor.type->parameters.size() != 1)
 				continue;
 			const TypePtr& param = ctor.type->parameters[0];
-			if (param->kind == TK_CLASS ||
-			    (IsReferenceType(param) &&
-			     param->target->kind == TK_CLASS))
-				continue;  // no chained user conversions
+			// One standard conversion reaches the parameter; chained
+			// user conversions stay excluded below.
 			ImplicitConversion inner = ClassifyConversion(source, param);
 			if (!inner.viable || inner.rank == CR_USER)
 				continue;

@@ -256,12 +256,7 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	// temporary's holds [callee, args...].
 	const SemNode& call = *action.children[0];
 	const SemNode& callee = *call.children[0];
-	size_t first_arg = 1;
-	if (call.children.size() > 1 &&
-	    call.children[1]->kind == SN_UNARY_EXPRESSION &&
-	    call.children[1]->op == OP_AMP &&
-	    call.children[1]->has_op)
-		first_arg = 2;
+	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	ctor_depth_++;
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
@@ -405,11 +400,7 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
                                              const string& this_text)
 {
 	const SemNode& call = *action.children[0];
-	size_t first_arg = 1;
-	if (call.children.size() > 1 &&
-	    call.children[1]->kind == SN_UNARY_EXPRESSION &&
-	    call.children[1]->op == OP_AMP && call.children[1]->has_op)
-		first_arg = 2;
+	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	string dst = this_text;
 	if (dst.empty())
 	{
@@ -574,10 +565,8 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 				LowerCall(*child.children[0]);
 				in_lifetime_action_ = saved;
 			}
-			else if (child.children[0]->children.size() > 1 &&
-			         child.children[0]->children[1]->kind ==
-			             SN_UNARY_EXPRESSION &&
-			         child.children[0]->children[1]->op == OP_AMP &&
+			else if (child.ctor_addressed &&
+			         child.children[0]->children.size() > 1 &&
 			         !child.children[0]->children[1]->children.empty() &&
 			         child.children[0]->children[1]->children[0]->kind ==
 			             SN_MEMBER_EXPRESSION)

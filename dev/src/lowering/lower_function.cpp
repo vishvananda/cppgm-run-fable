@@ -313,9 +313,8 @@ void FunctionLowerer::LowerConstructorAction(const SemNode& node)
 	}
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
-	if (node.has_value && node.children[0]->children.size() > 1 &&
-	    node.children[0]->children[1]->kind == SN_UNARY_EXPRESSION &&
-	    node.children[0]->children[1]->op == OP_AMP)
+	if (node.has_value && node.ctor_addressed &&
+	    node.children[0]->children.size() > 1)
 	{
 		string address = LowerAddressExpr(
 			*node.children[0]->children[1]->children[0]);

@@ -96,6 +96,7 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 			call.children.insert(
 				call.children.begin() + 1,
 				AddressOfNode(ThisFieldExpr(field)));
+			action->ctor_addressed = true;
 			out.push_back(std::move(action));
 			return;
 		}
