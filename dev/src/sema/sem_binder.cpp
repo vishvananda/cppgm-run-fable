@@ -26,7 +26,8 @@ bool SameParameterList(const Type& a, const Type& b)
 {
 	if (a.variadic != b.variadic ||
 	    a.parameters.size() != b.parameters.size() ||
-	    a.is_const != b.is_const || a.is_volatile != b.is_volatile)
+	    a.is_const != b.is_const || a.is_volatile != b.is_volatile ||
+	    a.ref_qual != b.ref_qual)
 		return false;
 	for (size_t i = 0; i < a.parameters.size(); i++)
 		if (!TypeEquals(a.parameters[i], b.parameters[i]))
@@ -399,7 +400,18 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 		return;
 	}
 	SemValue value = analyzer_.Analyze(*expr);
-	analyzer_.CopyInitialize(value, binding.type, "initialization");
+	if (init->kind == INIT_PAREN)
+	{
+		// 8.5p15: direct-initialization admits explicit conversion
+		// functions.
+		ImplicitConversion conv = ClassifyConversionEx(
+			MakeConversionSource(value), binding.type, true);
+		if (!conv.viable)
+			throw runtime_error("no conversion for initialization");
+		analyzer_.ApplyConversion(value, conv, binding.type);
+	}
+	else
+		analyzer_.CopyInitialize(value, binding.type, "initialization");
 	item.children.push_back(std::move(value.node));
 }
 

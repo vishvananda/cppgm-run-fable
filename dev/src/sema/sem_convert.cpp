@@ -261,9 +261,11 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	bool rvalue_source = !lvalue_source;
 	if (rvalue_ref)
 	{
-		// 8.5.3p5: an rvalue reference binds rvalues and function
-		// lvalues only.
-		if (lvalue_source && !function_source)
+		// 8.5.3p5: an rvalue reference never binds an lvalue directly;
+		// a conversion-produced temporary (array decay, value
+		// conversions) still binds below.
+		if (lvalue_source && !function_source &&
+		    ReferenceRelated(referee, source.type))
 			return result;
 	}
 	else if (!lvalue_source)
@@ -306,7 +308,7 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	bool referee_volatile = false;
 	TopCv(referee, referee_const, referee_volatile);
 	bool const_lvalue_ref = !rvalue_ref && referee_const && !referee_volatile;
-	if (!const_lvalue_ref && !(rvalue_ref && rvalue_source))
+	if (!const_lvalue_ref && !rvalue_ref)
 		return result;
 	ImplicitConversion value =
 		ClassifyValueConversion(source, RemoveTopCv(referee));
@@ -330,6 +332,10 @@ int CompareConversions(const ImplicitConversion& a,
 {
 	if (a.rank != b.rank)
 		return a.rank < b.rank ? -1 : 1;
+	if (a.rank == CR_USER && a.second_rank != b.second_rank)
+		// 13.3.3.2p3: user-defined sequences rank by their second
+		// standard conversion.
+		return a.second_rank < b.second_rank ? -1 : 1;
 	if (a.bool_from_pointer != b.bool_from_pointer)
 		return a.bool_from_pointer ? 1 : -1;
 	if (a.base_distance != b.base_distance)

@@ -391,6 +391,59 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in)
 	return adjusted;
 }
 
+// A braced aggregate temporary (`T{items}` over an aggregate class):
+// the synthesized field-wise constructor runs over the converted
+// items; trailing fields value-initialize through zero arguments.
+SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
+                                             vector<SemValue> args)
+{
+	TypePtr adjusted = EnsureAggregateCtor(cls_in);
+	const ClassInfo& cls = *unit_.classes.Find(cls_in.entity);
+	const string& base_name = cls.members->name;
+	string qualified = QualifiedScopePath(cls.members->parent) +
+		base_name + "::" + base_name;
+	SemNodePtr action = MakeSemNode(SN_CONSTRUCTOR_ACTION);
+	action->name = qualified;
+	action->special = SF_CONSTRUCTOR;
+	action->type = MakeNamedType(TK_CLASS, cls.entity);
+	action->category = VC_PRVALUE;
+	SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
+	call->type = MakeFundamentalType(FT_VOID);
+	call->category = VC_PRVALUE;
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = qualified;
+	callee->type = adjusted;
+	callee->entity_scope = cls.members;
+	callee->entity_name = base_name;
+	callee->is_method = true;
+	callee->special = SF_CONSTRUCTOR;
+	callee->unwind_no = true;
+	call->children.push_back(std::move(callee));
+	if (args.size() + 1 > adjusted->parameters.size())
+		throw runtime_error("too many initializers for aggregate");
+	for (size_t i = 0; i < args.size(); i++)
+	{
+		analyzer_.CopyInitialize(args[i], adjusted->parameters[i + 1],
+		                         "aggregate item");
+		call->children.push_back(std::move(args[i].node));
+	}
+	for (size_t i = args.size() + 1; i < adjusted->parameters.size(); i++)
+	{
+		TypePtr param = adjusted->parameters[i];
+		if (IsReferenceType(param))
+			throw runtime_error("reference member is not initialized");
+		SemValue zero = ZeroValue(RemoveTopCv(param));
+		call->children.push_back(std::move(zero.node));
+	}
+	action->children.push_back(std::move(call));
+	if (unit_.classes.NeedsDestruction(cls))
+	{
+		action->needs_dtor = true;
+		action->children.push_back(MakeTemporaryDtor(cls));
+	}
+	return action;
+}
+
 // A braced array of aggregates: each element runs the synthesized
 // field-wise constructor at its byte offset (the action records the
 // A declared class array: braced per-element construction (aggregate

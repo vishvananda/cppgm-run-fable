@@ -128,7 +128,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
 		                     *expr.operands[0], true, OP_LPAREN, "");
 	case EK_KEYWORD_CAST:
-		if (expr.op != KW_STATIC_CAST && expr.op != KW_CONST_CAST)
+		if (expr.op != KW_STATIC_CAST && expr.op != KW_CONST_CAST &&
+		    expr.op != KW_REINTERPET_CAST)
 			throw OutsideBoundary("cast keyword");
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
 		                     *expr.operands[0], true, expr.op,
@@ -1433,7 +1434,9 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 		valid = IsArithmeticOrEnum(value.type);
 	else if (to->kind == TK_POINTER)
 		valid = value.null_pointer_literal || IsNullPtrType(value.type) ||
-			IsPointerAfterDecay(value.type);
+			IsPointerAfterDecay(value.type) ||
+			// 5.2.10p5: reinterpret_cast of an integral value.
+			(op == KW_REINTERPET_CAST && IsIntegralType(value.type));
 	else
 		valid = false;
 	if (!valid)

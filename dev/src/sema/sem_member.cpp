@@ -389,6 +389,18 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	vector<SemValue> args;
 	for (size_t i = 0; i < arguments.size(); i++)
 		args.push_back(Analyze(*arguments[i]));
+	if (cls->is_aggregate && !cls->has_user_ctor && !args.empty())
+	{
+		// 5.2.3p3/8.5.1: a braced temporary of an aggregate class
+		// initializes field-wise.
+		SemNodePtr action =
+			host_.MakeAggregateTemporary(*cls, std::move(args));
+		SemValue value;
+		value.type = RemoveTopCv(class_type);
+		value.category = VC_PRVALUE;
+		value.node = std::move(action);
+		return value;
+	}
 	int winner = host_.ResolveClassCtorHost(*cls, args, false, "temporary");
 	vector<SemNodePtr> arg_nodes;
 	for (size_t i = 0; i < args.size(); i++)

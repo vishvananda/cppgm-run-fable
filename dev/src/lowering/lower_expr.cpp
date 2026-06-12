@@ -1319,6 +1319,16 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 			value.type = target;
 			return value;
 		}
+		if (IsIntegralType(source))
+		{
+			// 5.2.10p5: an integral value reinterpreted as a pointer.
+			string temp = NewTemp();
+			Emit(temp + " = copy ptr " + value.text);
+			value.text = temp;
+			value.imm_int = false;
+			value.type = target;
+			return value;
+		}
 		// 4.10p3: a derived-class pointer adjusts to the base
 		// subobject (offset 0 in the single-inheritance model).
 		if (source->kind == TK_POINTER &&

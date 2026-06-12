@@ -78,6 +78,10 @@ struct ISemExprHost
 	// operator selected by overload resolution.
 	virtual void EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
 	                                 size_t overload_index) = 0;
+	// A braced aggregate temporary: the synthesized field-wise
+	// constructor over the converted items (8.5.1 over a prvalue).
+	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
+	                                          vector<SemValue> args) = 0;
 	virtual ~ISemExprHost() {}
 };
 

@@ -549,7 +549,9 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 			AppendMemberInit(cls, field, found->second->init.get(),
 			                 actions);
 		}
-		else
+		else if (!cls.is_union)
+			// 12.6.2p8: union variant members are not implicitly
+			// initialized.
 			AppendFieldDefaultInit(cls, field, actions);
 	}
 	if (matched != body.decl->mem_initializers.size())
@@ -650,7 +652,9 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 		if (cls.base)
 			AppendBaseDefaultInit(cls, actions);
 		for (size_t i = 0; i < cls.fields.size(); i++)
-			if (!cls.fields[i].name.empty() || !cls.fields[i].is_bit_field)
+			if (!cls.is_union &&
+			    (!cls.fields[i].name.empty() ||
+			     !cls.fields[i].is_bit_field))
 				AppendFieldDefaultInit(cls, cls.fields[i], actions);
 	}
 	catch (...)

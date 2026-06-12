@@ -73,7 +73,7 @@ bool UnionMemberBlocks(const ClassInfo& cls,
 bool HasUsableCopyAssign(const ClassInfo& cls)
 {
 	if (cls.has_user_copy_assign)
-		return true;
+		return !cls.copy_assign_deleted;
 	return cls.copy_assign_index >= 0 && !cls.copy_assign_deleted;
 }
 
@@ -180,7 +180,12 @@ void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 			if (is_move)
 				cls.has_user_move_assign = true;
 			else
+			{
 				cls.has_user_copy_assign = true;
+				if (i < assign->fn_deleted.size() &&
+				    assign->fn_deleted[i])
+					cls.copy_assign_deleted = true;
+			}
 			if (i < assign->fn_defaulted.size() &&
 			    assign->fn_defaulted[i])
 			{

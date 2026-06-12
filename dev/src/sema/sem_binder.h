@@ -41,6 +41,8 @@ public:
 	                                 const char* what);
 	virtual void EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
 	                                 size_t overload_index);
+	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
+	                                          vector<SemValue> args);
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
