@@ -51,9 +51,9 @@ struct ClassField
 struct ClassCtor
 {
 	ClassCtor()
-		: access(MA_PUBLIC), is_explicit(false), deleted(false),
-		  defaulted(false), unwind_no(false), definition(0),
-		  inherited_base(0), inherited_built(false)
+		: inherited_built(false), access(MA_PUBLIC), is_explicit(false),
+		  deleted(false), defaulted(false), unwind_no(false), definition(0),
+		  inherited_base(0)
 	{}
 
 	vector<string> param_names;  // declared parameter names

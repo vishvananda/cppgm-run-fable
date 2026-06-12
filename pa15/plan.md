@@ -139,3 +139,66 @@ New/extended facts on `SemNode` (lowering input):
   region), the temporaries destroy in reverse order inside the last region,
   and dispatch blocks destroy live temporaries before scoped locals. The
   unwind-runtime declares appear only for scoped local cleanups.
+
+## Architecture Review
+
+As built, the implementation matches the planned ownership split:
+
+- **Layout** lives only in `sema/class_info.cpp`: `BeginClassLayout` /
+  `LayoutField` / `LayoutBitField` / `FinishClassLayout` compute offsets,
+  bit-field packing, size, and alignment once at class completion. No
+  offset/alignment arithmetic exists in lowering; `lower_member.cpp` addresses
+  members purely from the typed `SemNode` facts (`member_offset`, `base_hops`,
+  `member_ref`, bit-field unit/offset/width).
+- **Resolution** lives in the `sem_*` modules. Member access, method calls,
+  ctor/dtor selection, operator overloading, and ADL stamp
+  `entity_scope`/`entity_name`/`type`/`special` plus offset facts onto
+  `SemNode`s (`sem_member.cpp`, `sem_ctor.cpp`, `sem_operator.cpp`). Lowering
+  performs no AST walks (no `Ast*` references in `lowering/`) and no name
+  lookup; demand-driven member emission keys off `MemberDefinitionKey`
+  (scope + name + signature + kind), not source spelling.
+- **Demand-driven helpers**: deferred in-class definitions register weak in
+  `member_defs_`; `MemberFunctionEntry` attaches the definition when an entry
+  is first demanded, and `LowerUsedFunctions` sweeps entries in registration
+  order so output stays repeatable. C1/D1 entries carry the base-entry alias;
+  unused weak definitions never print.
+- Two deliberate, reviewed exceptions to "lowering only consumes facts":
+  - `LowerOverloadIndex`/`LowerMemberOverloadIndex`/`LowerOverloadDeleted`
+    read the declaring scope's own binding (`FindOwnBinding`, no scope-chain
+    walk) to derive the `__ov<N>` presentation suffix and per-overload
+    deleted-ness. Both are entity-keyed reads of sema-owned per-overload data
+    used only for symbol naming/declare emission; call dispatch itself is
+    driven by `SemNode` facts.
+  - `MangleTerminalName` string-parses `operator...` spellings when building
+    Itanium names. The spelling is itself the semantic identity of an
+    operator, and the output is presentation-only.
+- **Principled recovery paths** (verified not to be acceptance shortcuts):
+  the builtin-call fallback in `AnalyzeCall` only fires for the three
+  `__builtin_*` names and rethrows the original lookup error otherwise;
+  `TryVexingCallRecovery` is the 6.8p1 statement/declaration disambiguation,
+  keyed on whether the leading name resolves to a type or a function, with a
+  structural guard and fall-through to ordinary declaration binding.
+
+## Final Architecture Review
+
+Post-audit state (see `audit.md` for the change list):
+
+- The `LowerUsedFunctions` fixpoint no longer re-walks the whole function
+  table per round: `DemandFunction` is the single demand chokepoint and
+  records the lowest re-armed entry index, and each sweep restarts from that
+  floor. Lowering order — and therefore symbol uniquification and output —
+  is unchanged; the through-pa15 report is byte-stable.
+- Constructor/field elision (`DefaultConstructionHasEffects` /
+  `DestructionHasEffects`) recurses over the subobject tree once per
+  class analysis; remaining linear scans (`FindClassField`, ctor overload
+  walks, scope-depth string building in `LowerScopeKey`) are bounded by
+  per-class member counts and nesting depth, not program size.
+- File discipline: every PA15 module is within the audit's size and
+  header-body limits; the only file-audit warning (`parser.h`) predates PA15
+  (last touched in the PA6 audit). No implementation lives outside
+  `dev/src`; the only handout-path change in the PA15 range is this plan.
+- Extension points are clean for the next stages: PA16 value semantics can
+  add copy/move ctor entries to `ClassCtor`/`member_defs_` and new
+  `SN_CONSTRUCTOR_ACTION` variants without touching layout or demand
+  plumbing; PA17 vtables slot into `ClassInfo` layout plus a new dispatch
+  path in `lower_member.cpp`.

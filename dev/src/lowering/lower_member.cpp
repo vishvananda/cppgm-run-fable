@@ -26,15 +26,6 @@ TypePtr StripRef(const TypePtr& type)
 	return IsReferenceType(type) ? type->target : type;
 }
 
-// The innermost element type of a (possibly array-of) class object.
-TypePtr InnerObjectType(const TypePtr& type)
-{
-	TypePtr inner = type;
-	while (inner->kind == TK_ARRAY)
-		inner = inner->target;
-	return RemoveTopCv(inner);
-}
-
 // The unsigned mask of `width` bits.
 unsigned long long BitMask(unsigned long long width)
 {

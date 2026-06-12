@@ -119,8 +119,8 @@ struct ScopeBinding
 
 struct Scope
 {
-	Scope() : kind(SCOPE_NAMESPACE), parent(0), unnamed_member(0),
-	          class_base(0) {}
+	Scope() : kind(SCOPE_NAMESPACE), parent(0), class_base(0),
+	          unnamed_member(0) {}
 
 	EScopeKind kind;
 	string name;  // empty for the global namespace, blocks, and

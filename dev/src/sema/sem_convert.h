@@ -44,9 +44,9 @@ struct ConversionSource
 struct ImplicitConversion
 {
 	ImplicitConversion()
-		: viable(false), rank(CR_EXACT), null_to_pointer(false),
-		  bool_from_pointer(false), reference_binding(false),
-		  binds_rvalue_reference(false), base_distance(0),
+		: viable(false), rank(CR_EXACT), base_distance(0),
+		  null_to_pointer(false), bool_from_pointer(false),
+		  reference_binding(false), binds_rvalue_reference(false),
 		  selected_overload(-1), user_class(0), user_ctor(-1)
 	{}
 

@@ -51,7 +51,7 @@ string FloatInitToken(const TypePtr& type, const LowerConst& value)
 }  // namespace
 
 LowerProgram::LowerProgram()
-	: has_main_(false), needs_eh_runtime_(false)
+	: has_main_(false), needs_eh_runtime_(false), lower_floor_(0)
 {
 	symbols_.insert("main");
 }
@@ -207,6 +207,7 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 	info.deleted = LowerOverloadDeleted(scope, name, type);
 	if (!info.is_main)
 		info.object_name = MangleFunctionObjectName(scope, name, type);
+	info.index = functions_.size();
 	function_index_[key] = functions_.size();
 	functions_.push_back(info);
 	return functions_.back();
@@ -274,6 +275,7 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		info.definition = def->second;
 		info.unwind_no = def->second->unwind_no;
 	}
+	info.index = functions_.size();
 	function_index_[key] = functions_.size();
 	functions_.push_back(info);
 	return functions_.back();
@@ -342,7 +344,7 @@ string LowerProgram::FunctionRef(const Scope* scope, const string& name,
                                  const TypePtr& type)
 {
 	LowFunctionInfo& info = FunctionEntry(scope, name, type);
-	info.used = true;
+	DemandFunction(info);
 	return "@" + info.low_name;
 }
 
@@ -360,7 +362,7 @@ string LowerProgram::MemberFunctionRef(const SemNode& callee)
 	}
 	LowFunctionInfo& info = MemberFunctionEntry(
 		callee.entity_scope, callee.entity_name, callee.type, code);
-	info.used = true;
+	DemandFunction(info);
 	return "@" + info.low_name;
 }
 
@@ -540,18 +542,34 @@ string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 		RenderScalarInit(info);
 }
 
+// Demand-marks a function entry. A flip behind the sweep below re-arms
+// the rescan floor so the sweep revisits only that suffix.
+void LowerProgram::DemandFunction(LowFunctionInfo& info)
+{
+	if (info.used)
+		return;
+	info.used = true;
+	if (info.defined && info.body_text.empty() &&
+	    info.index < lower_floor_)
+		lower_floor_ = info.index;
+}
+
 // Lowers the reachable definitions: source-owned roots first, then
 // hidden-friend bodies (whose references count as semantic demand even
 // when the friend itself never prints), then whatever those marked.
+// Each sweep runs in entry order from the rescan floor; entries below
+// the floor are already lowered or had no demand flip since last
+// checked, so repeated whole-table walks are avoided.
 void LowerProgram::LowerUsedFunctions()
 {
 	for (int phase = 0; phase < 2; phase++)
 	{
-		bool progress = true;
-		while (progress)
+		lower_floor_ = 0;
+		while (lower_floor_ < functions_.size())
 		{
-			progress = false;
-			for (size_t i = 0; i < functions_.size(); i++)
+			size_t start = lower_floor_;
+			lower_floor_ = functions_.size();
+			for (size_t i = start; i < functions_.size(); i++)
 			{
 				LowFunctionInfo& info = functions_[i];
 				if (!info.defined || !info.body_text.empty())
@@ -562,7 +580,6 @@ void LowerProgram::LowerUsedFunctions()
 					continue;
 				FunctionLowerer lowerer(*this, *info.definition, info);
 				info.body_text = lowerer.Lower();
-				progress = true;
 			}
 		}
 	}
@@ -669,6 +686,7 @@ void LowerProgram::BuildLifetimeHelpers()
 		info.low_name = UniqueSymbol("__cppgm_init");
 		info.internal = true;
 		info.role = "init";
+		info.index = functions_.size();
 		functions_.push_back(info);
 		LowerHelper(functions_.back(), *init_def);
 		helper_defs_.push_back(std::move(init_def));
@@ -682,6 +700,7 @@ void LowerProgram::BuildLifetimeHelpers()
 		info.low_name = UniqueSymbol("__cppgm_fini");
 		info.internal = true;
 		info.role = "fini";
+		info.index = functions_.size();
 		functions_.push_back(info);
 		LowerHelper(functions_.back(), *fini_def);
 		helper_defs_.push_back(std::move(fini_def));

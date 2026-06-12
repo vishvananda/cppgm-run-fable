@@ -28,7 +28,8 @@ struct LowFunctionInfo
 	LowFunctionInfo()
 		: scope(0), is_main(false), defined(false), used(false),
 		  deleted(false), c_linkage(false), unwind_no(false),
-		  internal(false), weak(false), is_method(false), definition(0)
+		  internal(false), weak(false), is_method(false), definition(0),
+		  index(0)
 	{}
 
 	const Scope* scope;  // declaring namespace or class scope
@@ -54,14 +55,15 @@ struct LowFunctionInfo
 	string alias_object;
 	string role;  // role=init / role=fini helpers
 	const SemNode* definition;
+	size_t index;        // position in functions_ (demand rescan key)
 	string body_text;    // lowered definition text
 };
 
 struct LowGlobalInfo
 {
 	LowGlobalInfo()
-		: type(), defined(false), used(false), internal(false),
-		  is_thread_local(false), c_linkage(false), dynamic_init(false),
+		: dynamic_init(false), type(), defined(false), used(false),
+		  internal(false), is_thread_local(false), c_linkage(false),
 		  node(0)
 	{}
 
@@ -135,6 +137,7 @@ private:
 	string MemberDefinitionKey(const Scope* scope, const string& name,
 	                           const TypePtr& type,
 	                           ESpecialFunction special) const;
+	void DemandFunction(LowFunctionInfo& info);
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();
 	void AppendDynamicInit(LowGlobalInfo& info, const SemNode& child,
@@ -165,5 +168,8 @@ private:
 	// MemberDefinitionKey; lifetime helper state.
 	map<string, const SemNode*> member_defs_;
 	bool needs_eh_runtime_;
+	// The lowest functions_ index whose demand flipped since the body
+	// sweep last passed it (rescans restart there, not from zero).
+	size_t lower_floor_;
 	vector<SemNodePtr> helper_defs_;  // synthesized init/fini trees
 };

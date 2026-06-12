@@ -22,10 +22,9 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  is_extern_decl(false), is_thread_local_decl(false),
 	  c_linkage(false), unwind_no(false), member_offset(0),
 	  base_hops(0), is_bit_field(false), bit_offset(0), bit_width(0),
-	  is_method(false), special(SF_NONE), inline_def(false),
-	  needs_dtor(false), trivial_init(false), elided(false),
-	  bf_plain_store(false),
-	  member_ref(false)
+	  member_ref(false), is_method(false), special(SF_NONE),
+	  inline_def(false), needs_dtor(false), trivial_init(false),
+	  elided(false), bf_plain_store(false)
 {
 }
 
