@@ -395,7 +395,7 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 			braced = init->expr.get();
 		if (!braced)
 			throw OutsideBoundary("class array initializer form");
-		if (cls.ctors.empty() && cls.is_aggregate &&
+		if (!cls.has_user_ctor && cls.is_aggregate &&
 		    binding.home && binding.home->kind != SCOPE_NAMESPACE)
 		{
 			AppendAggregateArrayInit(item, binding, cls, *braced);
@@ -562,6 +562,13 @@ void SemBinder::AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
 	bool needs_dtor = unit_.classes.NeedsDestruction(*cls);
 	if (!needs_dtor)
 		return;
+	if (!unit_.classes.DestructionHasEffects(*cls))
+	{
+		// The destructor is still potentially invoked (resolved and
+		// access-checked); an effect-free chain emits no cleanup.
+		MakeDestructorCall(*cls, false, SemNodePtr());
+		return;
+	}
 	item.needs_dtor = true;
 	if (type->kind == TK_ARRAY)
 	{
@@ -649,6 +656,16 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	else
 		for (size_t i = 0; i < args.size(); i++)
 			values.push_back(analyzer_.Analyze(*args[i]));
+	if (copy_init && !braced && values.size() == 1 &&
+	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+	    BaseClassDistance(RemoveTopCv(values[0].type)->named,
+	                      cls.entity) >= 0)
+		// PA16 copy-initialization from a class value: the copy/move
+		// constructor wraps the source (unless the source already
+		// constructs in place); the elision below targets the object.
+		analyzer_.CopyInitialize(values[0],
+		                         MakeNamedType(TK_CLASS, cls.entity),
+		                         "initialization");
 	if (values.size() == 1 && values[0].node &&
 	    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
@@ -670,16 +687,13 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		item.children.push_back(std::move(action));
 		return;
 	}
-	if (copy_init && !braced && values.size() == 1 &&
+	if (values.size() == 1 && values[0].node &&
+	    values[0].category == VC_PRVALUE &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
-	    BaseClassDistance(RemoveTopCv(values[0].type)->named,
-	                      cls.entity) >= 0)
+	    RemoveTopCv(values[0].type)->named == cls.entity)
 	{
-		// Same-class copy-initialization keeps the PA12 dump shape;
-		// the value-semantics lowering belongs to PA16.
-		analyzer_.CopyInitialize(values[0],
-		                         MakeNamedType(TK_CLASS, cls.entity),
-		                         "initialization");
+		// A same-class prvalue initializer (call result, conditional)
+		// constructs the declared object directly (copy elision).
 		item.children.push_back(std::move(values[0].node));
 		return;
 	}

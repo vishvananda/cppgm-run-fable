@@ -81,7 +81,12 @@ enum ESemNodeKind
 	SN_CAST_EXPRESSION,        // extra: TOKEN:spelling (absent for
 	                           // functional casts)
 	SN_SIZEOF_EXPRESSION,
-	SN_BRACED_INIT_LIST
+	SN_BRACED_INIT_LIST,
+	// PA16 synthesized special-member body action: copies `value.bits`
+	// bytes (alignment in `bit_width`) from the address of children[1]
+	// to the address of children[0]. Lowering-only; never printed by
+	// the PA12 dump.
+	SN_STORAGE_COPY
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete
@@ -165,6 +170,17 @@ struct SemNode
 	// constructor stores the masked value directly instead of
 	// read-modify-write.
 	bool bf_plain_store;
+
+	// --- PA16 value-semantics facts ---
+	// SN_CONSTRUCTOR_ACTION: a copy/move-initialization wrapper the
+	// binder synthesized around a class-typed source (call arguments,
+	// declared-object copy-init, by-value returns). The PA12 dump
+	// prints the wrapped source instead of the action.
+	bool synth_copy;
+	// SN_CONSTRUCTOR_ACTION: the selected copy/move constructor is the
+	// trivial implicit one; the lowering emits a raw `copyobj` of the
+	// whole object instead of demanding a helper definition.
+	bool trivial_copy;
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);

@@ -285,6 +285,109 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	ctor_depth_--;
 }
 
+// Constructs the class value of `node` into the object at `dest`:
+// constructor actions run in place, class-valued calls write their
+// result there, conditionals construct per arm.
+void FunctionLowerer::LowerClassInit(const SemNode& node,
+                                     const string& dest)
+{
+	switch (node.kind)
+	{
+	case SN_CONSTRUCTOR_ACTION:
+		if (node.trivial_copy)
+			LowerTrivialCopyAction(node, dest);
+		else
+			LowerConstructorCall(node, dest);
+		return;
+	case SN_CALL_EXPRESSION:
+		MaterializeClassResult(node, "tmpobj", dest);
+		return;
+	case SN_CONDITIONAL_EXPRESSION:
+	{
+		string then_label = NewLabel("cond_then");
+		string else_label = NewLabel("cond_else");
+		string end_label = NewLabel("cond_end");
+		BranchOnValue(*node.children[0], then_label, else_label);
+		OpenBlock(then_label);
+		LowerClassInit(*node.children[1], dest);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		OpenBlock(else_label);
+		LowerClassInit(*node.children[2], dest);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		OpenBlock(end_label);
+		return;
+	}
+	default:
+		break;
+	}
+	// A class lvalue/xvalue source without a wrapping constructor (the
+	// trivial direct transfer): raw object copy.
+	TypePtr bare = RemoveTopCv(StripRef(node.type));
+	if (bare->kind != TK_CLASS)
+		throw OutsideBoundary("class object initializer form");
+	string src = LowerAddressExpr(node);
+	if (bare->named->class_record && bare->named->class_record->is_empty)
+		return;
+	Emit("copyobj " + LowerObjSpan(bare) + " " + src + ", " + dest);
+}
+
+// A class-valued call's result object: written into `dest` when
+// given, else materialized in a fresh `kind` slot. Returns the object
+// address text.
+string FunctionLowerer::MaterializeClassResult(const SemNode& call,
+                                               const char* kind,
+                                               const string& dest)
+{
+	TypePtr bare = RemoveTopCv(StripRef(call.type));
+	string address = dest;
+	if (address.empty())
+	{
+		string slot = AddMatSlot(kind, LowerSlotType(bare));
+		address = NewTemp();
+		Emit(address + " = addr $" + slot);
+	}
+	if (LowerClassDirect(bare))
+	{
+		LowerValue result = LowerCall(call);
+		Emit("copyobj " + LowerObjSpan(bare) + " " + result.text + ", " +
+		     address);
+	}
+	else
+		LowerCall(call, address);
+	return address;
+}
+
+// A trivial copy/move construction: the source object's bytes copy
+// directly into the destination (the PA16 direct value-transfer form).
+void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
+                                             const string& this_text)
+{
+	const SemNode& call = *action.children[0];
+	size_t first_arg = 1;
+	if (call.children.size() > 1 &&
+	    call.children[1]->kind == SN_UNARY_EXPRESSION &&
+	    call.children[1]->op == OP_AMP && call.children[1]->has_op)
+		first_arg = 2;
+	string dst = this_text;
+	if (dst.empty())
+	{
+		if (first_arg != 2)
+			throw OutsideBoundary("trivial copy without a destination");
+		dst = LowerAddressExpr(*call.children[1]->children[0]);
+	}
+	const SemNode& source = *call.children[first_arg];
+	string src = LowerAddressExpr(source);
+	TypePtr cls_type = RemoveTopCv(action.type);
+	// An empty object has no bytes to transfer (the PA15 convention).
+	if (cls_type->named->class_record &&
+	    cls_type->named->class_record->is_empty)
+		return;
+	Emit("copyobj " + to_string(TypeSize(cls_type)) + "x" +
+	     to_string(TypeAlignment(cls_type)) + " " + src + ", " + dst);
+}
+
 string FunctionLowerer::MaterializeTemporary(const SemNode& action,
                                              const char* kind)
 {
@@ -292,7 +395,10 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 	string slot = AddMatSlot(kind, LowerSlotType(type));
 	string address = NewTemp();
 	Emit(address + " = addr $" + slot);
-	LowerConstructorCall(action, address);
+	if (action.trivial_copy)
+		LowerTrivialCopyAction(action, address);
+	else
+		LowerConstructorCall(action, address);
 	if (action.needs_dtor)
 	{
 		const SemNode* dtor = 0;
@@ -337,13 +443,38 @@ string FunctionLowerer::ClassArrayElement(const string& base,
 void FunctionLowerer::LowerClassLocal(const SemNode& node)
 {
 	const TypePtr& declared = node.type;
-	string slot = AddSlot(node.entity_scope, node.entity_name,
-	                      LowerSlotType(declared));
 	bool is_array = declared->kind == TK_ARRAY;
 	bool any_init = false;
 	for (size_t i = 0; i < node.children.size(); i++)
 		if (node.children[i]->kind != SN_DESTRUCTOR_ACTION)
 			any_init = true;
+	// The return-slot-reused local lives in the caller's result
+	// storage: no slot, addresses through %ret, no scope cleanup.
+	if (nrvo_scope_ && node.entity_scope == nrvo_scope_ &&
+	    node.entity_name == nrvo_name_)
+	{
+		address_aliases_[std::make_pair(
+			(const void*)node.entity_scope, node.entity_name)] = "%ret";
+		nrvo_active_ = true;
+		for (size_t i = 0; i < node.children.size(); i++)
+		{
+			const SemNode& child = *node.children[i];
+			if (child.kind == SN_DESTRUCTOR_ACTION)
+				continue;  // ownership transfers with the result
+			if (child.kind == SN_CONSTRUCTOR_ACTION)
+			{
+				if (!child.trivial_init)
+					LowerClassInit(child, "%ret");
+			}
+			else if (child.kind == SN_EXPRESSION_STATEMENT)
+				LowerStatement(child);
+			else
+				LowerClassInit(child, "%ret");
+		}
+		return;
+	}
+	string slot = AddSlot(node.entity_scope, node.entity_name,
+	                      LowerSlotType(declared));
 	string decl_address;
 	if (!is_array && any_init)
 	{
@@ -361,6 +492,11 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 		case SN_CONSTRUCTOR_ACTION:
 			if (child.trivial_init)
 				break;
+			if (child.trivial_copy)
+			{
+				LowerTrivialCopyAction(child, decl_address);
+				break;
+			}
 			if (is_array && child.has_value)
 			{
 				// The field-wise aggregate form: elements share one
@@ -406,6 +542,12 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 			break;
 		case SN_EXPRESSION_STATEMENT:
 			LowerStatement(child);
+			break;
+		case SN_CALL_EXPRESSION:
+		case SN_CONDITIONAL_EXPRESSION:
+			// A class prvalue initializer constructs the declared
+			// object directly (copy elision).
+			LowerClassInit(child, decl_address);
 			break;
 		default:
 			throw OutsideBoundary("class object initializer form");

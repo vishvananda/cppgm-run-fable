@@ -191,6 +191,20 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		result.null_to_pointer = true;
 		return result;
 	}
+	// 13.3.3.1: a derived-class value copy-initializes a base-class
+	// object directly with Conversion rank (the base copy constructor
+	// binds the derived source).
+	if (dest->kind == TK_CLASS && from->kind == TK_CLASS)
+	{
+		int distance = BaseClassDistance(from->named, dest->named);
+		if (distance > 0)
+		{
+			result.viable = true;
+			result.rank = CR_CONVERSION;
+			result.base_distance = distance;
+			return result;
+		}
+	}
 	// 13.3.3.1.2/12.3.1: a class destination accepts sources its
 	// non-explicit converting constructors take through one standard
 	// conversion (the PA15 user-defined-conversion subset).

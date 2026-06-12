@@ -197,6 +197,12 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	EMemberAccess access = chosen.index < binding.fn_access.size()
 		? binding.fn_access[chosen.index] : MA_PUBLIC;
 	host_.CheckMemberAccess(binding.home, access, op_name);
+	// PA16: an implicitly declared copy/move assignment synthesizes its
+	// definition on first selection.
+	if (chosen.is_member && binding.name == "operator =")
+		if (const NamedTypeInfo* owner_entity =
+		        host_.Model().ScopeEntity(binding.owner))
+			host_.EnsureAssignSpecial(owner_entity, chosen.index);
 	const TypePtr& fn = chosen.declared;
 	if (chosen.is_member)
 	{

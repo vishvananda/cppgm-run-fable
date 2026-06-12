@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "post_token.h"
+#include "sema/class_info.h"
 
 using std::runtime_error;
 using std::to_string;
@@ -176,4 +177,59 @@ unsigned long long LowerValueWidth(const TypePtr& type)
 	if (type->kind == TK_FUNCTION)
 		return 8;
 	return TypeSize(type);
+}
+
+// --- PA16 object ABI ---------------------------------------------------
+
+bool LowerClassDirect(const TypePtr& bare)
+{
+	return bare->named && bare->named->class_record &&
+		ClassPassedDirectly(*bare->named->class_record);
+}
+
+string LowerObjSpan(const TypePtr& bare)
+{
+	return to_string(TypeSize(bare)) + "x" + to_string(TypeAlignment(bare));
+}
+
+void LowerAbiParameter(const TypePtr& param, string& type_text,
+                       string& pass)
+{
+	pass.clear();
+	if (IsReferenceType(param))
+	{
+		type_text = "ptr";
+		pass = "reference";
+		return;
+	}
+	TypePtr bare = RemoveTopCv(param);
+	if (bare->kind == TK_CLASS)
+	{
+		if (LowerClassDirect(bare))
+			type_text = LowerSlotType(bare);
+		else
+		{
+			type_text = "ptr";
+			pass = "by_address";
+		}
+		return;
+	}
+	type_text = LowerValueType(param);
+}
+
+bool LowerAbiReturn(const TypePtr& return_type, string& ret_text)
+{
+	TypePtr bare = RemoveTopCv(return_type);
+	if (bare->kind == TK_CLASS)
+	{
+		if (LowerClassDirect(bare))
+		{
+			ret_text = LowerSlotType(bare);
+			return false;
+		}
+		ret_text = "void";
+		return true;
+	}
+	ret_text = LowerValueType(return_type);
+	return false;
 }

@@ -823,14 +823,25 @@ void LowerProgram::Write(ostream& out)
 
 string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 {
+	string ret_text;
+	bool indirect_result = LowerAbiReturn(info.type->target, ret_text);
 	string params;
-	for (size_t i = 0; i < info.type->parameters.size(); i++)
+	size_t at = 0;
+	if (indirect_result)
+	{
+		params = "%ret : ptr [pass=indirect_result]";
+		at = 1;
+	}
+	for (size_t i = 0; i < info.type->parameters.size(); i++, at++)
 	{
 		const TypePtr& param = info.type->parameters[i];
-		params += (i ? ", " : "") + string("%arg") + to_string(i) +
-			" : " + LowerValueType(param);
-		if (IsReferenceType(param))
-			params += " [pass=reference]";
+		string param_text;
+		string pass;
+		LowerAbiParameter(param, param_text, pass);
+		params += (at ? ", " : "") + string("%arg") + to_string(at) +
+			" : " + param_text;
+		if (!pass.empty())
+			params += " [pass=" + pass + "]";
 	}
 	vector<string> meta;
 	if (info.type->variadic)
@@ -846,5 +857,5 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 		metadata += (i ? ", " : " [") + meta[i];
 	metadata += "]";
 	return "declare function @" + info.low_name + "(" + params +
-		") -> " + LowerValueType(info.type->target) + metadata;
+		") -> " + ret_text + metadata;
 }

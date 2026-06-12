@@ -30,6 +30,7 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
                                  const LowFunctionInfo& info)
 	: program_(program), def_(definition), info_(info),
 	  return_type_(definition.type->target),
+	  indirect_ret_(false), nrvo_scope_(0), nrvo_active_(false),
 	  temp_counter_(0), label_counter_(0), mat_counter_(0),
 	  eh_open_(false), in_lifetime_action_(false), eh_armed_(false),
 	  in_cleanup_emission_(false), ctor_depth_(0)
@@ -38,6 +39,18 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
 
 string FunctionLowerer::Lower()
 {
+	string ret_text;
+	indirect_ret_ = LowerAbiReturn(return_type_, ret_text);
+	if (indirect_ret_)
+	{
+		ParamInfo ret_param;
+		ret_param.low_name = "ret";
+		ret_param.type_text = "ptr";
+		ret_param.pass = "indirect_result";
+		params_.push_back(ret_param);
+		param_names_.insert(ret_param.low_name);
+		ScanReturnSlotReuse();
+	}
 	size_t first_statement = 0;
 	for (size_t i = 0; i < def_.children.size(); i++)
 	{
@@ -48,10 +61,11 @@ string FunctionLowerer::Lower()
 		ParamInfo param;
 		param.low_name = child.name.empty()
 			? "__param" + to_string(i) : child.name;
-		param.by_reference = IsReferenceType(child.type);
-		param.type_text = RemoveTopCv(child.type)->kind == TK_CLASS
-			? LowerSlotType(RemoveTopCv(child.type))
-			: LowerValueType(child.type);
+		LowerAbiParameter(child.type, param.type_text, param.pass);
+		// The named slot keeps the object's storage spelling even when
+		// the value arrives by address.
+		if (param.pass == "by_address")
+			param.type_text = "ptr";
 		params_.push_back(param);
 		param_names_.insert(param.low_name);
 	}
@@ -70,8 +84,8 @@ string FunctionLowerer::Header() const
 			params += ", ";
 		params += "%" + params_[i].low_name + " : " +
 			params_[i].type_text;
-		if (params_[i].by_reference)
-			params += " [pass=reference]";
+		if (!params_[i].pass.empty())
+			params += " [pass=" + params_[i].pass + "]";
 	}
 	vector<string> meta;
 	if (info_.is_main)
@@ -95,23 +109,46 @@ string FunctionLowerer::Header() const
 	for (size_t i = 0; i < meta.size(); i++)
 		metadata += (i ? ", " : " [") + meta[i];
 	metadata += "]";
+	string ret_text;
+	LowerAbiReturn(return_type_, ret_text);
 	return "function @" + info_.low_name + "(" + params + ") -> " +
-		LowerValueType(return_type_) + metadata + " {";
+		ret_text + metadata + " {";
 }
 
 void FunctionLowerer::EmitParameterStores()
 {
 	OpenBlock("entry");
-	for (size_t i = 0; i < params_.size(); i++)
+	size_t lead = indirect_ret_ ? 1 : 0;
+	for (size_t i = lead; i < params_.size(); i++)
 	{
-		const SemNode& child = *def_.children[i];
+		const SemNode& child = *def_.children[i - lead];
 		const Scope* scope = child.entity_scope;
+		TypePtr bare = RemoveTopCv(child.type);
+		if (bare->kind == TK_CLASS)
+		{
+			// The named slot keeps the object's storage spelling; a
+			// direct obj parameter copies into it, a by_address
+			// parameter addresses the caller's object through %name.
+			string slot = AddSlot(scope, params_[i].low_name,
+			                      LowerSlotType(bare));
+			if (params_[i].pass == "by_address")
+			{
+				address_aliases_[std::make_pair(
+					(const void*)scope, child.name)] =
+					"%" + params_[i].low_name;
+				continue;
+			}
+			if (bare->named->class_record &&
+			    bare->named->class_record->is_empty)
+				continue;  // an empty object has no bytes to copy
+			string address = NewTemp();
+			Emit(address + " = addr $" + slot);
+			Emit("copyobj " + LowerObjSpan(bare) + " %" +
+			     params_[i].low_name + ", " + address);
+			continue;
+		}
 		string slot = AddSlot(scope, params_[i].low_name,
 		                      params_[i].type_text);
-		// Object-typed (by-value class) parameters own their slot
-		// directly; no store materializes them.
-		if (RemoveTopCv(child.type)->kind == TK_CLASS)
-			continue;
 		Emit("store " + params_[i].type_text + " %" +
 		     params_[i].low_name + ", $" + slot);
 	}
@@ -269,6 +306,11 @@ void FunctionLowerer::LowerConstructorAction(const SemNode& node)
 		program_.MemberFunctionRef(*node.children[0]->children[0]);
 		return;
 	}
+	if (node.trivial_copy)
+	{
+		LowerTrivialCopyAction(node, "");
+		return;
+	}
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
 	if (node.has_value && node.children[0]->children.size() > 1 &&
@@ -333,6 +375,16 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 	case SN_CONSTRUCTOR_ACTION:
 		LowerConstructorAction(node);
 		return;
+	case SN_STORAGE_COPY:
+	{
+		// A synthesized special member's leading trivially copyable
+		// storage prefix: one raw object copy.
+		string dst = LowerAddressExpr(*node.children[0]);
+		string src = LowerAddressExpr(*node.children[1]);
+		Emit("copyobj " + to_string(node.value.bits) + "x" +
+		     to_string(node.bit_width) + " " + src + ", " + dst);
+		return;
+	}
 	case SN_DESTRUCTOR_ACTION:
 	{
 		bool saved = in_lifetime_action_;
@@ -505,6 +557,88 @@ void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
 	}
 }
 
+// The single source local of a class-valued return statement's
+// copy-initialization, or null.
+static const SemNode* ReturnSourceLocal(const SemNode& ret)
+{
+	if (ret.children.empty())
+		return 0;
+	const SemNode& child = *ret.children[0];
+	if (child.kind != SN_CONSTRUCTOR_ACTION || !child.synth_copy)
+		return 0;
+	const SemNode& call = *child.children[0];
+	const SemNode& source = *call.children.back();
+	if (source.kind != SN_ID_EXPRESSION || !source.entity_scope)
+		return 0;
+	return &source;
+}
+
+void FunctionLowerer::CollectReturnLocals(const SemNode& node,
+                                          bool& eligible,
+                                          const SemNode*& source)
+{
+	if (node.kind == SN_RETURN_STATEMENT && !node.children.empty())
+	{
+		const SemNode* named = ReturnSourceLocal(node);
+		if (!named)
+		{
+			eligible = false;
+			return;
+		}
+		if (source && (source->entity_scope != named->entity_scope ||
+		               source->entity_name != named->entity_name))
+		{
+			eligible = false;
+			return;
+		}
+		source = named;
+		return;
+	}
+	for (size_t i = 0; i < node.children.size(); i++)
+		CollectReturnLocals(*node.children[i], eligible, source);
+}
+
+// The PA16 return-slot-reuse form: when every class-valued return
+// names the same top-level local (declared directly in the function
+// body), that local lives in %ret and the return copies elide.
+void FunctionLowerer::ScanReturnSlotReuse()
+{
+	bool eligible = true;
+	const SemNode* source = 0;
+	CollectReturnLocals(def_, eligible, source);
+	if (!eligible || !source)
+		return;
+	// The named local must be a top-level declaration of the body.
+	const SemNode* body = 0;
+	for (size_t i = 0; i < def_.children.size(); i++)
+		if (def_.children[i]->kind == SN_COMPOUND_STATEMENT)
+		{
+			body = def_.children[i].get();
+			break;
+		}
+	if (!body)
+		return;
+	for (size_t i = 0; i < body->children.size(); i++)
+	{
+		const SemNode* item = body->children[i].get();
+		if (item->kind == SN_SIMPLE_DECLARATION &&
+		    item->children.size() == 1)
+			item = item->children[0].get();
+		if (item->kind != SN_VARIABLE)
+			continue;
+		if (item->entity_scope == source->entity_scope &&
+		    item->entity_name == source->entity_name &&
+		    !IsReferenceType(item->type) &&
+		    TypeEquals(RemoveTopCv(item->type),
+		               RemoveTopCv(return_type_)))
+		{
+			nrvo_scope_ = source->entity_scope;
+			nrvo_name_ = source->entity_name;
+			return;
+		}
+	}
+}
+
 void FunctionLowerer::LowerReturn(const SemNode& node)
 {
 	if (node.children.empty())
@@ -514,6 +648,32 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 		return;
 	}
 	const SemNode& value = *node.children[0];
+	TypePtr ret_bare = RemoveTopCv(return_type_);
+	if (!IsReferenceType(return_type_) && ret_bare->kind == TK_CLASS)
+	{
+		BeginFullExpression(value);
+		if (indirect_ret_)
+		{
+			const SemNode* named = ReturnSourceLocal(node);
+			bool reused = nrvo_active_ && named &&
+				named->entity_scope == nrvo_scope_ &&
+				named->entity_name == nrvo_name_;
+			if (!reused)
+				LowerClassInit(value, "%ret");
+			EndFullExpression();
+			EmitCleanupsFrom(0);
+			Terminate("return void");
+			return;
+		}
+		string slot = AddMatSlot("retobj", LowerSlotType(ret_bare));
+		string address = NewTemp();
+		Emit(address + " = addr $" + slot);
+		LowerClassInit(value, address);
+		EndFullExpression();
+		EmitCleanupsFrom(0);
+		Terminate("return " + LowerSlotType(ret_bare) + " $" + slot);
+		return;
+	}
 	BeginFullExpression(value);
 	if (IsVoidType(return_type_))
 	{

@@ -447,6 +447,53 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		value.node->null_pointer = true;
 		value.null_pointer_literal = false;
 	}
+	if (!IsReferenceType(dest))
+	{
+		// PA16: a by-value class destination copy/move-initializes from
+		// a class source unless the source already constructs the
+		// destination object in place.
+		TypePtr bare = RemoveTopCv(dest);
+		if (bare->kind == TK_CLASS && value.type && !value.function_set &&
+		    RemoveTopCv(value.type)->kind == TK_CLASS)
+		{
+			// A same-class prvalue (temporary, call result,
+			// conditional) constructs the destination in place
+			// (12.8p31); glvalues and derived sources copy/move.
+			bool in_place = value.node &&
+				value.category == VC_PRVALUE &&
+				RemoveTopCv(value.type)->named == bare->named;
+			if (!in_place)
+				WrapClassValueInit(value, bare);
+		}
+	}
+}
+
+void SemExprAnalyzer::WrapClassValueInit(SemValue& value, const TypePtr& bare)
+{
+	const ClassInfo* cls = host_.Classes().Find(bare->named);
+	if (!cls || !bare->named->complete)
+		throw runtime_error("copy of an incomplete class object");
+	vector<SemValue> args;
+	args.push_back(std::move(value));
+	int index = host_.ResolveClassCtorHost(*cls, args, true,
+	                                       "initialization");
+	vector<SemNodePtr> arg_nodes;
+	for (size_t i = 0; i < args.size(); i++)
+		arg_nodes.push_back(std::move(args[i].node));
+	SemNodePtr action = host_.MakeConstructorCall(
+		*cls, index, false, SemNodePtr(), std::move(arg_nodes));
+	action->synth_copy = true;
+	action->type = RemoveTopCv(bare);
+	action->category = VC_PRVALUE;
+	if (host_.Classes().NeedsDestruction(*cls))
+	{
+		action->needs_dtor = true;
+		action->children.push_back(host_.MakeTemporaryDtor(*cls));
+	}
+	value = SemValue();
+	value.type = action->type;
+	value.category = VC_PRVALUE;
+	value.node = std::move(action);
 }
 
 void SemExprAnalyzer::CopyInitialize(SemValue& value, const TypePtr& dest,

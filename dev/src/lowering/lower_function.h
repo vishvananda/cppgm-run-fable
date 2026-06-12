@@ -69,7 +69,9 @@ private:
 	{
 		string low_name;
 		string type_text;
-		bool by_reference;
+		// Pass metadata: "" / "reference" / "by_address" /
+		// "indirect_result".
+		string pass;
 	};
 
 	// --- shared state helpers (lower_function.cpp) ---
@@ -90,6 +92,11 @@ private:
 	void TerminateOpenEnd();
 
 	// --- statements (lower_function.cpp) ---
+	// PA16: picks the single top-level local every class-valued return
+	// names (the return-slot-reuse form), if any.
+	void ScanReturnSlotReuse();
+	void CollectReturnLocals(const SemNode& node, bool& eligible,
+	                         const SemNode*& source);
 	void LowerStatementList(const vector<SemNodePtr>& items, size_t from);
 	void LowerStatement(const SemNode& node);
 	void LowerLocalDeclaration(const SemNode& node);
@@ -130,10 +137,24 @@ private:
 	void BranchOnValue(const SemNode& node, const string& true_label,
 	                   const string& false_label);
 	void LowerEffect(const SemNode& node);
-	LowerValue LowerCall(const SemNode& node);
+	// `result_address` carries the caller-owned destination of an
+	// indirect class-valued call ("" lets class results materialize at
+	// the consumer).
+	LowerValue LowerCall(const SemNode& node,
+	                     const string& result_address = "");
 	string LowerCallArgument(const SemNode& node, const TypePtr& param);
 	string LowerReferenceArgument(const SemNode& node,
 	                              const TypePtr& referee);
+	// --- PA16 class value transfers ---
+	// Constructs/copies the class value of `node` into the object at
+	// `dest` (constructor actions, class-valued calls, conditionals).
+	void LowerClassInit(const SemNode& node, const string& dest);
+	// Materializes a class-valued call result in a fresh `kind` slot
+	// (or into `dest` when given); returns the object address text.
+	string MaterializeClassResult(const SemNode& call, const char* kind,
+	                              const string& dest);
+	// One by_address call argument object (slot kind "arg").
+	string MaterializeClassArg(const SemNode& node, const TypePtr& bare);
 	LowerValue LowerComparison(const SemNode& node);
 	LowerValue LowerBinary(const SemNode& node);
 	LowerValue LowerLogicalValue(const SemNode& node);
@@ -167,6 +188,12 @@ private:
 	void LowerClassLocal(const SemNode& node);
 	void LowerConstructorCall(const SemNode& action,
 	                          const string& this_text);
+	// PA16: a trivial copy/move construction lowers as a raw object
+	// copy (`copyobj`) instead of a synthesized helper call. The
+	// destination is `this_text` when non-empty, else the action's own
+	// address child.
+	void LowerTrivialCopyAction(const SemNode& action,
+	                            const string& this_text);
 	// A class temporary: a fresh object slot plus its constructor run;
 	// returns the address temp ("%tN").
 	string MaterializeTemporary(const SemNode& action, const char* kind);
@@ -209,6 +236,15 @@ private:
 	set<string> referenced_;
 	vector<ParamInfo> params_;
 	set<string> param_names_;
+	// PA16: lvalues addressed through a parameter or the indirect
+	// result pointer instead of a local slot (by_address parameters and
+	// the return-slot-reused local), keyed like slot_map_.
+	map<pair<const void*, string>, string> address_aliases_;
+	bool indirect_ret_;
+	// The eligible top-level named local lowered directly in %ret.
+	const Scope* nrvo_scope_;
+	string nrvo_name_;
+	bool nrvo_active_;
 	vector<pair<string, string>> slots_;  // (name, type) print order
 	map<pair<const void*, string>, string> slot_map_;
 	map<string, int> slot_base_counts_;

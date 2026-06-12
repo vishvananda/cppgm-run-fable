@@ -46,14 +46,25 @@ struct ClassField
 	const AstInitializer* default_init;
 };
 
+// PA16: the special-member role of a constructor (12.8p2/p3).
+enum ECtorKind
+{
+	CK_ORDINARY,
+	CK_COPY,
+	CK_MOVE
+};
+
 // One declared constructor (12.1). The implicit default constructor is
-// synthesized on first use and does not appear here.
+// synthesized on first use and does not appear here; implicitly
+// declared copy/move constructors append at class completion with
+// `implicit` set.
 struct ClassCtor
 {
 	ClassCtor()
 		: inherited_built(false), access(MA_PUBLIC), is_explicit(false),
 		  deleted(false), defaulted(false), unwind_no(false), definition(0),
-		  inherited_base(0)
+		  inherited_base(0), kind(CK_ORDINARY), implicit(false),
+		  ignore_in_overload(false), built(false), built_unwind_no(false)
 	{}
 
 	vector<string> param_names;  // declared parameter names
@@ -72,6 +83,15 @@ struct ClassCtor
 	// 12.9 inheriting constructor: the base class whose constructor this
 	// one forwards to (null for ordinary constructors).
 	const NamedTypeInfo* inherited_base;
+
+	// --- PA16 special-member facts ---
+	ECtorKind kind;   // classified by parameter shape (12.8p2/p3)
+	bool implicit;    // implicitly declared at class completion
+	// A defaulted move constructor defined as deleted is ignored by
+	// overload resolution (12.8p9).
+	bool ignore_in_overload;
+	bool built;            // synthesized definition pushed (implicit/defaulted)
+	bool built_unwind_no;  // synthesized body cannot throw
 };
 
 struct ClassInfo
@@ -84,7 +104,13 @@ struct ClassInfo
 		  dtor_unwind_no(false), bit_cursor(0), aggregate_ctor_built(false),
 		  implicit_ctor_built(false),
 		  implicit_dtor_built(false), implicit_ctor_unwind_no(false),
-		  implicit_dtor_unwind_no(false)
+		  implicit_dtor_unwind_no(false), dtor_user_declared(false),
+		  has_user_copy_ctor(false), has_user_move_ctor(false),
+		  has_user_copy_assign(false), has_user_move_assign(false),
+		  specials_declared(false), copy_assign_index(-1),
+		  move_assign_index(-1), copy_assign_deleted(false),
+		  copy_assign_built(false), move_assign_built(false),
+		  copy_assign_unwind_no(false), move_assign_unwind_no(false)
 	{}
 
 	const NamedTypeInfo* entity;
@@ -121,6 +147,23 @@ struct ClassInfo
 	bool implicit_dtor_built;
 	bool implicit_ctor_unwind_no;
 	bool implicit_dtor_unwind_no;
+
+	// --- PA16 copy/move special-member state ---
+	bool dtor_user_declared;  // any destructor declaration (incl. = default)
+	bool has_user_copy_ctor;
+	bool has_user_move_ctor;
+	bool has_user_copy_assign;
+	bool has_user_move_assign;
+	bool specials_declared;   // implicit copy/move members appended
+	// Implicitly declared assignment operators: their overload position
+	// in the class's "operator =" member binding (-1 when absent).
+	int copy_assign_index;
+	int move_assign_index;
+	bool copy_assign_deleted;
+	bool copy_assign_built;
+	bool move_assign_built;
+	bool copy_assign_unwind_no;
+	bool move_assign_unwind_no;
 };
 
 // The per-translation-unit class record arena, owned by the SemUnit.
@@ -182,3 +225,29 @@ const ClassField* FindClassField(const ClassInfo& info, const string& name);
 // The constructor overload position whose parameter list matches
 // `type`, or -1 (used for deterministic low-name overload suffixes).
 int ClassCtorIndex(const ClassInfo& info, const TypePtr& type);
+
+// 12.8p2/p3: the special-member role of a declared constructor of the
+// class entity (first parameter a reference to the class, every later
+// parameter defaulted).
+ECtorKind ClassifyCtorKind(const NamedTypeInfo* entity,
+                           const ClassCtor& ctor);
+
+// --- PA16 triviality facts (9p6, 12.8) --------------------------------
+// All traverse the base/member subobject tree through the entities'
+// class_record links, so they need completed classes only.
+
+// The class record of a (possibly array-of-class) subobject type, or
+// null (link-based; no registry needed).
+const ClassInfo* SubobjectClass(const TypePtr& type);
+
+bool ClassHasTrivialDtor(const ClassInfo& info);
+bool ClassHasTrivialCopyCtor(const ClassInfo& info);
+bool ClassHasTrivialMoveCtor(const ClassInfo& info);
+bool ClassHasTrivialCopyAssign(const ClassInfo& info);
+bool ClassHasTrivialMoveAssign(const ClassInfo& info);
+bool ClassTriviallyCopyable(const ClassInfo& info);
+
+// The PA16 LowIR boundary classification: complete objects of the
+// class pass/return as direct `obj<SxA>` values iff this holds;
+// otherwise they pass by_address / return through indirect_result.
+bool ClassPassedDirectly(const ClassInfo& info);

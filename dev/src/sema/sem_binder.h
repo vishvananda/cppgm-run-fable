@@ -36,6 +36,11 @@ public:
 	                                       SemNodePtr address,
 	                                       vector<SemNodePtr> args);
 	virtual SemNodePtr MakeTemporaryDtor(const ClassInfo& cls);
+	virtual int ResolveClassCtorHost(const ClassInfo& cls,
+	                                 vector<SemValue>& args, bool copy_init,
+	                                 const char* what);
+	virtual void EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
+	                                 size_t overload_index);
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
@@ -93,6 +98,7 @@ private:
 	void BindDeclarationStatement(const AstStmt& stmt);
 	void BindExpressionStatement(const AstStmt& stmt);
 	void BindReturnStatement(const AstStmt& stmt);
+	SemNodePtr WrapReturnValue(SemValue value, const TypePtr& bare);
 	void BindCondition(const AstCondition& condition, bool for_switch);
 	void BindConditionDeclaration(const AstCondition& condition,
 	                              bool for_switch);
@@ -172,6 +178,36 @@ private:
 	void EnsureImplicitDefaultCtor(const ClassInfo& cls);
 	void EnsureImplicitDtor(const ClassInfo& cls);
 	void EnsureInheritedCtor(const ClassInfo& cls, int index);
+
+	// --- PA16 copy/move special members (sem_special.cpp) ---
+	// Implicit declaration at class completion (12.8) and the
+	// demand-driven synthesis of copy/move constructor and assignment
+	// definitions.
+	void DeclareImplicitSpecialMembers(ClassInfo& cls);
+	void DeclareImplicitAssign(ClassInfo& cls, bool is_move, bool deleted);
+	void EnsureSpecialCtor(const ClassInfo& cls, int index);
+	struct SpecialBodyContext;
+	SemNodePtr SourceObjectExpr(Scope* fn_scope, const string& name,
+	                            const TypePtr& class_type);
+	SemNodePtr SourceFieldExpr(const SemNode& source_proto,
+	                           const ClassField& field,
+	                           EValueCategory category);
+	SemNodePtr StorageCopyAction(const ClassInfo& cls,
+	                             const SemNode& source_proto,
+	                             unsigned long long span,
+	                             unsigned long long alignment);
+	// The leading trivially copyable storage prefix of the class for a
+	// copy (is_move false) or move (true) transfer: returns the byte
+	// span (0 when none; cls.size when the whole object is trivial) and
+	// the span alignment, and sets `first_suffix` to the first field
+	// row needing individual lowering.
+	unsigned long long TrivialStoragePrefix(const ClassInfo& cls,
+	                                        bool is_move,
+	                                        unsigned long long& alignment,
+	                                        size_t& first_suffix);
+	void AppendTransferActions(const ClassInfo& cls, bool is_move,
+	                           bool assign_form, const SemNode& source_proto,
+	                           vector<SemNodePtr>& out);
 	virtual void BindInheritingConstructors(Scope* base_scope);
 	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
 	                              SemNodePtr address);

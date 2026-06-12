@@ -172,6 +172,7 @@ void SemBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
 	ClassInfo* cls = OpenClass();
 	FinishClassLayout(*cls, *info);
 	info->complete = true;
+	DeclareImplicitSpecialMembers(*cls);
 	open_classes_.pop_back();
 	if (open_classes_.empty())
 		FlushDeferredBodies();
@@ -228,6 +229,7 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 			throw runtime_error("destructor with a ctor-initializer");
 		// A defaulted destructor behaves like the implicit one.
 		cls->has_user_dtor = !defaulted && !deleted;
+		cls->dtor_user_declared = true;
 		cls->dtor_access = current_access_;
 		cls->dtor_deleted = deleted;
 		cls->dtor_definition = defined ? &decl : 0;
@@ -258,6 +260,11 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	ctor.definition = defined ? &decl : 0;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		ctor.defaults.push_back(composed.parameters[i].default_arg);
+	ctor.kind = ClassifyCtorKind(cls->entity, ctor);
+	if (ctor.kind == CK_COPY)
+		cls->has_user_copy_ctor = true;
+	else if (ctor.kind == CK_MOVE)
+		cls->has_user_move_ctor = true;
 	cls->ctors.push_back(ctor);
 	// 8.5.1p1/12.1p5: user-provided or deleted constructors disqualify
 	// aggregates; `= default` on the default constructor keeps the
@@ -689,15 +696,20 @@ void SemBinder::BindInheritingConstructors(Scope* base_scope)
 	if (!cls->base || cls->base->members != base_scope)
 		throw runtime_error("using Base::Base does not name the direct "
 		                    "base");
+	bool any_inherited = false;
 	for (size_t i = 0; i < cls->base->ctors.size(); i++)
 	{
+		// 12.9p3: copy/move constructors of the base are not inherited.
+		if (cls->base->ctors[i].kind != CK_ORDINARY)
+			continue;
 		ClassCtor ctor = cls->base->ctors[i];
 		ctor.definition = 0;
 		ctor.inherited_base = cls->base->entity;
 		ctor.inherited_built = false;
 		cls->ctors.push_back(ctor);
+		any_inherited = true;
 	}
-	cls->has_user_ctor = !cls->base->ctors.empty() || cls->has_user_ctor;
+	cls->has_user_ctor = any_inherited || cls->has_user_ctor;
 	cls->is_aggregate = false;
 }
 
@@ -981,22 +993,34 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 	}
 	vector<TypePtr> candidates;
 	vector<size_t> min_arity;
+	vector<size_t> positions;
+	bool any_default_form = false;
 	for (size_t i = 0; i < cls.ctors.size(); i++)
 	{
-		candidates.push_back(cls.ctors[i].type);
+		if (cls.ctors[i].ignore_in_overload)
+			continue;
 		size_t required = cls.ctors[i].type->parameters.size();
 		const vector<const AstExpr*>& defaults = cls.ctors[i].defaults;
 		while (required > 0 && required <= defaults.size() &&
 		       defaults[required - 1])
 			required--;
+		if (required == 0)
+			any_default_form = true;
+		candidates.push_back(cls.ctors[i].type);
 		min_arity.push_back(required);
+		positions.push_back(i);
 	}
+	// Default-initialization of a class whose only constructor entries
+	// are the implicitly declared copy/move members uses the implicit
+	// default constructor.
+	if (args.empty() && !cls.has_user_ctor && !any_default_form)
+		return -1;
 	vector<ConversionSource> sources;
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
 	vector<ImplicitConversion> conversions;
-	size_t winner = SelectBestOverload(candidates, sources, conversions,
-	                                   &min_arity);
+	size_t winner = positions[SelectBestOverload(candidates, sources,
+	                                             conversions, &min_arity)];
 	const ClassCtor& ctor = cls.ctors[winner];
 	if (ctor.deleted)
 		throw runtime_error(string("use of deleted constructor for ") +
@@ -1005,7 +1029,7 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		throw runtime_error(string("explicit constructor selected by "
 		                           "copy-initialization for ") + what);
 	CheckMemberAccess(cls.members, ctor.access, "constructor");
-	const TypePtr& fn = candidates[winner];
+	const TypePtr& fn = ctor.type;
 	for (size_t i = 0; i < args.size(); i++)
 		if (i < fn->parameters.size())
 			analyzer_.ApplyConversion(args[i], conversions[i],
@@ -1029,6 +1053,7 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 {
 	TypePtr ctor_type;
 	bool callee_unwind_no = false;
+	bool trivial_transfer = false;
 	if (ctor_index < 0)
 	{
 		EnsureImplicitDefaultCtor(cls);
@@ -1038,10 +1063,29 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	}
 	else
 	{
-		ctor_type = cls.ctors[ctor_index].type;
-		callee_unwind_no = cls.ctors[ctor_index].unwind_no;
-		if (cls.ctors[ctor_index].inherited_base)
+		const ClassCtor& selected = cls.ctors[ctor_index];
+		ctor_type = selected.type;
+		callee_unwind_no = selected.unwind_no;
+		if (selected.inherited_base)
 			EnsureInheritedCtor(cls, ctor_index);
+		else if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
+		         !selected.definition &&
+		         (selected.implicit || selected.defaulted))
+		{
+			// An implicit/defaulted copy or move constructor: a trivial
+			// one lowers as a raw object copy; otherwise the field-wise
+			// definition synthesizes on first demand.
+			trivial_transfer = selected.kind == CK_COPY
+				? ClassHasTrivialCopyCtor(cls)
+				: ClassHasTrivialMoveCtor(cls);
+			if (trivial_transfer)
+				callee_unwind_no = true;
+			else
+			{
+				EnsureSpecialCtor(cls, ctor_index);
+				callee_unwind_no = cls.ctors[ctor_index].built_unwind_no;
+			}
+		}
 	}
 	TypePtr adjusted = MethodAdjustedType(cls, ctor_type);
 	const string& base_name = cls.members->name;
@@ -1052,6 +1096,11 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	action->special = base_entry ? SF_CONSTRUCTOR_BASE : SF_CONSTRUCTOR;
 	action->trivial_init = ctor_index < 0 &&
 		!unit_.classes.NeedsConstruction(cls);
+	if (trivial_transfer)
+	{
+		action->trivial_copy = true;
+		action->type = MakeNamedType(TK_CLASS, cls.entity);
+	}
 	SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
 	call->type = MakeFundamentalType(FT_VOID);
 	call->category = VC_PRVALUE;

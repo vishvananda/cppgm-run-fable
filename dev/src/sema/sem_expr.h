@@ -18,6 +18,8 @@ using std::vector;
 // reaches the binder through ISemExprHost - name and type resolution
 // stay in the binder, the clause 4/5/13 rules stay here.
 
+struct SemValue;
+
 // The analyzer's view of the PA12 binder.
 struct ISemExprHost
 {
@@ -64,6 +66,18 @@ struct ISemExprHost
 	// A temporary's destructor action (no address subtree); demanded
 	// for full-expression temporaries of destructible classes.
 	virtual SemNodePtr MakeTemporaryDtor(const ClassInfo& cls) = 0;
+	// --- PA16 value semantics ---
+	// Constructor overload resolution over the class's constructors
+	// (user-declared plus the implicitly declared copy/move members);
+	// applies conversions and default arguments, returns -1 for the
+	// implicit default constructor.
+	virtual int ResolveClassCtorHost(const ClassInfo& cls,
+	                                 vector<SemValue>& args, bool copy_init,
+	                                 const char* what) = 0;
+	// Demand-synthesis of an implicitly declared copy/move assignment
+	// operator selected by overload resolution.
+	virtual void EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
+	                                 size_t overload_index) = 0;
 	virtual ~ISemExprHost() {}
 };
 
@@ -141,6 +155,13 @@ public:
 	void ApplyConversion(SemValue& value, const ImplicitConversion& conv,
 	                     const TypePtr& dest);
 
+	// PA16: 13.3.1.2 selection over the user-declared (and implicitly
+	// declared assignment) operator candidates; public so the binder's
+	// special-member synthesis reuses it for member-wise assignment.
+	bool ResolveOperatorCall(const string& spelling,
+	                         vector<SemValue>& operands, bool member_only,
+	                         SemValue& result);
+
 private:
 	SemValue AnalyzeLiteral(const AstExpr& expr);
 	SemValue AnalyzeKeywordLiteral(const AstExpr& expr);
@@ -172,6 +193,11 @@ private:
 	                               const vector<AstExprPtr>& arguments);
 	SemValue AnalyzeSizeof(const AstExpr& expr);
 	SemValue CallResult(const TypePtr& function_type);
+	// PA16: copy/move-initialization of a by-value class destination
+	// (call arguments, declared objects, return values): resolves the
+	// copy/move constructor and wraps the source in a synth_copy
+	// constructor action.
+	void WrapClassValueInit(SemValue& value, const TypePtr& bare);
 
 	// --- PA15 member access and method calls (sem_member.cpp) ---
 	SemValue AnalyzeMemberAccess(SemValue object, const string& name,
@@ -195,9 +221,6 @@ private:
 	                               const vector<SemValue>& operands,
 	                               bool member_only,
 	                               vector<OperatorCandidate>& out);
-	bool ResolveOperatorCall(const string& spelling,
-	                         vector<SemValue>& operands, bool member_only,
-	                         SemValue& result);
 	static bool OperatorOperand(const SemValue& value);
 	bool TryBinaryOperator(const string& spelling, SemValue& lhs,
 	                       SemValue& rhs, SemValue& result);

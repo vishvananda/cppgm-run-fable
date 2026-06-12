@@ -389,49 +389,7 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	vector<SemValue> args;
 	for (size_t i = 0; i < arguments.size(); i++)
 		args.push_back(Analyze(*arguments[i]));
-	int winner = -1;
-	if (!cls->ctors.empty())
-	{
-		vector<TypePtr> candidates;
-		vector<size_t> min_arity;
-		for (size_t i = 0; i < cls->ctors.size(); i++)
-		{
-			candidates.push_back(cls->ctors[i].type);
-			size_t required = cls->ctors[i].type->parameters.size();
-			const vector<const AstExpr*>& defaults =
-				cls->ctors[i].defaults;
-			while (required > 0 && required <= defaults.size() &&
-			       defaults[required - 1])
-				required--;
-			min_arity.push_back(required);
-		}
-		vector<ConversionSource> sources;
-		for (size_t i = 0; i < args.size(); i++)
-			sources.push_back(MakeConversionSource(args[i]));
-		vector<ImplicitConversion> conversions;
-		winner = (int)SelectBestOverload(candidates, sources,
-		                                 conversions, &min_arity);
-		if (cls->ctors[winner].deleted)
-			throw runtime_error("use of deleted constructor");
-		host_.CheckMemberAccess(cls->members, cls->ctors[winner].access,
-		                        "constructor");
-		const TypePtr& fn = candidates[winner];
-		for (size_t i = 0; i < args.size(); i++)
-			if (i < fn->parameters.size())
-				ApplyConversion(args[i], conversions[i],
-				                fn->parameters[i]);
-		for (size_t i = args.size(); i < fn->parameters.size(); i++)
-		{
-			SemValue filled = Analyze(*cls->ctors[winner].defaults[i]);
-			CopyInitialize(filled, fn->parameters[i],
-			               "default argument");
-			args.push_back(std::move(filled));
-		}
-		if (cls->ctors[winner].defaulted && fn->parameters.empty())
-			winner = -1;
-	}
-	else if (!args.empty())
-		throw runtime_error("no matching constructor for temporary");
+	int winner = host_.ResolveClassCtorHost(*cls, args, false, "temporary");
 	vector<SemNodePtr> arg_nodes;
 	for (size_t i = 0; i < args.size(); i++)
 		arg_nodes.push_back(std::move(args[i].node));
@@ -522,35 +480,8 @@ SemValue SemExprAnalyzer::AnalyzeNew(const AstExpr& expr)
 		for (size_t i = 0; i < expr.new_init->args.size(); i++)
 			ctor_args.push_back(Analyze(*expr.new_init->args[i]));
 	}
-	vector<TypePtr> ctor_types;
-	vector<size_t> min_arity;
-	int ctor_index = -1;
-	if (!cls->ctors.empty())
-	{
-		for (size_t i = 0; i < cls->ctors.size(); i++)
-		{
-			ctor_types.push_back(cls->ctors[i].type);
-			size_t required = cls->ctors[i].type->parameters.size();
-			const vector<const AstExpr*>& defaults = cls->ctors[i].defaults;
-			while (required > 0 && required <= defaults.size() &&
-			       defaults[required - 1])
-				required--;
-			min_arity.push_back(required);
-		}
-		vector<ConversionSource> ctor_sources;
-		for (size_t i = 0; i < ctor_args.size(); i++)
-			ctor_sources.push_back(MakeConversionSource(ctor_args[i]));
-		vector<ImplicitConversion> ctor_conversions;
-		ctor_index = (int)SelectBestOverload(ctor_types, ctor_sources,
-		                                     ctor_conversions,
-		                                     &min_arity);
-		const TypePtr& fn = ctor_types[ctor_index];
-		for (size_t i = 0; i < ctor_args.size(); i++)
-			ApplyConversion(ctor_args[i], ctor_conversions[i],
-			                fn->parameters[i]);
-	}
-	else if (!ctor_args.empty())
-		throw runtime_error("no matching constructor for new");
+	int ctor_index = host_.ResolveClassCtorHost(*cls, ctor_args, false,
+	                                            "new-expression");
 	vector<SemNodePtr> arg_nodes;
 	for (size_t i = 0; i < ctor_args.size(); i++)
 		arg_nodes.push_back(std::move(ctor_args[i].node));

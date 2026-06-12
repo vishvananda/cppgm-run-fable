@@ -268,3 +268,115 @@ int ClassCtorIndex(const ClassInfo& info, const TypePtr& type)
 			return (int)i;
 	return -1;
 }
+
+ECtorKind ClassifyCtorKind(const NamedTypeInfo* entity,
+                           const ClassCtor& ctor)
+{
+	const vector<TypePtr>& params = ctor.type->parameters;
+	if (params.empty())
+		return CK_ORDINARY;
+	for (size_t i = 1; i < params.size(); i++)
+		if (i >= ctor.defaults.size() || !ctor.defaults[i])
+			return CK_ORDINARY;
+	const TypePtr& first = params[0];
+	if (!IsReferenceType(first))
+		return CK_ORDINARY;
+	TypePtr referee = RemoveTopCv(first->target);
+	if (referee->kind != TK_CLASS || referee->named != entity)
+		return CK_ORDINARY;
+	return first->kind == TK_LVALUE_REFERENCE ? CK_COPY : CK_MOVE;
+}
+
+// --- PA16 triviality facts (9p6, 12.8) --------------------------------
+
+const ClassInfo* SubobjectClass(const TypePtr& type)
+{
+	TypePtr inner = type;
+	while (inner->kind == TK_ARRAY)
+		inner = inner->target;
+	inner = RemoveTopCv(inner);
+	if (inner->kind != TK_CLASS)
+		return 0;
+	return inner->named->class_record;
+}
+
+namespace {
+
+// Whether a user-provided (declared, not defaulted, not deleted)
+// constructor of the given special kind exists.
+bool UserProvidedCtor(const ClassInfo& info, ECtorKind kind)
+{
+	for (size_t i = 0; i < info.ctors.size(); i++)
+	{
+		const ClassCtor& ctor = info.ctors[i];
+		if (ctor.kind == kind && !ctor.implicit && !ctor.defaulted &&
+		    !ctor.deleted)
+			return true;
+	}
+	return false;
+}
+
+// Triviality of one subobject tree under a per-class predicate.
+template <bool (*Predicate)(const ClassInfo&)>
+bool SubobjectsSatisfy(const ClassInfo& info)
+{
+	if (info.base && !Predicate(*info.base))
+		return false;
+	for (size_t i = 0; i < info.fields.size(); i++)
+	{
+		const ClassInfo* member = SubobjectClass(info.fields[i].type);
+		if (member && !Predicate(*member))
+			return false;
+	}
+	return true;
+}
+
+}  // namespace
+
+bool ClassHasTrivialDtor(const ClassInfo& info)
+{
+	if (info.has_user_dtor || info.dtor_deleted)
+		return false;
+	return SubobjectsSatisfy<ClassHasTrivialDtor>(info);
+}
+
+bool ClassHasTrivialCopyCtor(const ClassInfo& info)
+{
+	if (UserProvidedCtor(info, CK_COPY))
+		return false;
+	return SubobjectsSatisfy<ClassHasTrivialCopyCtor>(info);
+}
+
+bool ClassHasTrivialMoveCtor(const ClassInfo& info)
+{
+	if (UserProvidedCtor(info, CK_MOVE))
+		return false;
+	return SubobjectsSatisfy<ClassHasTrivialMoveCtor>(info);
+}
+
+bool ClassHasTrivialCopyAssign(const ClassInfo& info)
+{
+	if (info.has_user_copy_assign)
+		return false;
+	return SubobjectsSatisfy<ClassHasTrivialCopyAssign>(info);
+}
+
+bool ClassHasTrivialMoveAssign(const ClassInfo& info)
+{
+	if (info.has_user_move_assign)
+		return false;
+	return SubobjectsSatisfy<ClassHasTrivialMoveAssign>(info);
+}
+
+bool ClassTriviallyCopyable(const ClassInfo& info)
+{
+	return ClassHasTrivialCopyCtor(info) && ClassHasTrivialMoveCtor(info) &&
+		ClassHasTrivialCopyAssign(info) && ClassHasTrivialMoveAssign(info) &&
+		ClassHasTrivialDtor(info);
+}
+
+bool ClassPassedDirectly(const ClassInfo& info)
+{
+	return ClassTriviallyCopyable(info) && !info.is_union &&
+		info.size <= 16;
+}

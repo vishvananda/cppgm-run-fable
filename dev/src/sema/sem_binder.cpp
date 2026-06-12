@@ -470,6 +470,10 @@ void SemBinder::BindAnonymousUnionMembers(const AstDecl& decl,
 	for (size_t i = 0; i < union_scope.bindings.size(); i++)
 	{
 		const ScopeBinding& member = union_scope.bindings[i];
+		// The implicitly declared assignment operators live in the
+		// union's member scope but are not data members.
+		if (member.kind == SB_FUNCTION && member.name == "operator =")
+			continue;
 		if (member.kind != SB_VARIABLE)
 			throw runtime_error("anonymous union member is not a "
 			                    "non-static data member");
@@ -649,8 +653,87 @@ void SemBinder::BindReturnStatement(const AstStmt& stmt)
 		return;
 	}
 	SemValue value = analyzer_.Analyze(*stmt.expr);
+	TypePtr bare = RemoveTopCv(current_return_);
+	if (!IsReferenceType(current_return_) && bare->kind == TK_CLASS &&
+	    value.type && RemoveTopCv(value.type)->kind == TK_CLASS &&
+	    !value.function_set)
+	{
+		item->children.push_back(WrapReturnValue(std::move(value), bare));
+		return;
+	}
 	analyzer_.CopyInitialize(value, current_return_, "return value");
 	item->children.push_back(std::move(value.node));
+}
+
+// 12.8p32: a by-value class return copy-initializes the result object;
+// an expression naming a non-volatile automatic object tries the move
+// constructor first and falls back to the copy constructor.
+SemNodePtr SemBinder::WrapReturnValue(SemValue value, const TypePtr& bare)
+{
+	if (value.category == VC_PRVALUE &&
+	    RemoveTopCv(value.type)->named == bare->named)
+	{
+		// The prvalue constructs the result object directly; its own
+		// temporary cleanup does not apply.
+		if (value.node->kind == SN_CONSTRUCTOR_ACTION)
+		{
+			value.node->needs_dtor = false;
+			while (value.node->children.size() > 1 &&
+			       value.node->children.back()->kind ==
+			           SN_DESTRUCTOR_ACTION)
+				value.node->children.pop_back();
+		}
+		return std::move(value.node);
+	}
+	const ClassInfo* cls = unit_.classes.Find(bare->named);
+	if (!cls)
+		throw runtime_error("class record missing for return value");
+	bool move_first = false;
+	if (value.category == VC_LVALUE &&
+	    value.node->kind == SN_ID_EXPRESSION && value.node->entity_scope &&
+	    TypeEquals(RemoveTopCv(value.type), RemoveTopCv(bare)))
+	{
+		const Scope* home = value.node->entity_scope;
+		const ScopeBinding* binding =
+			FindOwnBinding(*home, value.node->entity_name);
+		if (binding &&
+		    (binding->kind == SB_VARIABLE ||
+		     binding->kind == SB_PARAMETER) &&
+		    !IsReferenceType(binding->type) &&
+		    (home->kind == SCOPE_FUNCTION || home->kind == SCOPE_BLOCK))
+			move_first = true;
+	}
+	vector<SemValue> args;
+	args.push_back(std::move(value));
+	int index = -1;
+	bool resolved = false;
+	if (move_first)
+	{
+		args[0].category = VC_XVALUE;
+		try
+		{
+			index = ResolveClassConstructor(*cls, args, true,
+			                                "return value");
+			resolved = true;
+		}
+		catch (const std::exception&)
+		{
+			args[0].category = VC_LVALUE;
+		}
+	}
+	if (!resolved)
+		index = ResolveClassConstructor(*cls, args, true, "return value");
+	vector<SemNodePtr> arg_nodes;
+	for (size_t i = 0; i < args.size(); i++)
+		arg_nodes.push_back(std::move(args[i].node));
+	SemNodePtr action = MakeConstructorCall(*cls, index, false, SemNodePtr(),
+	                                        std::move(arg_nodes));
+	action->synth_copy = true;
+	action->type = bare;
+	action->category = VC_PRVALUE;
+	// Ownership transfers to the caller's result object: no temporary
+	// cleanup attaches.
+	return action;
 }
 
 void SemBinder::BindConditionDeclaration(const AstCondition& condition,

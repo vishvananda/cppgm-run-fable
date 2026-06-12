@@ -694,6 +694,9 @@ string FunctionLowerer::DirectStorage(const SemNode& node)
 {
 	if (node.kind != SN_ID_EXPRESSION)
 		return "";
+	if (address_aliases_.count(std::make_pair(
+			(const void*)node.entity_scope, node.entity_name)))
+		return "";  // addressed through the alias, not a slot
 	const ScopeBinding* binding = EntityBinding(node);
 	if (!binding || binding->kind == SB_FUNCTION ||
 	    IsReferenceType(binding->type) ||
@@ -816,6 +819,13 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	{
 	case SN_ID_EXPRESSION:
 	{
+		// A by_address parameter (or the return-slot-reused local)
+		// addresses the caller-owned object directly.
+		map<pair<const void*, string>, string>::const_iterator alias =
+			address_aliases_.find(std::make_pair(
+				(const void*)node.entity_scope, node.entity_name));
+		if (alias != address_aliases_.end())
+			return alias->second;
 		const ScopeBinding* binding = EntityBinding(node);
 		if (!binding)
 			throw runtime_error("unresolved lvalue " + node.name);
@@ -867,7 +877,12 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		throw OutsideBoundary("address form");
 	case SN_CALL_EXPRESSION:
 		if (!IsReferenceType(node.type))
+		{
+			if (NodeType(node)->kind == TK_CLASS)
+				// A class prvalue call: the materialized result.
+				return MaterializeClassResult(node, "tmpobj", "");
 			throw OutsideBoundary("address of a call result");
+		}
 		return LowerCall(node).text;
 	case SN_CONDITIONAL_EXPRESSION:
 		return LowerConditionalAddress(node);
@@ -979,6 +994,21 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		}
 		return address;
 	}
+	if (source->kind == TK_CLASS && bare->kind == TK_CLASS)
+	{
+		// A class prvalue (call result, conditional) binding a
+		// reference: materialize the result object.
+		string address = MaterializeClassResult(node, "arg", "");
+		int hops = BaseClassDistance(source->named, bare->named);
+		for (int i = 0; i < hops; i++)
+		{
+			string hopped = NewTemp();
+			Emit(hopped + " = index i8 [projection=base_subobject] " +
+			     address + ", 0");
+			address = hopped;
+		}
+		return address;
+	}
 	// 8.5.3p5: materialize a temporary with the converted value.
 	string slot = AddMatSlot("refarg", LowerSlotType(bare));
 	string value = LowerValueAs(node, bare, LCC_INIT);
@@ -1011,29 +1041,49 @@ string FunctionLowerer::LowerCallArgument(const SemNode& node,
 		return LowerReferenceArgument(node, param->target);
 	if (RemoveTopCv(param)->kind == TK_CLASS)
 	{
-		// A by-value class argument materializes a fresh object slot
-		// passed by name (the PA15 empty-class subset; full value
-		// semantics belong to PA16).
 		TypePtr bare = RemoveTopCv(param);
+		if (!LowerClassDirect(bare))
+			// The indirect boundary: the caller materializes the
+			// argument object and passes its address.
+			return MaterializeClassArg(node, bare);
+		// The direct obj boundary: a fresh object slot passes by name.
 		string slot = AddMatSlot("argobj", LowerSlotType(bare));
 		string copy_address = NewTemp();
 		Emit(copy_address + " = addr $" + slot);
-		if (node.kind == SN_CONSTRUCTOR_ACTION)
-			LowerConstructorCall(node, copy_address);
-		else
+		if (node.kind == SN_CONSTRUCTOR_ACTION && node.trivial_init)
+			;  // default-constructed argument object: storage only
+		else if (node.kind == SN_ID_EXPRESSION ||
+		         node.kind == SN_MEMBER_EXPRESSION)
 		{
-			LowerAddressExpr(node);
-			if (bare->named->size > 1 ||
-			    (bare->named->class_record &&
-			     !bare->named->class_record->is_empty))
-				throw OutsideBoundary("by-value class argument copy");
+			// The PA15 empty-class direct binding kept the slot
+			// untouched; non-empty trivial sources copy their bytes.
+			string source_address = LowerAddressExpr(node);
+			if (bare->named->class_record &&
+			    !bare->named->class_record->is_empty)
+				Emit("copyobj " + LowerObjSpan(bare) + " " +
+				     source_address + ", " + copy_address);
 		}
+		else
+			LowerClassInit(node, copy_address);
 		return "$" + slot;
 	}
 	return LowerValueAs(node, RemoveTopCv(param), LCC_INIT);
 }
 
-LowerValue FunctionLowerer::LowerCall(const SemNode& node)
+string FunctionLowerer::MaterializeClassArg(const SemNode& node,
+                                            const TypePtr& bare)
+{
+	if (node.kind == SN_CONSTRUCTOR_ACTION)
+		return MaterializeTemporary(node, "arg");
+	string slot = AddMatSlot("arg", LowerSlotType(bare));
+	string address = NewTemp();
+	Emit(address + " = addr $" + slot);
+	LowerClassInit(node, address);
+	return address;
+}
+
+LowerValue FunctionLowerer::LowerCall(const SemNode& node,
+                                      const string& result_address)
 {
 	const SemNode& callee = *node.children[0];
 	TypePtr fn_type;
@@ -1077,12 +1127,25 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node)
 		callee_text = LowerValueExpr(callee).text;
 	else
 		callee_text = LowerPointerOperand(callee);
-	string return_text = LowerValueType(fn_type->target);
+	string return_text;
+	bool indirect_result = LowerAbiReturn(fn_type->target, return_text);
+	if (indirect_result)
+	{
+		// The caller-owned result object's address leads the argument
+		// list.
+		if (result_address.empty())
+			throw OutsideBoundary("indirect class result destination");
+		arguments = result_address +
+			(arguments.empty() ? "" : ", " + arguments);
+	}
 	string line;
 	LowerValue result;
 	result.type = StripRef(fn_type->target);
-	if (IsVoidType(fn_type->target))
+	if (return_text == "void")
+	{
 		line = "call void " + callee_text + "(" + arguments + ")";
+		result.text = result_address;
+	}
 	else
 	{
 		result.text = NewTemp();
@@ -1092,24 +1155,36 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node)
 	if (!direct)
 	{
 		string signature;
-		for (size_t i = 0; i < fn_type->parameters.size(); i++)
+		size_t at = 0;
+		if (indirect_result)
 		{
-			const TypePtr& param = fn_type->parameters[i];
-			signature += (i ? ", " : "") + string("%arg") +
-				to_string(i) + " : " + LowerValueType(param);
-			if (IsReferenceType(param))
-				signature += " [pass=reference]";
+			signature = "%arg0 : ptr [pass=indirect_result]";
+			at = 1;
+		}
+		for (size_t i = 0; i < fn_type->parameters.size(); i++, at++)
+		{
+			string param_text;
+			string pass;
+			LowerAbiParameter(fn_type->parameters[i], param_text, pass);
+			signature += (at ? ", " : "") + string("%arg") +
+				to_string(at) + " : " + param_text;
+			if (!pass.empty())
+				signature += " [pass=" + pass + "]";
 		}
 		line += " as (" + signature + ") -> " + return_text;
 		if (fn_type->variadic)
 			line += " [arity=variadic]";
 	}
 	Emit(line);
-	if (protected_call && eh_open_ && !IsVoidType(fn_type->target))
+	bool class_result =
+		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&
+		!IsReferenceType(fn_type->target);
+	if (protected_call && eh_open_ && !IsVoidType(fn_type->target) &&
+	    !class_result)
 	{
-		// A protected call's result survives the region in a slot.
-		string slot = AddMatSlot("call", LowerValueType(
-			StripRef(fn_type->target)));
+		// A protected call's result survives the region in a slot (a
+		// reference result survives as its pointer).
+		string slot = AddMatSlot("call", LowerValueType(fn_type->target));
 		Emit("store " + return_text + " " + result.text + ", $" + slot);
 		string reloaded = NewTemp();
 		Emit(reloaded + " = load " + return_text + " $" + slot);
@@ -1324,6 +1399,14 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 		}
 		break;
 	case SN_CALL_EXPRESSION:
+		if (!IsReferenceType(node.type) &&
+		    RemoveTopCv(NodeType(node))->kind == TK_CLASS)
+		{
+			// A discarded class-valued call still materializes its
+			// result object.
+			MaterializeClassResult(node, "discard", "");
+			return;
+		}
 		LowerCall(node);
 		return;
 	case SN_UNARY_EXPRESSION:

@@ -24,7 +24,8 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  base_hops(0), is_bit_field(false), bit_offset(0), bit_width(0),
 	  member_ref(false), is_method(false), special(SF_NONE),
 	  inline_def(false), needs_dtor(false), trivial_init(false),
-	  elided(false), bf_plain_store(false)
+	  elided(false), bf_plain_store(false), synth_copy(false),
+	  trivial_copy(false)
 {
 }
 
@@ -84,6 +85,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_CAST_EXPRESSION: return "cast-expression";
 	case SN_SIZEOF_EXPRESSION: return "sizeof-expression";
 	case SN_BRACED_INIT_LIST: return "braced-init-list";
+	case SN_STORAGE_COPY: return "storage-copy";
 	}
 	throw runtime_error("unknown semantic node kind");
 }
@@ -148,6 +150,14 @@ string NodeLine(const SemNode& node)
 
 void PrintNode(const SemNode& node, ostream& out, int depth)
 {
+	if (node.kind == SN_CONSTRUCTOR_ACTION && node.synth_copy)
+	{
+		// A PA16 copy/move-initialization wrapper: the PA12 dump pins
+		// the wrapped source expression (the call's last child).
+		const SemNode& call = *node.children[0];
+		PrintNode(*call.children.back(), out, depth);
+		return;
+	}
 	for (int i = 0; i < depth; i++)
 		out << "  ";
 	out << NodeLine(node) << "\n";
@@ -202,6 +212,8 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.elided = node.elided;
 	out.bf_plain_store = node.bf_plain_store;
 	out.member_ref = node.member_ref;
+	out.synth_copy = node.synth_copy;
+	out.trivial_copy = node.trivial_copy;
 	for (size_t i = 0; i < node.children.size(); i++)
 		out.children.push_back(CloneSemNode(*node.children[i]));
 	return copy;

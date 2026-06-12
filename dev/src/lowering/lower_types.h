@@ -36,3 +36,23 @@ string LowerConvertOp(const TypePtr& from, const TypePtr& to);
 
 // Object size in bytes of the lowered scalar value.
 unsigned long long LowerValueWidth(const TypePtr& type);
+
+// --- PA16 object ABI ---------------------------------------------------
+
+// Complete objects of the class type pass/return as direct obj<SxA>
+// values; otherwise parameters pass by_address and results return
+// through a leading indirect_result destination pointer.
+bool LowerClassDirect(const TypePtr& bare);
+
+// The "SIZExALIGN" span text of a class or array type.
+string LowerObjSpan(const TypePtr& bare);
+
+// The ABI-lowered parameter spelling and pass metadata of one declared
+// parameter type ("" when no pass metadata applies).
+void LowerAbiParameter(const TypePtr& param, string& type_text,
+                       string& pass);
+
+// The ABI-lowered return facts of a function type: `ret_text` is the
+// emitted return spelling; true when the function carries a leading
+// `ptr [pass=indirect_result]` result parameter (and returns void).
+bool LowerAbiReturn(const TypePtr& return_type, string& ret_text);
