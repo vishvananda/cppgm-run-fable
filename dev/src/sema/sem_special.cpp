@@ -161,6 +161,7 @@ void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 		return;
 	cls.specials_declared = true;
 	// Classify the user-declared assignment operators (12.8p17/p19).
+	// Explicitly-defaulted ones synthesize like the implicit members.
 	if (ScopeBinding* assign = FindOwnBinding(*cls.members, "operator ="))
 	{
 		size_t count = assign->overloads.size() + 1;
@@ -175,10 +176,26 @@ void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 			bare = RemoveTopCv(bare);
 			if (bare->kind != TK_CLASS || bare->named != cls.entity)
 				continue;
-			if (param->kind == TK_RVALUE_REFERENCE)
+			bool is_move = param->kind == TK_RVALUE_REFERENCE;
+			if (is_move)
 				cls.has_user_move_assign = true;
 			else
 				cls.has_user_copy_assign = true;
+			if (i < assign->fn_defaulted.size() &&
+			    assign->fn_defaulted[i])
+			{
+				if (is_move)
+					cls.move_assign_index = (int)i;
+				else
+					cls.copy_assign_index = (int)i;
+				if (AssignBlockedByMembers(cls, is_move))
+				{
+					assign->fn_deleted.resize(count, false);
+					assign->fn_deleted[i] = true;
+					if (!is_move)
+						cls.copy_assign_deleted = true;
+				}
+			}
 		}
 	}
 	// A user-defaulted copy/move constructor may be defined as deleted
@@ -541,7 +558,8 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 	}
 }
 
-void SemBinder::EnsureSpecialCtor(const ClassInfo& cls_in, int index)
+void SemBinder::EnsureSpecialCtor(const ClassInfo& cls_in, int index,
+                                  bool out_of_class)
 {
 	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
 	ClassCtor& ctor = cls.ctors[index];
@@ -552,13 +570,19 @@ void SemBinder::EnsureSpecialCtor(const ClassInfo& cls_in, int index)
 	const string& base_name = cls.members->name;
 	Scope* fn_scope =
 		model_.CreateScope(SCOPE_FUNCTION, base_name, cls.members);
-	string param_name = !ctor.param_names.empty() &&
-		!ctor.param_names[0].empty() ? ctor.param_names[0] : "other";
+	string param_name;
+	if (!ctor.param_names.empty() && !ctor.param_names[0].empty())
+		param_name = ctor.param_names[0];
+	else
+		// Implicit members name their source "other"; explicitly
+		// defaulted declarations keep the positional spelling.
+		param_name = ctor.implicit ? "other" : "__param1";
 	DeferredBody body;
 	body.name = base_name;
 	body.fn_scope = fn_scope;
 	body.declaring = cls.members;
 	body.cls = &cls;
+	body.out_of_class = out_of_class;
 	body.composed.type = ctor.type;
 	ParameterInfo parameter;
 	parameter.name = param_name;
@@ -615,7 +639,12 @@ void SemBinder::EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
 	ClassInfo* found = unit_.classes.Find(cls_entity);
 	if (!found)
 		return;
-	ClassInfo& cls = *found;
+	BuildAssignSpecial(*found, overload_index, false);
+}
+
+void SemBinder::BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
+                                   bool out_of_class)
+{
 	bool is_move;
 	if ((int)overload_index == cls.copy_assign_index)
 		is_move = false;
@@ -632,14 +661,17 @@ void SemBinder::EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
 		? binding->type : binding->overloads[overload_index - 1];
 	const string name = "operator =";
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, name, cls.members);
+	bool user_defaulted = overload_index < binding->fn_defaulted.size() &&
+		binding->fn_defaulted[overload_index];
 	DeferredBody body;
 	body.name = name;
 	body.fn_scope = fn_scope;
 	body.declaring = cls.members;
 	body.cls = &cls;
+	body.out_of_class = out_of_class;
 	body.composed.type = declared;
 	ParameterInfo parameter;
-	parameter.name = "other";
+	parameter.name = user_defaulted ? "__param1" : "other";
 	parameter.type = declared->parameters[0];
 	body.composed.parameters.push_back(parameter);
 	ScopeBinding param_binding;
@@ -692,7 +724,22 @@ void SemBinder::EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
 		cls.copy_assign_unwind_no = !may_throw;
 	if (overload_index < binding->fn_unwind_no.size())
 		binding->fn_unwind_no[overload_index] = !may_throw;
-	unit_.deferred.push_back(std::move(item));
+	if (out_of_class)
+		// A source-owned defaulted definition prints unconditionally.
+		AppendItem(std::move(item));
+	else
+		unit_.deferred.push_back(std::move(item));
+}
+
+void SemBinder::RecomputeUserCtorFact(ClassInfo& cls)
+{
+	cls.has_user_ctor = false;
+	for (size_t i = 0; i < cls.ctors.size(); i++)
+	{
+		const ClassCtor& ctor = cls.ctors[i];
+		if (!ctor.implicit && !ctor.defaulted && !ctor.deleted)
+			cls.has_user_ctor = true;
+	}
 }
 
 int SemBinder::ResolveClassCtorHost(const ClassInfo& cls,

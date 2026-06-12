@@ -85,6 +85,8 @@ ImplicitConversion ClassifyFunctionSet(const ConversionSource& source,
 
 ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
                                             const TypePtr& dest);
+ImplicitConversion ClassifySourceConversionFunction(
+	const ConversionSource& source, const TypePtr& dest, bool contextual);
 
 // 4.5/4.6/4.7-4.12 over non-reference destinations. The destination is
 // taken as an object value: its own top-level cv is ignored.
@@ -499,12 +501,97 @@ TypePtr UsualArithmeticConversions(const TypePtr& a_in, const TypePtr& b_in)
 	return MakeFundamentalType(UnsignedCounterpart(ss));
 }
 
+namespace {
+
+// 12.3.2/13.3.3.1.2: the conversion functions of a class source. The
+// implicit object binding selects among cv-qualified overloads; the
+// result then reaches `dest` through one standard conversion whose
+// rank orders competing user-defined sequences.
+ImplicitConversion ClassifySourceConversionFunction(
+	const ConversionSource& source, const TypePtr& dest, bool contextual)
+{
+	ImplicitConversion result;
+	TypePtr from = RemoveTopCv(source.type);
+	if (from->kind != TK_CLASS || !from->named->class_record)
+		return result;
+	bool dest_bool = !IsReferenceType(dest) && IsBoolType(RemoveTopCv(dest));
+	ImplicitConversion best_object;
+	for (const ClassInfo* link = from->named->class_record; link;
+	     link = link->base)
+	{
+		for (size_t i = 0; i < link->conversions.size(); i++)
+		{
+			const ClassConversion& conv = link->conversions[i];
+			// 12.3.2p2: explicit conversion functions participate only
+			// in direct-initialization / contextual-bool contexts.
+			if (conv.is_explicit && !(contextual && dest_bool))
+				continue;
+			// The implicit object parameter binds the source.
+			TypePtr object_class = MakeNamedType(TK_CLASS, from->named);
+			object_class = MakeCvQualifiedType(
+				object_class, conv.type->is_const,
+				conv.type->is_volatile);
+			ImplicitConversion object = ClassifyReferenceBinding(
+				source, MakeReferenceType(object_class, false, true));
+			if (!object.viable)
+				continue;
+			// One standard conversion from the result to `dest`.
+			ConversionSource inner;
+			inner.type = IsReferenceType(conv.result)
+				? conv.result->target : RemoveTopCv(conv.result);
+			inner.category = conv.result->kind == TK_LVALUE_REFERENCE
+				? VC_LVALUE : VC_PRVALUE;
+			ImplicitConversion second = ClassifyConversion(inner, dest);
+			if (!second.viable || second.rank == CR_USER)
+				continue;
+			bool better = false;
+			if (!result.viable)
+				better = true;
+			else
+			{
+				int object_order = CompareConversions(object, best_object,
+				                                      source);
+				if (object_order < 0)
+					better = true;
+				else if (object_order == 0 &&
+				         second.rank < result.second_rank)
+					better = true;
+			}
+			if (!better)
+				continue;
+			result.viable = true;
+			result.rank = CR_USER;
+			result.conv_class = link->entity;
+			result.conv_index = (int)i;
+			result.second_rank = second.rank;
+			result.null_to_pointer = false;
+			best_object = object;
+		}
+	}
+	return result;
+}
+
+}  // namespace
+
 ImplicitConversion ClassifyConversion(const ConversionSource& source,
                                       const TypePtr& dest)
 {
-	if (IsReferenceType(dest))
-		return ClassifyReferenceBinding(source, dest);
-	return ClassifyValueConversion(source, dest);
+	return ClassifyConversionEx(source, dest, false);
+}
+
+ImplicitConversion ClassifyConversionEx(const ConversionSource& source,
+                                        const TypePtr& dest,
+                                        bool contextual)
+{
+	ImplicitConversion result = IsReferenceType(dest)
+		? ClassifyReferenceBinding(source, dest)
+		: ClassifyValueConversion(source, dest);
+	if (result.viable)
+		return result;
+	if (source.type && RemoveTopCv(source.type)->kind == TK_CLASS &&
+	    !source.function_set)
+		return ClassifySourceConversionFunction(source, dest, contextual);
+	return result;
 }
 
 size_t SelectBestOverload(const vector<TypePtr>& candidates,

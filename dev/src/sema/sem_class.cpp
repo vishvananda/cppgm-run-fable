@@ -194,6 +194,11 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	if (!cls || current_ != cls->members)
 		throw OutsideBoundary("out-of-class special member definition");
 	const AstNamePart& part = id->parts[0];
+	if (part.kind == NP_CONVERSION_FUNCTION)
+	{
+		BindConversionFunction(decl, *cls, part);
+		return;
+	}
 	if (part.kind != NP_IDENTIFIER)
 		throw OutsideBoundary("conversion function");
 	if (part.identifier != cls->members->name)
@@ -287,6 +292,53 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	}
 }
 
+// A conversion-function member declaration (12.3.2): bound in the
+// class scope under its canonical "operator <type>" name, recorded in
+// the class's conversion set, and (when defined in-class) deferred
+// like other member bodies.
+void SemBinder::BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
+                                       const AstNamePart& part)
+{
+	bool is_explicit = false;
+	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
+	{
+		ETokenType keyword = decl.member_specifiers[i].keyword;
+		if (keyword == KW_EXPLICIT)
+			is_explicit = true;
+		else if (keyword == KW_VIRTUAL)
+			throw OutsideBoundary("virtual conversion function");
+	}
+	TypePtr result = builder_.ResolveTypeId(*part.conversion_type);
+	DeclaratorInfo composed = builder_.ComposeDeclarator(
+		decl.declarator.get(), result);
+	if (composed.type->kind != TK_FUNCTION ||
+	    !composed.type->parameters.empty() || composed.type->variadic)
+		throw runtime_error("conversion function takes no parameters");
+	bool deleted = decl.special_init &&
+		decl.special_init->kind == INIT_DELETE;
+	bool defined = decl.kind == DK_SPECIAL_MEMBER_DEFINITION;
+	string name = "operator " + DescribeType(result);
+	ScopeBinding& binding = BindFunctionName(name, composed.type, false);
+	RecordFunctionFacts(binding, composed, deleted, 0, defined);
+	ClassConversion conv;
+	conv.name = name;
+	conv.result = result;
+	conv.type = composed.type;
+	conv.is_explicit = is_explicit;
+	conv.access = current_access_;
+	cls.conversions.push_back(conv);
+	if (!defined)
+		return;
+	DeferredBody body;
+	body.decl = &decl;
+	body.composed = composed;
+	body.name = name;
+	body.fn_scope = MakeSpecialMemberScope(name, composed, cls);
+	body.declaring = cls.members;
+	body.cls = &cls;
+	deferred_bodies_.push_back(body);
+}
+
 // The function scope of a constructor/destructor body, with its
 // declared parameters bound.
 Scope* SemBinder::MakeSpecialMemberScope(const string& name,
@@ -315,20 +367,88 @@ Scope* SemBinder::MakeSpecialMemberScope(const string& name,
 void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
                                            const AstName& id)
 {
-	if (decl.kind != DK_SPECIAL_MEMBER_DEFINITION)
+	bool defaulted = decl.kind == DK_SPECIAL_MEMBER_DECLARATION &&
+		decl.special_init && decl.special_init->kind == INIT_DEFAULT;
+	if (decl.kind != DK_SPECIAL_MEMBER_DEFINITION && !defaulted)
 		throw OutsideBoundary("qualified special member declaration");
 	Scope* declaring = ResolvePrefixScope(id);
 	if (declaring->kind != SCOPE_CLASS)
 		throw OutsideBoundary("qualified special member scope");
 	const AstNamePart& part = id.parts.back();
-	if (part.kind != NP_IDENTIFIER || part.tilde)
-		throw OutsideBoundary("out-of-class destructor definition");
-	if (part.identifier != declaring->name)
-		throw runtime_error("special member does not name its class");
 	const NamedTypeInfo* entity = model_.ScopeEntity(declaring);
 	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
 	if (!cls)
-		throw runtime_error("constructor of an unknown class");
+		throw runtime_error("special member of an unknown class");
+	if (part.kind == NP_CONVERSION_FUNCTION)
+	{
+		// An out-of-class conversion-function definition: the
+		// conversion-type-id resolves in the class's scope.
+		if (defaulted)
+			throw runtime_error("defaulted conversion function");
+		Scope* saved = current_;
+		current_ = declaring;
+		TypePtr result;
+		DeclaratorInfo composed;
+		try
+		{
+			result = builder_.ResolveTypeId(*part.conversion_type);
+			composed = builder_.ComposeDeclarator(
+				decl.declarator.get(), result);
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+		string name = "operator " + DescribeType(result);
+		if (!FindOwnBinding(*declaring, name))
+			throw runtime_error("conversion definition matches no "
+			                    "declaration");
+		DeferredBody body;
+		body.decl = &decl;
+		body.composed = composed;
+		body.name = name;
+		body.fn_scope = MakeSpecialMemberScope(name, composed, *cls);
+		body.declaring = declaring;
+		body.cls = cls;
+		body.out_of_class = true;
+		AnalyzeDeferredBody(body);
+		return;
+	}
+	if (part.kind != NP_IDENTIFIER)
+		throw OutsideBoundary("qualified special member name");
+	if (part.identifier != declaring->name)
+		throw runtime_error("special member does not name its class");
+	if (part.tilde)
+	{
+		// Out-of-class destructor definition or `= default`.
+		if (!cls->dtor_user_declared)
+			throw runtime_error("destructor definition matches no "
+			                    "declaration");
+		if (cls->dtor_definition)
+			throw runtime_error("redefinition of destructor");
+		if (defaulted)
+		{
+			// 8.4.3: defaulted outside the class behaves implicitly
+			// but emits as a source-owned strong definition.
+			cls->has_user_dtor = false;
+			EnsureImplicitDtor(*cls, true);
+			return;
+		}
+		DeferredBody body;
+		body.decl = &decl;
+		body.name = "~" + declaring->name;
+		body.fn_scope = MakeSpecialMemberScope(body.name,
+		                                       DeclaratorInfo(), *cls);
+		body.declaring = declaring;
+		body.cls = cls;
+		body.out_of_class = true;
+		cls->dtor_definition = &decl;
+		cls->has_user_dtor = true;
+		AnalyzeDeferredBody(body);
+		return;
+	}
 	// Parameters resolve against the class's lexical scope.
 	Scope* saved = current_;
 	current_ = declaring;
@@ -350,6 +470,19 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		                    "declaration");
 	if (cls->ctors[index].definition)
 		throw runtime_error("redefinition of constructor");
+	if (defaulted)
+	{
+		ClassCtor& ctor = cls->ctors[index];
+		if (ctor.kind == CK_ORDINARY && !ctor.type->parameters.empty())
+			throw runtime_error("defaulted non-special constructor");
+		ctor.defaulted = true;
+		RecomputeUserCtorFact(*cls);
+		if (ctor.kind == CK_ORDINARY)
+			EnsureImplicitDefaultCtor(*cls, true);
+		else
+			EnsureSpecialCtor(*cls, index, true);
+		return;
+	}
 	cls->ctors[index].definition = &decl;
 	DeferredBody body;
 	body.decl = &decl;
@@ -626,7 +759,8 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 {
 	ESpecialFunction special = SF_NONE;
-	if (body.decl->kind == DK_SPECIAL_MEMBER_DEFINITION)
+	if (body.decl->kind == DK_SPECIAL_MEMBER_DEFINITION &&
+	    body.name.compare(0, 9, "operator ") != 0)
 		special = body.name[0] == '~' ? SF_DESTRUCTOR : SF_CONSTRUCTOR;
 	SemNodePtr item = BuildFunctionNode(body, special);
 	SemNode* node = item.get();

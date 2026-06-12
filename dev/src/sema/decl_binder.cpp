@@ -148,11 +148,15 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 			defaults[i] = composed.parameters[i].default_arg;
 }
 
-const string& DeclBinder::TerminalName(const AstName& name)
+string DeclBinder::TerminalName(const AstName& name)
 {
 	if (name.parts.empty())
 		throw OutsideBoundary("name form");
-	return PartName(name.parts.back());
+	const AstNamePart& part = name.parts.back();
+	if (part.kind == NP_OPERATOR_FUNCTION ||
+	    part.kind == NP_LITERAL_OPERATOR)
+		return DeclaredFunctionName(part);
+	return PartName(part);
 }
 
 Scope* DeclBinder::ScopeOfBinding(const ScopeBinding& binding)
@@ -656,11 +660,17 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	}
 	if (composed.type->kind == TK_FUNCTION)
 	{
-		// 8.4.3: `= delete` is a deleted definition; any other
+		// 8.4.3: `= delete` is a deleted definition; `= default` is a
+		// defaulted definition of a special member function; any other
 		// initializer on a function declarator is ill-formed.
 		bool deleted = declarator.init &&
 			declarator.init->kind == INIT_DELETE;
-		if (declarator.init && !deleted)
+		bool defaulted = declarator.init &&
+			declarator.init->kind == INIT_DEFAULT;
+		if (defaulted &&
+		    (current_->kind != SCOPE_CLASS || name != "operator ="))
+			throw runtime_error("defaulted non-special member function");
+		if (declarator.init && !deleted && !defaulted)
 			throw OutsideBoundary("function declarator initializer");
 		// 8.3.5p6: cv-qualifiers only on non-static member functions.
 		if ((composed.type->is_const || composed.type->is_volatile) &&
@@ -668,6 +678,16 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 			throw runtime_error("cv-qualified non-member function");
 		ScopeBinding& binding = BindFunctionName(name, composed.type, true);
 		RecordFunctionFacts(binding, composed, deleted, &specs);
+		if (defaulted)
+		{
+			size_t index = 0;
+			for (size_t i = 0; i < binding.overloads.size(); i++)
+				if (TypeEquals(binding.overloads[i], composed.type))
+					index = i + 1;
+			binding.fn_defaulted.resize(
+				binding.overloads.size() + 1, false);
+			binding.fn_defaulted[index] = true;
+		}
 		if (in_c_linkage_)
 			binding.c_linkage = true;
 		OnFunctionDeclared(binding, composed.type);

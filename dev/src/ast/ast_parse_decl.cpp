@@ -412,6 +412,11 @@ AstDeclPtr AstParser::ParseDeclarationForms()
 	decl = ParseSpecialMember(true);
 	if (decl)
 		return decl;
+	// PA16: out-of-class defaulted special members
+	// (`X::X() = default;`).
+	decl = ParseSpecialMember(false, true);
+	if (decl)
+		return decl;
 	decl = ParseFunctionDefinition();
 	if (decl)
 		return decl;

@@ -867,13 +867,18 @@ void FunctionLowerer::LowerSwitch(const SemNode& node)
 	string selector;
 	if (condition.children[0]->kind == SN_CONDITION_DECLARATION)
 	{
-		const SemNode& variable =
-			*condition.children[0]->children[0];
+		const SemNode& inner = *condition.children[0];
+		const SemNode& variable = *inner.children[0];
 		LowerLocalVariable(variable);
-		TypePtr type = StripReference(variable.type);
-		selector = NewTemp();
-		Emit(selector + " = load " + LowerValueType(type) + " $" +
-		     SlotRef(variable.entity_scope, variable.entity_name));
+		if (inner.children.size() > 1)
+			selector = LowerValueExpr(*inner.children[1]).text;
+		else
+		{
+			TypePtr type = StripReference(variable.type);
+			selector = NewTemp();
+			Emit(selector + " = load " + LowerValueType(type) + " $" +
+			     SlotRef(variable.entity_scope, variable.entity_name));
+		}
 	}
 	else
 		selector = LowerValueExpr(*condition.children[0]).text;
@@ -931,15 +936,21 @@ void FunctionLowerer::LowerConditionInto(const SemNode& condition,
 		return;
 	}
 	// 6.4p4: the condition value is the declared variable, read back
-	// from its slot after initialization.
+	// from its slot after initialization (a class variable converts
+	// through its attached conversion-function call).
 	const SemNode& variable = *inner.children[0];
 	LowerLocalVariable(variable);
-	TypePtr type = StripReference(variable.type);
 	LowerValue value;
-	value.text = NewTemp();
-	value.type = RemoveTopCv(type);
-	Emit(value.text + " = load " + LowerValueType(type) + " $" +
-	     SlotRef(variable.entity_scope, variable.entity_name));
+	if (inner.children.size() > 1)
+		value = LowerValueExpr(*inner.children[1]);
+	else
+	{
+		TypePtr type = StripReference(variable.type);
+		value.text = NewTemp();
+		value.type = RemoveTopCv(type);
+		Emit(value.text + " = load " + LowerValueType(type) + " $" +
+		     SlotRef(variable.entity_scope, variable.entity_name));
+	}
 	LowerValue truth = MaterializeTruth(value);
 	ReferenceLabel(true_label);
 	ReferenceLabel(false_label);

@@ -76,15 +76,18 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		                                 item.entity_name, item.type,
 		                                 item.special);
 		member_defs_[key] = &item;
-		if (!item.inline_def &&
-		    (item.special == SF_CONSTRUCTOR ||
-		     item.special == SF_CONSTRUCTOR_BASE))
+		if (!item.inline_def)
 		{
-			// An out-of-class constructor prints both ABI entries.
+			// An out-of-class constructor or destructor prints both
+			// ABI entries.
+			bool is_ctor = item.special == SF_CONSTRUCTOR ||
+				item.special == SF_CONSTRUCTOR_BASE;
 			MemberFunctionEntry(item.entity_scope, item.entity_name,
-			                    item.type, "C2").used = true;
+			                    item.type,
+			                    is_ctor ? "C2" : "D2").used = true;
 			MemberFunctionEntry(item.entity_scope, item.entity_name,
-			                    item.type, "C1").used = true;
+			                    item.type,
+			                    is_ctor ? "C1" : "D1").used = true;
 		}
 		return;
 	}

@@ -428,6 +428,53 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		value.null_pointer_literal = false;
 		return;
 	}
+	if (conv.conv_index >= 0 && conv.conv_class)
+	{
+		// 12.3.2: the conversion function call produces the converted
+		// value; any remaining standard conversion happens in context.
+		const ClassInfo* cls = host_.Classes().Find(conv.conv_class);
+		if (!cls)
+			throw runtime_error("conversion function class record "
+			                    "missing");
+		const ClassConversion& fn = cls->conversions[conv.conv_index];
+		host_.CheckMemberAccess(cls->members, fn.access, fn.name);
+		int hops = BaseClassDistance(RemoveTopCv(value.type)->named,
+		                             conv.conv_class);
+		if (hops > 0)
+		{
+			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+			adjusted->type = MakeNamedType(TK_CLASS, conv.conv_class);
+			adjusted->category = VC_LVALUE;
+			adjusted->base_hops = hops;
+			adjusted->children.push_back(std::move(value.node));
+			value.node = std::move(adjusted);
+		}
+		SemValue out = CallResult(fn.type);
+		SemNodePtr callee = MakeSemNode(SN_CALLEE);
+		callee->name = CanonicalQualifiedName(cls->members, fn.name);
+		callee->type = ThisAdjustedType(conv.conv_class, fn.type);
+		callee->entity_scope = cls->members;
+		callee->entity_name = fn.name;
+		callee->is_method = true;
+		if (const ScopeBinding* binding =
+		        FindOwnBinding(*cls->members, fn.name))
+		{
+			size_t index = 0;
+			for (size_t i = 0; i < binding->overloads.size(); i++)
+				if (TypeEquals(binding->overloads[i], fn.type))
+					index = i + 1;
+			if (index < binding->fn_unwind_no.size() &&
+			    binding->fn_unwind_no[index])
+				callee->unwind_no = true;
+		}
+		out.node->children.push_back(std::move(callee));
+		out.node->children.push_back(
+			AddressOfObject(std::move(value.node)));
+		bool null_literal = value.null_pointer_literal;
+		(void)null_literal;
+		value = std::move(out);
+		return;
+	}
 	if (conv.selected_overload >= 0)
 	{
 		// 13.4: the target type picked one overload; the id-expression
@@ -506,13 +553,54 @@ void SemExprAnalyzer::CopyInitialize(SemValue& value, const TypePtr& dest,
 	ApplyConversion(value, conv, dest);
 }
 
-void SemExprAnalyzer::RequireContextualBool(const SemValue& value,
+void SemExprAnalyzer::RequireContextualBool(SemValue& value,
                                             const char* what)
 {
-	ImplicitConversion conv = ClassifyConversion(
-		MakeConversionSource(value), MakeFundamentalType(FT_BOOL));
+	// 4p4: contextual bool conversion; explicit conversion functions
+	// participate (direct-initialization semantics).
+	ImplicitConversion conv = ClassifyConversionEx(
+		MakeConversionSource(value), MakeFundamentalType(FT_BOOL), true);
 	if (!conv.viable)
 		throw runtime_error(string(what) + " is not contextually bool");
+	if (conv.conv_index >= 0 && value.node)
+		ApplyConversion(value, conv, MakeFundamentalType(FT_BOOL));
+}
+
+// A class operand of a built-in operator form converts through its
+// single viable non-explicit conversion function (the 13.6 subset).
+bool SemExprAnalyzer::ConvertClassOperand(SemValue& value)
+{
+	TypePtr bare = RemoveTopCv(value.type);
+	if (bare->kind != TK_CLASS || !bare->named->class_record)
+		return false;
+	const ClassConversion* found = 0;
+	const NamedTypeInfo* found_class = 0;
+	for (const ClassInfo* link = bare->named->class_record; link;
+	     link = link->base)
+		for (size_t i = 0; i < link->conversions.size(); i++)
+		{
+			const ClassConversion& conv = link->conversions[i];
+			if (conv.is_explicit)
+				continue;
+			if (found && !TypeEquals(found->result, conv.result))
+				return false;  // no unique built-in operand form
+			if (!found)
+			{
+				found = &conv;
+				found_class = link->entity;
+			}
+		}
+	if (!found)
+		return false;
+	TypePtr dest = IsReferenceType(found->result)
+		? found->result->target : RemoveTopCv(found->result);
+	ImplicitConversion conv = ClassifyConversionEx(
+		MakeConversionSource(value), dest, false);
+	if (!conv.viable || conv.conv_index < 0)
+		return false;
+	(void)found_class;
+	ApplyConversion(value, conv, dest);
+	return true;
 }
 
 void SemExprAnalyzer::RequireModifiableLvalue(const SemValue& value,
@@ -954,6 +1042,12 @@ SemValue SemExprAnalyzer::AnalyzeBinary(const AstExpr& expr)
 		if (TryBinaryOperator(expr.op_spelling, lhs, rhs, overloaded))
 			return overloaded;
 	}
+	// 13.6: class operands reach the built-in forms through their
+	// conversion functions once user-declared operators are rejected.
+	if (lhs.type->kind == TK_CLASS)
+		ConvertClassOperand(lhs);
+	if (rhs.type->kind == TK_CLASS)
+		ConvertClassOperand(rhs);
 	switch (expr.op)
 	{
 	case OP_PLUS:
@@ -1023,6 +1117,8 @@ SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 	RequireModifiableLvalue(lhs, "assignment");
 	if (lhs.type->kind == TK_CLASS)
 		throw OutsideBoundary("class assignment");
+	if (expr.op != OP_ASS && rhs.type->kind == TK_CLASS)
+		ConvertClassOperand(rhs);
 	if (expr.op == OP_ASS)
 		CopyInitialize(rhs, lhs.type, "assignment");
 	else if (lhs.type->kind == TK_POINTER)
@@ -1180,15 +1276,21 @@ SemValue SemExprAnalyzer::AnalyzeSubscript(const AstExpr& expr)
 	SemValue second = Analyze(*expr.operands[1]);
 	if (first.type->kind == TK_CLASS)
 	{
-		// 13.5.5: operator[] is a member function.
+		// 13.5.5: operator[] is a member function; a class operand may
+		// also reach the built-in form through a conversion function.
 		vector<SemValue> operands;
 		operands.push_back(std::move(first));
 		operands.push_back(std::move(second));
 		SemValue overloaded;
 		if (ResolveOperatorCall("[]", operands, true, overloaded))
 			return overloaded;
-		throw runtime_error("no operator[] for the class operand");
+		first = std::move(operands[0]);
+		second = std::move(operands[1]);
+		if (!ConvertClassOperand(first))
+			throw runtime_error("no operator[] for the class operand");
 	}
+	if (second.type->kind == TK_CLASS)
+		ConvertClassOperand(second);
 	// 5.2.1: one operand is the array/pointer, the other the index; the
 	// dump normalizes the commuted form to array-first order.
 	bool first_is_pointer = IsPointerAfterDecay(first.type);
@@ -1259,6 +1361,44 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 	if (value.function_set && value.overloads.size() > 1)
 		throw OutsideBoundary("cast of an overloaded name");
 	TypePtr to = RemoveTopCv(dest);
+	if (to->kind != TK_CLASS && !value.function_set &&
+	    RemoveTopCv(value.type)->kind == TK_CLASS)
+	{
+		// 5.2.9p4: a cast is direct-initialization; explicit
+		// conversion functions participate.
+		ImplicitConversion conv = ClassifyConversionEx(
+			MakeConversionSource(value), to, true);
+		if (conv.viable && conv.conv_index >= 0)
+			ApplyConversion(value, conv, to);
+	}
+	if (to->kind == TK_CLASS)
+	{
+		// 5.2.9p4 / 5.4: a cast to a class type direct-initializes a
+		// temporary from the operand (explicit constructors allowed).
+		const ClassInfo* cls = host_.Classes().Find(to->named);
+		if (!cls || !to->named->complete)
+			throw runtime_error("cast to an incomplete class");
+		vector<SemValue> args;
+		args.push_back(std::move(value));
+		int index = host_.ResolveClassCtorHost(*cls, args, false, "cast");
+		vector<SemNodePtr> arg_nodes;
+		for (size_t i = 0; i < args.size(); i++)
+			arg_nodes.push_back(std::move(args[i].node));
+		SemNodePtr action = host_.MakeConstructorCall(
+			*cls, index, false, SemNodePtr(), std::move(arg_nodes));
+		action->type = to;
+		action->category = VC_PRVALUE;
+		if (host_.Classes().NeedsDestruction(*cls))
+		{
+			action->needs_dtor = true;
+			action->children.push_back(host_.MakeTemporaryDtor(*cls));
+		}
+		SemValue result;
+		result.type = to;
+		result.category = VC_PRVALUE;
+		result.node = std::move(action);
+		return result;
+	}
 	bool valid;
 	if (IsVoidType(to))
 		valid = true;

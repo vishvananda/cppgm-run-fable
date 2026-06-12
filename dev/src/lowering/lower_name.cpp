@@ -74,7 +74,17 @@ const char* BuiltinCode(EFundamentalType type)
 }
 
 // The 5.1.2 operator-function terminal codes.
+bool LookupOperatorCode(const string& text, string& code);
+
 string OperatorCode(const string& text)
+{
+	string code;
+	if (LookupOperatorCode(text, code))
+		return code;
+	throw OutsideBoundary("operator-function name");
+}
+
+bool LookupOperatorCode(const string& text, string& code)
 {
 	struct Entry { const char* op; const char* code; };
 	static const Entry table[] = {
@@ -92,8 +102,11 @@ string OperatorCode(const string& text)
 	};
 	for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
 		if (text == table[i].op)
-			return table[i].code;
-	throw OutsideBoundary("operator-function name");
+		{
+			code = table[i].code;
+			return true;
+		}
+	return false;
 }
 
 // Component substitution table (5.1.9): previously seen substitutable
@@ -537,9 +550,19 @@ string MangleMemberFunctionObjectName(const Scope* scope,
 	if (!special_code.empty())
 		encoding += special_code;
 	else
-		// Member operators count the implicit object argument.
-		encoding += MangleTerminalName(name,
-		                               bare->parameters.size() + 1);
+	{
+		// A conversion function encodes "cv <type>"; member operators
+		// count the implicit object argument.
+		string code;
+		bool conversion = name.compare(0, 9, "operator ") == 0 &&
+			name.compare(0, 10, "operator \"") != 0 &&
+			!LookupOperatorCode(name.substr(9), code);
+		if (conversion)
+			encoding += "cv" + MangleType(bare->target, subs);
+		else
+			encoding += MangleTerminalName(
+				name, bare->parameters.size() + 1);
+	}
 	encoding += "E";
 	return "_Z" + encoding + MangleBareParameters(bare, subs);
 }

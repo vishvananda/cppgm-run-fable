@@ -125,6 +125,9 @@ private:
 	                       const AstInitializer* init,
 	                       const DeclSpecifierInfo& specs);
 	void BindFriendFunction(const AstDecl& decl, ClassInfo& cls);
+	// PA16: a conversion-function member declaration (12.3.2).
+	void BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
+	                            const AstNamePart& part);
 	void BindMemberFunctionBody(const AstDecl& decl,
 	                            const DeclaratorInfo& composed,
 	                            const string& name);
@@ -174,9 +177,12 @@ private:
 	                            vector<SemValue>& args, bool copy_init,
 	                            const char* what);
 	// The synthesized implicit default constructor / destructor
-	// definitions, built on first demand into unit_.deferred.
-	void EnsureImplicitDefaultCtor(const ClassInfo& cls);
-	void EnsureImplicitDtor(const ClassInfo& cls);
+	// definitions, built on first demand into unit_.deferred (an
+	// out-of-class `= default` builds them as strong definitions).
+	void EnsureImplicitDefaultCtor(const ClassInfo& cls,
+	                               bool out_of_class = false);
+	void EnsureImplicitDtor(const ClassInfo& cls,
+	                        bool out_of_class = false);
 	void EnsureInheritedCtor(const ClassInfo& cls, int index);
 
 	// --- PA16 copy/move special members (sem_special.cpp) ---
@@ -185,7 +191,13 @@ private:
 	// definitions.
 	void DeclareImplicitSpecialMembers(ClassInfo& cls);
 	void DeclareImplicitAssign(ClassInfo& cls, bool is_move, bool deleted);
-	void EnsureSpecialCtor(const ClassInfo& cls, int index);
+	void EnsureSpecialCtor(const ClassInfo& cls, int index,
+	                       bool out_of_class = false);
+	void BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
+	                        bool out_of_class);
+	// Recomputes the user-provided-constructor fact after an
+	// out-of-class `= default` re-classifies a declaration.
+	void RecomputeUserCtorFact(ClassInfo& cls);
 	struct SpecialBodyContext;
 	SemNodePtr SourceObjectExpr(Scope* fn_scope, const string& name,
 	                            const TypePtr& class_type);

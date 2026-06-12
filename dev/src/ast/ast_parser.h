@@ -233,7 +233,8 @@ private:
 	AstDeclPtr ParseMemberDeclaration();  // forms + token span
 	AstDeclPtr ParseMemberDeclarationForms();
 	AstDeclPtr ParseBitFieldDeclaration();
-	AstDeclPtr ParseSpecialMember(bool require_definition);
+	AstDeclPtr ParseSpecialMember(bool require_definition,
+	                              bool qualified_default_only = false);
 	bool ParseSpecialMemberName(AstName& name);
 	bool ParseCtorInitializer(AstDecl& decl);
 	AstDeclPtr ParseEnumDeclaration();     // enum-specifier + ;

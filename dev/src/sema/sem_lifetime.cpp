@@ -18,6 +18,19 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA15 assignment boundary");
 }
 
+// 13.1p2 parameter-list agreement of an out-of-class declarator with
+// an in-class declaration.
+bool SameAssignmentSignature(const Type& a, const Type& b)
+{
+	if (a.parameters.size() != b.parameters.size() ||
+	    a.is_const != b.is_const || a.is_volatile != b.is_volatile)
+		return false;
+	for (size_t i = 0; i < a.parameters.size(); i++)
+		if (!TypeEquals(a.parameters[i], b.parameters[i]))
+			return false;
+	return true;
+}
+
 }  // namespace
 
 // --- object lifetime --------------------------------------------------------
@@ -144,6 +157,10 @@ size_t SemBinder::ConsumeAggregateItems(const ClassInfo& cls,
 		const ClassField& field = cls.fields[i];
 		if (field.name.empty())
 			continue;
+		// 8.5.1p15: a braced union initializer initializes the first
+		// non-static data member only.
+		if (cls.is_union && !out.empty())
+			break;
 		SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
 		member->name = field.name;
 		member->type = IsReferenceType(field.type) ? field.type->target
@@ -721,7 +738,44 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
                                         const DeclaratorInfo& composed)
 {
 	if (composed.type->kind == TK_FUNCTION)
-		throw OutsideBoundary("qualified function declarator");
+	{
+		// PA16: an out-of-class `= default` assignment operator
+		// synthesizes its definition as a source-owned strong one.
+		string name = DeclaredFunctionName(composed.id->parts.back());
+		Scope* owner = ResolvePrefixScope(*composed.id);
+		if (owner->kind != SCOPE_CLASS || name != "operator =" ||
+		    !declarator.init || declarator.init->kind != INIT_DEFAULT)
+			throw OutsideBoundary("qualified function declarator");
+		const NamedTypeInfo* entity = model_.ScopeEntity(owner);
+		ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
+		ScopeBinding* binding = FindOwnBinding(*owner, name);
+		if (!cls || !binding || binding->kind != SB_FUNCTION)
+			throw runtime_error("defaulted operator= matches no "
+			                    "declaration");
+		size_t count = binding->overloads.size() + 1;
+		size_t index = count;
+		for (size_t i = 0; i < count; i++)
+		{
+			const TypePtr& declared =
+				i == 0 ? binding->type : binding->overloads[i - 1];
+			if (SameAssignmentSignature(*declared, *composed.type))
+				index = i;
+		}
+		if (index == count)
+			throw runtime_error("defaulted operator= matches no "
+			                    "declaration");
+		binding->fn_defaulted.resize(count, false);
+		binding->fn_defaulted[index] = true;
+		const TypePtr& param =
+			(index == 0 ? binding->type : binding->overloads[index - 1])
+				->parameters[0];
+		if (param->kind == TK_RVALUE_REFERENCE)
+			cls->move_assign_index = (int)index;
+		else
+			cls->copy_assign_index = (int)index;
+		BuildAssignSpecial(*cls, index, true);
+		return;
+	}
 	Scope* declaring = ResolvePrefixScope(*composed.id);
 	if (declaring->kind != SCOPE_CLASS)
 		throw OutsideBoundary("qualified declarator scope");

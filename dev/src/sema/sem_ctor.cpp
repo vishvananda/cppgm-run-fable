@@ -468,6 +468,34 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 			continue;
 		}
 		TypePtr named = ResolveTypeName(mem.id);
+		if (named->kind == TK_CLASS && named->named == cls.entity)
+		{
+			// 12.6.2p6: a mem-initializer naming the class itself
+			// delegates; no other initializer may appear.
+			if (body.decl->mem_initializers.size() != 1)
+				throw runtime_error("delegating constructor has other "
+				                    "mem-initializers");
+			vector<SemValue> values;
+			const AstInitializer& init = *mem.init;
+			if (init.kind == INIT_PAREN)
+				for (size_t j = 0; j < init.args.size(); j++)
+					values.push_back(analyzer_.Analyze(*init.args[j]));
+			else if (init.kind == INIT_BRACED)
+				for (size_t j = 0;
+				     j < init.expr->arguments.size(); j++)
+					values.push_back(analyzer_.Analyze(
+						*init.expr->arguments[j]));
+			int index = ResolveClassConstructor(
+				cls, values, false, "delegating constructor");
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < values.size(); j++)
+				arg_nodes.push_back(std::move(values[j].node));
+			item.children.push_back(MakeConstructorCall(
+				cls, index, false,
+				AddressOfNode(ThisObjectExpr()),
+				std::move(arg_nodes)));
+			return;
+		}
 		if (cls.base && named->kind == TK_CLASS &&
 		    named->named == cls.base->entity)
 		{
@@ -581,7 +609,8 @@ bool SemBinder::NodeMayThrow(const SemNode& node) const
 	return false;
 }
 
-void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in)
+void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
+                                          bool out_of_class)
 {
 	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
 	if (cls.implicit_ctor_built)
@@ -600,6 +629,7 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in)
 	body.fn_scope = fn_scope;
 	body.declaring = cls.members;
 	body.cls = &cls;
+	body.out_of_class = out_of_class;
 	body.composed.type = ctor_type;
 	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
 	SemNode* node = item.get();
@@ -642,7 +672,8 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in)
 	unit_.deferred.push_back(std::move(item));
 }
 
-void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in)
+void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in,
+                                   bool out_of_class)
 {
 	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
 	if (cls.implicit_dtor_built || cls.has_user_dtor)
@@ -656,6 +687,7 @@ void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in)
 	body.fn_scope = fn_scope;
 	body.declaring = cls.members;
 	body.cls = &cls;
+	body.out_of_class = out_of_class;
 	body.composed.type = MakeFunctionType(MakeFundamentalType(FT_VOID),
 	                                      vector<TypePtr>(), false);
 	SemNodePtr item = BuildFunctionNode(body, SF_DESTRUCTOR);

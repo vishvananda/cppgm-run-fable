@@ -147,7 +147,12 @@ public:
 	// braced-init-list node (completing unknown bounds via `dest`).
 	SemNodePtr AnalyzeBracedInit(const AstExpr& braced, TypePtr& dest);
 
-	void RequireContextualBool(const SemValue& value, const char* what);
+	// PA16: contextual bool conversion; a class operand materializes
+	// its conversion-function call into the value.
+	void RequireContextualBool(SemValue& value, const char* what);
+	// A class operand of a built-in operator form converts through its
+	// single non-explicit conversion function (13.6 subset).
+	bool ConvertClassOperand(SemValue& value);
 
 	// PA15: applies a classified conversion's dump effects (overload
 	// selection, null-pointer retyping) for callers that ranked the

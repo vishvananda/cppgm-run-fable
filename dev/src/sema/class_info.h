@@ -94,6 +94,19 @@ struct ClassCtor
 	bool built_unwind_no;  // synthesized body cannot throw
 };
 
+// PA16: one declared conversion function (12.3.2), bound in the class
+// member scope under its canonical "operator <type>" name.
+struct ClassConversion
+{
+	ClassConversion() : is_explicit(false), access(MA_PUBLIC) {}
+
+	string name;     // canonical member-scope binding name
+	TypePtr result;  // conversion-type-id
+	TypePtr type;    // declared function type (cv on the node)
+	bool is_explicit;
+	EMemberAccess access;
+};
+
 struct ClassInfo
 {
 	ClassInfo()
@@ -137,6 +150,8 @@ struct ClassInfo
 	// included) and the declared (scope, name) of friend functions.
 	vector<const NamedTypeInfo*> friend_classes;
 	vector<std::pair<const Scope*, string>> friend_functions;
+	// PA16 conversion functions in declaration order (12.3.2).
+	vector<ClassConversion> conversions;
 
 	// Layout cursor state used while the class is still open.
 	unsigned long long bit_cursor;  // next free bit from the object start

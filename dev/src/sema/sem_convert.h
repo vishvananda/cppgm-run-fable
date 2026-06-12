@@ -47,7 +47,8 @@ struct ImplicitConversion
 		: viable(false), rank(CR_EXACT), base_distance(0),
 		  null_to_pointer(false), bool_from_pointer(false),
 		  reference_binding(false), binds_rvalue_reference(false),
-		  selected_overload(-1), user_class(0), user_ctor(-1)
+		  selected_overload(-1), user_class(0), user_ctor(-1),
+		  conv_class(0), conv_index(-1), second_rank(CR_EXACT)
 	{}
 
 	bool viable;
@@ -71,13 +72,24 @@ struct ImplicitConversion
 	// constructor (12.3.1).
 	const NamedTypeInfo* user_class;
 	int user_ctor;
+	// CR_USER through a conversion function (12.3.2): the declaring
+	// class and its conversion-set index, plus the rank of the second
+	// standard conversion (13.3.3.2p3 ranking between user sequences).
+	const NamedTypeInfo* conv_class;
+	int conv_index;
+	EConversionRank second_rank;
 };
 
 // Classifies the conversion of `source` to the destination type (a
 // parameter, variable, or return type; references bind). Returns a
-// non-viable result rather than throwing.
+// non-viable result rather than throwing. `contextual` additionally
+// admits explicit conversion functions (direct-initialization and
+// contextual-bool contexts, 12.3.2p2).
 ImplicitConversion ClassifyConversion(const ConversionSource& source,
                                       const TypePtr& dest);
+ImplicitConversion ClassifyConversionEx(const ConversionSource& source,
+                                        const TypePtr& dest,
+                                        bool contextual);
 
 // 4.5 integral promotion target of an integral fundamental type.
 EFundamentalType PromotedFundamental(EFundamentalType type);

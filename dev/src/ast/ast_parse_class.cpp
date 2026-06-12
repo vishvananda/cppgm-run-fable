@@ -388,7 +388,8 @@ bool AstParser::ParseCtorInitializer(AstDecl& decl)
 // member-function-specifier* special-member-name parameter-clause
 // function-suffix* then `= default|delete ;`, `;`, or ctor-initializer?
 // compound-statement.
-AstDeclPtr AstParser::ParseSpecialMember(bool require_definition)
+AstDeclPtr AstParser::ParseSpecialMember(bool require_definition,
+                                         bool qualified_default_only)
 {
 	State state = Save();
 	AstDeclPtr decl = MakeDecl(require_definition
@@ -415,6 +416,7 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition)
 		Restore(state);
 		return AstDeclPtr();
 	}
+	bool qualified = name.parts.size() > 1;
 	decl->declarator = AstDeclaratorPtr(new AstDeclarator());
 	AstDeclaratorItem id_item;
 	id_item.kind = DI_ID;
@@ -462,6 +464,15 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition)
 		}
 	}
 	if (!MatchSimple(OP_SEMICOLON))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
+	// PA16 namespace-scope form: only a qualified `= default` special
+	// member declaration is accepted outside a class body.
+	if (qualified_default_only &&
+	    (!qualified || !decl->special_init ||
+	     decl->special_init->kind != INIT_DEFAULT))
 	{
 		Restore(state);
 		return AstDeclPtr();

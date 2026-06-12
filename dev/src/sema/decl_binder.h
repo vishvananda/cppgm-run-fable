@@ -132,7 +132,8 @@ protected:
 	// --- names ---
 	// Validates the PA11-supported name shape (plain identifier parts).
 	static const string& PartName(const AstNamePart& part);
-	static const string& TerminalName(const AstName& name);
+	// PA16: terminal parts include operator-function-ids ("operator =").
+	static string TerminalName(const AstName& name);
 	// PA14: the declared name of a function declarator-id terminal,
 	// accepting operator-function-ids ("operator delete").
 	static string DeclaredFunctionName(const AstNamePart& part);

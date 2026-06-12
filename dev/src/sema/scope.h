@@ -115,6 +115,9 @@ struct ScopeBinding
 	vector<bool> fn_inline_def;  // defined in-class: weak, demand-emitted
 	vector<bool> fn_adl_only;    // hidden friend: visible to ADL only
 	vector<bool> fn_unwind_no;   // simple-noexcept declarator
+	// PA16: explicitly-defaulted special member functions (8.4.2); the
+	// binder synthesizes their definitions like the implicit ones.
+	vector<bool> fn_defaulted;
 };
 
 struct Scope

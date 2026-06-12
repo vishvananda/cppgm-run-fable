@@ -753,14 +753,53 @@ void SemBinder::BindConditionDeclaration(const AstCondition& condition,
 	TypePtr type = composed.type;
 	if (specs.is_constexpr)
 		type = MakeCvQualifiedType(type, true, false);
-	BindVariable(composed.id->parts[0].identifier, type, condition.init.get(),
-	             specs);
-	parents_.pop_back();
+	const string& var_name = composed.id->parts[0].identifier;
+	BindVariable(var_name, type, condition.init.get(), specs);
 
 	// 6.4p4: the condition value is the (converted) declared variable.
 	SemValue value;
 	value.type = IsReferenceType(type) ? type->target : type;
 	value.category = VC_LVALUE;
+	TypePtr bare = RemoveTopCv(value.type);
+	if (bare->kind == TK_CLASS)
+	{
+		// A class condition variable converts through its conversion
+		// function; the call attaches as the condition value child.
+		const ScopeBinding* binding = FindOwnBinding(*current_, var_name);
+		ScopeBinding fallback;
+		if (!binding)
+		{
+			fallback.name = var_name;
+			fallback.type = type;
+			fallback.home = current_;
+			binding = &fallback;
+		}
+		ScopeBinding local = *binding;
+		local.home = local.home ? local.home : current_;
+		SemValue object;
+		object.node = MakeSemNode(SN_ID_EXPRESSION);
+		object.node->name = var_name;
+		object.node->type = value.type;
+		object.node->category = VC_LVALUE;
+		object.node->entity_scope =
+			binding->owner ? binding->owner : current_;
+		object.node->entity_name = var_name;
+		object.type = value.type;
+		object.category = VC_LVALUE;
+		if (for_switch)
+		{
+			if (!analyzer_.ConvertClassOperand(object) ||
+			    (!IsIntegralType(object.type) &&
+			     object.type->kind != TK_ENUM))
+				throw runtime_error("switch condition is not integral");
+		}
+		else
+			analyzer_.RequireContextualBool(object, "condition");
+		item->children.push_back(std::move(object.node));
+		parents_.pop_back();
+		return;
+	}
+	parents_.pop_back();
 	if (for_switch)
 	{
 		if (!IsIntegralType(value.type) && value.type->kind != TK_ENUM)

@@ -541,9 +541,21 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	}
 	if (callee.op == OP_ARROW)
 		object = DereferenceObject(std::move(object));
-	if (!callee.name.IsPlainIdentifier())
+	string name;
+	const AstNamePart& last = callee.name.parts.back();
+	if (callee.name.IsPlainIdentifier())
+		name = callee.name.parts[0].identifier;
+	else if (callee.name.parts.size() == 1 &&
+	         last.kind == NP_OPERATOR_FUNCTION)
+		name = "operator " + last.operator_text;
+	else if (callee.name.parts.size() == 1 &&
+	         last.kind == NP_CONVERSION_FUNCTION)
+		// An explicit conversion call: the type-id resolves to the
+		// canonical member name.
+		name = "operator " + DescribeType(
+			host_.ResolveCastTypeId(*last.conversion_type));
+	else
 		throw OutsideBoundary("member name form");
-	const string& name = callee.name.parts[0].identifier;
 	if (object.type->kind != TK_CLASS)
 		throw runtime_error("member call on a non-class value");
 	const ScopeBinding* member =
@@ -653,6 +665,12 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	EMemberAccess access = winner < binding.fn_access.size()
 		? binding.fn_access[winner] : MA_PUBLIC;
 	host_.CheckMemberAccess(binding.home, access, binding.name);
+	// PA16: a qualified or explicit call can select an implicitly
+	// declared assignment operator; synthesize it on first selection.
+	if (binding.name == "operator =")
+		if (const NamedTypeInfo* owner_entity =
+		        host_.Model().ScopeEntity(binding.owner))
+			host_.EnsureAssignSpecial(owner_entity, winner);
 	bool is_static = winner < binding.fn_static.size() &&
 		binding.fn_static[winner];
 	const TypePtr& fn = declared[winner];

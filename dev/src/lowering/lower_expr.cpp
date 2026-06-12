@@ -1366,8 +1366,11 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		value.text = temp;
 	}
 	else if (LowerValueType(source) != LowerValueType(target) ||
-	         context == LCC_CAST)
+	         (context == LCC_CAST &&
+	          !(source->kind == TK_ENUM || target->kind == TK_ENUM)))
 	{
+		// An enumeration cast that keeps the spelling emits nothing
+		// (the canonical reference shape).
 		string temp = NewTemp();
 		Emit(temp + " = copy " + LowerValueType(target) + " " +
 		     value.text);
