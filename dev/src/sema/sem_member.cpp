@@ -446,6 +446,119 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	return value;
 }
 
+// 5.3.4 placement new over the class subset: the chosen allocation
+// function takes (sizeof(T), placement...), and the selected
+// constructor runs on its result.
+SemValue SemExprAnalyzer::AnalyzeNew(const AstExpr& expr)
+{
+	if (!expr.type)
+		throw OutsideBoundary("new-expression form");
+	TypePtr allocated = RemoveTopCv(host_.ResolveCastTypeId(*expr.type));
+	if (allocated->kind != TK_CLASS || !expr.has_placement)
+		throw OutsideBoundary("non-placement new-expression");
+	const ClassInfo* cls = host_.Classes().Find(allocated->named);
+	if (!cls || !allocated->named->complete)
+		throw runtime_error("new of an incomplete class");
+	// The allocation call: operator new(sizeof(T), placement...).
+	const ScopeBinding* op_new =
+		FindOwnBinding(*host_.Model().global(), "operator new");
+	if (!op_new || op_new->kind != SB_FUNCTION)
+		throw runtime_error("no matching operator new");
+	vector<SemValue> alloc_args;
+	SemValue size_value;
+	size_value.node = MakeSemNode(SN_LITERAL);
+	size_value.node->token = std::to_string(allocated->named->size);
+	size_value.node->type = MakeFundamentalType(FT_INT);
+	size_value.node->category = VC_PRVALUE;
+	size_value.node->has_value = true;
+	size_value.node->value =
+		ConstValue(FT_INT, allocated->named->size);
+	size_value.type = size_value.node->type;
+	alloc_args.push_back(std::move(size_value));
+	for (size_t i = 0; i < expr.arguments.size(); i++)
+		alloc_args.push_back(Analyze(*expr.arguments[i]));
+	vector<TypePtr> candidates;
+	candidates.push_back(op_new->type);
+	for (size_t i = 0; i < op_new->overloads.size(); i++)
+		candidates.push_back(op_new->overloads[i]);
+	vector<ConversionSource> sources;
+	for (size_t i = 0; i < alloc_args.size(); i++)
+		sources.push_back(MakeConversionSource(alloc_args[i]));
+	vector<ImplicitConversion> conversions;
+	size_t winner = SelectBestOverload(candidates, sources, conversions);
+	const TypePtr& alloc_fn = candidates[winner];
+	for (size_t i = 0; i < alloc_args.size(); i++)
+		ApplyConversion(alloc_args[i], conversions[i],
+		                alloc_fn->parameters[i]);
+	TypePtr pointer = MakePointerType(allocated, false, false);
+	SemNodePtr alloc_call = MakeSemNode(SN_CALL_EXPRESSION);
+	alloc_call->type = pointer;
+	alloc_call->category = VC_PRVALUE;
+	SemNodePtr alloc_callee = MakeSemNode(SN_CALLEE);
+	alloc_callee->name = CanonicalQualifiedName(op_new->owner,
+	                                            op_new->name);
+	alloc_callee->type = alloc_fn;
+	alloc_callee->entity_scope = op_new->owner;
+	alloc_callee->entity_name = op_new->name;
+	if (winner < op_new->fn_unwind_no.size() &&
+	    op_new->fn_unwind_no[winner])
+		alloc_callee->unwind_no = true;
+	alloc_call->children.push_back(std::move(alloc_callee));
+	for (size_t i = 0; i < alloc_args.size(); i++)
+		alloc_call->children.push_back(std::move(alloc_args[i].node));
+	// The constructor over the allocation's result.
+	vector<SemValue> ctor_args;
+	if (expr.new_init)
+	{
+		if (expr.new_init->kind != INIT_PAREN)
+			throw OutsideBoundary("new-initializer form");
+		for (size_t i = 0; i < expr.new_init->args.size(); i++)
+			ctor_args.push_back(Analyze(*expr.new_init->args[i]));
+	}
+	vector<TypePtr> ctor_types;
+	vector<size_t> min_arity;
+	int ctor_index = -1;
+	if (!cls->ctors.empty())
+	{
+		for (size_t i = 0; i < cls->ctors.size(); i++)
+		{
+			ctor_types.push_back(cls->ctors[i].type);
+			size_t required = cls->ctors[i].type->parameters.size();
+			const vector<const AstExpr*>& defaults = cls->ctors[i].defaults;
+			while (required > 0 && required <= defaults.size() &&
+			       defaults[required - 1])
+				required--;
+			min_arity.push_back(required);
+		}
+		vector<ConversionSource> ctor_sources;
+		for (size_t i = 0; i < ctor_args.size(); i++)
+			ctor_sources.push_back(MakeConversionSource(ctor_args[i]));
+		vector<ImplicitConversion> ctor_conversions;
+		ctor_index = (int)SelectBestOverload(ctor_types, ctor_sources,
+		                                     ctor_conversions,
+		                                     &min_arity);
+		const TypePtr& fn = ctor_types[ctor_index];
+		for (size_t i = 0; i < ctor_args.size(); i++)
+			ApplyConversion(ctor_args[i], ctor_conversions[i],
+			                fn->parameters[i]);
+	}
+	else if (!ctor_args.empty())
+		throw runtime_error("no matching constructor for new");
+	vector<SemNodePtr> arg_nodes;
+	for (size_t i = 0; i < ctor_args.size(); i++)
+		arg_nodes.push_back(std::move(ctor_args[i].node));
+	SemNodePtr action = host_.MakeConstructorCall(
+		*cls, ctor_index, false, std::move(alloc_call),
+		std::move(arg_nodes));
+	action->type = pointer;
+	action->category = VC_PRVALUE;
+	SemValue value;
+	value.type = pointer;
+	value.category = VC_PRVALUE;
+	value.node = std::move(action);
+	return value;
+}
+
 // `object.name(args)` / `pointer->name(args)`: data members holding
 // callables call indirectly through the member value; member functions
 // resolve against the implicit object argument.

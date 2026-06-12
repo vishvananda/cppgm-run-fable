@@ -1145,6 +1145,46 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 		AppendAggregateInit(*member_cls, *proto, *braced, out);
 		return;
 	}
+	if (member_cls && !braced && args.empty())
+	{
+		// 8.5p10 `member()`: zero-initialization, then the default
+		// constructor when one is needed.
+		SemNodePtr zero_stmt = MakeSemNode(SN_EXPRESSION_STATEMENT);
+		SemNodePtr assign = MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
+		assign->type = bare;
+		assign->category = VC_LVALUE;
+		assign->has_op = true;
+		assign->op = OP_ASS;
+		assign->op_spelling = "=";
+		if (member_cls->has_user_ctor ||
+		    unit_.classes.NeedsConstruction(*member_cls))
+		{
+			// The zero-fill folds into the constructor action so both
+			// share one member address.
+			vector<SemValue> no_args;
+			int index = ResolveClassConstructor(*member_cls, no_args,
+			                                    false,
+			                                    field.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
+			SemNodePtr action = MakeConstructorCall(
+				*member_cls, index, false,
+				AddressOfNode(ThisFieldExpr(field)),
+				std::move(arg_nodes));
+			action->has_value = true;
+			action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+			                           member_cls->size);
+			out.push_back(std::move(action));
+			return;
+		}
+		SemValue zero = ZeroValue(MakeFundamentalType(FT_INT));
+		assign->children.push_back(ThisFieldExpr(field));
+		assign->children.push_back(std::move(zero.node));
+		zero_stmt->children.push_back(std::move(assign));
+		out.push_back(std::move(zero_stmt));
+		return;
+	}
 	if (member_cls)
 	{
 		// Class member: direct- or list-initialization by constructor.
@@ -2324,6 +2364,66 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->is_static_decl = specs.is_static;
 	item->is_thread_local_decl = specs.is_thread_local;
 	AttachObjectLifetime(*item, *member, declarator.init.get(), specs);
+}
+
+// 6.8p1 disambiguation with name lookup: `begin(a);` is only a
+// declaration when `begin` names a type; when it names a function the
+// statement is the call expression instead. The parser commits to the
+// declaration form, so the binder re-reads the shape here.
+bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
+{
+	if (decl.kind != DK_SIMPLE || decl.declarators.size() != 1 ||
+	    decl.specifiers.size() != 1 ||
+	    decl.specifiers[0].kind != SPEC_TYPE_NAME)
+		return false;
+	const AstName& callee_name = decl.specifiers[0].name;
+	if (TryResolveTypeFromName(callee_name))
+		return false;
+	const ScopeBinding* fn = 0;
+	try
+	{
+		const NamedTypeInfo* member_class = 0;
+		fn = ResolveValue(callee_name, member_class);
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
+	if (!fn || fn->kind != SB_FUNCTION)
+		return false;
+	const AstInitDeclarator& declarator = decl.declarators[0];
+	if (declarator.init || !declarator.declarator ||
+	    declarator.declarator->items.size() != 1 ||
+	    declarator.declarator->items[0].kind != DI_NESTED)
+		return false;
+	const AstDeclarator* inner = declarator.declarator->items[0].nested.get();
+	if (!inner || inner->items.size() != 1 ||
+	    inner->items[0].kind != DI_ID ||
+	    !inner->items[0].name.IsPlainIdentifier())
+		return false;
+	// Synthesize `callee(argument)` over owned AST nodes.
+	AstExprPtr callee(new AstExpr(EK_ID));
+	callee->name.global_scope = callee_name.global_scope;
+	for (size_t i = 0; i < callee_name.parts.size(); i++)
+	{
+		AstNamePart part;
+		part.kind = NP_IDENTIFIER;
+		part.identifier = callee_name.parts[i].identifier;
+		callee->name.parts.push_back(std::move(part));
+	}
+	AstExprPtr argument(new AstExpr(EK_ID));
+	AstNamePart arg_part;
+	arg_part.kind = NP_IDENTIFIER;
+	arg_part.identifier = inner->items[0].name.parts[0].identifier;
+	argument->name.parts.push_back(std::move(arg_part));
+	AstExprPtr call(new AstExpr(EK_CALL));
+	call->operands.push_back(std::move(callee));
+	call->arguments.push_back(std::move(argument));
+	SemNode* item = AppendItem(SN_EXPRESSION_STATEMENT);
+	SemValue value = analyzer_.Analyze(*call);
+	item->children.push_back(std::move(value.node));
+	recovered_exprs_.push_back(std::move(call));
+	return true;
 }
 
 bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)

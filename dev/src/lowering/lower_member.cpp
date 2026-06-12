@@ -219,6 +219,31 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	if (lhs.is_bit_field)
 		return LowerBitFieldAssignment(node);
 	TypePtr type = RemoveTopCv(StripRef(lhs.type));
+	if (type->kind == TK_CLASS)
+	{
+		// Value-initialization zero-fills the object representation.
+		string storage = MemberAddress(lhs);
+		unsigned long long size = TypeSize(type);
+		string width;
+		switch (size)
+		{
+		case 1: width = "i8"; break;
+		case 2: width = "i16"; break;
+		case 4: width = "i32"; break;
+		case 8: width = "i64"; break;
+		default:
+			break;
+		}
+		if (width.empty())
+			Emit("zeroinit " + to_string(size) + "x" +
+			     to_string(TypeAlignment(type)) + " " + storage);
+		else
+			Emit("store " + width + " 0, " + storage);
+		LowerValue result;
+		result.type = type;
+		result.text = storage;
+		return result;
+	}
 	string value = LowerValueAs(rhs, type, LCC_OPERAND);
 	string storage = MemberAddress(lhs);
 	Emit("store " + LowerValueType(type) + " " + value + ", " + storage);

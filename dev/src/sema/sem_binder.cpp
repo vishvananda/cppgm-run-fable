@@ -451,6 +451,22 @@ void SemBinder::BindAnonymousUnionMembers(const AstDecl& decl,
 		item->type = type;
 		EmitConstructorAction(*item, storage_name, type);
 	}
+	ClassInfo* enclosing = OpenClass();
+	const ClassField* anon_row = 0;
+	if (current_->kind == SCOPE_CLASS && enclosing &&
+	    current_ == enclosing->members)
+	{
+		// The anonymous object occupies one field row; its members
+		// inject at absolute offsets so every access addresses the
+		// enclosing object directly.
+		ClassField anon_field;
+		anon_field.name = storage_name;
+		anon_field.type = type;
+		anon_field.access = current_access_;
+		anon_row = &LayoutField(*enclosing, anon_field);
+	}
+	const ClassInfo* anon_cls =
+		anon_row ? unit_.classes.Find(type->named) : 0;
 	for (size_t i = 0; i < union_scope.bindings.size(); i++)
 	{
 		const ScopeBinding& member = union_scope.bindings[i];
@@ -462,6 +478,18 @@ void SemBinder::BindAnonymousUnionMembers(const AstDecl& decl,
 		injected.anon_storage_name = storage_name;
 		injected.anon_storage_type = type;
 		AddBinding(*current_, injected);
+		if (anon_cls)
+		{
+			const ClassField* inner =
+				FindClassField(*anon_cls, member.name);
+			if (inner)
+			{
+				ClassField row = *inner;
+				row.offset += anon_row->offset;
+				row.access = current_access_;
+				enclosing->fields.push_back(row);
+			}
+		}
 	}
 }
 
@@ -594,6 +622,8 @@ void SemBinder::BindDeclarationStatement(const AstStmt& stmt)
 	default:
 		break;
 	}
+	if (TryVexingCallRecovery(decl))
+		return;
 	SemNode* item = AppendItem(SN_SIMPLE_DECLARATION);
 	parents_.push_back(item);
 	BindDeclaration(decl);

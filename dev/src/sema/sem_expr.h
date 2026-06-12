@@ -185,6 +185,7 @@ private:
 	                                  const string& written);
 	SemValue MakeTemporaryObject(const TypePtr& class_type,
 	                             const vector<AstExprPtr>& arguments);
+	SemValue AnalyzeNew(const AstExpr& expr);
 	// --- PA15 operator overloading (sem_operator.cpp) ---
 	void CollectOperatorCandidates(const string& op_name,
 	                               const vector<SemValue>& operands,

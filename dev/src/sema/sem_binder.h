@@ -197,6 +197,10 @@ private:
 	// The set of bit-field storage units already written by the open
 	// constructor synthesis (first writes store plainly).
 	std::map<unsigned long long, bool> bf_units_written_;
+	bool TryVexingCallRecovery(const AstDecl& decl);
+	// Call expressions synthesized by the statement disambiguation
+	// recovery (owned here; analyzed nodes reference them).
+	vector<AstExprPtr> recovered_exprs_;
 
 	SemUnit& unit_;
 	SemExprAnalyzer analyzer_;

@@ -292,6 +292,33 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 			return;
 		bool saved = in_lifetime_action_;
 		in_lifetime_action_ = true;
+		if (node.has_value && node.children[0]->children.size() > 1 &&
+		    node.children[0]->children[1]->kind == SN_UNARY_EXPRESSION &&
+		    node.children[0]->children[1]->op == OP_AMP)
+		{
+			// Value-initialization: zero-fill, then construct through
+			// the same member address.
+			string address = LowerAddressExpr(
+				*node.children[0]->children[1]->children[0]);
+			unsigned long long size = node.value.bits;
+			string width;
+			switch (size)
+			{
+			case 1: width = "i8"; break;
+			case 2: width = "i16"; break;
+			case 4: width = "i32"; break;
+			case 8: width = "i64"; break;
+			default:
+				break;
+			}
+			if (width.empty())
+				Emit("zeroinit " + to_string(size) + "x1 " + address);
+			else
+				Emit("store " + width + " 0, " + address);
+			LowerConstructorCall(node, address);
+			in_lifetime_action_ = saved;
+			return;
+		}
 		LowerCall(*node.children[0]);
 		in_lifetime_action_ = saved;
 		return;

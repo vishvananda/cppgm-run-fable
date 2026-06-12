@@ -1052,7 +1052,8 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 			throw OutsideBoundary("qualified or template class-name");
 		name = decl.class_name.parts[0].identifier;
 	}
-	if (standalone && anonymous && !is_union)
+	if (standalone && anonymous && !is_union &&
+	    current_->kind != SCOPE_CLASS)
 		throw runtime_error("anonymous class declaration declares nothing");
 
 	NamedTypeInfo* info;

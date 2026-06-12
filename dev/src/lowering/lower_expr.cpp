@@ -320,6 +320,32 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 		return LowerMemberValue(node);
 	case SN_CONSTRUCTOR_ACTION:
 	{
+		if (RemoveTopCv(node.type)->kind == TK_POINTER)
+		{
+			// Placement new: the allocation call provides the object
+			// address; the constructor runs on it.
+			const SemNode& call = *node.children[0];
+			LowerValue address = LowerValueExpr(*call.children[1]);
+			bool saved = in_lifetime_action_;
+			in_lifetime_action_ = true;
+			const SemNode& callee = *call.children[0];
+			string arguments = address.text;
+			for (size_t i = 2; i < call.children.size(); i++)
+			{
+				TypePtr param =
+					i - 1 < callee.type->parameters.size()
+						? callee.type->parameters[i - 1] : TypePtr();
+				arguments += ", " +
+					LowerCallArgument(*call.children[i], param);
+			}
+			Emit("call void " + program_.MemberFunctionRef(callee) +
+			     "(" + arguments + ")");
+			in_lifetime_action_ = saved;
+			LowerValue value;
+			value.type = RemoveTopCv(node.type);
+			value.text = address.text;
+			return value;
+		}
 		// A constructed temporary used as a value: its address temp.
 		LowerValue value;
 		value.type = RemoveTopCv(node.type);
@@ -333,6 +359,15 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 			LowerEffect(*node.children[0]);
 			LowerValue value;
 			value.type = NodeType(node);
+			return value;
+		}
+		// A cast of an array to a pointer spells the decay.
+		if (NodeType(node)->kind == TK_POINTER &&
+		    NodeType(*node.children[0])->kind == TK_ARRAY)
+		{
+			LowerValue value;
+			value.type = NodeType(node);
+			value.text = LowerPointerOperand(*node.children[0]);
 			return value;
 		}
 		LowerValue operand = LowerValueExpr(*node.children[0]);
