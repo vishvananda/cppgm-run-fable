@@ -617,9 +617,10 @@ AstExprPtr AstParser::ParsePostfixRoot()
 		while (Peek(keywords).kind == PTOK_SIMPLE &&
 		       IsSimpleTypeKeyword(Peek(keywords).simple_type))
 			keywords++;
-		if (AtSimple(OP_LPAREN, keywords))
+		if (AtSimple(OP_LPAREN, keywords) || AtSimple(OP_LBRACE, keywords))
 		{
 			State entry = Save();
+			bool braced_form = AtSimple(OP_LBRACE, keywords);
 			AstExprPtr node = MakeExpr(EK_FUNCTIONAL_CAST);
 			node->op = token.simple_type;
 			for (size_t i = 0; i < keywords; i++)
@@ -630,6 +631,18 @@ AstExprPtr AstParser::ParsePostfixRoot()
 					node->op_spelling += " ";
 				node->op_spelling += keyword.spelling;
 				Advance();
+			}
+			if (braced_form)
+			{
+				// 5.2.3p3: simple-type-specifier braced-init-list.
+				AstExprPtr braced = ParseBracedInitList();
+				if (!braced)
+				{
+					Restore(entry);
+					return AstExprPtr();
+				}
+				node->arguments.swap(braced->arguments);
+				return node;
 			}
 			AstExprPtr args = ParseParenExprList(EK_FUNCTIONAL_CAST);
 			if (!args)

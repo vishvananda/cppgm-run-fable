@@ -103,6 +103,29 @@ size_t SemBinder::ConsumeAggregateClassItem(const ClassInfo& member_cls,
 		}
 		return at;
 	}
+	if (element && member_cls.is_aggregate)
+	{
+		// 8.5.1p13: an expression convertible to the subaggregate's
+		// type initializes the whole member; only otherwise does brace
+		// elision consume items element-wise.
+		SemValue probe = analyzer_.Analyze(*element);
+		TypePtr probe_type = RemoveTopCv(probe.type);
+		if (probe_type->kind == TK_CLASS &&
+		    BaseClassDistance(probe_type->named, member_cls.entity) >= 0)
+		{
+			vector<SemValue> values;
+			values.push_back(std::move(probe));
+			int index = ResolveClassConstructor(member_cls, values, true,
+			                                    field.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			arg_nodes.push_back(std::move(values[0].node));
+			out.push_back(MakeConstructorCall(
+				member_cls, index, false,
+				AddressOfNode(std::move(member)),
+				std::move(arg_nodes)));
+			return at + 1;
+		}
+	}
 	if (member_cls.is_aggregate)
 	{
 		// Brace elision: the nested aggregate consumes the
@@ -495,11 +518,50 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 						*element->arguments[j]));
 			else
 				values.push_back(analyzer_.Analyze(*element));
+			if (values.size() == 1 && values[0].node &&
+			    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
+			    values[0].category == VC_PRVALUE &&
+			    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+			    RemoveTopCv(values[0].type)->named == cls.entity)
+			{
+				// 12.8p31: the element temporary elides; the
+				// constructor runs on the element directly.
+				SemNodePtr action = std::move(values[0].node);
+				action->needs_dtor = false;
+				while (action->children.size() > 1 &&
+				       action->children.back()->kind ==
+				           SN_DESTRUCTOR_ACTION)
+					action->children.pop_back();
+				SemNode& call = *action->children[0];
+				call.children.insert(
+					call.children.begin() + 1,
+					AddressOfNode(SubscriptNode(
+						VariableObjectExpr(binding), i)));
+				item.children.push_back(std::move(action));
+				continue;
+			}
 			int index = ResolveClassConstructor(
 				cls, values, true, binding.name.c_str());
 			vector<SemNodePtr> arg_nodes;
 			for (size_t j = 0; j < values.size(); j++)
 				arg_nodes.push_back(std::move(values[j].node));
+			item.children.push_back(MakeConstructorCall(
+				cls, index, false,
+				AddressOfNode(SubscriptNode(
+					VariableObjectExpr(binding), i)),
+				std::move(arg_nodes)));
+		}
+		// 8.5.1p7: elements beyond the initializer list
+		// value-initialize.
+		for (unsigned long long i = braced->arguments.size();
+		     i < completed->bound; i++)
+		{
+			vector<SemValue> no_args;
+			int index = ResolveClassConstructor(cls, no_args, false,
+			                                    binding.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t j = 0; j < no_args.size(); j++)
+				arg_nodes.push_back(std::move(no_args[j].node));
 			item.children.push_back(MakeConstructorCall(
 				cls, index, false,
 				AddressOfNode(SubscriptNode(

@@ -348,7 +348,7 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 		address = NewTemp();
 		Emit(address + " = addr $" + slot);
 	}
-	if (LowerClassDirect(bare))
+	if (LowerClassReturnDirect(bare))
 	{
 		LowerValue result = LowerCall(call);
 		Emit("copyobj " + LowerObjSpan(bare) + " " + result.text + ", " +
@@ -380,6 +380,19 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	const SemNode& source = *call.children[first_arg];
 	string src = LowerAddressExpr(source);
 	TypePtr cls_type = RemoveTopCv(action.type);
+	// A derived source adjusts to the copied base subobject.
+	TypePtr source_type = RemoveTopCv(StripRef(source.type));
+	if (source_type->kind == TK_CLASS)
+	{
+		int hops = BaseClassDistance(source_type->named, cls_type->named);
+		for (int i = 0; i < hops; i++)
+		{
+			string hopped = NewTemp();
+			Emit(hopped + " = index i8 [projection=base_subobject] " +
+			     src + ", 0");
+			src = hopped;
+		}
+	}
 	// An empty object has no bytes to transfer (the PA15 convention).
 	if (cls_type->named->class_record &&
 	    cls_type->named->class_record->is_empty)

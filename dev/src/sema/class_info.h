@@ -262,7 +262,11 @@ bool ClassHasTrivialCopyAssign(const ClassInfo& info);
 bool ClassHasTrivialMoveAssign(const ClassInfo& info);
 bool ClassTriviallyCopyable(const ClassInfo& info);
 
-// The PA16 LowIR boundary classification: complete objects of the
-// class pass/return as direct `obj<SxA>` values iff this holds;
-// otherwise they pass by_address / return through indirect_result.
-bool ClassPassedDirectly(const ClassInfo& info);
+// The PA16 LowIR boundary classification. Parameters pass as direct
+// `obj<SxA>` payloads when destruction and moves are trivial (the
+// caller constructs the argument object; the callee copies the
+// payload); returns additionally require a trivial copy constructor
+// (a direct return byte-copies the result). Everything else passes
+// by_address / returns through indirect_result.
+bool ClassParamDirect(const ClassInfo& info);
+bool ClassReturnDirect(const ClassInfo& info);

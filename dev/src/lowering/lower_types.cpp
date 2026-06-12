@@ -184,7 +184,13 @@ unsigned long long LowerValueWidth(const TypePtr& type)
 bool LowerClassDirect(const TypePtr& bare)
 {
 	return bare->named && bare->named->class_record &&
-		ClassPassedDirectly(*bare->named->class_record);
+		ClassParamDirect(*bare->named->class_record);
+}
+
+bool LowerClassReturnDirect(const TypePtr& bare)
+{
+	return bare->named && bare->named->class_record &&
+		ClassReturnDirect(*bare->named->class_record);
 }
 
 string LowerObjSpan(const TypePtr& bare)
@@ -222,7 +228,7 @@ bool LowerAbiReturn(const TypePtr& return_type, string& ret_text)
 	TypePtr bare = RemoveTopCv(return_type);
 	if (bare->kind == TK_CLASS)
 	{
-		if (LowerClassDirect(bare))
+		if (LowerClassReturnDirect(bare))
 		{
 			ret_text = LowerSlotType(bare);
 			return false;

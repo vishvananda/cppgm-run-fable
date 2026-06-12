@@ -520,7 +520,8 @@ string LowerProgram::RenderScalarInit(const LowGlobalInfo& info)
 	case LC_FLOAT:
 		return FloatInitToken(info.type, value);
 	case LC_NULL:
-		return "zero";
+		// A null-pointer initializer spells the immediate zero.
+		return "0";
 	case LC_ADDR:
 	case LC_STRING:
 		return RenderAddress(value);

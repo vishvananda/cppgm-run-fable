@@ -1447,6 +1447,14 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 		LowerAssignment(node);
 		return;
 	case SN_CONSTRUCTOR_ACTION:
+		if (RemoveTopCv(node.type ? node.type : TypePtr(
+				new Type()))->kind == TK_POINTER)
+		{
+			// A discarded new-expression still allocates and
+			// constructs.
+			LowerValueExpr(node);
+			return;
+		}
 		MaterializeTemporary(node, "tmpobj");
 		return;
 	case SN_ID_EXPRESSION:

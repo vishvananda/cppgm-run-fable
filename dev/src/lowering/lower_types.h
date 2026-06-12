@@ -43,6 +43,7 @@ unsigned long long LowerValueWidth(const TypePtr& type);
 // values; otherwise parameters pass by_address and results return
 // through a leading indirect_result destination pointer.
 bool LowerClassDirect(const TypePtr& bare);
+bool LowerClassReturnDirect(const TypePtr& bare);
 
 // The "SIZExALIGN" span text of a class or array type.
 string LowerObjSpan(const TypePtr& bare);

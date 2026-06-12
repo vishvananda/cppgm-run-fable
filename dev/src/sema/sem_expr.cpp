@@ -580,8 +580,11 @@ bool SemExprAnalyzer::ConvertClassOperand(SemValue& value)
 	TypePtr bare = RemoveTopCv(value.type);
 	if (bare->kind != TK_CLASS || !bare->named->class_record)
 		return false;
+	bool source_const = false;
+	bool source_volatile = false;
+	TopCv(value.type, source_const, source_volatile);
 	const ClassConversion* found = 0;
-	const NamedTypeInfo* found_class = 0;
+	int found_score = 3;
 	for (const ClassInfo* link = bare->named->class_record; link;
 	     link = link->base)
 		for (size_t i = 0; i < link->conversions.size(); i++)
@@ -589,12 +592,18 @@ bool SemExprAnalyzer::ConvertClassOperand(SemValue& value)
 			const ClassConversion& conv = link->conversions[i];
 			if (conv.is_explicit)
 				continue;
-			if (found && !TypeEquals(found->result, conv.result))
+			// The implicit object binding selects among cv-qualified
+			// overloads: a const source requires a const function.
+			if (source_const && !conv.type->is_const)
+				continue;
+			int score = conv.type->is_const == source_const ? 0 : 1;
+			if (found && score == found_score &&
+			    !TypeEquals(found->result, conv.result))
 				return false;  // no unique built-in operand form
-			if (!found)
+			if (!found || score < found_score)
 			{
 				found = &conv;
-				found_class = link->entity;
+				found_score = score;
 			}
 		}
 	if (!found)
@@ -605,7 +614,6 @@ bool SemExprAnalyzer::ConvertClassOperand(SemValue& value)
 		MakeConversionSource(value), dest, false);
 	if (!conv.viable || conv.conv_index < 0)
 		return false;
-	(void)found_class;
 	ApplyConversion(value, conv, dest);
 	return true;
 }
@@ -1367,6 +1375,24 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 		bool compatible = op == KW_CONST_CAST
 			? SimilarTypes(referee, value.type)
 			: TypeEquals(RemoveTopCv(referee), RemoveTopCv(value.type));
+		if (!value.function_set && !compatible &&
+		    op != KW_CONST_CAST &&
+		    (dest->kind == TK_RVALUE_REFERENCE ||
+		     (referee->is_const && !referee->is_volatile)))
+		{
+			// 5.2.9p4: the cast direct-initializes a temporary bound
+			// to the reference.
+			ImplicitConversion conv = ClassifyConversionEx(
+				MakeConversionSource(value), RemoveTopCv(referee), true);
+			if (conv.viable &&
+			    (conv.user_ctor >= 0 || conv.conv_index >= 0))
+			{
+				ApplyConversion(value, conv, RemoveTopCv(referee));
+				value.category = dest->kind == TK_RVALUE_REFERENCE
+					? VC_XVALUE : VC_LVALUE;
+				return value;
+			}
+		}
 		if (value.function_set || !compatible)
 			throw OutsideBoundary("reference cast form");
 		if (dest->kind == TK_LVALUE_REFERENCE &&

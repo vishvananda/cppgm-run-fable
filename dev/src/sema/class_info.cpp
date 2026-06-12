@@ -375,8 +375,13 @@ bool ClassTriviallyCopyable(const ClassInfo& info)
 		ClassHasTrivialDtor(info);
 }
 
-bool ClassPassedDirectly(const ClassInfo& info)
+bool ClassParamDirect(const ClassInfo& info)
 {
-	return ClassTriviallyCopyable(info) && !info.is_union &&
-		info.size <= 16;
+	return info.size <= 16 && !info.is_union &&
+		ClassHasTrivialMoveCtor(info) && ClassHasTrivialDtor(info);
+}
+
+bool ClassReturnDirect(const ClassInfo& info)
+{
+	return ClassParamDirect(info) && ClassHasTrivialCopyCtor(info);
 }
