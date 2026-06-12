@@ -76,6 +76,7 @@ vector<ParseToken> BuildParseTokens(const vector<PostToken>& tokens)
 			result.back().literal_type = token.type;
 			result.back().literal_elements = token.num_elements;
 			result.back().literal_data = token.data;
+			result.back().ud_suffix = token.ud_suffix;
 			break;
 		}
 	}

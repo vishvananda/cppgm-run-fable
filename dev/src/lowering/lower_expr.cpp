@@ -1052,16 +1052,11 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node)
 	}
 	// A call that can unwind while destructor-protected objects are
 	// alive runs under an unwind-dispatch region.
-	bool protected_call = !in_lifetime_action_ && HaveCleanups() &&
+	bool protected_call = !in_cleanup_emission_ &&
+		(eh_armed_ || (!in_lifetime_action_ && HaveCleanups())) &&
 		(!direct || program_.CalleeMayUnwind(callee));
 	if (protected_call && !eh_open_)
-	{
-		eh_dispatch_ = NewLabel("call_unwind_dispatch");
-		eh_end_ = NewLabel("call_unwind_end");
-		ReferenceLabel(eh_dispatch_);
-		Emit("eh_try ^" + eh_dispatch_);
-		eh_open_ = true;
-	}
+		OpenEhRegion();
 	string arguments;
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
@@ -1278,7 +1273,13 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		value.type = target;
 		return value;
 	}
-	// Integral (and enumeration) conversions.
+	// Integral (and enumeration) conversions. An identity cast emits
+	// nothing (the canonical reference shape).
+	if (context == LCC_CAST && TypeEquals(source, target))
+	{
+		value.type = target;
+		return value;
+	}
 	if (value.imm_int)
 		return ConvertIntegralImmediate(value, source, target);
 	string op = LowerConvertOp(source, target);

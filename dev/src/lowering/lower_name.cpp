@@ -328,6 +328,9 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 
 string MangleTerminalName(const string& name, size_t arity)
 {
+	if (name.compare(0, 10, "operator \"") == 0)
+		// Literal operators: li <source-name of the suffix>.
+		return "li" + SourceName(name.substr(11));
 	if (name.compare(0, 9, "operator ") == 0)
 	{
 		string text = name.substr(9);

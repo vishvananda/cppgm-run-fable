@@ -174,6 +174,22 @@ private:
 	                         const TypePtr& element);
 
 	// --- PA15 lifetime (lower_member.cpp) ---
+	// Full-expression temporaries (12.2): registered as each one is
+	// constructed, destroyed at the end of the enclosing full
+	// expression and from every unwind dispatch while live.
+	struct TempCleanup
+	{
+		TempCleanup() : action(0) {}
+
+		string address;         // the materialized slot's address temp
+		const SemNode* action;  // SN_DESTRUCTOR_ACTION (no address)
+	};
+	void LowerConstructorAction(const SemNode& node);
+	void BeginFullExpression(const SemNode& root);
+	void EndFullExpression();
+	bool TreeHasTempCleanups(const SemNode& node) const;
+	void EmitTempCleanups(size_t from);
+	void OpenEhRegion();
 	void PushCleanupScope();
 	void PopCleanupScope(bool emit);
 	void RegisterCleanup(const vector<const SemNode*>& actions);
@@ -217,4 +233,14 @@ private:
 	// Lifetime-machinery calls (constructor actions, cleanups) never
 	// open unwind regions.
 	bool in_lifetime_action_;
+	// --- full-expression temporary state ---
+	vector<TempCleanup> temp_cleanups_;
+	vector<size_t> fe_marks_;
+	vector<char> fe_armed_;
+	// The open full expression constructs destructible temporaries:
+	// may-unwind calls run under dispatch regions even before the
+	// first cleanup registers.
+	bool eh_armed_;
+	bool in_cleanup_emission_;
+	int ctor_depth_;  // open LowerConstructorCall frames
 };

@@ -1,5 +1,7 @@
 #include "sema/class_info.h"
 
+#include "ast/ast.h"
+
 namespace {
 
 unsigned long long RoundUpBits(unsigned long long value,
@@ -72,6 +74,77 @@ bool ClassRegistry::NeedsConstruction(const ClassInfo& info) const
 			return true;
 		const ClassInfo* member = MemberClass(info.fields[i].type);
 		if (member && NeedsConstruction(*member))
+			return true;
+	}
+	return false;
+}
+
+// An analyzed special-member definition with no statements (and, for
+// constructors, no mem-initializers) does nothing of its own.
+static bool EmptyMemberBody(const AstStmt* body)
+{
+	return body && body->kind == SK_COMPOUND && body->items.empty();
+}
+
+bool ClassRegistry::DestructionHasEffects(const ClassInfo& info) const
+{
+	if (info.has_user_dtor &&
+	    (!info.dtor_definition ||
+	     !EmptyMemberBody(info.dtor_definition->body.get())))
+		return true;
+	if (info.base && DestructionHasEffects(*info.base))
+		return true;
+	for (size_t i = 0; i < info.fields.size(); i++)
+	{
+		const ClassInfo* member = MemberClass(info.fields[i].type);
+		if (member && DestructionHasEffects(*member))
+			return true;
+	}
+	return false;
+}
+
+bool ClassRegistry::DefaultConstructionHasEffects(const ClassInfo& info) const
+{
+	if (info.has_user_ctor)
+	{
+		const ClassCtor* found = 0;
+		for (size_t i = 0; i < info.ctors.size(); i++)
+		{
+			const ClassCtor& ctor = info.ctors[i];
+			if (ctor.inherited_base)
+				continue;
+			size_t required = ctor.type->parameters.size();
+			while (required > 0 && required <= ctor.defaults.size() &&
+			       ctor.defaults[required - 1])
+				required--;
+			if (required == 0)
+			{
+				found = &ctor;
+				break;
+			}
+		}
+		if (!found)
+			return true;
+		if (!found->defaulted)
+		{
+			// Default arguments evaluate per call; an unseen
+			// definition may do anything.
+			if (!found->type->parameters.empty())
+				return true;
+			if (!found->definition ||
+			    !found->definition->mem_initializers.empty() ||
+			    !EmptyMemberBody(found->definition->body.get()))
+				return true;
+		}
+	}
+	if (info.base && DefaultConstructionHasEffects(*info.base))
+		return true;
+	for (size_t i = 0; i < info.fields.size(); i++)
+	{
+		if (info.fields[i].default_init)
+			return true;
+		const ClassInfo* member = MemberClass(info.fields[i].type);
+		if (member && DefaultConstructionHasEffects(*member))
 			return true;
 	}
 	return false;

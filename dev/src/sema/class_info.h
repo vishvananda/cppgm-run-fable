@@ -134,6 +134,13 @@ public:
 	// Whether destruction of an object of this class requires code (a
 	// user destructor anywhere in the base/member subobject tree).
 	bool NeedsDestruction(const ClassInfo& info) const;
+	// Whether destroying / default-constructing an object performs any
+	// observable work: a user-provided body with statements, a member
+	// initializer, or a subobject chain that does. The reference
+	// emission elides subobject constructor/destructor calls inside
+	// synthesized lifetime code when the whole chain is empty.
+	bool DestructionHasEffects(const ClassInfo& info) const;
+	bool DefaultConstructionHasEffects(const ClassInfo& info) const;
 
 	// Whether default-initialization requires constructor code (a user
 	// constructor, a default member initializer, or a base or member

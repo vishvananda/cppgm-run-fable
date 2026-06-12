@@ -284,6 +284,16 @@ bool AstParser::ParseOperatorIdPart(AstNamePart& part)
 		Advance();
 		return true;
 	}
+	if (AtLiteral() && Peek().literal_kind == PTK_UD_STRING &&
+	    Peek().literal_elements == 1 && !Peek().ud_suffix.empty())
+	{
+		// The combined `""_suffix` spelling lexes as one user-defined
+		// string literal token.
+		part.kind = NP_LITERAL_OPERATOR;
+		part.identifier = Peek().ud_suffix;
+		Advance();
+		return true;
+	}
 	if (AtSimple(KW_NEW) || AtSimple(KW_DELETE))
 	{
 		part.kind = NP_OPERATOR_FUNCTION;

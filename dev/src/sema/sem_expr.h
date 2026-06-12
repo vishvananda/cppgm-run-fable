@@ -61,6 +61,9 @@ struct ISemExprHost
 	                                       int ctor_index, bool base_entry,
 	                                       SemNodePtr address,
 	                                       vector<SemNodePtr> args) = 0;
+	// A temporary's destructor action (no address subtree); demanded
+	// for full-expression temporaries of destructible classes.
+	virtual SemNodePtr MakeTemporaryDtor(const ClassInfo& cls) = 0;
 	virtual ~ISemExprHost() {}
 };
 
@@ -186,6 +189,7 @@ private:
 	SemValue MakeTemporaryObject(const TypePtr& class_type,
 	                             const vector<AstExprPtr>& arguments);
 	SemValue AnalyzeNew(const AstExpr& expr);
+	SemValue AnalyzeStringUdl(const AstExpr& expr);
 	// --- PA15 operator overloading (sem_operator.cpp) ---
 	void CollectOperatorCandidates(const string& op_name,
 	                               const vector<SemValue>& operands,

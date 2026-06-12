@@ -662,7 +662,24 @@ AstExprPtr AstParser::ParsePostfixRoot()
 		}
 		Restore(entry);
 	}
-	return ParsePrimaryExpression();
+	AstExprPtr expr = ParsePrimaryExpression();
+	// 5.2.3p3: simple-type-specifier braced-init-list builds a temporary
+	// (`T{...}`). Only an id-expression can name the type here, and a
+	// braced-init-list never follows a value-id inside an expression, so
+	// the call shape reuses the function-style cast path with the braced
+	// items as its arguments.
+	if (expr && expr->kind == EK_ID && AtSimple(OP_LBRACE))
+	{
+		AstExprPtr braced = ParseBracedInitList();
+		if (braced)
+		{
+			AstExprPtr call = MakeExpr(EK_CALL);
+			call->arguments.swap(braced->arguments);
+			call->operands.push_back(move(expr));
+			return call;
+		}
+	}
+	return expr;
 }
 
 AstExprPtr AstParser::ParsePrimaryExpression()
@@ -676,6 +693,7 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 		node->literal_type = token.literal_type;
 		node->literal_elements = token.literal_elements;
 		node->literal_data = token.literal_data;
+		node->literal_suffix = token.ud_suffix;
 		Advance();
 		return node;
 	}

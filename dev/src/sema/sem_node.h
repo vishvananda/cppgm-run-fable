@@ -157,6 +157,10 @@ struct SemNode
 	// SN_CONSTRUCTOR_ACTION: the implicit default constructor does
 	// nothing, so default-initialization emits no call.
 	bool trivial_init;
+	// A synthesized subobject constructor action whose whole chain does
+	// nothing: the callee is still demanded (emitted on use) but the
+	// call itself is not printed.
+	bool elided;
 	// PA15 bit-field stores: the first write to a storage unit inside a
 	// constructor stores the masked value directly instead of
 	// read-modify-write.

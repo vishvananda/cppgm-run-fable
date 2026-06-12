@@ -137,6 +137,8 @@ private:
 	                           ESpecialFunction special) const;
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();
+	void AppendDynamicInit(LowGlobalInfo& info, const SemNode& child,
+	                       bool ref, SemNode& init_def);
 	void LowerHelper(LowFunctionInfo& info, const SemNode& definition);
 	string UniqueSymbol(const string& base);
 	string RenderGlobal(const LowGlobalInfo& info);

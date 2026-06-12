@@ -68,6 +68,7 @@ struct ParseToken
 	EFundamentalType literal_type;
 	size_t literal_elements;
 	string literal_data;
+	string ud_suffix;  // user-defined literal kinds
 };
 
 // Converts the collected phase-7 tokens of one translation unit into

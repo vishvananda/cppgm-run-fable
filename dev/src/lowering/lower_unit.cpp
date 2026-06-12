@@ -577,6 +577,36 @@ void LowerProgram::LowerHelper(LowFunctionInfo& info,
 	info.body_text = lowerer.Lower();
 }
 
+// One dynamic global initializer: when the value (or referent
+// address) is not a renderable constant, @__cppgm_init stores it.
+void LowerProgram::AppendDynamicInit(LowGlobalInfo& info,
+                                     const SemNode& child, bool ref,
+                                     SemNode& init_def)
+{
+	LowerConst value;
+	if (EvaluateLowerConst(child, value))
+		return;
+	info.dynamic_init = true;
+	SemNodePtr target = MakeSemNode(SN_ID_EXPRESSION);
+	target->name = info.node->entity_name;
+	target->type = info.type;
+	target->category = VC_LVALUE;
+	target->entity_scope = info.node->entity_scope;
+	target->entity_name = info.node->entity_name;
+	SemNodePtr assign = MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
+	assign->type = ref ? info.type : RemoveTopCv(info.type);
+	assign->category = VC_LVALUE;
+	assign->has_op = true;
+	assign->op = OP_ASS;
+	assign->op_spelling = "=";
+	assign->member_ref = ref;
+	assign->children.push_back(std::move(target));
+	assign->children.push_back(CloneSemNode(child));
+	SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
+	statement->children.push_back(std::move(assign));
+	init_def.children.push_back(std::move(statement));
+}
+
 // Builds @__cppgm_init / @__cppgm_fini from the registered
 // namespace-scope objects: construction in declaration order,
 // destruction in reverse declaration order (3.6.2/3.6.3 subset).
@@ -614,64 +644,15 @@ void LowerProgram::BuildLifetimeHelpers()
 				// Aggregate member stores run dynamically.
 				init_def->children.push_back(CloneSemNode(child));
 			else if (IsReferenceType(info.type) && j == 0)
-			{
-				LowerConst value;
-				if (EvaluateLowerConst(child, value))
-					continue;
-				info.dynamic_init = true;
-				SemNodePtr target = MakeSemNode(SN_ID_EXPRESSION);
-				target->name = info.node->entity_name;
-				target->type = info.type;
-				target->category = VC_LVALUE;
-				target->entity_scope = info.node->entity_scope;
-				target->entity_name = info.node->entity_name;
 				// The reference binds dynamically: the helper stores
 				// the referent's address into the pointer object.
-				SemNodePtr statement =
-					MakeSemNode(SN_EXPRESSION_STATEMENT);
-				SemNodePtr assign =
-					MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
-				assign->type = info.type;
-				assign->category = VC_LVALUE;
-				assign->has_op = true;
-				assign->op = OP_ASS;
-				assign->op_spelling = "=";
-				assign->member_ref = true;
-				assign->children.push_back(std::move(target));
-				assign->children.push_back(CloneSemNode(child));
-				statement->children.push_back(std::move(assign));
-				init_def->children.push_back(std::move(statement));
-			}
+				AppendDynamicInit(info, child, true, *init_def);
 			else if (!is_class && info.type->kind != TK_ARRAY &&
 			         !IsReferenceType(info.type) && j == 0 &&
 			         child.kind != SN_BRACED_INIT_LIST)
-			{
 				// A scalar initializer: constant expressions render
 				// statically, everything else stores in @__cppgm_init.
-				LowerConst value;
-				if (EvaluateLowerConst(child, value))
-					continue;
-				info.dynamic_init = true;
-				SemNodePtr target = MakeSemNode(SN_ID_EXPRESSION);
-				target->name = info.node->entity_name;
-				target->type = info.type;
-				target->category = VC_LVALUE;
-				target->entity_scope = info.node->entity_scope;
-				target->entity_name = info.node->entity_name;
-				SemNodePtr assign =
-					MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
-				assign->type = RemoveTopCv(info.type);
-				assign->category = VC_LVALUE;
-				assign->has_op = true;
-				assign->op = OP_ASS;
-				assign->op_spelling = "=";
-				assign->children.push_back(std::move(target));
-				assign->children.push_back(CloneSemNode(child));
-				SemNodePtr statement =
-					MakeSemNode(SN_EXPRESSION_STATEMENT);
-				statement->children.push_back(std::move(assign));
-				init_def->children.push_back(std::move(statement));
-			}
+				AppendDynamicInit(info, child, false, *init_def);
 		}
 	}
 	// Finalization actions run in reverse declaration order.

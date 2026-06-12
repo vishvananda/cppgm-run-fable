@@ -35,6 +35,7 @@ public:
 	                                       int ctor_index, bool base_entry,
 	                                       SemNodePtr address,
 	                                       vector<SemNodePtr> args);
+	virtual SemNodePtr MakeTemporaryDtor(const ClassInfo& cls);
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
@@ -136,8 +137,17 @@ private:
 	void AppendMemberInit(const ClassInfo& cls, const ClassField& field,
 	                      const AstInitializer* init,
 	                      vector<SemNodePtr>& out);
+	void AppendClassMemberInit(const ClassField& field,
+	                           const ClassInfo& member_cls,
+	                           const AstExpr* braced,
+	                           const vector<const AstExpr*>& args,
+	                           vector<SemNodePtr>& out);
 	void AppendFieldDefaultInit(const ClassInfo& cls,
 	                            const ClassField& field,
+	                            vector<SemNodePtr>& out);
+	void AppendBaseDefaultInit(const ClassInfo& cls,
+	                           vector<SemNodePtr>& out);
+	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,
 	                           const AstExpr* braced,
@@ -173,6 +183,9 @@ private:
 	void AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	                           const AstInitializer* init,
 	                           const ClassInfo& cls);
+	void AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
+	                          const AstInitializer* init,
+	                          const ClassInfo& cls);
 	void AppendAggregateInit(const ClassInfo& cls,
 	                         const SemNode& target_proto,
 	                         const AstExpr& braced,
@@ -182,6 +195,11 @@ private:
 	                             const vector<AstExprPtr>& items,
 	                             size_t at, bool top_braced,
 	                             vector<SemNodePtr>& out);
+	size_t ConsumeAggregateClassItem(const ClassInfo& member_cls,
+	                                 const ClassField& field,
+	                                 SemNodePtr member,
+	                                 const vector<AstExprPtr>& items,
+	                                 size_t at, vector<SemNodePtr>& out);
 	size_t ConsumeArrayItems(const ClassField& field,
 	                         const SemNode& member_proto,
 	                         const vector<AstExprPtr>& items,

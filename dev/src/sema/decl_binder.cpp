@@ -96,6 +96,8 @@ string DeclBinder::DeclaredFunctionName(const AstNamePart& part)
 {
 	if (part.kind == NP_OPERATOR_FUNCTION)
 		return "operator " + part.operator_text;
+	if (part.kind == NP_LITERAL_OPERATOR)
+		return "operator \"\"" + part.identifier;
 	return PartName(part);
 }
 

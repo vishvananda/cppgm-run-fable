@@ -50,6 +50,7 @@ struct AstExpr
 	EFundamentalType literal_type;
 	size_t literal_elements;
 	std::string literal_data;
+	std::string literal_suffix;  // user-defined literal kinds
 	// EK_FUNCTIONAL_CAST: the simple-type keyword sequence (one entry
 	// for the classic single-keyword form, several for the PA12
 	// multi-keyword form such as `unsigned long(e)`).

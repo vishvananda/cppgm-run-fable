@@ -439,6 +439,13 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 		*cls, winner, false, SemNodePtr(), std::move(arg_nodes));
 	action->type = RemoveTopCv(class_type);
 	action->category = VC_PRVALUE;
+	if (host_.Classes().NeedsDestruction(*cls))
+	{
+		// 12.2: the temporary is destroyed at the end of the enclosing
+		// full expression.
+		action->needs_dtor = true;
+		action->children.push_back(host_.MakeTemporaryDtor(*cls));
+	}
 	SemValue value;
 	value.type = RemoveTopCv(class_type);
 	value.category = VC_PRVALUE;
@@ -828,6 +835,68 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 	callee->entity_name = binding.name;
 	if (winner < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[winner])
+		callee->unwind_no = true;
+	value.node->children.push_back(std::move(callee));
+	for (size_t i = 0; i < args.size(); i++)
+		value.node->children.push_back(std::move(args[i].node));
+	return value;
+}
+
+// 2.14.8: a user-defined string literal calls the literal operator of
+// its suffix with the character array and its length.
+SemValue SemExprAnalyzer::AnalyzeStringUdl(const AstExpr& expr)
+{
+	const string op_name = "operator \"\"" + expr.literal_suffix;
+	const ScopeBinding* binding =
+		UnqualifiedLookup(host_.CurrentScope(), op_name, SLF_ANY);
+	if (!binding || binding->kind != SB_FUNCTION)
+		throw runtime_error("no literal operator for suffix " +
+		                    expr.literal_suffix);
+	SemValue text;
+	text.node = MakeSemNode(SN_LITERAL);
+	text.node->token = expr.literal;
+	text.type = MakeArrayType(
+		MakeCvQualifiedType(MakeFundamentalType(expr.literal_type),
+		                    true, false),
+		true, expr.literal_elements);
+	text.category = VC_LVALUE;
+	text.node->type = text.type;
+	text.node->category = VC_LVALUE;
+	text.node->is_string_literal = true;
+	text.node->string_bytes = expr.literal_data;
+	SemValue length;
+	length.node = MakeSemNode(SN_LITERAL);
+	length.node->token = std::to_string(expr.literal_elements - 1);
+	length.node->type = MakeFundamentalType(FT_INT);
+	length.node->category = VC_PRVALUE;
+	length.node->has_value = true;
+	length.node->value = ConstValue(FT_INT, expr.literal_elements - 1);
+	length.type = length.node->type;
+
+	vector<TypePtr> candidates;
+	candidates.push_back(binding->type);
+	for (size_t i = 0; i < binding->overloads.size(); i++)
+		candidates.push_back(binding->overloads[i]);
+	vector<SemValue> args;
+	args.push_back(std::move(text));
+	args.push_back(std::move(length));
+	vector<ConversionSource> sources;
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
+	vector<ImplicitConversion> conversions;
+	size_t winner = SelectBestOverload(candidates, sources, conversions);
+	const TypePtr& fn = candidates[winner];
+	for (size_t i = 0; i < args.size(); i++)
+		ApplyConversion(args[i], conversions[i], fn->parameters[i]);
+
+	SemValue value = CallResult(fn);
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = CanonicalQualifiedName(binding->owner, binding->name);
+	callee->type = fn;
+	callee->entity_scope = binding->owner;
+	callee->entity_name = binding->name;
+	if (winner < binding->fn_unwind_no.size() &&
+	    binding->fn_unwind_no[winner])
 		callee->unwind_no = true;
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)

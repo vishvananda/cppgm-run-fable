@@ -196,6 +196,8 @@ SemValue SemExprAnalyzer::AnalyzeLiteral(const AstExpr& expr)
 		value.node->is_string_literal = true;
 		value.node->string_bytes = expr.literal_data;
 	}
+	else if (expr.literal_kind == PTK_UD_STRING)
+		return AnalyzeStringUdl(expr);
 	else
 		throw OutsideBoundary("user-defined literal");
 	value.node->type = value.type;
@@ -413,6 +415,11 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		SemNodePtr action = host_.MakeConstructorCall(
 			*cls, conv.user_ctor, false, SemNodePtr(), std::move(args));
 		action->category = VC_PRVALUE;
+		if (host_.Classes().NeedsDestruction(*cls))
+		{
+			action->needs_dtor = true;
+			action->children.push_back(host_.MakeTemporaryDtor(*cls));
+		}
 		TypePtr class_type = MakeNamedType(TK_CLASS, conv.user_class);
 		action->type = class_type;
 		value.node = std::move(action);

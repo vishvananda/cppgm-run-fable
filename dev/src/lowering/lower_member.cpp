@@ -271,6 +271,13 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	    call.children[1]->op == OP_AMP &&
 	    call.children[1]->has_op)
 		first_arg = 2;
+	// In a full expression with destructible temporaries every
+	// may-unwind construction runs under a dispatch region (opened
+	// before its arguments lower).
+	if (eh_armed_ && !in_cleanup_emission_ && !eh_open_ &&
+	    program_.CalleeMayUnwind(callee))
+		OpenEhRegion();
+	ctor_depth_++;
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
 	string arguments = this_text;
@@ -284,6 +291,7 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	string callee_text = program_.MemberFunctionRef(callee);
 	Emit("call void " + callee_text + "(" + arguments + ")");
 	in_lifetime_action_ = saved;
+	ctor_depth_--;
 }
 
 string FunctionLowerer::MaterializeTemporary(const SemNode& action,
@@ -294,6 +302,26 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 	string address = NewTemp();
 	Emit(address + " = addr $" + slot);
 	LowerConstructorCall(action, address);
+	if (action.needs_dtor)
+	{
+		const SemNode* dtor = 0;
+		for (size_t i = 0; i < action.children.size(); i++)
+			if (action.children[i]->kind == SN_DESTRUCTOR_ACTION)
+				dtor = action.children[i].get();
+		if (dtor)
+		{
+			// Registration invalidates the open dispatch (it now
+			// must destroy this temporary); close and reopen.
+			if (eh_open_)
+				CloseEhRegion();
+			TempCleanup cleanup;
+			cleanup.address = address;
+			cleanup.action = dtor;
+			temp_cleanups_.push_back(cleanup);
+			if (eh_armed_ && ctor_depth_ > 0)
+				OpenEhRegion();
+		}
+	}
 	return address;
 }
 
@@ -423,6 +451,8 @@ void FunctionLowerer::EmitCleanupsFrom(size_t from)
 {
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
+	bool saved_emission = in_cleanup_emission_;
+	in_cleanup_emission_ = true;
 	for (size_t scope = cleanup_scopes_.size(); scope-- > from;)
 	{
 		const vector<vector<const SemNode*>>& groups =
@@ -433,6 +463,7 @@ void FunctionLowerer::EmitCleanupsFrom(size_t from)
 			for (size_t i = 0; i < groups[group].size(); i++)
 				LowerCall(*groups[group][i]->children[0]);
 	}
+	in_cleanup_emission_ = saved_emission;
 	in_lifetime_action_ = saved;
 }
 
@@ -444,11 +475,14 @@ void FunctionLowerer::PopCleanupScope(bool emit)
 	{
 		bool saved = in_lifetime_action_;
 		in_lifetime_action_ = true;
+		bool saved_emission = in_cleanup_emission_;
+		in_cleanup_emission_ = true;
 		const vector<vector<const SemNode*>>& groups =
 			cleanup_scopes_.back();
 		for (size_t group = groups.size(); group-- > 0;)
 			for (size_t i = 0; i < groups[group].size(); i++)
 				LowerCall(*groups[group][i]->children[0]);
+		in_cleanup_emission_ = saved_emission;
 		in_lifetime_action_ = saved;
 	}
 	cleanup_scopes_.pop_back();
@@ -463,7 +497,70 @@ void FunctionLowerer::CloseEhRegion()
 	ReferenceLabel(eh_end_);
 	Terminate("jump ^" + eh_end_);
 	OpenBlock(eh_dispatch_);
+	EmitTempCleanups(0);
 	EmitCleanupsFrom(0);
 	Terminate("resume");
 	OpenBlock(eh_end_);
+}
+
+void FunctionLowerer::OpenEhRegion()
+{
+	eh_dispatch_ = NewLabel("call_unwind_dispatch");
+	eh_end_ = NewLabel("call_unwind_end");
+	ReferenceLabel(eh_dispatch_);
+	Emit("eh_try ^" + eh_dispatch_);
+	eh_open_ = true;
+}
+
+// --- full-expression temporaries ---------------------------------------------
+
+bool FunctionLowerer::TreeHasTempCleanups(const SemNode& node) const
+{
+	if (node.kind == SN_CONSTRUCTOR_ACTION && node.needs_dtor)
+		return true;
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (TreeHasTempCleanups(*node.children[i]))
+			return true;
+	return false;
+}
+
+void FunctionLowerer::BeginFullExpression(const SemNode& root)
+{
+	fe_marks_.push_back(temp_cleanups_.size());
+	fe_armed_.push_back(eh_armed_);
+	// The reference declares the unwind runtime only for scoped local
+	// cleanups; full-expression temporaries do not add the declares.
+	if (TreeHasTempCleanups(root))
+		eh_armed_ = true;
+}
+
+// Destruction order is the reverse of construction; the records stay
+// live for the closing dispatch and are dropped afterwards.
+void FunctionLowerer::EndFullExpression()
+{
+	size_t mark = fe_marks_.back();
+	fe_marks_.pop_back();
+	if (temp_cleanups_.size() > mark && !blocks_.back().terminated)
+		EmitTempCleanups(mark);
+	CloseEhRegion();
+	temp_cleanups_.resize(mark);
+	eh_armed_ = fe_armed_.back() != 0;
+	fe_armed_.pop_back();
+}
+
+void FunctionLowerer::EmitTempCleanups(size_t from)
+{
+	bool saved = in_lifetime_action_;
+	in_lifetime_action_ = true;
+	bool saved_emission = in_cleanup_emission_;
+	in_cleanup_emission_ = true;
+	for (size_t i = temp_cleanups_.size(); i-- > from;)
+	{
+		const SemNode& call = *temp_cleanups_[i].action->children[0];
+		Emit("call void " +
+		     program_.MemberFunctionRef(*call.children[0]) + "(" +
+		     temp_cleanups_[i].address + ")");
+	}
+	in_cleanup_emission_ = saved_emission;
+	in_lifetime_action_ = saved;
 }

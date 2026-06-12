@@ -31,7 +31,8 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
 	: program_(program), def_(definition), info_(info),
 	  return_type_(definition.type->target),
 	  temp_counter_(0), label_counter_(0), mat_counter_(0),
-	  eh_open_(false), in_lifetime_action_(false)
+	  eh_open_(false), in_lifetime_action_(false), eh_armed_(false),
+	  in_cleanup_emission_(false), ctor_depth_(0)
 {
 }
 
@@ -256,6 +257,49 @@ string FunctionLowerer::Render() const
 
 // --- statements ----------------------------------------------------------
 
+// Subobject construction inside synthesized bodies: an elided chain
+// only demands its callee; value-initialization zero-fills through the
+// constructor's address first.
+void FunctionLowerer::LowerConstructorAction(const SemNode& node)
+{
+	if (node.trivial_init)
+		return;
+	if (node.elided)
+	{
+		program_.MemberFunctionRef(*node.children[0]->children[0]);
+		return;
+	}
+	bool saved = in_lifetime_action_;
+	in_lifetime_action_ = true;
+	if (node.has_value && node.children[0]->children.size() > 1 &&
+	    node.children[0]->children[1]->kind == SN_UNARY_EXPRESSION &&
+	    node.children[0]->children[1]->op == OP_AMP)
+	{
+		string address = LowerAddressExpr(
+			*node.children[0]->children[1]->children[0]);
+		unsigned long long size = node.value.bits;
+		string width;
+		switch (size)
+		{
+		case 1: width = "i8"; break;
+		case 2: width = "i16"; break;
+		case 4: width = "i32"; break;
+		case 8: width = "i64"; break;
+		default:
+			break;
+		}
+		if (width.empty())
+			Emit("zeroinit " + to_string(size) + "x1 " + address);
+		else
+			Emit("store " + width + " 0, " + address);
+		LowerConstructorCall(node, address);
+		in_lifetime_action_ = saved;
+		return;
+	}
+	LowerCall(*node.children[0]);
+	in_lifetime_action_ = saved;
+}
+
 void FunctionLowerer::LowerStatementList(const vector<SemNodePtr>& items,
                                          size_t from)
 {
@@ -282,47 +326,13 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		LowerLocalVariable(node);
 		return;
 	case SN_EXPRESSION_STATEMENT:
+		BeginFullExpression(*node.children[0]);
 		LowerEffect(*node.children[0]);
-		CloseEhRegion();
+		EndFullExpression();
 		return;
 	case SN_CONSTRUCTOR_ACTION:
-	{
-		// Subobject construction inside synthesized bodies.
-		if (node.trivial_init)
-			return;
-		bool saved = in_lifetime_action_;
-		in_lifetime_action_ = true;
-		if (node.has_value && node.children[0]->children.size() > 1 &&
-		    node.children[0]->children[1]->kind == SN_UNARY_EXPRESSION &&
-		    node.children[0]->children[1]->op == OP_AMP)
-		{
-			// Value-initialization: zero-fill, then construct through
-			// the same member address.
-			string address = LowerAddressExpr(
-				*node.children[0]->children[1]->children[0]);
-			unsigned long long size = node.value.bits;
-			string width;
-			switch (size)
-			{
-			case 1: width = "i8"; break;
-			case 2: width = "i16"; break;
-			case 4: width = "i32"; break;
-			case 8: width = "i64"; break;
-			default:
-				break;
-			}
-			if (width.empty())
-				Emit("zeroinit " + to_string(size) + "x1 " + address);
-			else
-				Emit("store " + width + " 0, " + address);
-			LowerConstructorCall(node, address);
-			in_lifetime_action_ = saved;
-			return;
-		}
-		LowerCall(*node.children[0]);
-		in_lifetime_action_ = saved;
+		LowerConstructorAction(node);
 		return;
-	}
 	case SN_DESTRUCTOR_ACTION:
 	{
 		bool saved = in_lifetime_action_;
@@ -418,8 +428,9 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 		if (RemoveTopCv(inner)->kind == TK_CLASS &&
 		    !IsReferenceType(declared))
 		{
+			BeginFullExpression(node);
 			LowerClassLocal(node);
-			CloseEhRegion();
+			EndFullExpression();
 			return;
 		}
 	}
@@ -427,8 +438,10 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 	{
 		string slot = AddSlot(node.entity_scope, node.entity_name,
 		                      "ptr");
+		BeginFullExpression(node);
 		string address = LowerAddressExpr(*node.children[0]);
 		Emit("store ptr " + address + ", $" + slot);
+		EndFullExpression();
 		return;
 	}
 	if (declared->kind == TK_ARRAY)
@@ -446,10 +459,12 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 	                      LowerSlotType(declared));
 	if (node.children.empty())
 		return;
+	BeginFullExpression(node);
 	string value = LowerValueAs(*node.children[0],
 	                            RemoveTopCv(declared), LCC_INIT);
 	Emit("store " + LowerSlotType(declared) + " " + value + ", $" +
 	     slot);
+	EndFullExpression();
 }
 
 void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
@@ -499,10 +514,11 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 		return;
 	}
 	const SemNode& value = *node.children[0];
+	BeginFullExpression(value);
 	if (IsVoidType(return_type_))
 	{
 		LowerEffect(value);
-		CloseEhRegion();
+		EndFullExpression();
 		EmitCleanupsFrom(0);
 		Terminate("return void");
 		return;
@@ -527,14 +543,14 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 				address = hopped;
 			}
 		}
-		CloseEhRegion();
+		EndFullExpression();
 		EmitCleanupsFrom(0);
 		Terminate("return ptr " + address);
 		return;
 	}
 	string text = LowerValueAs(value, RemoveTopCv(return_type_),
 	                           LCC_INIT);
-	CloseEhRegion();
+	EndFullExpression();
 	EmitCleanupsFrom(0);
 	Terminate("return " + LowerValueType(return_type_) + " " + text);
 }

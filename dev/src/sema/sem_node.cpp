@@ -23,7 +23,8 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  c_linkage(false), unwind_no(false), member_offset(0),
 	  base_hops(0), is_bit_field(false), bit_offset(0), bit_width(0),
 	  is_method(false), special(SF_NONE), inline_def(false),
-	  needs_dtor(false), trivial_init(false), bf_plain_store(false),
+	  needs_dtor(false), trivial_init(false), elided(false),
+	  bf_plain_store(false),
 	  member_ref(false)
 {
 }
@@ -199,6 +200,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.inline_def = node.inline_def;
 	out.needs_dtor = node.needs_dtor;
 	out.trivial_init = node.trivial_init;
+	out.elided = node.elided;
 	out.bf_plain_store = node.bf_plain_store;
 	out.member_ref = node.member_ref;
 	for (size_t i = 0; i < node.children.size(); i++)

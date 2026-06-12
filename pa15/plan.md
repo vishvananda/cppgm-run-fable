@@ -117,3 +117,25 @@ New/extended facts on `SemNode` (lowering input):
 5. Long tail: bit-field access, pseudo-destructors, inheriting ctors,
    placement new, user-defined literal operators, static thread_local
    members, using-declarations re-exposing members.
+
+## Resolved conventions (from reference diffs)
+
+- User-defined string literals: `operator ""_x` parses from the combined
+  `""_x` token (PTK_UD_STRING + ud_suffix); the call passes the literal's
+  global address plus `elements - 1` as an int converted to the size
+  parameter; mangling is `li<SourceName>`.
+- `T{...}` braced functional casts parse as the call shape with the braced
+  items as arguments (an id followed by `{` is never a value use).
+- Identity casts (same source and target type) emit no conversion copy.
+- Synthesized lifetime bodies elide subobject ctor/dtor calls whose whole
+  chain does nothing (`DefaultConstructionHasEffects` /
+  `DestructionHasEffects`); the elided constructor chain still demands the
+  nearest user-provided constructors (emitted on use, `elided` actions),
+  while the destructor side demands nothing. Expression-level construction
+  and destruction always call.
+- Full-expression temporaries of destructible classes register cleanups as
+  they construct; every may-unwind construction in such a statement runs
+  under its own dispatch region (registration closes and reopens the open
+  region), the temporaries destroy in reverse order inside the last region,
+  and dispatch blocks destroy live temporaries before scoped locals. The
+  unwind-runtime declares appear only for scoped local cleanups.
