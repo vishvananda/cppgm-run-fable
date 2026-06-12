@@ -169,7 +169,8 @@ private:
 	LowerValue LowerIncDec(const SemNode& node, bool prefix);
 	LowerValue LowerAssignment(const SemNode& node);
 	LowerValue LowerCompoundAssignment(const SemNode& node,
-	                                   const LowerValue& target);
+	                                   const LowerValue& target,
+	                                   const SemNode* member_lhs = 0);
 	LowerValue LowerConditionalValue(const SemNode& node);
 	string LowerConditionalAddress(const SemNode& node);
 	LowerValue LowerIdValue(const SemNode& node);

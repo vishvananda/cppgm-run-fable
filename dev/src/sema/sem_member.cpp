@@ -407,6 +407,9 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 		arg_nodes.push_back(std::move(args[i].node));
 	SemNodePtr action = host_.MakeConstructorCall(
 		*cls, winner, false, SemNodePtr(), std::move(arg_nodes));
+	// 5.2.3: the functional-cast temporary's construction is explicit
+	// even when the implicit default constructor does nothing.
+	action->trivial_init = false;
 	action->type = RemoveTopCv(class_type);
 	action->category = VC_PRVALUE;
 	if (host_.Classes().NeedsDestruction(*cls))

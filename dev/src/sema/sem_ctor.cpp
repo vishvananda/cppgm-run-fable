@@ -100,6 +100,26 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 			out.push_back(std::move(action));
 			return;
 		}
+		if (values.size() == 1 && values[0].node &&
+		    values[0].category == VC_PRVALUE &&
+		    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+		    RemoveTopCv(values[0].type)->named == member_cls.entity)
+		{
+			// A same-class prvalue (call result) constructs the member
+			// directly (copy elision).
+			SemNodePtr assign = MakeSemNode(SN_ASSIGNMENT_EXPRESSION);
+			assign->type = bare;
+			assign->category = VC_LVALUE;
+			assign->has_op = true;
+			assign->op = OP_ASS;
+			assign->op_spelling = "=";
+			assign->children.push_back(ThisFieldExpr(field));
+			assign->children.push_back(std::move(values[0].node));
+			SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
+			statement->children.push_back(std::move(assign));
+			out.push_back(std::move(statement));
+			return;
+		}
 		int index = ResolveClassConstructor(member_cls, values, false,
 		                                    field.name.c_str());
 		vector<SemNodePtr> arg_nodes;

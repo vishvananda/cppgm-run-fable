@@ -795,7 +795,11 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 		LowerValue target;
 		target.text = storage;
 		target.type = type;
-		return LowerCompoundAssignment(node, target);
+		// A member lvalue recomputes its store address after the value
+		// (the canonical reference order).
+		return LowerCompoundAssignment(
+			node, target,
+			lhs.kind == SN_MEMBER_EXPRESSION ? &lhs : 0);
 	}
 	string value = LowerValueAs(rhs, type, LCC_OPERAND);
 	Emit("store " + LowerValueType(type) + " " + value + ", " +
@@ -807,7 +811,8 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 }
 
 LowerValue FunctionLowerer::LowerCompoundAssignment(
-	const SemNode& node, const LowerValue& target)
+	const SemNode& node, const LowerValue& target,
+	const SemNode* member_lhs)
 {
 	const SemNode& rhs = *node.children[1];
 	TypePtr type = target.type;
@@ -822,7 +827,8 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 		LowerValue count = LowerValueExpr(rhs);
 		result.text = PointerStep(old_value, count, type->target,
 		                          node.op == OP_MINUSASS);
-		Emit("store ptr " + result.text + ", " + target.text);
+		Emit("store ptr " + result.text + ", " +
+		     (member_lhs ? MemberAddress(*member_lhs) : target.text));
 		return result;
 	}
 	TypePtr common = IsCompoundShift(node.op)
@@ -842,7 +848,8 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 	back.text = computed;
 	back.type = common;
 	back = ConvertValue(back, type, LCC_OPERAND);
-	Emit("store " + type_text + " " + back.text + ", " + target.text);
+	Emit("store " + type_text + " " + back.text + ", " +
+	     (member_lhs ? MemberAddress(*member_lhs) : target.text));
 	result.text = back.text;
 	return result;
 }

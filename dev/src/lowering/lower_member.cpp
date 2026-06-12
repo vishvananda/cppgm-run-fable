@@ -210,6 +210,20 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	if (lhs.is_bit_field)
 		return LowerBitFieldAssignment(node);
 	TypePtr type = RemoveTopCv(StripRef(lhs.type));
+	if (type->kind == TK_CLASS &&
+	    (rhs.kind == SN_CALL_EXPRESSION ||
+	     rhs.kind == SN_CONSTRUCTOR_ACTION ||
+	     rhs.kind == SN_CONDITIONAL_EXPRESSION))
+	{
+		// A same-class prvalue initializer constructs the member
+		// object directly (copy elision).
+		string storage = MemberAddress(lhs);
+		LowerClassInit(rhs, storage);
+		LowerValue result;
+		result.type = type;
+		result.text = storage;
+		return result;
+	}
 	if (type->kind == TK_CLASS)
 	{
 		// Value-initialization zero-fills the object representation.
