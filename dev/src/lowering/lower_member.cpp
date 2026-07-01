@@ -312,6 +312,18 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 	case SN_CONSTRUCTOR_ACTION:
 		if (node.trivial_copy)
 			LowerTrivialCopyAction(node, dest);
+		else if (node.ctor_addressed &&
+		         node.children[0]->children.size() > 1 &&
+		         !node.children[0]->children[1]->children.empty() &&
+		         node.children[0]->children[1]->children[0]->kind ==
+		             SN_MEMBER_EXPRESSION)
+		{
+			// A subobject-targeted action addresses its own member.
+			bool saved = in_lifetime_action_;
+			in_lifetime_action_ = true;
+			LowerCall(*node.children[0]);
+			in_lifetime_action_ = saved;
+		}
 		else
 			LowerConstructorCall(node, dest);
 		return;
@@ -424,12 +436,15 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	const SemNode& call = *action.children[0];
 	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	string dst = this_text;
-	if (dst.empty())
-	{
-		if (first_arg != 2)
-			throw OutsideBoundary("trivial copy without a destination");
+	// A member-addressed action (an aggregate item) owns its exact
+	// subobject address; a caller-supplied destination names only the
+	// enclosing object.
+	if (first_arg == 2 &&
+	    (dst.empty() ||
+	     call.children[1]->children[0]->kind == SN_MEMBER_EXPRESSION))
 		dst = LowerAddressExpr(*call.children[1]->children[0]);
-	}
+	else if (dst.empty())
+		throw OutsideBoundary("trivial copy without a destination");
 	const SemNode& source = *call.children[first_arg];
 	string src = LowerAddressExpr(source);
 	TypePtr cls_type = RemoveTopCv(action.type);
