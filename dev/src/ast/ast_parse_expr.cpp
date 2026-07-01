@@ -77,7 +77,10 @@ AstExprPtr AstParser::ParseAssignmentExpression()
 	ETokenType op = token.simple_type;
 	string spelling = token.spelling;
 	Advance();
-	AstExprPtr right = ParseAssignmentExpression();
+	// 5.17p1: the right operand is an initializer-clause; a
+	// braced-init-list is accepted directly.
+	AstExprPtr right = AtSimple(OP_LBRACE) ? ParseBracedInitList()
+	                                       : ParseAssignmentExpression();
 	if (!right)
 	{
 		Restore(state);

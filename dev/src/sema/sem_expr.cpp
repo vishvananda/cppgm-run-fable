@@ -1147,7 +1147,16 @@ SemValue SemExprAnalyzer::AnalyzeBinary(const AstExpr& expr)
 SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 {
 	SemValue lhs = Analyze(*expr.operands[0]);
-	SemValue rhs = Analyze(*expr.operands[1]);
+	const AstExpr& right = *expr.operands[1];
+	SemValue rhs;
+	if (right.kind == EK_BRACED && expr.op == OP_ASS &&
+	    lhs.type->kind == TK_CLASS)
+		// 5.17p9: a braced-init-list right operand list-initializes
+		// a temporary of the left operand's class type.
+		rhs = MakeTemporaryObject(RemoveTopCv(lhs.type),
+		                          right.arguments);
+	else
+		rhs = Analyze(right);
 	if (lhs.type->kind == TK_CLASS || lhs.type->kind == TK_ENUM)
 	{
 		// 13.5.3: operator= must be a member; compound forms also

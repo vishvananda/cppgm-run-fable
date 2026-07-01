@@ -224,7 +224,7 @@ private:
 	// the span alignment, and sets `first_suffix` to the first field
 	// row needing individual lowering.
 	unsigned long long TrivialStoragePrefix(const ClassInfo& cls,
-	                                        bool is_move,
+	                                        bool is_move, bool assign_form,
 	                                        unsigned long long& alignment,
 	                                        size_t& first_suffix);
 	void AppendTransferActions(const ClassInfo& cls, bool is_move,

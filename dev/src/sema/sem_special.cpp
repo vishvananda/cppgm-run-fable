@@ -369,8 +369,8 @@ SemNodePtr SemBinder::StorageCopyAction(const ClassInfo& cls,
 }
 
 unsigned long long SemBinder::TrivialStoragePrefix(
-	const ClassInfo& cls, bool is_move, unsigned long long& alignment,
-	size_t& first_suffix)
+	const ClassInfo& cls, bool is_move, bool assign_form,
+	unsigned long long& alignment, size_t& first_suffix)
 {
 	alignment = 1;
 	first_suffix = 0;
@@ -404,6 +404,13 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 			first_suffix = i;
 			return field.offset;
 		}
+		// The synthesized assignment copies bit-field storage units
+		// as scalar unit stores rather than raw storage bytes.
+		if (assign_form && field.is_bit_field)
+		{
+			first_suffix = i;
+			return field.offset;
+		}
 		unsigned long long size = field.is_bit_field
 			? TypeSize(field.type) : TypeSize(field.type);
 		if (field.offset + size > end)
@@ -424,8 +431,8 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 	EValueCategory category = is_move ? VC_XVALUE : VC_LVALUE;
 	unsigned long long alignment = 1;
 	size_t first_suffix = 0;
-	unsigned long long span = TrivialStoragePrefix(cls, is_move, alignment,
-	                                               first_suffix);
+	unsigned long long span = TrivialStoragePrefix(
+		cls, is_move, assign_form, alignment, first_suffix);
 	if (span)
 		out.push_back(StorageCopyAction(cls, source_proto, span,
 		                                alignment));
@@ -548,6 +555,25 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 			SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
 			statement->children.push_back(std::move(result.node));
 			out.push_back(std::move(statement));
+			continue;
+		}
+		if (assign_form && field.is_bit_field)
+		{
+			// One plain unit copy per bit-field storage unit; later
+			// rows of the same unit are already covered.
+			if (i > first_suffix && cls.fields[i - 1].is_bit_field &&
+			    cls.fields[i - 1].offset == field.offset)
+				continue;
+			ClassField unit = field;
+			unit.is_bit_field = false;
+			unit.bit_offset = 0;
+			unit.bit_width = 0;
+			SemValue value;
+			value.node = SourceFieldExpr(source_proto, unit, category);
+			value.type = bare;
+			value.category = VC_LVALUE;
+			out.push_back(MemberAssignAction(
+				unit, ThisFieldExpr(unit), std::move(value)));
 			continue;
 		}
 		// Scalar, reference, and bit-field members transfer value-wise.

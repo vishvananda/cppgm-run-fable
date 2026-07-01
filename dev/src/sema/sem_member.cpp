@@ -413,10 +413,10 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	action->trivial_init = false;
 	action->type = RemoveTopCv(class_type);
 	action->category = VC_PRVALUE;
-	if (host_.Classes().NeedsDestruction(*cls))
+	if (host_.Classes().DestructionHasEffects(*cls))
 	{
 		// 12.2: the temporary is destroyed at the end of the enclosing
-		// full expression.
+		// full expression (an effect-free chain emits no cleanup).
 		action->needs_dtor = true;
 		action->children.push_back(host_.MakeTemporaryDtor(*cls));
 	}
