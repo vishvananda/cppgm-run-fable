@@ -142,6 +142,9 @@ private:
 	                           ESpecialFunction special, SemNode& node);
 	void BindQualifiedSpecialMember(const AstDecl& decl,
 	                                const AstName& id);
+	void BindQualifiedConversionFunction(const AstDecl& decl,
+	                                     const AstNamePart& part,
+	                                     Scope* declaring, ClassInfo& cls);
 	Scope* MakeSpecialMemberScope(const string& name,
 	                              const DeclaratorInfo& composed,
 	                              ClassInfo& cls);
@@ -227,6 +230,9 @@ private:
 	                                        bool is_move, bool assign_form,
 	                                        unsigned long long& alignment,
 	                                        size_t& first_suffix);
+	void AppendBaseTransfer(const ClassInfo& cls, bool is_move,
+	                        bool assign_form, const SemNode& source_proto,
+	                        vector<SemNodePtr>& out);
 	void AppendTransferActions(const ClassInfo& cls, bool is_move,
 	                           bool assign_form, const SemNode& source_proto,
 	                           vector<SemNodePtr>& out);
@@ -244,6 +250,12 @@ private:
 	void AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 	                          const AstInitializer* init,
 	                          const ClassInfo& cls);
+	void AppendArrayElementInit(SemNode& item, ScopeBinding& binding,
+	                            const ClassInfo& cls,
+	                            unsigned long long at,
+	                            const AstExpr* element);
+	void AppendElidedObjectInit(SemNode& item, ScopeBinding& binding,
+	                            const ClassInfo& cls, SemNodePtr action);
 	void AppendAggregateInit(const ClassInfo& cls,
 	                         const SemNode& target_proto,
 	                         const AstExpr& braced,

@@ -423,6 +423,58 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 	return cls.size;
 }
 
+// The base subobject transfers through its own special member.
+void SemBinder::AppendBaseTransfer(const ClassInfo& cls, bool is_move,
+                                   bool assign_form,
+                                   const SemNode& source_proto,
+                                   vector<SemNodePtr>& out)
+{
+	EValueCategory category = is_move ? VC_XVALUE : VC_LVALUE;
+	SemNodePtr base_source = MakeSemNode(SN_MEMBER_EXPRESSION);
+	base_source->type = MakeNamedType(TK_CLASS, cls.base->entity);
+	base_source->category = category;
+	base_source->base_hops = 1;
+	base_source->children.push_back(CloneSemNode(source_proto));
+	if (assign_form)
+	{
+		SemValue lhs;
+		lhs.node = MakeSemNode(SN_MEMBER_EXPRESSION);
+		lhs.node->type = MakeNamedType(TK_CLASS, cls.base->entity);
+		lhs.node->category = VC_LVALUE;
+		lhs.node->base_hops = 1;
+		lhs.node->children.push_back(ThisObjectExpr());
+		lhs.type = lhs.node->type;
+		lhs.category = VC_LVALUE;
+		SemValue rhs;
+		rhs.node = std::move(base_source);
+		rhs.type = lhs.type;
+		rhs.category = category;
+		vector<SemValue> operands;
+		operands.push_back(std::move(lhs));
+		operands.push_back(std::move(rhs));
+		SemValue result;
+		if (!analyzer_.ResolveOperatorCall("=", operands, true, result))
+			throw runtime_error("no base assignment operator");
+		SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
+		statement->children.push_back(std::move(result.node));
+		out.push_back(std::move(statement));
+		return;
+	}
+	SemValue source;
+	source.node = std::move(base_source);
+	source.type = MakeNamedType(TK_CLASS, cls.base->entity);
+	source.category = category;
+	vector<SemValue> args;
+	args.push_back(std::move(source));
+	int index = ResolveClassConstructor(*cls.base, args, false,
+	                                    "base subobject");
+	vector<SemNodePtr> arg_nodes;
+	arg_nodes.push_back(std::move(args[0].node));
+	out.push_back(MakeConstructorCall(*cls.base, index, true,
+	                                  ThisBaseAddress(cls),
+	                                  std::move(arg_nodes)));
+}
+
 void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
                                       bool assign_form,
                                       const SemNode& source_proto,
@@ -438,52 +490,8 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 		                                alignment));
 	else if (cls.base)
 	{
-		// The base subobject transfers through its own special member.
-		SemNodePtr base_source = MakeSemNode(SN_MEMBER_EXPRESSION);
-		base_source->type = MakeNamedType(TK_CLASS, cls.base->entity);
-		base_source->category = category;
-		base_source->base_hops = 1;
-		base_source->children.push_back(CloneSemNode(source_proto));
-		if (assign_form)
-		{
-			SemValue lhs;
-			lhs.node = MakeSemNode(SN_MEMBER_EXPRESSION);
-			lhs.node->type = MakeNamedType(TK_CLASS, cls.base->entity);
-			lhs.node->category = VC_LVALUE;
-			lhs.node->base_hops = 1;
-			lhs.node->children.push_back(ThisObjectExpr());
-			lhs.type = lhs.node->type;
-			lhs.category = VC_LVALUE;
-			SemValue rhs;
-			rhs.node = std::move(base_source);
-			rhs.type = lhs.type;
-			rhs.category = category;
-			vector<SemValue> operands;
-			operands.push_back(std::move(lhs));
-			operands.push_back(std::move(rhs));
-			SemValue result;
-			if (!analyzer_.ResolveOperatorCall("=", operands, true, result))
-				throw runtime_error("no base assignment operator");
-			SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
-			statement->children.push_back(std::move(result.node));
-			out.push_back(std::move(statement));
-		}
-		else
-		{
-			SemValue source;
-			source.node = std::move(base_source);
-			source.type = MakeNamedType(TK_CLASS, cls.base->entity);
-			source.category = category;
-			vector<SemValue> args;
-			args.push_back(std::move(source));
-			int index = ResolveClassConstructor(*cls.base, args, false,
-			                                    "base subobject");
-			vector<SemNodePtr> arg_nodes;
-			arg_nodes.push_back(std::move(args[0].node));
-			out.push_back(MakeConstructorCall(*cls.base, index, true,
-			                                  ThisBaseAddress(cls),
-			                                  std::move(arg_nodes)));
-		}
+		AppendBaseTransfer(cls, is_move, assign_form, source_proto,
+		                   out);
 	}
 	for (size_t i = first_suffix; i < cls.fields.size(); i++)
 	{

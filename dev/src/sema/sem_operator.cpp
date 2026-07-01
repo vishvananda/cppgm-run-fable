@@ -274,6 +274,65 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(const AstExpr& expr,
 // 13.3.1.2 selection over the collected candidates; false when no
 // user-declared candidate is viable (the caller falls back to the
 // built-in meaning).
+// The ranked signature of one user candidate: member operators fold
+// the implicit object parameter in front of the declared parameters
+// (13.3.1p2-p4 with 8.3.5p6 ref-qualifiers).
+TypePtr SemExprAnalyzer::CandidateSignature(
+	const OperatorCandidate& candidate, const SemValue& object)
+{
+	if (!candidate.is_member)
+		return candidate.declared;
+	const NamedTypeInfo* owner_entity =
+		host_.Model().ScopeEntity(candidate.binding->owner);
+	TypePtr class_type = MakeNamedType(
+		TK_CLASS, owner_entity ? owner_entity : object.type->named);
+	class_type = MakeCvQualifiedType(class_type,
+	                                 candidate.declared->is_const,
+	                                 candidate.declared->is_volatile);
+	bool rvalue_param = candidate.declared->ref_qual == 2 ||
+		(candidate.declared->ref_qual == 0 &&
+		 object.category != VC_LVALUE);
+	vector<TypePtr> parameters;
+	parameters.push_back(
+		MakeReferenceType(class_type, rvalue_param, true));
+	for (size_t i = 0; i < candidate.declared->parameters.size(); i++)
+		parameters.push_back(candidate.declared->parameters[i]);
+	return MakeFunctionType(candidate.declared->target, parameters,
+	                        candidate.declared->variadic);
+}
+
+// 13.3.1.2p3: the built-in operator form competes as a candidate when
+// every operand has a built-in-usable type. Returns its ranking
+// position ((size_t)-1 when absent).
+size_t SemExprAnalyzer::AppendBuiltinCandidate(
+	const string& spelling, const vector<SemValue>& operands,
+	bool member_only, vector<TypePtr>& ranking,
+	vector<size_t>& viable_arity)
+{
+	if (member_only || operands.size() != 2 ||
+	    !BuiltinCandidateOp(spelling))
+		return (size_t)-1;
+	TypePtr left = BuiltinOperandType(operands[0]);
+	TypePtr right = BuiltinOperandType(operands[1]);
+	if (!left || !right)
+		return (size_t)-1;
+	TypePtr common = UsualArithmeticConversions(
+		left->kind == TK_ENUM
+			? MakeFundamentalType(left->named->enum_underlying)
+			: left,
+		right->kind == TK_ENUM
+			? MakeFundamentalType(right->named->enum_underlying)
+			: right);
+	vector<TypePtr> parameters;
+	parameters.push_back(common);
+	parameters.push_back(common);
+	size_t position = ranking.size();
+	ranking.push_back(MakeFunctionType(MakeFundamentalType(FT_BOOL),
+	                                   parameters, false));
+	viable_arity.push_back(2);
+	return position;
+}
+
 bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
                                           vector<SemValue>& operands,
                                           bool member_only,
@@ -291,60 +350,12 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	vector<size_t> viable_arity;
 	for (size_t c = 0; c < candidates.size(); c++)
 	{
-		const OperatorCandidate& candidate = candidates[c];
-		if (candidate.is_member)
-		{
-			const NamedTypeInfo* owner_entity =
-				host_.Model().ScopeEntity(candidate.binding->owner);
-			TypePtr class_type = MakeNamedType(
-				TK_CLASS,
-				owner_entity ? owner_entity : operands[0].type->named);
-			class_type = MakeCvQualifiedType(
-				class_type, candidate.declared->is_const,
-				candidate.declared->is_volatile);
-			bool rvalue_param = candidate.declared->ref_qual == 2 ||
-				(candidate.declared->ref_qual == 0 &&
-				 operands[0].category != VC_LVALUE);
-			vector<TypePtr> parameters;
-			parameters.push_back(
-				MakeReferenceType(class_type, rvalue_param, true));
-			for (size_t i = 0;
-			     i < candidate.declared->parameters.size(); i++)
-				parameters.push_back(candidate.declared->parameters[i]);
-			ranking.push_back(MakeFunctionType(
-				candidate.declared->target, parameters,
-				candidate.declared->variadic));
-		}
-		else
-			ranking.push_back(candidate.declared);
+		ranking.push_back(
+			CandidateSignature(candidates[c], operands[0]));
 		viable_arity.push_back(ranking.back()->parameters.size());
 	}
-	// 13.3.1.2p3: the built-in operator form competes as a candidate
-	// when every operand has a built-in-usable type.
-	size_t builtin_pos = (size_t)-1;
-	if (!member_only && operands.size() == 2 &&
-	    BuiltinCandidateOp(spelling))
-	{
-		TypePtr left = BuiltinOperandType(operands[0]);
-		TypePtr right = BuiltinOperandType(operands[1]);
-		if (left && right)
-		{
-			TypePtr common = UsualArithmeticConversions(
-				left->kind == TK_ENUM
-					? MakeFundamentalType(left->named->enum_underlying)
-					: left,
-				right->kind == TK_ENUM
-					? MakeFundamentalType(right->named->enum_underlying)
-					: right);
-			vector<TypePtr> parameters;
-			parameters.push_back(common);
-			parameters.push_back(common);
-			builtin_pos = ranking.size();
-			ranking.push_back(MakeFunctionType(
-				MakeFundamentalType(FT_BOOL), parameters, false));
-			viable_arity.push_back(2);
-		}
-	}
+	size_t builtin_pos = AppendBuiltinCandidate(
+		spelling, operands, member_only, ranking, viable_arity);
 	// Arity filter happens inside SelectBestOverload; a fully
 	// non-viable set falls back to the built-in operator.
 	vector<ImplicitConversion> conversions;

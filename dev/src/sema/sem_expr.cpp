@@ -409,39 +409,44 @@ SemValue SemExprAnalyzer::CallResult(const TypePtr& function_type)
 	return value;
 }
 
+// 12.3.1: the converting constructor builds a temporary of the
+// destination class from the (standard-converted) source.
+void SemExprAnalyzer::ApplyConstructorConversion(
+	SemValue& value, const ImplicitConversion& conv)
+{
+	const ClassInfo* cls = host_.Classes().Find(conv.user_class);
+	if (!cls)
+		throw runtime_error("converting constructor class record "
+		                    "missing");
+	const TypePtr& param = cls->ctors[conv.user_ctor].type->parameters[0];
+	ImplicitConversion inner =
+		ClassifyConversion(MakeConversionSource(value), param);
+	ApplyConversion(value, inner, param);
+	vector<SemNodePtr> args;
+	args.push_back(std::move(value.node));
+	SemNodePtr action = host_.MakeConstructorCall(
+		*cls, conv.user_ctor, false, SemNodePtr(), std::move(args));
+	action->category = VC_PRVALUE;
+	if (host_.Classes().NeedsDestruction(*cls))
+	{
+		action->needs_dtor = true;
+		action->children.push_back(host_.MakeTemporaryDtor(*cls));
+	}
+	TypePtr class_type = MakeNamedType(TK_CLASS, conv.user_class);
+	action->type = class_type;
+	value.node = std::move(action);
+	value.type = class_type;
+	value.category = VC_PRVALUE;
+	value.null_pointer_literal = false;
+}
+
 void SemExprAnalyzer::ApplyConversion(SemValue& value,
                                       const ImplicitConversion& conv,
                                       const TypePtr& dest)
 {
 	if (conv.user_ctor >= 0 && conv.user_class)
 	{
-		// 12.3.1: the converting constructor builds a temporary of the
-		// destination class from the (standard-converted) source.
-		const ClassInfo* cls = host_.Classes().Find(conv.user_class);
-		if (!cls)
-			throw runtime_error("converting constructor class record "
-			                    "missing");
-		const TypePtr& param =
-			cls->ctors[conv.user_ctor].type->parameters[0];
-		ImplicitConversion inner =
-			ClassifyConversion(MakeConversionSource(value), param);
-		ApplyConversion(value, inner, param);
-		vector<SemNodePtr> args;
-		args.push_back(std::move(value.node));
-		SemNodePtr action = host_.MakeConstructorCall(
-			*cls, conv.user_ctor, false, SemNodePtr(), std::move(args));
-		action->category = VC_PRVALUE;
-		if (host_.Classes().NeedsDestruction(*cls))
-		{
-			action->needs_dtor = true;
-			action->children.push_back(host_.MakeTemporaryDtor(*cls));
-		}
-		TypePtr class_type = MakeNamedType(TK_CLASS, conv.user_class);
-		action->type = class_type;
-		value.node = std::move(action);
-		value.type = class_type;
-		value.category = VC_PRVALUE;
-		value.null_pointer_literal = false;
+		ApplyConstructorConversion(value, conv);
 		return;
 	}
 	if (conv.conv_index >= 0 && conv.conv_class)
@@ -1395,190 +1400,6 @@ SemValue SemExprAnalyzer::AnalyzeMember(const AstExpr& expr)
 }
 
 // --- casts and sizeof -------------------------------------------------------
-
-SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
-                                        const AstExpr& operand,
-                                        bool has_anno, ETokenType op,
-                                        const string& op_spelling)
-{
-	SemValue value = Analyze(operand);
-	if (IsReferenceType(dest))
-	{
-		// 5.2.9p3: a cast to reference type adjusts the operand's
-		// category and printed type; no cast node is dumped.
-		// const_cast accepts the 5.2.11 similar types.
-		const TypePtr& referee = dest->target;
-		bool compatible = op == KW_CONST_CAST
-			? SimilarTypes(referee, value.type)
-			: TypeEquals(RemoveTopCv(referee), RemoveTopCv(value.type));
-		if (!value.function_set && !compatible &&
-		    op != KW_CONST_CAST &&
-		    (dest->kind == TK_RVALUE_REFERENCE ||
-		     (referee->is_const && !referee->is_volatile)))
-		{
-			// 5.2.9p4: the cast direct-initializes a temporary bound
-			// to the reference.
-			ImplicitConversion conv = ClassifyConversionEx(
-				MakeConversionSource(value), RemoveTopCv(referee), true);
-			if (conv.viable &&
-			    (conv.user_ctor >= 0 || conv.conv_index >= 0))
-			{
-				ApplyConversion(value, conv, RemoveTopCv(referee));
-				value.category = dest->kind == TK_RVALUE_REFERENCE
-					? VC_XVALUE : VC_LVALUE;
-				return value;
-			}
-		}
-		if (value.function_set || !compatible)
-			throw OutsideBoundary("reference cast form");
-		if (dest->kind == TK_LVALUE_REFERENCE &&
-		    value.category != VC_LVALUE)
-			throw runtime_error("lvalue reference cast of an rvalue");
-		value.category = dest->kind == TK_RVALUE_REFERENCE
-			? VC_XVALUE : VC_LVALUE;
-		value.type = referee;
-		value.node->category = value.category;
-		value.node->type = dest;
-		value.null_pointer_literal = false;
-		return value;
-	}
-	if (value.function_set && value.overloads.size() > 1)
-		throw OutsideBoundary("cast of an overloaded name");
-	TypePtr to = RemoveTopCv(dest);
-	if (to->kind != TK_CLASS && !value.function_set &&
-	    RemoveTopCv(value.type)->kind == TK_CLASS)
-	{
-		// 5.2.9p4: a cast is direct-initialization; explicit
-		// conversion functions participate.
-		ImplicitConversion conv = ClassifyConversionEx(
-			MakeConversionSource(value), to, true);
-		if (conv.viable && conv.conv_index >= 0)
-			ApplyConversion(value, conv, to);
-	}
-	if (to->kind == TK_CLASS)
-	{
-		// 5.2.9p4 / 5.4: a cast to a class type direct-initializes a
-		// temporary from the operand (explicit constructors allowed).
-		const ClassInfo* cls = host_.Classes().Find(to->named);
-		if (!cls || !to->named->complete)
-			throw runtime_error("cast to an incomplete class");
-		vector<SemValue> args;
-		args.push_back(std::move(value));
-		int index = host_.ResolveClassCtorHost(*cls, args, false, "cast");
-		vector<SemNodePtr> arg_nodes;
-		for (size_t i = 0; i < args.size(); i++)
-			arg_nodes.push_back(std::move(args[i].node));
-		SemNodePtr action = host_.MakeConstructorCall(
-			*cls, index, false, SemNodePtr(), std::move(arg_nodes));
-		action->type = to;
-		action->category = VC_PRVALUE;
-		if (host_.Classes().NeedsDestruction(*cls))
-		{
-			action->needs_dtor = true;
-			action->children.push_back(host_.MakeTemporaryDtor(*cls));
-		}
-		SemValue result;
-		result.type = to;
-		result.category = VC_PRVALUE;
-		result.node = std::move(action);
-		return result;
-	}
-	bool valid;
-	if (IsVoidType(to))
-		valid = true;
-	else if (IsArithmeticType(to))
-		valid = IsArithmeticOrEnum(value.type) ||
-			((to->fundamental == FT_BOOL) &&
-			 (IsPointerAfterDecay(value.type) ||
-			  IsNullPtrType(value.type) ||
-			  value.type->kind == TK_MEMBER_POINTER));
-	else if (to->kind == TK_ENUM)
-		valid = IsArithmeticOrEnum(value.type);
-	else if (to->kind == TK_POINTER)
-		valid = value.null_pointer_literal || IsNullPtrType(value.type) ||
-			IsPointerAfterDecay(value.type) ||
-			// 5.2.10p5: reinterpret_cast of an integral value.
-			(op == KW_REINTERPET_CAST && IsIntegralType(value.type));
-	else
-		valid = false;
-	if (!valid)
-		throw OutsideBoundary("cast form");
-
-	SemValue result;
-	result.type = to;
-	result.category = VC_PRVALUE;
-	result.node = MakeSemNode(SN_CAST_EXPRESSION);
-	result.node->type = to;
-	result.node->category = VC_PRVALUE;
-	result.node->has_op = has_anno;
-	result.node->op = op;
-	result.node->op_spelling = op_spelling;
-	result.node->children.push_back(std::move(value.node));
-	return result;
-}
-
-SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
-	const TypePtr& dest, const vector<AstExprPtr>& arguments)
-{
-	if (RemoveTopCv(dest)->kind == TK_CLASS)
-		// T(args) over a class: a constructed temporary object.
-		return MakeTemporaryObject(RemoveTopCv(dest), arguments);
-	if (arguments.size() == 1)
-		return AnalyzeCastTo(dest, *arguments[0], false, OP_LPAREN, "");
-	if (!arguments.empty())
-		throw OutsideBoundary("multi-argument functional cast");
-	// 5.2.3p2: T() value-initializes; the supported scalar subset dumps
-	// as a zero literal.
-	TypePtr to = RemoveTopCv(dest);
-	if (!IsIntegralType(to) && to->kind != TK_ENUM)
-		throw OutsideBoundary("value-initialization form");
-	SemValue value;
-	value.type = to;
-	value.category = VC_PRVALUE;
-	value.node = MakeSemNode(SN_LITERAL);
-	value.node->token = "0";
-	value.node->type = to;
-	value.node->category = VC_PRVALUE;
-	value.node->has_value = true;
-	value.node->value = ConstValue(
-		to->kind == TK_ENUM ? to->named->enum_underlying : to->fundamental,
-		0);
-	value.null_pointer_literal = IsIntegralType(to);
-	return value;
-}
-
-SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
-{
-	bool alignment = expr.kind == EK_TYPE_TRAIT;
-	if (alignment && expr.op != KW_ALIGNOF)
-		throw OutsideBoundary("type trait expression");
-	TypePtr operand_type;
-	if (expr.kind == EK_SIZEOF_TYPE || (alignment && expr.is_type_operand))
-		operand_type = host_.ResolveCastTypeId(*expr.type);
-	else
-	{
-		// `sizeof(x)` parses as an expression; a bare type-name operand
-		// still disambiguates to the type form semantically.
-		const AstExpr* operand = StripParens(expr.operands[0].get());
-		if (operand->kind == EK_ID)
-			operand_type = host_.TryResolveCalleeType(operand->name);
-		if (!operand_type)
-			operand_type = Analyze(*expr.operands[0]).type;
-	}
-	// 5.3.3p1 / 5.3.6p1: requires a complete object type; the size (or
-	// alignment) is the value.
-	unsigned long long size = alignment ? TypeAlignment(operand_type)
-	                                    : TypeSize(operand_type);
-	SemValue value;
-	value.type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
-	value.category = VC_PRVALUE;
-	value.node = MakeSemNode(SN_SIZEOF_EXPRESSION);
-	value.node->type = value.type;
-	value.node->category = VC_PRVALUE;
-	value.node->has_value = true;
-	value.node->value = ConstValue(FT_UNSIGNED_LONG_INT, size);
-	return value;
-}
 
 SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(const AstExpr& braced,
                                               TypePtr& dest)

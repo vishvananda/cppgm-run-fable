@@ -126,6 +126,9 @@ private:
 	                        ELowerConvertContext context);
 	LowerValue ConvertToBool(LowerValue value, const TypePtr& source,
 	                         const TypePtr& target);
+	LowerValue ConvertPointerValue(LowerValue value,
+	                               const TypePtr& source,
+	                               const TypePtr& target);
 	LowerValue ConvertIntegralImmediate(LowerValue value,
 	                                    const TypePtr& source,
 	                                    const TypePtr& target);
@@ -196,6 +199,12 @@ private:
 	// Registers a by-value class parameter's attached destructor
 	// actions as function-scope cleanups (the callee owns them).
 	void RegisterParameterCleanup(const SemNode& parameter);
+	// PA16 allocation expressions (lower_new.cpp).
+	LowerValue LowerNewConstruction(const SemNode& node);
+	void LowerNewArrayCtorLoop(const SemNode& ctor, const string& data,
+	                           unsigned long long elem_size,
+	                           const string& bound);
+	void LowerNewArrayZeroLoop(const string& result, const string& bound);
 	LowerValue LowerMemberValue(const SemNode& node);
 	LowerValue LowerBitFieldValue(const SemNode& node);
 	LowerValue LowerBitFieldAssignment(const SemNode& node);

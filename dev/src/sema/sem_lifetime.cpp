@@ -474,6 +474,76 @@ SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
 // A declared class array: braced per-element construction (aggregate
 // classes at block scope take the field-wise form), or the per-element
 // default construction of an uninitialized array.
+// One class-array element's list-initialization (a null `element`
+// value-initializes). Braced local elements share the array base
+// address and construct at their byte offset; namespace-scope
+// elements keep the subscripted form used by the global-init helper.
+void SemBinder::AppendArrayElementInit(SemNode& item,
+                                       ScopeBinding& binding,
+                                       const ClassInfo& cls,
+                                       unsigned long long at,
+                                       const AstExpr* element)
+{
+	bool shared_base = binding.home &&
+		binding.home->kind != SCOPE_NAMESPACE;
+	vector<SemValue> values;
+	if (element && element->kind == EK_BRACED)
+		for (size_t j = 0; j < element->arguments.size(); j++)
+			values.push_back(analyzer_.Analyze(
+				*element->arguments[j]));
+	else if (element)
+		values.push_back(analyzer_.Analyze(*element));
+	if (values.size() == 1 && values[0].node &&
+	    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
+	    values[0].category == VC_PRVALUE &&
+	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
+	    RemoveTopCv(values[0].type)->named == cls.entity)
+	{
+		// 12.8p31: the element temporary elides; the constructor runs
+		// on the element directly.
+		SemNodePtr action = std::move(values[0].node);
+		action->needs_dtor = false;
+		while (action->children.size() > 1 &&
+		       action->children.back()->kind == SN_DESTRUCTOR_ACTION)
+			action->children.pop_back();
+		if (shared_base)
+		{
+			action->has_value = true;
+			action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+			                           at * cls.size);
+		}
+		else
+		{
+			SemNode& call = *action->children[0];
+			call.children.insert(
+				call.children.begin() + 1,
+				AddressOfNode(SubscriptNode(
+					VariableObjectExpr(binding), at)));
+			action->ctor_addressed = true;
+		}
+		item.children.push_back(std::move(action));
+		return;
+	}
+	int index = ResolveClassConstructor(cls, values, element != 0,
+	                                    binding.name.c_str());
+	vector<SemNodePtr> arg_nodes;
+	for (size_t j = 0; j < values.size(); j++)
+		arg_nodes.push_back(std::move(values[j].node));
+	SemNodePtr action = MakeConstructorCall(
+		cls, index, false,
+		shared_base ? SemNodePtr()
+		            : AddressOfNode(SubscriptNode(
+		                  VariableObjectExpr(binding), at)),
+		std::move(arg_nodes));
+	if (shared_base)
+	{
+		action->has_value = true;
+		action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+		                           at * cls.size);
+	}
+	item.children.push_back(std::move(action));
+}
+
 void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
                                      const AstInitializer* init,
                                      const ClassInfo& cls)
@@ -509,99 +579,14 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 		if (braced->arguments.size() > completed->bound)
 			throw runtime_error("too many initializers for " +
 			                    binding.name);
-		bool shared_base = binding.home &&
-			binding.home->kind != SCOPE_NAMESPACE;
 		for (size_t i = 0; i < braced->arguments.size(); i++)
-		{
-			const AstExpr* element = braced->arguments[i].get();
-			vector<SemValue> values;
-			if (element->kind == EK_BRACED)
-				for (size_t j = 0;
-				     j < element->arguments.size(); j++)
-					values.push_back(analyzer_.Analyze(
-						*element->arguments[j]));
-			else
-				values.push_back(analyzer_.Analyze(*element));
-			if (values.size() == 1 && values[0].node &&
-			    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
-			    values[0].category == VC_PRVALUE &&
-			    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
-			    RemoveTopCv(values[0].type)->named == cls.entity)
-			{
-				// 12.8p31: the element temporary elides; the
-				// constructor runs on the element directly.
-				SemNodePtr action = std::move(values[0].node);
-				action->needs_dtor = false;
-				while (action->children.size() > 1 &&
-				       action->children.back()->kind ==
-				           SN_DESTRUCTOR_ACTION)
-					action->children.pop_back();
-				// Braced local elements share the array base address
-				// and construct at their byte offset; namespace-scope
-				// elements keep the subscripted form used by the
-				// global-init helper.
-				if (shared_base)
-				{
-					action->has_value = true;
-					action->value = ConstValue(
-						FT_UNSIGNED_LONG_INT, i * cls.size);
-				}
-				else
-				{
-					SemNode& call = *action->children[0];
-					call.children.insert(
-						call.children.begin() + 1,
-						AddressOfNode(SubscriptNode(
-							VariableObjectExpr(binding), i)));
-					action->ctor_addressed = true;
-				}
-				item.children.push_back(std::move(action));
-				continue;
-			}
-			int index = ResolveClassConstructor(
-				cls, values, true, binding.name.c_str());
-			vector<SemNodePtr> arg_nodes;
-			for (size_t j = 0; j < values.size(); j++)
-				arg_nodes.push_back(std::move(values[j].node));
-			SemNodePtr action = MakeConstructorCall(
-				cls, index, false,
-				shared_base ? SemNodePtr()
-				            : AddressOfNode(SubscriptNode(
-				                  VariableObjectExpr(binding), i)),
-				std::move(arg_nodes));
-			if (shared_base)
-			{
-				action->has_value = true;
-				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
-				                           i * cls.size);
-			}
-			item.children.push_back(std::move(action));
-		}
+			AppendArrayElementInit(item, binding, cls, i,
+			                       braced->arguments[i].get());
 		// 8.5.1p7: elements beyond the initializer list
 		// value-initialize.
 		for (unsigned long long i = braced->arguments.size();
 		     i < completed->bound; i++)
-		{
-			vector<SemValue> no_args;
-			int index = ResolveClassConstructor(cls, no_args, false,
-			                                    binding.name.c_str());
-			vector<SemNodePtr> arg_nodes;
-			for (size_t j = 0; j < no_args.size(); j++)
-				arg_nodes.push_back(std::move(no_args[j].node));
-			SemNodePtr action = MakeConstructorCall(
-				cls, index, false,
-				shared_base ? SemNodePtr()
-				            : AddressOfNode(SubscriptNode(
-				                  VariableObjectExpr(binding), i)),
-				std::move(arg_nodes));
-			if (shared_base)
-			{
-				action->has_value = true;
-				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
-				                           i * cls.size);
-			}
-			item.children.push_back(std::move(action));
-		}
+			AppendArrayElementInit(item, binding, cls, i, 0);
 		return;
 	}
 	if (!cls.has_user_ctor && !unit_.classes.NeedsConstruction(cls))
@@ -749,6 +734,33 @@ void SemBinder::AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
 		*cls, false, AddressOfNode(VariableObjectExpr(binding))));
 }
 
+// 12.8p31: the same-class temporary elides; the constructor runs
+// directly on the declared object.
+void SemBinder::AppendElidedObjectInit(SemNode& item,
+                                       ScopeBinding& binding,
+                                       const ClassInfo& cls,
+                                       SemNodePtr action)
+{
+	// The elided temporary's own cleanup does not apply; the declared
+	// object's lifetime governs.
+	action->needs_dtor = false;
+	while (action->children.size() > 1 &&
+	       action->children.back()->kind == SN_DESTRUCTOR_ACTION)
+		action->children.pop_back();
+	SemNode& call = *action->children[0];
+	// The explicit-temporary marking does not survive elision into a
+	// namespace-scope object: with no observable construction work the
+	// reference emits no dynamic initializer for it.
+	if (binding.owner && binding.owner->kind == SCOPE_NAMESPACE &&
+	    call.children.size() == 1 && !cls.has_user_ctor &&
+	    !unit_.classes.NeedsConstruction(cls))
+		action->trivial_init = true;
+	call.children.insert(call.children.begin() + 1,
+	                     AddressOfNode(VariableObjectExpr(binding)));
+	action->ctor_addressed = true;
+	item.children.push_back(std::move(action));
+}
+
 void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
                                       const AstInitializer* init,
                                       const ClassInfo& cls)
@@ -837,28 +849,8 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
 	    RemoveTopCv(values[0].type)->named == cls.entity)
 	{
-		// 12.8p31: the temporary elides; the constructor runs directly
-		// on the declared object.
-		SemNodePtr action = std::move(values[0].node);
-		// The elided temporary's own cleanup does not apply; the
-		// declared object's lifetime governs.
-		action->needs_dtor = false;
-		while (action->children.size() > 1 &&
-		       action->children.back()->kind == SN_DESTRUCTOR_ACTION)
-			action->children.pop_back();
-		SemNode& call = *action->children[0];
-		// The explicit-temporary marking does not survive elision into
-		// a namespace-scope object: with no observable construction
-		// work the reference emits no dynamic initializer for it.
-		if (binding.owner && binding.owner->kind == SCOPE_NAMESPACE &&
-		    call.children.size() == 1 && !cls.has_user_ctor &&
-		    !unit_.classes.NeedsConstruction(cls))
-			action->trivial_init = true;
-		call.children.insert(
-			call.children.begin() + 1,
-			AddressOfNode(VariableObjectExpr(binding)));
-		action->ctor_addressed = true;
-		item.children.push_back(std::move(action));
+		AppendElidedObjectInit(item, binding, cls,
+		                       std::move(values[0].node));
 		return;
 	}
 	if (values.size() == 1 && values[0].node &&

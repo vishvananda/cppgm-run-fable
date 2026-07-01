@@ -137,3 +137,35 @@ same classifier on the function type.
   blocker fixed before continuing.
 - `perl scripts/cppgm_file_audit.pl --stage pa16 --paths dev/src` must
   stay clean; commit per cohesive cluster.
+
+## Status (2026-07-01)
+
+Complete: `make test-report-through-pa16` passes 1152/1152 and the
+pa16 file audit is clean. Late-landing design points beyond the
+original plan:
+
+- Body-derived non-throwing facts: every bound definition publishes
+  `fn_unwind_no` (and ctor/dtor records) from `NodeMayThrow` over its
+  body; unwind-dispatch regions and the EH runtime declares emit only
+  when a call can actually unwind at a point with live cleanups.
+- Callee-owned by-value parameters: sema attaches the destructor
+  action to the parameter node; the lowering registers it as a
+  function-scope cleanup.
+- Value-transfer shapes pinned by the refs: non-trivially-copyable
+  conditionals materialize their own temporary and copy-construct the
+  destination; braced local class arrays share one base address with
+  byte-offset element construction (namespace-scope arrays keep the
+  subscripted global-init form); synthesized assignment copies
+  bit-field storage units as scalar unit stores ahead of the trivial
+  storage-prefix `copyobj`.
+- Elided-copy odr-use (3.2p3/12.8p30): a synthesized ctor selected for
+  an elided return copy emits the user-provided member specials its
+  body odr-uses without emitting the synthesized definition itself.
+- Per-overload owner tracking (`ScopeBinding::fn_owner`) keeps
+  using-imported members addressed and emitted under their declaring
+  class; built-in operator forms compete in operator overload ranking
+  (13.3.1.2p3); conversion functions win reference-temporary binding
+  over converting constructors (8.5.3p5).
+- File layout after the audit split: `sema/sem_cast.cpp` (explicit
+  conversions, sizeof/alignof) and `lowering/lower_convert.cpp` (value
+  conversion emission) joined the source sets.

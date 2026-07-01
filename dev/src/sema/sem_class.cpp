@@ -363,6 +363,44 @@ Scope* SemBinder::MakeSpecialMemberScope(const string& name,
 // An out-of-class constructor definition with a qualified name
 // (`Outer::Buffer::Buffer(Token) {}`): the declaration must already
 // exist in the named class; the body analyzes against that class.
+// An out-of-class conversion-function definition: the
+// conversion-type-id resolves in the class's scope.
+void SemBinder::BindQualifiedConversionFunction(const AstDecl& decl,
+                                                const AstNamePart& part,
+                                                Scope* declaring,
+                                                ClassInfo& cls)
+{
+	Scope* saved = current_;
+	current_ = declaring;
+	TypePtr result;
+	DeclaratorInfo composed;
+	try
+	{
+		result = builder_.ResolveTypeId(*part.conversion_type);
+		composed = builder_.ComposeDeclarator(
+			decl.declarator.get(), result);
+	}
+	catch (...)
+	{
+		current_ = saved;
+		throw;
+	}
+	current_ = saved;
+	string name = "operator " + DescribeType(result);
+	if (!FindOwnBinding(*declaring, name))
+		throw runtime_error("conversion definition matches no "
+		                    "declaration");
+	DeferredBody body;
+	body.decl = &decl;
+	body.composed = composed;
+	body.name = name;
+	body.fn_scope = MakeSpecialMemberScope(name, composed, cls);
+	body.declaring = declaring;
+	body.cls = &cls;
+	body.out_of_class = true;
+	AnalyzeDeferredBody(body);
+}
+
 void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
                                            const AstName& id)
 {
@@ -380,39 +418,9 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		throw runtime_error("special member of an unknown class");
 	if (part.kind == NP_CONVERSION_FUNCTION)
 	{
-		// An out-of-class conversion-function definition: the
-		// conversion-type-id resolves in the class's scope.
 		if (defaulted)
 			throw runtime_error("defaulted conversion function");
-		Scope* saved = current_;
-		current_ = declaring;
-		TypePtr result;
-		DeclaratorInfo composed;
-		try
-		{
-			result = builder_.ResolveTypeId(*part.conversion_type);
-			composed = builder_.ComposeDeclarator(
-				decl.declarator.get(), result);
-		}
-		catch (...)
-		{
-			current_ = saved;
-			throw;
-		}
-		current_ = saved;
-		string name = "operator " + DescribeType(result);
-		if (!FindOwnBinding(*declaring, name))
-			throw runtime_error("conversion definition matches no "
-			                    "declaration");
-		DeferredBody body;
-		body.decl = &decl;
-		body.composed = composed;
-		body.name = name;
-		body.fn_scope = MakeSpecialMemberScope(name, composed, *cls);
-		body.declaring = declaring;
-		body.cls = cls;
-		body.out_of_class = true;
-		AnalyzeDeferredBody(body);
+		BindQualifiedConversionFunction(decl, part, declaring, *cls);
 		return;
 	}
 	if (part.kind != NP_IDENTIFIER)

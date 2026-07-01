@@ -21,6 +21,56 @@ runtime_error OutsideBoundary(const char* what)
 
 }  // namespace
 
+// Scalar new of a class object: the allocation call provides the
+// object address; the constructor runs on it (a non-throwing
+// allocation branches around construction on null).
+LowerValue FunctionLowerer::LowerNewConstruction(const SemNode& node)
+{
+	const SemNode& call = *node.children[0];
+	LowerValue address = LowerValueExpr(*call.children[1]);
+	string init_label;
+	string end_label;
+	if (node.null_pointer)
+	{
+		string c = NewTemp();
+		Emit(c + " = cmp ne ptr " + address.text + ", 0");
+		init_label = NewLabel("new_init");
+		end_label = NewLabel("new_end");
+		ReferenceLabel(init_label);
+		ReferenceLabel(end_label);
+		Terminate("branch " + c + ", ^" + init_label + ", ^" +
+		          end_label);
+		OpenBlock(init_label);
+	}
+	if (!node.trivial_init)
+	{
+		bool saved = in_lifetime_action_;
+		in_lifetime_action_ = true;
+		const SemNode& callee = *call.children[0];
+		string arguments = address.text;
+		for (size_t i = 2; i < call.children.size(); i++)
+		{
+			TypePtr param = i - 1 < callee.type->parameters.size()
+				? callee.type->parameters[i - 1] : TypePtr();
+			arguments += ", " +
+				LowerCallArgument(*call.children[i], param);
+		}
+		Emit("call void " + program_.MemberFunctionRef(callee) + "(" +
+		     arguments + ")");
+		in_lifetime_action_ = saved;
+	}
+	if (!init_label.empty())
+	{
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		OpenBlock(end_label);
+	}
+	LowerValue value;
+	value.type = RemoveTopCv(node.type);
+	value.text = address.text;
+	return value;
+}
+
 // Array new: size computation (count * element-size plus the 8-byte
 // count header for class elements), the allocation call, the stored
 // count, and the per-element construction loop.
@@ -112,7 +162,6 @@ LowerValue FunctionLowerer::LowerNewArray(const SemNode& node)
 	}
 	if (ctor)
 	{
-		// Per-element default construction in index order.
 		string bound;
 		if (!runtime)
 		{
@@ -121,40 +170,10 @@ LowerValue FunctionLowerer::LowerNewArray(const SemNode& node)
 		}
 		else
 			bound = runtime_count;
-		string index_slot = AddMatSlot("array_new_index", "i64");
-		string cond_label = NewLabel("array_new_ctor_cond");
-		string body_label = NewLabel("array_new_ctor_body");
-		string end_label = NewLabel("array_new_ctor_end");
-		Emit("store i64 0, $" + index_slot);
-		CloseInto(cond_label);
-		string at = NewTemp();
-		Emit(at + " = load i64 $" + index_slot);
-		string more = NewTemp();
-		Emit(more + " = cmp ult i64 " + at + ", " + bound);
-		ReferenceLabel(body_label);
-		ReferenceLabel(end_label);
-		Terminate("branch " + more + ", ^" + body_label + ", ^" +
-		          end_label);
-		OpenBlock(body_label);
-		string offset = NewTemp();
-		Emit(offset + " = binary mul i64 " + at + ", " +
-		     to_string(elem_size));
-		string element = NewTemp();
-		Emit(element + " = index i8 " + data + ", " + offset);
-		bool saved = in_lifetime_action_;
-		in_lifetime_action_ = true;
-		LowerConstructorCall(*ctor, element);
-		in_lifetime_action_ = saved;
-		string next = NewTemp();
-		Emit(next + " = binary add i64 " + at + ", 1");
-		Emit("store i64 " + next + ", $" + index_slot);
-		ReferenceLabel(cond_label);
-		Terminate("jump ^" + cond_label);
-		OpenBlock(end_label);
+		LowerNewArrayCtorLoop(*ctor, data, elem_size, bound);
 	}
 	if (node.trivial_init && !header)
 	{
-		// `()` value-initialization zero-fills the storage byte-wise.
 		string bound;
 		if (!runtime)
 		{
@@ -164,35 +183,81 @@ LowerValue FunctionLowerer::LowerNewArray(const SemNode& node)
 		}
 		else
 			bound = runtime_size;
-		string offset_slot = AddMatSlot("zeroinit_offset", "i64");
-		string cond_label = NewLabel("zeroinit_cond");
-		string body_label = NewLabel("zeroinit_body");
-		string end_label = NewLabel("zeroinit_end");
-		Emit("store i64 0, $" + offset_slot);
-		CloseInto(cond_label);
-		string at = NewTemp();
-		Emit(at + " = load i64 $" + offset_slot);
-		string more = NewTemp();
-		Emit(more + " = cmp ult i64 " + at + ", " + bound);
-		ReferenceLabel(body_label);
-		ReferenceLabel(end_label);
-		Terminate("branch " + more + ", ^" + body_label + ", ^" +
-		          end_label);
-		OpenBlock(body_label);
-		string element = NewTemp();
-		Emit(element + " = index i8 " + result + ", " + at);
-		Emit("store i8 0, " + element);
-		string next = NewTemp();
-		Emit(next + " = binary add i64 " + at + ", 1");
-		Emit("store i64 " + next + ", $" + offset_slot);
-		ReferenceLabel(cond_label);
-		Terminate("jump ^" + cond_label);
-		OpenBlock(end_label);
+		LowerNewArrayZeroLoop(result, bound);
 	}
 	LowerValue value;
 	value.type = RemoveTopCv(node.type);
 	value.text = data;
 	return value;
+}
+
+// Per-element default construction of an array new in index order.
+void FunctionLowerer::LowerNewArrayCtorLoop(const SemNode& ctor,
+                                            const string& data,
+                                            unsigned long long elem_size,
+                                            const string& bound)
+{
+	string index_slot = AddMatSlot("array_new_index", "i64");
+	string cond_label = NewLabel("array_new_ctor_cond");
+	string body_label = NewLabel("array_new_ctor_body");
+	string end_label = NewLabel("array_new_ctor_end");
+	Emit("store i64 0, $" + index_slot);
+	CloseInto(cond_label);
+	string at = NewTemp();
+	Emit(at + " = load i64 $" + index_slot);
+	string more = NewTemp();
+	Emit(more + " = cmp ult i64 " + at + ", " + bound);
+	ReferenceLabel(body_label);
+	ReferenceLabel(end_label);
+	Terminate("branch " + more + ", ^" + body_label + ", ^" +
+	          end_label);
+	OpenBlock(body_label);
+	string offset = NewTemp();
+	Emit(offset + " = binary mul i64 " + at + ", " +
+	     to_string(elem_size));
+	string element = NewTemp();
+	Emit(element + " = index i8 " + data + ", " + offset);
+	bool saved = in_lifetime_action_;
+	in_lifetime_action_ = true;
+	LowerConstructorCall(ctor, element);
+	in_lifetime_action_ = saved;
+	string next = NewTemp();
+	Emit(next + " = binary add i64 " + at + ", 1");
+	Emit("store i64 " + next + ", $" + index_slot);
+	ReferenceLabel(cond_label);
+	Terminate("jump ^" + cond_label);
+	OpenBlock(end_label);
+}
+
+// `()` value-initialization of an array new zero-fills the storage
+// byte-wise.
+void FunctionLowerer::LowerNewArrayZeroLoop(const string& result,
+                                            const string& bound)
+{
+	string offset_slot = AddMatSlot("zeroinit_offset", "i64");
+	string cond_label = NewLabel("zeroinit_cond");
+	string body_label = NewLabel("zeroinit_body");
+	string end_label = NewLabel("zeroinit_end");
+	Emit("store i64 0, $" + offset_slot);
+	CloseInto(cond_label);
+	string at = NewTemp();
+	Emit(at + " = load i64 $" + offset_slot);
+	string more = NewTemp();
+	Emit(more + " = cmp ult i64 " + at + ", " + bound);
+	ReferenceLabel(body_label);
+	ReferenceLabel(end_label);
+	Terminate("branch " + more + ", ^" + body_label + ", ^" +
+	          end_label);
+	OpenBlock(body_label);
+	string element = NewTemp();
+	Emit(element + " = index i8 " + result + ", " + at);
+	Emit("store i8 0, " + element);
+	string next = NewTemp();
+	Emit(next + " = binary add i64 " + at + ", 1");
+	Emit("store i64 " + next + ", $" + offset_slot);
+	ReferenceLabel(cond_label);
+	Terminate("jump ^" + cond_label);
+	OpenBlock(end_label);
 }
 
 // Scalar new of a non-class object: the allocation call plus the

@@ -166,6 +166,9 @@ public:
 	// conversion themselves (constructor selection, operator calls).
 	void ApplyConversion(SemValue& value, const ImplicitConversion& conv,
 	                     const TypePtr& dest);
+	// The converting-constructor arm of ApplyConversion (12.3.1).
+	void ApplyConstructorConversion(SemValue& value,
+	                                const ImplicitConversion& conv);
 
 	// PA16: 13.3.1.2 selection over the user-declared (and implicitly
 	// declared assignment) operator candidates; public so the binder's
@@ -173,6 +176,13 @@ public:
 	bool ResolveOperatorCall(const string& spelling,
 	                         vector<SemValue>& operands, bool member_only,
 	                         SemValue& result);
+	TypePtr CandidateSignature(const OperatorCandidate& candidate,
+	                           const SemValue& object);
+	size_t AppendBuiltinCandidate(const string& spelling,
+	                              const vector<SemValue>& operands,
+	                              bool member_only,
+	                              vector<TypePtr>& ranking,
+	                              vector<size_t>& viable_arity);
 
 private:
 	SemValue AnalyzeLiteral(const AstExpr& expr);
