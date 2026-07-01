@@ -239,8 +239,11 @@ ClassField& LayoutBitField(ClassInfo& info, const ClassField& field)
 	return info.fields.back();
 }
 
-void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity)
+void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity,
+                       unsigned long long min_alignment)
 {
+	if (min_alignment > info.alignment)
+		info.alignment = min_alignment;
 	info.dsize = (info.bit_cursor + 7) / 8;
 	unsigned long long size =
 		RoundUpBits(info.dsize, info.alignment);

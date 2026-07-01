@@ -985,7 +985,8 @@ string DeclBinder::TypeDisplayName(const string& key,
 }
 
 void DeclBinder::CompleteClassLayout(NamedTypeInfo& info,
-                                     const vector<TypePtr>& fields)
+                                     const vector<TypePtr>& fields,
+                                     unsigned long long min_alignment)
 {
 	for (size_t i = 0; i < fields.size(); i++)
 	{
@@ -1009,9 +1010,34 @@ void DeclBinder::CompleteClassLayout(NamedTypeInfo& info,
 		if (field_alignment > alignment)
 			alignment = field_alignment;
 	}
+	if (min_alignment > alignment)
+		alignment = min_alignment;
 	size = RoundUp(size, alignment);
 	info.size = size ? size : 1;
 	info.alignment = alignment;
+}
+
+unsigned long long DeclBinder::RequestedAlignment(const AstDecl& decl)
+{
+	unsigned long long strictest = 0;
+	for (size_t i = 0; i < decl.align_types.size(); i++)
+	{
+		unsigned long long value = TypeAlignment(
+			RemoveTopCv(builder_.ResolveTypeId(*decl.align_types[i])));
+		if (value > strictest)
+			strictest = value;
+	}
+	for (size_t i = 0; i < decl.align_exprs.size(); i++)
+	{
+		ConstValue value =
+			EvaluateConstExpr(*decl.align_exprs[i], *this);
+		// 7.6.2p5: a power of two; zero has no effect.
+		if (value.bits & (value.bits - 1))
+			throw runtime_error("alignment is not a power of two");
+		if (value.bits > strictest)
+			strictest = value.bits;
+	}
+	return strictest;
 }
 
 void DeclBinder::BindAnonymousUnionMembers(const AstDecl& decl,
@@ -1051,9 +1077,8 @@ void DeclBinder::OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
 void DeclBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
                                Scope* scope, const vector<TypePtr>& fields)
 {
-	(void)decl;
 	(void)scope;
-	CompleteClassLayout(*info, fields);
+	CompleteClassLayout(*info, fields, RequestedAlignment(decl));
 }
 
 void DeclBinder::BindSpecialMember(const AstDecl& decl)

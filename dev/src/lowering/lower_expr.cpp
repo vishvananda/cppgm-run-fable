@@ -701,16 +701,9 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 		// A derived arm adjusts to the common base result (5.16p3).
 		if (source->kind == TK_CLASS && result_type->kind == TK_CLASS)
 		{
-			int hops = BaseClassDistance(source->named,
-			                             result_type->named);
-			for (int i = 0; i < hops; i++)
-			{
-				string hopped = NewTemp();
-				Emit(hopped +
-				     " = index i8 [projection=base_subobject] " +
-				     address + ", 0");
-				address = hopped;
-			}
+			address = AdjustToBase(
+				address,
+				BaseClassDistance(source->named, result_type->named));
 		}
 		Emit("store ptr " + address + ", $" + slot);
 		ReferenceLabel(end_label);
@@ -1007,15 +1000,9 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 			MaterializeTemporary(node, exact ? "arg" : "tmpobj");
 		if (!exact && made->kind == TK_CLASS)
 		{
-			int hops = BaseClassDistance(made->named, bare->named);
-			for (int i = 0; i < hops; i++)
-			{
-				string hopped = NewTemp();
-				Emit(hopped +
-				     " = index i8 [projection=base_subobject] " +
-				     address + ", 0");
-				address = hopped;
-			}
+			address = AdjustToBase(
+				address,
+				BaseClassDistance(made->named, bare->named));
 		}
 		return address;
 	}
@@ -1029,15 +1016,9 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		string address = LowerAddressExpr(node);
 		if (source->kind == TK_CLASS && bare->kind == TK_CLASS)
 		{
-			int hops = BaseClassDistance(source->named, bare->named);
-			for (int i = 0; i < hops; i++)
-			{
-				string hopped = NewTemp();
-				Emit(hopped +
-				     " = index i8 [projection=base_subobject] " +
-				     address + ", 0");
-				address = hopped;
-			}
+			address = AdjustToBase(
+				address,
+				BaseClassDistance(source->named, bare->named));
 		}
 		return address;
 	}
@@ -1046,15 +1027,8 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		// A class prvalue (call result, conditional) binding a
 		// reference: materialize the result object.
 		string address = MaterializeClassResult(node, "arg", "");
-		int hops = BaseClassDistance(source->named, bare->named);
-		for (int i = 0; i < hops; i++)
-		{
-			string hopped = NewTemp();
-			Emit(hopped + " = index i8 [projection=base_subobject] " +
-			     address + ", 0");
-			address = hopped;
-		}
-		return address;
+		return AdjustToBase(
+			address, BaseClassDistance(source->named, bare->named));
 	}
 	// 8.5.3p5: materialize a temporary with the converted value.
 	string slot = AddMatSlot("refarg", LowerSlotType(bare));
@@ -1368,16 +1342,10 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		    source->target->kind == TK_CLASS &&
 		    target->target->kind == TK_CLASS)
 		{
-			int hops = BaseClassDistance(source->target->named,
-			                             target->target->named);
-			for (int i = 0; i < hops; i++)
-			{
-				string hopped = NewTemp();
-				Emit(hopped +
-				     " = index i8 [projection=base_subobject] " +
-				     value.text + ", 0");
-				value.text = hopped;
-			}
+			value.text = AdjustToBase(
+				value.text,
+				BaseClassDistance(source->target->named,
+				                  target->target->named));
 		}
 		if (context == LCC_CAST && !value.imm_null)
 		{

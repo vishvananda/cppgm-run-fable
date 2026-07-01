@@ -133,6 +133,9 @@ private:
 	bool AtCloseAngle() const;
 	bool MatchCloseAngle();
 	void SkipDeclAdornments();   // __attribute__((...)) and alignas(...)
+	// Class-head adornments: __attribute__ forms are discarded,
+	// alignas(...) specifiers are captured into the class declaration.
+	void ParseClassAdornments(AstDecl& decl);
 	bool SkipSquareAttribute();  // [[ ... ]]
 	bool SkipBalancedParens();
 

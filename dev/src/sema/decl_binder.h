@@ -90,7 +90,11 @@ protected:
 	TypePtr BindClass(const AstDecl& decl, bool standalone);
 	TypePtr BindClassForward(const AstDecl& decl, bool elaborated);
 	void CompleteClassLayout(NamedTypeInfo& info,
-	                         const std::vector<TypePtr>& fields);
+	                         const std::vector<TypePtr>& fields,
+	                         unsigned long long min_alignment);
+	// The strictest class-head alignas value (7.6.2), zero when the
+	// declaration carries no alignment-specifier.
+	unsigned long long RequestedAlignment(const AstDecl& decl);
 	// PA15 seams: base-clause binding (PA11 rejects bases), class
 	// open/close events, and completion. The default completion runs
 	// the PA11 field-sequential layout.

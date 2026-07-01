@@ -50,9 +50,12 @@ struct ISemExprHost
 	virtual TypePtr CurrentThisType() = 0;
 	// Throws unless a member with the given declared access, found in
 	// the class scope `owner`, is accessible from the current context
-	// (clause 11 with friendship).
+	// (clause 11 with friendship). `naming` is the class of the object
+	// expression when known; protected access through friendship of an
+	// intermediate derived class (11.2p5/11.4) needs it.
 	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
-	                               const string& what) = 0;
+	                               const string& what,
+	                               const NamedTypeInfo* naming = 0) = 0;
 	// 11.2p4: whether the current context is `cls` itself, one of its
 	// members, or one of its friends (the naming-class rule grants such
 	// contexts full access along the inheritance chain).

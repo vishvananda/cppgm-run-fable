@@ -189,6 +189,10 @@ private:
 	// projection, and the indirection of reference members (skipped
 	// when the store binds the reference itself).
 	string MemberAddress(const SemNode& node, bool skip_ref_load = false);
+	// A derived-to-base address adjustment: one base-subobject
+	// projection regardless of derivation depth (every base sits at
+	// offset zero without multiple inheritance).
+	string AdjustToBase(const string& address, int hops);
 	LowerValue LowerMemberValue(const SemNode& node);
 	LowerValue LowerBitFieldValue(const SemNode& node);
 	LowerValue LowerBitFieldAssignment(const SemNode& node);

@@ -83,6 +83,50 @@ bool AstParser::ParseBaseClause(AstDecl& decl)
 	}
 }
 
+// alignment-specifier operand: alignas(type-id) or
+// alignas(constant-expression) (7.6.2), captured for the class layout.
+void AstParser::ParseClassAdornments(AstDecl& decl)
+{
+	for (;;)
+	{
+		State state = Save();
+		if (AtIdentifierSpelled("__attribute__"))
+		{
+			Advance();
+			if (SkipBalancedParens())
+				continue;
+			Restore(state);
+			return;
+		}
+		if (AtSimple(KW_ALIGNAS))
+		{
+			Advance();
+			if (!MatchSimple(OP_LPAREN))
+			{
+				Restore(state);
+				return;
+			}
+			State operand = Save();
+			AstTypeIdPtr type;
+			if (ParseTypeId(type) && MatchSimple(OP_RPAREN))
+			{
+				decl.align_types.push_back(move(type));
+				continue;
+			}
+			Restore(operand);
+			AstExprPtr expr = ParseAssignmentExpression();
+			if (expr && MatchSimple(OP_RPAREN))
+			{
+				decl.align_exprs.push_back(move(expr));
+				continue;
+			}
+			Restore(state);
+			return;
+		}
+		return;
+	}
+}
+
 // class-key adornments? class-name? base-clause? { class-member* }
 AstDeclPtr AstParser::ParseClassSpecifier()
 {
@@ -93,7 +137,7 @@ AstDeclPtr AstParser::ParseClassSpecifier()
 	decl->class_key = Peek().simple_type;
 	decl->class_key_spelling = Peek().spelling;
 	Advance();
-	SkipDeclAdornments();
+	ParseClassAdornments(*decl);
 	State name_state = Save();
 	if (!ParseQualifiedTypeName(decl->class_name))
 		Restore(name_state);
@@ -165,7 +209,7 @@ AstDeclPtr AstParser::ParseElaboratedClass()
 	decl->class_key = Peek().simple_type;
 	decl->class_key_spelling = Peek().spelling;
 	Advance();
-	SkipDeclAdornments();
+	ParseClassAdornments(*decl);
 	if (!ParseQualifiedTypeName(decl->class_name))
 	{
 		Restore(state);

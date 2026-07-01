@@ -703,15 +703,9 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 		TypePtr referee = RemoveTopCv(return_type_->target);
 		if (source->kind == TK_CLASS && referee->kind == TK_CLASS)
 		{
-			int hops = BaseClassDistance(source->named, referee->named);
-			for (int i = 0; i < hops; i++)
-			{
-				string hopped = NewTemp();
-				Emit(hopped +
-				     " = index i8 [projection=base_subobject] " +
-				     address + ", 0");
-				address = hopped;
-			}
+			address = AdjustToBase(
+				address,
+				BaseClassDistance(source->named, referee->named));
 		}
 		EndFullExpression();
 		EmitCleanupsFrom(0);

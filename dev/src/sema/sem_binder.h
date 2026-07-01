@@ -29,7 +29,8 @@ public:
 	virtual const ClassInfo* CurrentClass();
 	virtual TypePtr CurrentThisType();
 	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
-	                               const string& what);
+	                               const string& what,
+	                               const NamedTypeInfo* naming = 0);
 	virtual bool InClassContextOrFriend(const NamedTypeInfo* cls);
 	virtual SemNodePtr MakeConstructorCall(const ClassInfo& cls,
 	                                       int ctor_index, bool base_entry,
@@ -135,6 +136,10 @@ private:
 	                            const string& name);
 	void FlushDeferredBodies();
 	void AnalyzeDeferredBody(const DeferredBody& body);
+	// Publishes a bound body's derived non-throwing fact so callers
+	// resolved afterwards skip unwind regions around calls to it.
+	void PublishBodyUnwindFact(const DeferredBody& body,
+	                           ESpecialFunction special, SemNode& node);
 	void BindQualifiedSpecialMember(const AstDecl& decl,
 	                                const AstName& id);
 	Scope* MakeSpecialMemberScope(const string& name,

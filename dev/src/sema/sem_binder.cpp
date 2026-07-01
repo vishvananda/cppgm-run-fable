@@ -588,6 +588,11 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	current_return_ = saved_return;
 	method_ = saved_method;
 	parents_.pop_back();
+	DeferredBody published;
+	published.name = name;
+	published.declaring = current_->parent;
+	published.composed = composed;
+	PublishBodyUnwindFact(published, SF_NONE, *item);
 }
 
 // --- statements ---------------------------------------------------------------

@@ -173,7 +173,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 	if (!member)
 		throw runtime_error("no member named " + name);
 	if (!host_.InClassContextOrFriend(object_entity))
-		host_.CheckMemberAccess(member->home, member->access, name);
+		host_.CheckMemberAccess(member->home, member->access, name,
+		                        object_entity);
 	if (member->kind == SB_ENUMERATOR)
 	{
 		SemValue value;
@@ -520,7 +521,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	if (member->kind != SB_FUNCTION)
 		throw runtime_error(name + " is not a member function");
 	if (!host_.InClassContextOrFriend(object.type->named))
-		host_.CheckMemberAccess(member->home, member->access, name);
+		host_.CheckMemberAccess(member->home, member->access, name,
+		                        object.type->named);
 	return AnalyzeMethodCall(std::move(object), *member, expr.arguments);
 }
 
@@ -600,7 +602,8 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		throw runtime_error("use of deleted member function");
 	EMemberAccess access = winner < binding.fn_access.size()
 		? binding.fn_access[winner] : MA_PUBLIC;
-	host_.CheckMemberAccess(binding.home, access, binding.name);
+	host_.CheckMemberAccess(binding.home, access, binding.name,
+	                        object_entity);
 	// PA16: a qualified or explicit call can select an implicitly
 	// declared assignment operator; synthesize it on first selection.
 	if (binding.name == "operator =")

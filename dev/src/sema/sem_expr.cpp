@@ -149,6 +149,7 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 	}
 	case EK_SIZEOF_EXPR:
 	case EK_SIZEOF_TYPE:
+	case EK_TYPE_TRAIT:
 		return AnalyzeSizeof(expr);
 	case EK_NEW:
 		return AnalyzeNew(expr);
@@ -1521,8 +1522,11 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 
 SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 {
+	bool alignment = expr.kind == EK_TYPE_TRAIT;
+	if (alignment && expr.op != KW_ALIGNOF)
+		throw OutsideBoundary("type trait expression");
 	TypePtr operand_type;
-	if (expr.kind == EK_SIZEOF_TYPE)
+	if (expr.kind == EK_SIZEOF_TYPE || (alignment && expr.is_type_operand))
 		operand_type = host_.ResolveCastTypeId(*expr.type);
 	else
 	{
@@ -1534,8 +1538,10 @@ SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 		if (!operand_type)
 			operand_type = Analyze(*expr.operands[0]).type;
 	}
-	// 5.3.3p1: requires a complete object type; the size is the value.
-	unsigned long long size = TypeSize(operand_type);
+	// 5.3.3p1 / 5.3.6p1: requires a complete object type; the size (or
+	// alignment) is the value.
+	unsigned long long size = alignment ? TypeAlignment(operand_type)
+	                                    : TypeSize(operand_type);
 	SemValue value;
 	value.type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
 	value.category = VC_PRVALUE;

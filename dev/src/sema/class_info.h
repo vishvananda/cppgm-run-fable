@@ -231,9 +231,10 @@ ClassField& LayoutField(ClassInfo& info, const ClassField& field);
 // zero-width unnamed field only realigns the cursor.
 ClassField& LayoutBitField(ClassInfo& info, const ClassField& field);
 
-// Finishes the layout: rounds the size and stamps the entity's
-// size/alignment facts.
-void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity);
+// Finishes the layout: applies any class-head alignas request,
+// rounds the size, and stamps the entity's size/alignment facts.
+void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity,
+                       unsigned long long min_alignment);
 
 // --- queries ----------------------------------------------------------
 

@@ -166,11 +166,10 @@ void SemBinder::BindBitFieldDeclaration(const AstDecl& decl)
 void SemBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
                               Scope* scope, const std::vector<TypePtr>& fields)
 {
-	(void)decl;
 	(void)scope;
 	(void)fields;
 	ClassInfo* cls = OpenClass();
-	FinishClassLayout(*cls, *info);
+	FinishClassLayout(*cls, *info, RequestedAlignment(decl));
 	info->complete = true;
 	DeclareImplicitSpecialMembers(*cls);
 	open_classes_.pop_back();
@@ -818,6 +817,7 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	method_ = saved_method;
 	current_return_ = saved_return;
 
+	PublishBodyUnwindFact(body, special, *node);
 	if (body.out_of_class && special == SF_NONE)
 		AppendItem(std::move(item));
 	else
@@ -827,6 +827,44 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 			node->inline_def = false;
 		unit_.deferred.push_back(std::move(item));
 	}
+}
+
+void SemBinder::PublishBodyUnwindFact(const DeferredBody& body,
+                                      ESpecialFunction special,
+                                      SemNode& node)
+{
+	bool may_throw = false;
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (NodeMayThrow(*node.children[i]))
+			may_throw = true;
+	if (may_throw)
+		return;
+	node.unwind_no = true;
+	if (special == SF_DESTRUCTOR)
+	{
+		if (body.cls)
+			body.cls->dtor_unwind_no = true;
+		return;
+	}
+	if (special == SF_CONSTRUCTOR)
+	{
+		if (!body.cls)
+			return;
+		int index = ClassCtorIndex(*body.cls, body.composed.type);
+		if (index >= 0)
+			body.cls->ctors[index].unwind_no = true;
+		return;
+	}
+	ScopeBinding* binding = FindOwnBinding(*body.declaring, body.name);
+	if (!binding || binding->kind != SB_FUNCTION)
+		return;
+	size_t index = 0;
+	for (size_t i = 0; i < binding->overloads.size(); i++)
+		if (TypeEquals(binding->overloads[i], body.composed.type))
+			index = i + 1;
+	if (binding->fn_unwind_no.size() <= index)
+		binding->fn_unwind_no.resize(index + 1, false);
+	binding->fn_unwind_no[index] = true;
 }
 
 void SemBinder::BindInheritingConstructors(Scope* base_scope)
@@ -944,7 +982,8 @@ TypePtr SemBinder::CurrentThisType()
 }
 
 void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
-                                  const string& what)
+                                  const string& what,
+                                  const NamedTypeInfo* naming)
 {
 	if (access == MA_PUBLIC)
 		return;
@@ -982,6 +1021,27 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 			if (owner_cls->friend_functions[i].first == method_.fn_owner &&
 			    owner_cls->friend_functions[i].second == method_.fn_name)
 				return;
+	// 11.2p5/11.4: a protected member of a base class is also
+	// accessible to members and friends of any class P on the object
+	// expression's derivation path to the owner; the naming class is
+	// derived from P by construction, satisfying the 11.4 object-type
+	// restriction.
+	if (access == MA_PROTECTED && naming)
+		for (const ClassInfo* p = unit_.classes.Find(naming);
+		     p && p->members != owner; p = p->base)
+		{
+			for (size_t i = 0; i < contexts.size(); i++)
+				for (size_t j = 0; j < p->friend_classes.size(); j++)
+					if (p->friend_classes[j] == contexts[i]->entity)
+						return;
+			if (!method_.fn_name.empty())
+				for (size_t i = 0; i < p->friend_functions.size(); i++)
+					if (p->friend_functions[i].first ==
+					        method_.fn_owner &&
+					    p->friend_functions[i].second ==
+					        method_.fn_name)
+						return;
+		}
 	throw runtime_error(what + " is inaccessible in this context");
 }
 

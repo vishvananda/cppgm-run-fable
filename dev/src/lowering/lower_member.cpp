@@ -49,17 +49,21 @@ string MaskText(unsigned long long mask, const TypePtr& type)
 
 // --- member addressing -----------------------------------------------------
 
+string FunctionLowerer::AdjustToBase(const string& address, int hops)
+{
+	if (hops <= 0)
+		return address;
+	string hopped = NewTemp();
+	Emit(hopped + " = index i8 [projection=base_subobject] " + address +
+	     ", 0");
+	return hopped;
+}
+
 string FunctionLowerer::MemberAddress(const SemNode& node,
                                       bool skip_ref_load)
 {
-	string base = LowerAddressExpr(*node.children[0]);
-	for (int i = 0; i < node.base_hops; i++)
-	{
-		string hopped = NewTemp();
-		Emit(hopped + " = index i8 [projection=base_subobject] " + base +
-		     ", 0");
-		base = hopped;
-	}
+	string base = AdjustToBase(LowerAddressExpr(*node.children[0]),
+	                           node.base_hops);
 	if (!node.name.empty())
 	{
 		string field = NewTemp();
@@ -431,14 +435,8 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	TypePtr source_type = RemoveTopCv(StripRef(source.type));
 	if (source_type->kind == TK_CLASS)
 	{
-		int hops = BaseClassDistance(source_type->named, cls_type->named);
-		for (int i = 0; i < hops; i++)
-		{
-			string hopped = NewTemp();
-			Emit(hopped + " = index i8 [projection=base_subobject] " +
-			     src + ", 0");
-			src = hopped;
-		}
+		src = AdjustToBase(
+			src, BaseClassDistance(source_type->named, cls_type->named));
 	}
 	// An empty object has no bytes to transfer (the PA15 convention).
 	if (cls_type->named->class_record &&
@@ -627,7 +625,6 @@ void FunctionLowerer::RegisterCleanup(const vector<const SemNode*>& actions)
 	if (cleanup_scopes_.empty())
 		PushCleanupScope();
 	cleanup_scopes_.back().push_back(actions);
-	program_.RequireEhRuntime();
 }
 
 bool FunctionLowerer::HaveCleanups() const
@@ -696,6 +693,9 @@ void FunctionLowerer::CloseEhRegion()
 
 void FunctionLowerer::OpenEhRegion()
 {
+	// The unwind runtime declares appear exactly when a dispatch
+	// region exists in the emitted program.
+	program_.RequireEhRuntime();
 	eh_dispatch_ = NewLabel("call_unwind_dispatch");
 	eh_end_ = NewLabel("call_unwind_end");
 	ReferenceLabel(eh_dispatch_);
@@ -721,8 +721,6 @@ void FunctionLowerer::BeginFullExpression(const SemNode& root)
 {
 	fe_marks_.push_back(temp_cleanups_.size());
 	fe_armed_.push_back(eh_armed_);
-	// The reference declares the unwind runtime only for scoped local
-	// cleanups; full-expression temporaries do not add the declares.
 	if (TreeHasTempCleanups(root))
 		eh_armed_ = true;
 }
