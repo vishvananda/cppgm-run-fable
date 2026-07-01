@@ -309,6 +309,21 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	bool const_lvalue_ref = !rvalue_ref && referee_const && !referee_volatile;
 	if (!const_lvalue_ref && !rvalue_ref)
 		return result;
+	// 8.5.3p5: a conversion function of the source class yielding a
+	// compatible referee binds directly and is preferred over a
+	// constructor-built temporary.
+	if (RemoveTopCv(source.type)->kind == TK_CLASS)
+	{
+		ImplicitConversion via_fn =
+			ClassifySourceConversionFunction(source, dest, false);
+		if (via_fn.viable)
+		{
+			via_fn.reference_binding = true;
+			via_fn.binds_rvalue_reference = rvalue_ref;
+			via_fn.referee = referee;
+			return via_fn;
+		}
+	}
 	ImplicitConversion value =
 		ClassifyValueConversion(source, RemoveTopCv(referee));
 	if (!value.viable)

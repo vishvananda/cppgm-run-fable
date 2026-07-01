@@ -16,6 +16,62 @@ using std::set;
 
 namespace {
 
+// 13.6: whether a built-in candidate competes with the user-declared
+// operators for this spelling (the supported arithmetic/comparison
+// binary forms).
+bool BuiltinCandidateOp(const string& spelling)
+{
+	return spelling == "==" || spelling == "!=" || spelling == "<" ||
+		spelling == ">" || spelling == "<=" || spelling == ">=" ||
+		spelling == "+" || spelling == "-" || spelling == "*" ||
+		spelling == "/" || spelling == "%" || spelling == "&" ||
+		spelling == "|" || spelling == "^";
+}
+
+// The built-in-usable type of an operand: a class goes through its
+// unique non-explicit conversion function to an arithmetic result
+// (null when none or ambiguous); other operands pass through.
+TypePtr BuiltinOperandType(const SemValue& value)
+{
+	TypePtr bare = RemoveTopCv(value.type);
+	if (bare->kind != TK_CLASS)
+		return IsArithmeticType(bare) || bare->kind == TK_ENUM
+			? bare : TypePtr();
+	if (!bare->named->class_record)
+		return TypePtr();
+	bool source_const = false;
+	bool source_volatile = false;
+	TopCv(value.type, source_const, source_volatile);
+	const ClassConversion* found = 0;
+	int found_score = 3;
+	for (const ClassInfo* link = bare->named->class_record; link;
+	     link = link->base)
+		for (size_t i = 0; i < link->conversions.size(); i++)
+		{
+			const ClassConversion& conv = link->conversions[i];
+			if (conv.is_explicit)
+				continue;
+			if (source_const && !conv.type->is_const)
+				continue;
+			int score = conv.type->is_const == source_const ? 0 : 1;
+			if (found && score == found_score &&
+			    !TypeEquals(found->result, conv.result))
+				return TypePtr();
+			if (!found || score < found_score)
+			{
+				found = &conv;
+				found_score = score;
+			}
+		}
+	if (!found)
+		return TypePtr();
+	TypePtr result = IsReferenceType(found->result)
+		? found->result->target : found->result;
+	result = RemoveTopCv(result);
+	return IsArithmeticType(result) || result->kind == TK_ENUM
+		? result : TypePtr();
+}
+
 // The innermost enclosing namespace of a declared entity (3.4.2p2:
 // associated namespaces do not climb to parent namespaces).
 const Scope* InnermostNamespace(const Scope* scope)
@@ -263,6 +319,32 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 			ranking.push_back(candidate.declared);
 		viable_arity.push_back(ranking.back()->parameters.size());
 	}
+	// 13.3.1.2p3: the built-in operator form competes as a candidate
+	// when every operand has a built-in-usable type.
+	size_t builtin_pos = (size_t)-1;
+	if (!member_only && operands.size() == 2 &&
+	    BuiltinCandidateOp(spelling))
+	{
+		TypePtr left = BuiltinOperandType(operands[0]);
+		TypePtr right = BuiltinOperandType(operands[1]);
+		if (left && right)
+		{
+			TypePtr common = UsualArithmeticConversions(
+				left->kind == TK_ENUM
+					? MakeFundamentalType(left->named->enum_underlying)
+					: left,
+				right->kind == TK_ENUM
+					? MakeFundamentalType(right->named->enum_underlying)
+					: right);
+			vector<TypePtr> parameters;
+			parameters.push_back(common);
+			parameters.push_back(common);
+			builtin_pos = ranking.size();
+			ranking.push_back(MakeFunctionType(
+				MakeFundamentalType(FT_BOOL), parameters, false));
+			viable_arity.push_back(2);
+		}
+	}
 	// Arity filter happens inside SelectBestOverload; a fully
 	// non-viable set falls back to the built-in operator.
 	vector<ImplicitConversion> conversions;
@@ -276,6 +358,9 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	{
 		return false;
 	}
+	if (winner == builtin_pos)
+		// The built-in form wins: the caller lowers it directly.
+		return false;
 	const OperatorCandidate& chosen = candidates[winner];
 	const ScopeBinding& binding = *chosen.binding;
 	if (chosen.index < binding.fn_deleted.size() &&
