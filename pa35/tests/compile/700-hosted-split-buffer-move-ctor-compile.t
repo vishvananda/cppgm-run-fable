@@ -2,7 +2,7 @@
 #include <type_traits>
 static_assert(std::is_same<std::deque<int>::value_type, int>::value, "<deque> value_type");
 struct CalcToken {};
-int main()
+void split_buffer_move_anchor()
 {
 #ifdef _LIBCPP_VERSION
 #if _LIBCPP_VERSION >= 220000
@@ -13,5 +13,5 @@ int main()
   Buffer from;
   Buffer to(std::move(from));
 #endif
-  return 0;
 }
+static_assert(sizeof(&split_buffer_move_anchor) > 0, "split_buffer move body anchor");

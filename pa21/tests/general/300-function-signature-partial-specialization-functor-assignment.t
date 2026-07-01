@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: core-language reduction of std::function assignment surface
 
 template<typename Signature>

@@ -1,0 +1,34 @@
+translation-unit
+  alias-use at pa22/tests/general/500-member-template-enable-if-redeclaration-overload.t:28:21
+    template enable_if_t
+    bind #1 = !is_ptr<U>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/general/500-member-template-enable-if-redeclaration-overload.t:31:21
+    template enable_if_t
+    bind #1 = is_ptr<U>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/general/500-member-template-enable-if-redeclaration-overload.t:41:19
+    template enable_if_t
+    bind #1 = !is_ptr<U>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/general/500-member-template-enable-if-redeclaration-overload.t:48:19
+    template enable_if_t
+    bind #1 = is_ptr<U>::value source=explicit
+    bind #2 = int source=explicit
+  class-use at pa22/tests/general/500-member-template-enable-if-redeclaration-overload.t:57:3
+    template box
+    selected primary
+    bind #1 = int * source=explicit
+template-closure-events
+  ensure-definition
+    entity box<int *>::run
+  function-instantiation
+    entity box<int *>::pick
+  function-instantiation
+    entity box<int *>::run
+  require-definition
+    entity box<int *>::pick
+  require-definition
+    entity box<int *>::run
+  variable-instantiation
+    entity is_ptr<int *>::value

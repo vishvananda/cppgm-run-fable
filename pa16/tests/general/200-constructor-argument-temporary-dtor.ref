@@ -1,6 +1,3 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
-
 global @Counter__count : i32 [binding=strong, object=_ZN7Counter5countE] = 0
 
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
@@ -11,37 +8,28 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t1 = addr $holder
     %t2 = addr $arg__1
     call void @Counter__Counter(%t2)
-    eh_try ^call_unwind_dispatch_1
     call void @Holder__Holder(%t1, 5, %t2)
     call void @Counter___Counter(%t2)
-    eh_end
-    jump ^call_unwind_end_2
-
-  block ^call_unwind_dispatch_1:
-    call void @Counter___Counter(%t2)
-    resume
-
-  block ^call_unwind_end_2:
     %t3 = load i32 @Counter__count
     %t4 = cmp ne i32 %t3, 5
-    branch %t4, ^if_then_3, ^if_else_4
+    branch %t4, ^if_then_1, ^if_else_2
 
-  block ^if_then_3:
+  block ^if_then_1:
     %t5 = load i32 @Counter__count
     %t6 = addr $holder
     call void @Holder___Holder(%t6)
     return i32 %t5
 
-  block ^if_else_4:
-    jump ^if_end_5
+  block ^if_else_2:
+    jump ^if_end_3
 
-  block ^if_end_5:
+  block ^if_end_3:
     %t7 = addr $holder
     call void @Holder___Holder(%t7)
     %t8 = load i32 @Counter__count
     return i32 %t8
 }
-function @Counter__Counter(%this : ptr) -> void [binding=weak, object=_ZN7CounterC1Ev] {
+function @Counter__Counter(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7CounterC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -51,7 +39,7 @@ function @Counter__Counter(%this : ptr) -> void [binding=weak, object=_ZN7Counte
     store i32 %t2, @Counter__count
     return void
 }
-function @Counter___Counter(%this : ptr) -> void [binding=weak, object=_ZN7CounterD1Ev] {
+function @Counter___Counter(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7CounterD1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -61,7 +49,7 @@ function @Counter___Counter(%this : ptr) -> void [binding=weak, object=_ZN7Count
     store i32 %t2, @Counter__count
     return void
 }
-function @Holder__Holder(%this : ptr, %__param1 : i32, %value : ptr [pass=reference]) -> void [binding=weak, object=_ZN6HolderC1EiRK7Counter] {
+function @Holder__Holder(%this : ptr, %__param1 : i32, %value : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN6HolderC1EiRK7Counter] {
   slot $this : ptr
   slot $__param1 : i32
   slot $value : ptr
@@ -92,7 +80,7 @@ function @Holder__Holder(%this : ptr, %__param1 : i32, %value : ptr [pass=refere
     call void @Counter__Counter__ov2(%t14, %t15)
     return void
 }
-function @Holder___Holder(%this : ptr) -> void [binding=weak, object=_ZN6HolderD1Ev] {
+function @Holder___Holder(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6HolderD1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -114,7 +102,7 @@ function @Holder___Holder(%this : ptr) -> void [binding=weak, object=_ZN6HolderD
     call void @Counter___Counter(%t10)
     return void
 }
-function @Counter__Counter__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN7CounterC1ERKS_] {
+function @Counter__Counter__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN7CounterC1ERKS_] {
   slot $this : ptr
   slot $__param1 : ptr
 

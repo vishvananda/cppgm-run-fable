@@ -4,9 +4,9 @@ struct Control;
 template<class U, U W>
 struct Control
 {
-  virtual ~Control() {}
+  virtual ~Control() noexcept {}
 
-  virtual int value()
+  virtual int value() noexcept
   {
     return W;
   }

@@ -1,0 +1,28 @@
+translation-unit
+  class-use at pa22/tests/spec/400-qualified-template-id-function-template-use-scope.t:50:3
+    template alloc
+    selected primary
+    bind #1 = int source=explicit
+  class-use at pa22/tests/spec/400-qualified-template-id-function-template-use-scope.t:51:10
+    template traits
+    selected primary
+    bind #1 = alloc<int> source=explicit
+  function-call at pa22/tests/spec/400-qualified-template-id-function-template-use-scope.t:51:10
+    callee traits<alloc<int>>::destroy
+    selected instantiation
+    bind #1 = int source=deduced
+    bind #2 = 0 source=defaulted
+    drop traits<alloc<int>>::destroy reason=substitution_failure
+  class-use at pa22/tests/spec/400-qualified-template-id-function-template-use-scope.t:51:17
+    template alloc
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  ensure-definition
+    entity traits<alloc<int>>::destroy
+  function-instantiation
+    entity traits<alloc<int>>::destroy
+  require-definition
+    entity traits<alloc<int>>::destroy
+  variable-instantiation
+    entity has_destroy<alloc<int>, int *>::value

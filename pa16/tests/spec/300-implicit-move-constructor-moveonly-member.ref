@@ -1,11 +1,6 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
-declare function @operator_delete(%arg0 : ptr) -> void [unwind=no, binding=strong, object=cppgm_builtin_operator_delete]
-declare function @operator_new(%arg0 : i64) -> ptr [binding=strong, object=cppgm_builtin_operator_new]
-
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
-  slot $source : obj<8x8>
-  slot $moved : obj<8x8>
+  slot $source : obj<4x4>
+  slot $moved : obj<4x4>
   slot $cond__1 : i32
 
   block ^entry:
@@ -13,42 +8,27 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     call void @Outer__Outer(%t1)
     %t2 = addr $moved
     %t3 = addr $source
-    eh_try ^call_unwind_dispatch_1
     call void @Outer__Outer__ov3(%t2, %t3)
-    eh_end
-    jump ^call_unwind_end_2
-
-  block ^call_unwind_dispatch_1:
-    %t4 = addr $source
-    call void @Outer___Outer(%t4)
-    resume
-
-  block ^call_unwind_end_2:
-    %t5 = addr $moved
+    %t4 = addr $moved
+    %t5 = index i8 [projection=field] %t4, 0
     %t6 = index i8 [projection=field] %t5, 0
-    %t7 = index i8 [projection=field] %t6, 0
-    %t8 = load ptr %t7
-    %t9 = load i32 %t8
-    %t10 = cmp eq i32 %t9, 7
-    branch %t10, ^cond_then_3, ^cond_else_4
+    %t7 = load i32 %t6
+    %t8 = cmp eq i32 %t7, 7
+    branch %t8, ^cond_then_1, ^cond_else_2
 
-  block ^cond_then_3:
+  block ^cond_then_1:
     store i32 0, $cond__1
-    jump ^cond_end_5
+    jump ^cond_end_3
 
-  block ^cond_else_4:
+  block ^cond_else_2:
     store i32 1, $cond__1
-    jump ^cond_end_5
+    jump ^cond_end_3
 
-  block ^cond_end_5:
-    %t11 = load i32 $cond__1
-    %t12 = addr $moved
-    call void @Outer___Outer(%t12)
-    %t13 = addr $source
-    call void @Outer___Outer(%t13)
-    return i32 %t11
+  block ^cond_end_3:
+    %t9 = load i32 $cond__1
+    return i32 %t9
 }
-function @Outer__Outer(%this : ptr) -> void [binding=weak, object=_ZN5OuterC1Ev] {
+function @Outer__Outer(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5OuterC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -58,7 +38,7 @@ function @Outer__Outer(%this : ptr) -> void [binding=weak, object=_ZN5OuterC1Ev]
     call void @Inner__Inner(%t2)
     return void
 }
-function @Outer__Outer__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN5OuterC1EOS_] {
+function @Outer__Outer__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN5OuterC1EOS_] {
   slot $this : ptr
   slot $other : ptr
 
@@ -72,30 +52,17 @@ function @Outer__Outer__ov3(%this : ptr, %other : ptr [pass=reference]) -> void 
     call void @Inner__Inner__ov3(%t2, %t4)
     return void
 }
-function @Outer___Outer(%this : ptr) -> void [binding=weak, object=_ZN5OuterD1Ev] {
+function @Inner__Inner(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5InnerC1Ev] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     %t1 = load ptr $this
     %t2 = index i8 [projection=field] %t1, 0
-    call void @Inner___Inner(%t2)
-    return void
-}
-function @Inner__Inner(%this : ptr) -> void [binding=weak, object=_ZN5InnerC1Ev] {
-  slot $this : ptr
-
-  block ^entry:
-    store ptr %this, $this
-    %t1 = convert sext i64 i32 4
-    %t2 = call ptr @operator_new(%t1)
     store i32 7, %t2
-    %t3 = load ptr $this
-    %t4 = index i8 [projection=field] %t3, 0
-    store ptr %t2, %t4
     return void
 }
-function @Inner__Inner__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN5InnerC1EOS_] {
+function @Inner__Inner__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN5InnerC1EOS_] {
   slot $this : ptr
   slot $other : ptr
 
@@ -104,29 +71,17 @@ function @Inner__Inner__ov3(%this : ptr, %other : ptr [pass=reference]) -> void 
     store ptr %other, $other
     %t1 = load ptr $other
     %t2 = index i8 [projection=field] %t1, 0
-    %t3 = load ptr %t2
+    %t3 = load i32 %t2
     %t4 = load ptr $this
     %t5 = index i8 [projection=field] %t4, 0
-    store ptr %t3, %t5
-    %t6 = load ptr $other
-    %t7 = index i8 [projection=field] %t6, 0
-    store ptr 0, %t7
-    return void
-}
-function @Inner___Inner(%this : ptr) -> void [binding=weak, object=_ZN5InnerD1Ev] {
-  slot $this : ptr
-
-  block ^entry:
-    store ptr %this, $this
-    %t1 = load ptr $this
-    %t2 = index i8 [projection=field] %t1, 0
-    %t3 = load ptr %t2
-    call void @operator_delete(%t3)
+    store i32 %t3, %t5
+    %t6 = unary neg i32 1
+    %t7 = load ptr $other
+    %t8 = index i8 [projection=field] %t7, 0
+    store i32 %t6, %t8
     return void
 }
 alias object _ZN5OuterC2Ev = @Outer__Outer
 alias object _ZN5OuterC2EOS_ = @Outer__Outer__ov3
-alias object _ZN5OuterD2Ev = @Outer___Outer
 alias object _ZN5InnerC2Ev = @Inner__Inner
 alias object _ZN5InnerC2EOS_ = @Inner__Inner__ov3
-alias object _ZN5InnerD2Ev = @Inner___Inner

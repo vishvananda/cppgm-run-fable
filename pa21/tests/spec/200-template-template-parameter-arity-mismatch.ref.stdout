@@ -1,0 +1,11 @@
+ERROR: failed class template instantiation: use<pair_box> [scope <here>] [arg_texts pair_box] [bindings ] [phase callsemantic] [top-level declaration 2 kind=simple-declaration ast={simple-declaration
+  decl-specifier-seq
+    decl-specifier use<pair_box>
+  init-declarator-list
+    init-declarator
+      declarator
+        identifier bad_use
+}]
+Diagnostic context:
+collect_simple_declaration [use<pair_box>bad_use;] at tests/spec/200-template-template-parameter-arity-mismatch.t:14:1
+  lookup_type [use<pair_box>]

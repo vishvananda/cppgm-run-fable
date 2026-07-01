@@ -1,0 +1,77 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $query : obj<1x1>
+  slot $result : obj<1x1>
+  slot $arg__1 : obj<1x1>
+  slot $arg__2 : obj<1x1>
+  slot $cond__3 : i32
+
+  block ^entry:
+    %t1 = addr $query
+    %t2 = addr $result
+    %t3 = addr $query
+    %t4 = addr $arg__1
+    call void @api__executor__executor(%t4)
+    %t5 = addr $arg__2
+    call void @api__execution__detail__relationship__fork_t_0___fork_t(%t5)
+    %t6 = call obj<1x1> @api__query_fn__impl__operator__(%t3, %t4, %t5)
+    copyobj 1x1 %t6, %t2
+    branch 1, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__3
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__3
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t7 = load i32 $cond__3
+    return i32 %t7
+}
+function @api__execution__detail__relationship__fork_t_0___fork_t(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3api9execution6detail12relationship6fork_tILi0EEC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @api__query_fn__impl__operator__(%this : ptr, %t : ptr [pass=reference], %p : ptr [pass=reference]) -> obj<1x1> [binding=weak, object=_ZNK3api8query_fn4implclINS_8executorENS_9execution6detail12relationship6fork_tILi0EEEEES8_OT_OT0_] {
+  slot $this : ptr
+  slot $t : ptr
+  slot $p : ptr
+  slot $retobj__1 : obj<1x1>
+  slot $argobj__2 : obj<1x1>
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %t, $t
+    store ptr %p, $p
+    %t1 = addr $retobj__1
+    %t2 = load ptr $t
+    %t3 = addr $argobj__2
+    %t4 = load ptr $p
+    %t5 = call obj<1x1> @api__executor__query(%t2, $argobj__2)
+    copyobj 1x1 %t5, %t1
+    return obj<1x1> $retobj__1
+}
+function @api__executor__executor(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3api8executorC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @api__executor__query(%this : ptr, %__param1 : obj<1x1>) -> obj<1x1> [binding=weak, object=_ZNK3api8executor5queryENS_9execution6detail12relationship6fork_tILi0EEE] {
+  slot $this : ptr
+  slot $__param1 : obj<1x1>
+  slot $retobj__1 : obj<1x1>
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = addr $retobj__1
+    call void @api__execution__detail__relationship__fork_t_0___fork_t(%t1)
+    return obj<1x1> $retobj__1
+}
+alias object _ZN3api9execution6detail12relationship6fork_tILi0EEC2Ev = @api__execution__detail__relationship__fork_t_0___fork_t
+alias object _ZN3api8executorC2Ev = @api__executor__executor

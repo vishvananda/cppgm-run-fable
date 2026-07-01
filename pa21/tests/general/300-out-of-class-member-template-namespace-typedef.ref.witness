@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/general/300-out-of-class-member-template-namespace-typedef.t:18:6
+    template N::Holder
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa21/tests/general/300-out-of-class-member-template-namespace-typedef.t:19:22
+    callee N::Holder<int>::make
+    selected instantiation
+    bind #1 = <int, char> source=explicit
+template-closure-events
+  ensure-definition
+    entity N::Holder<int>::make
+  function-instantiation
+    entity N::Holder<int>::make
+  require-definition
+    entity N::Holder<int>::make

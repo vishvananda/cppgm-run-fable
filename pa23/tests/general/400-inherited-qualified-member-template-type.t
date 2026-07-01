@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Reduced from Boost.MPL size<>: an intermediate qualified template-id may name
 // a member class template inherited from a concrete base specialization.
 

@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-storage-op-alignment.t:13: storage alignment must be a positive power of two

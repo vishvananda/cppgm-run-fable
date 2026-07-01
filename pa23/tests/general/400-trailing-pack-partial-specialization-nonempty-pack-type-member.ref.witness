@@ -1,9 +1,0 @@
-translation-unit
-  class-use at pa23/tests/general/400-trailing-pack-partial-specialization-nonempty-pack-type-member.t:21:18
-    template common
-    selected partial
-    bind #1 = <int, int, long, long> source=explicit
-    specialize #1 = int source=deduced
-    specialize #2 = int source=deduced
-    specialize #3 = long source=deduced
-    specialize #4 = <long> source=deduced

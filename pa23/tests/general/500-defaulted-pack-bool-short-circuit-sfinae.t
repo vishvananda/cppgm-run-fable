@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A defaulted bool template parameter that short-circuits from a pack-size
 // comparison must become concrete before the following enable-if aliases are
 // substituted.

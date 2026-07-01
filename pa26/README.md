@@ -13,6 +13,8 @@ single-vptr ABI:
 - non-virtual multiple inheritance
 - member lookup and access across multiple base subobjects
 - constructor, copy, and destructor generation across multiple non-virtual bases
+- member pointer type formation, null/conversion handling, and `.*` / `->*`
+  application over the completed non-virtual object model
 - `dynamic_cast<void*>` for the current polymorphic single-inheritance ABI
 
 PA26 still produces LowIR. It does not introduce a new output format.
@@ -109,9 +111,9 @@ Testing uses checked-in golden outputs, not a reference binary. The `Makefile` i
 
 The local checked-in tests live in `tests/general/`. That directory contains
 PA26 source-to-LowIR tests over non-virtual multiple inheritance, multi-base
-generated members, `dynamic_cast<void*>`, and ambiguity rejection. PA26 has no
-`tests/spec/` directory because these tests focus on the combined
-language-to-LowIR contract.
+generated members, member pointers, `dynamic_cast<void*>`, and ambiguity
+rejection. PA26 has no `tests/spec/` directory because these tests focus on the
+combined language-to-LowIR contract.
 
 For each test case `x`:
 
@@ -164,6 +166,8 @@ PA26 supports the following in addition to the PA25 subset:
 - inherited non-virtual method lookup and `this` adjustment across multiple non-virtual bases
 - constructor, copy-constructor, copy-assignment, and destructor generation across multiple
   non-virtual bases
+- member pointer type formation, null values, base-to-derived member-pointer
+  conversions, and `.*` / `->*` application for non-virtual class layouts
 - `dynamic_cast<void*>` for the existing polymorphic single-inheritance ABI
 
 Within this milestone, PA26 should produce valid LowIR for ordinary source programs over
@@ -184,11 +188,15 @@ To complete PA26, implement these goals:
    Synthesized construction, copy, assignment, and destruction should sequence the supported
    non-virtual bases correctly.
 
-4. Remaining single-vptr RTTI case.
+4. Member pointer lowering over non-virtual layouts.
+   Member pointer values should preserve the selected member target and supported base
+   adjustment so `.*` and `->*` lower through the correct object address.
+
+5. Remaining single-vptr RTTI case.
    `dynamic_cast<void*>` should lower for the existing polymorphic single-inheritance ABI
    without introducing new LowIR operations.
 
-5. Ambiguity handling.
+6. Ambiguity handling.
    Ambiguous inherited member names must not silently resolve.
 
 ### Out Of Scope
@@ -197,6 +205,8 @@ The following are explicitly out of scope for PA26:
 
 - virtual inheritance
 - polymorphic multiple inheritance
+- member-pointer behavior that depends on virtual-base or polymorphic
+  multiple-inheritance adjustment
 - `dynamic_cast` reference forms
 - `dynamic_cast` cases that depend on multiple or virtual polymorphic base layouts
 - the remaining RTTI cases that require a broader multi-vptr or virtual-base ABI

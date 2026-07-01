@@ -1,0 +1,132 @@
+global @constructed : i32 [binding=strong, object=_Z11constructed] = 0
+global @destroyed : i32 [binding=strong, object=_Z9destroyed] = 0
+
+function @use(%__param0 : ptr [pass=reference]) -> i32 [unwind=no, binding=strong, object=_Z3useRK5Probe] {
+  slot $__param0 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    %t1 = load i32 @constructed
+    %t2 = binary add i32 %t1, 1
+    store i32 %t2, @constructed
+    return i32 1
+}
+function @truthy(%value : ptr) -> i32 [unwind=no, binding=strong, object=_Z6truthyPKc] {
+  slot $value : ptr
+  slot $land__1 : i64
+  slot $call__2 : i32
+  slot $arg__3 : obj<1x1>
+
+  block ^entry:
+    store ptr %value, $value
+    %t1 = load ptr $value
+    branch %t1, ^land_rhs_1, ^land_short_2
+
+  block ^land_rhs_1:
+    eh_try ^call_unwind_dispatch_4
+    %t2 = addr $arg__3
+    call void @Probe__Probe(%t2)
+    eh_end
+    jump ^call_unwind_end_5
+
+  block ^call_unwind_dispatch_4:
+    resume
+
+  block ^call_unwind_end_5:
+    eh_try ^call_unwind_dispatch_6
+    %t3 = call i32 @use(%t2)
+    store i32 %t3, $call__2
+    %t4 = load i32 $call__2
+    %t5 = cmp ne i64 %t4, 0
+    store i64 %t5, $land__1
+    call void @Probe___Probe(%t2)
+    eh_end
+    jump ^call_unwind_end_7
+
+  block ^call_unwind_dispatch_6:
+    call void @Probe___Probe(%t2)
+    resume
+
+  block ^call_unwind_end_7:
+    jump ^land_end_3
+
+  block ^land_short_2:
+    store i64 0, $land__1
+    jump ^land_end_3
+
+  block ^land_end_3:
+    %t6 = load i64 $land__1
+    %t7 = convert zext i32 u8 %t6
+    return i32 %t7
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $cond__1 : i32
+  slot $land__2 : i64
+  slot $land__3 : i64
+
+  block ^entry:
+    %t1 = call i32 @truthy(0)
+    %t2 = cmp eq i32 %t1, 0
+    branch %t2, ^land_rhs_7, ^land_short_8
+
+  block ^land_rhs_7:
+    %t3 = load i32 @constructed
+    %t4 = cmp eq i32 %t3, 0
+    %t5 = cmp ne i64 %t4, 0
+    store i64 %t5, $land__3
+    jump ^land_end_9
+
+  block ^land_short_8:
+    store i64 0, $land__3
+    jump ^land_end_9
+
+  block ^land_end_9:
+    %t6 = load i64 $land__3
+    branch %t6, ^land_rhs_4, ^land_short_5
+
+  block ^land_rhs_4:
+    %t7 = load i32 @destroyed
+    %t8 = cmp eq i32 %t7, 0
+    %t9 = cmp ne i64 %t8, 0
+    store i64 %t9, $land__2
+    jump ^land_end_6
+
+  block ^land_short_5:
+    store i64 0, $land__2
+    jump ^land_end_6
+
+  block ^land_end_6:
+    %t10 = load i64 $land__2
+    branch %t10, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t11 = load i32 $cond__1
+    return i32 %t11
+}
+function @Probe__Probe(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5ProbeC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @Probe___Probe(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5ProbeD1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load i32 @destroyed
+    %t2 = binary add i32 %t1, 1
+    store i32 %t2, @destroyed
+    return void
+}
+alias object _ZN5ProbeC2Ev = @Probe__Probe
+alias object _ZN5ProbeD2Ev = @Probe___Probe

@@ -54,7 +54,7 @@ function @derived_set_traits___test(%this : ptr, %__param1 : i8, %__param2 : ptr
     store ptr %__param2, $__param2
     return u8 1
 }
-function @meta__true___true_(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4meta5true_C1Ev] {
+function @meta__true___true_(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4meta5true_C1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

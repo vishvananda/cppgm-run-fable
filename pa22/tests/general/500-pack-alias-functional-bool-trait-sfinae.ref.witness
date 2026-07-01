@@ -1,0 +1,20 @@
+translation-unit
+  alias-use at pa22/tests/general/500-pack-alias-functional-bool-trait-sfinae.t:24:21
+    template first_t
+    bind #1 = true_type source=explicit
+    bind #2 = enable_if_t<bool(Bn::value)>... source=explicit
+  alias-use at pa22/tests/general/500-pack-alias-functional-bool-trait-sfinae.t:24:40
+    template enable_if_t
+    bind #1 = bool(Bn::value) source=explicit
+  class-use at pa22/tests/general/500-pack-alias-functional-bool-trait-sfinae.t:38:15
+    template and_
+    selected primary
+    bind #1 = <is_good<A>, is_good<B>> source=explicit
+  class-use at pa22/tests/general/500-pack-alias-functional-bool-trait-sfinae.t:38:20
+    template is_good
+    selected primary
+    bind #1 = A source=explicit
+  class-use at pa22/tests/general/500-pack-alias-functional-bool-trait-sfinae.t:38:32
+    template is_good
+    selected primary
+    bind #1 = B source=explicit

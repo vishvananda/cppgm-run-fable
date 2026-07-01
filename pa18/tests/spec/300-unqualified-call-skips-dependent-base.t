@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Config BOOST_NO_TWO_PHASE_NAME_LOOKUP reduction.
 // N3485 focus: 14.6.2 [temp.dep], 14.6.3 [temp.nondep]
 

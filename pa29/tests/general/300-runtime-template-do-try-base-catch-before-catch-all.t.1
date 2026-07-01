@@ -1,6 +1,8 @@
-#include <exception>
+struct base_error {
+  virtual ~base_error() {}
+};
 
-struct derived_error : std::exception {};
+struct derived_error : base_error {};
 
 struct thrower {
   void operator()()
@@ -17,7 +19,7 @@ int run(F f)
     try {
       f();
       result = 1;
-    } catch(std::exception const &) {
+    } catch(base_error const &) {
       result = 0;
     } catch(...) {
       result = 2;

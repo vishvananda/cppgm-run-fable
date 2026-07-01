@@ -1,6 +1,9 @@
-#include <exception>
-
 extern "C" void _Exit(int);
+
+namespace std {
+typedef void (*terminate_handler)();
+terminate_handler set_terminate(terminate_handler) noexcept;
+}  // namespace std
 
 void mark_terminate()
 {

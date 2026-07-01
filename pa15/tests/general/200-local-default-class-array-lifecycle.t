@@ -2,11 +2,11 @@ int constructed = 0;
 int destroyed = 0;
 
 struct Element {
-  Element() { constructed = constructed + 1; }
-  ~Element() { destroyed = destroyed + 1; }
+  Element() noexcept { constructed = constructed + 1; }
+  ~Element() noexcept { destroyed = destroyed + 1; }
 };
 
-int observed()
+int observed() noexcept
 {
   return constructed * 10 + destroyed;
 }

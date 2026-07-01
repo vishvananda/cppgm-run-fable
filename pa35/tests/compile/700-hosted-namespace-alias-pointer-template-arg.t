@@ -7,4 +7,4 @@ namespace alias = real;
 namespace { std::vector<const alias::Function *> functions; }
 int check() { return functions.empty() ? 0 : 1; }
 }
-int main() { return outer::check(); }
+static_assert(sizeof(&outer::check) > 0, "namespace alias pointer body anchor");

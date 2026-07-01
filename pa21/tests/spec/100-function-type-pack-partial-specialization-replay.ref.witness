@@ -1,0 +1,24 @@
+translation-unit
+  class-use at pa21/tests/spec/100-function-type-pack-partial-specialization-replay.t:30:15
+    template relay
+    selected partial
+    bind #1 = void (int) source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <int> source=deduced
+  class-use at pa21/tests/spec/100-function-type-pack-partial-specialization-replay.t:31:15
+    template relay
+    selected partial
+    bind #1 = void (int, float) source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <int, float> source=deduced
+  class-use at pa21/tests/spec/100-function-type-pack-partial-specialization-replay.t:35:10
+    template relay
+    selected partial
+    bind #1 = void (int, float) source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <int, float> source=deduced
+template-closure-events
+  variable-instantiation
+    entity arity<void (int)>::value
+  variable-instantiation
+    entity arity<void (int, float)>::value

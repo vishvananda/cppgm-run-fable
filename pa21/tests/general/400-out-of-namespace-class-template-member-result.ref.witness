@@ -1,0 +1,13 @@
+translation-unit
+  class-use at pa21/tests/general/400-out-of-namespace-class-template-member-result.t:25:13
+    template ns::child
+    selected primary
+    bind #1 = 0 source=explicit
+  class-use at pa21/tests/general/400-out-of-namespace-class-template-member-result.t:25:23
+    template ns::child<0>::impl
+    selected primary
+    bind #1 = ns::expr<2> source=explicit
+  class-use at pa21/tests/general/400-out-of-namespace-class-template-member-result.t:25:32
+    template ns::expr
+    selected primary
+    bind #1 = 2 source=explicit

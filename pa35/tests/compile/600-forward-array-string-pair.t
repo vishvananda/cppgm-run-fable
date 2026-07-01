@@ -13,8 +13,8 @@ std::pair<const std::string, E> make_pairish(T&& t)
   return std::pair<const std::string, E>(std::forward<T>(t), A);
 }
 
-int main()
+std::pair<const std::string, E> pairish_anchor()
 {
-  std::pair<const std::string, E> p = make_pairish("(");
-  return p.first.size() == 1 ? 0 : 1;
+  return make_pairish("(");
 }
+static_assert(sizeof(&pairish_anchor) > 0, "forwarded pair construction anchor");

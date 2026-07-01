@@ -1,0 +1,58 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  block ^entry:
+    %t1 = const i64 16
+    %t2 = convert sext i64 i32 16
+    %t3 = cmp ne i64 %t1, %t2
+    branch %t3, ^if_then_1, ^lor_rhs_4
+
+  block ^lor_rhs_4:
+    %t4 = const i64 16
+    %t5 = convert sext i64 i32 16
+    %t6 = cmp ne i64 %t4, %t5
+    branch %t6, ^if_then_1, ^if_else_2
+
+  block ^if_then_1:
+    return i32 1
+
+  block ^if_else_2:
+    jump ^if_end_3
+
+  block ^if_end_3:
+    %t7 = const i64 32
+    %t8 = convert sext i64 i32 32
+    %t9 = cmp ne i64 %t7, %t8
+    branch %t9, ^if_then_5, ^lor_rhs_8
+
+  block ^lor_rhs_8:
+    %t10 = const i64 32
+    %t11 = convert sext i64 i32 32
+    %t12 = cmp ne i64 %t10, %t11
+    branch %t12, ^if_then_5, ^if_else_6
+
+  block ^if_then_5:
+    return i32 2
+
+  block ^if_else_6:
+    jump ^if_end_7
+
+  block ^if_end_7:
+    %t13 = const i64 16
+    %t14 = const i64 16
+    %t15 = cmp ne i64 %t13, %t14
+    branch %t15, ^if_then_9, ^lor_rhs_12
+
+  block ^lor_rhs_12:
+    %t16 = const i64 16
+    %t17 = const i64 16
+    %t18 = cmp ne i64 %t16, %t17
+    branch %t18, ^if_then_9, ^if_else_10
+
+  block ^if_then_9:
+    return i32 3
+
+  block ^if_else_10:
+    jump ^if_end_11
+
+  block ^if_end_11:
+    return i32 0
+}

@@ -1,0 +1,13 @@
+translation-unit
+  alias-use at pa22/tests/general/300-detected-or-alias-template-argument.t:20:26
+    template void_t
+    bind #1 = Op<Args...> source=explicit
+  alias-use at pa22/tests/general/300-detected-or-alias-template-argument.t:27:9
+    template detected_or_t
+    bind #1 = nat source=explicit
+    bind #2 = iter_cat source=explicit
+    bind #3 = I<int> source=explicit
+  class-use at pa22/tests/general/300-detected-or-alias-template-argument.t:27:38
+    template I
+    selected primary
+    bind #1 = int source=explicit

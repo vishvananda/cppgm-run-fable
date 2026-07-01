@@ -1,0 +1,31 @@
+translation-unit
+  alias-use at pa21/tests/general/400-dependent-alias-helper-partial-specialization.t:26:5
+    template enable_hash_helper_imp
+    bind #1 = Type source=explicit
+    bind #2 = typename all<Keys...>::type source=explicit
+  alias-use at pa21/tests/general/400-dependent-alias-helper-partial-specialization.t:29:13
+    template enable_hash_helper
+    bind #1 = unique_ptr<T, D> source=explicit
+    bind #2 = typename unique_ptr<T, D>::pointer source=explicit
+  class-use at pa21/tests/general/400-dependent-alias-helper-partial-specialization.t:36:17
+    template hash
+    selected partial
+    bind #1 = unique_ptr<int, int> source=explicit
+    specialize #1 = int source=deduced
+    specialize #2 = int source=deduced
+  class-use at pa21/tests/general/400-dependent-alias-helper-partial-specialization.t:36:22
+    template unique_ptr
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = int source=explicit
+  class-use at pa21/tests/general/400-dependent-alias-helper-partial-specialization.t:37:10
+    template hash
+    selected partial
+    bind #1 = unique_ptr<int, int> source=explicit
+    specialize #1 = int source=deduced
+    specialize #2 = int source=deduced
+  class-use at pa21/tests/general/400-dependent-alias-helper-partial-specialization.t:37:15
+    template unique_ptr
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = int source=explicit

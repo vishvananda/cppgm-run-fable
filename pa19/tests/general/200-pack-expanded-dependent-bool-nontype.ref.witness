@@ -1,0 +1,20 @@
+translation-unit
+  class-use at pa19/tests/general/200-pack-expanded-dependent-bool-nontype.t:6:9
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = true source=explicit
+  class-use at pa19/tests/general/200-pack-expanded-dependent-bool-nontype.t:7:9
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = false source=explicit
+  class-use at pa19/tests/general/200-pack-expanded-dependent-bool-nontype.t:18:1
+    template values
+    selected primary
+    bind #1 = <integral_constant<bool, true>, integral_constant<bool, false>, integral_constant<bool, true>> source=explicit
+template-closure-events
+  variable-instantiation
+    entity integral_constant<bool, false>::value
+  variable-instantiation
+    entity integral_constant<bool, true>::value

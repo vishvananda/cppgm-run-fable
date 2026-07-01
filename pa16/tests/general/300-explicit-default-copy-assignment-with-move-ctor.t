@@ -14,4 +14,4 @@ int main()
   a = b;
   return a.value;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

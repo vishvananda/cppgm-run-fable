@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.2 member templates, 14.6.2.1 dependent types.
 // An out-of-class member-template definition can spell a nested dependent type
 // through the current class template-id even when the declaration used the

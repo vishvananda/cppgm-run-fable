@@ -13,7 +13,9 @@ struct Outer {
   std::vector<PPToken> cur_arg;
 };
 
-int main() {
+unsigned long nested_vector_anchor()
+{
   Outer o;
-  return (int)o.cur_arg.size();
+  return o.cur_arg.size();
 }
+static_assert(sizeof(&nested_vector_anchor) > 0, "nested vector constructor body anchor");

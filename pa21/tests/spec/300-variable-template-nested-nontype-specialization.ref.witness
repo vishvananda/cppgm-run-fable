@@ -1,0 +1,15 @@
+translation-unit
+  class-use at pa21/tests/spec/300-variable-template-nested-nontype-specialization.t:15:14
+    template ratio
+    selected primary
+    bind #1 = 1 source=explicit
+    bind #2 = 1000 source=explicit
+  variable-use at pa21/tests/spec/300-variable-template-nested-nontype-specialization.t:17:15
+    template is_ratio
+    selected partial
+    bind #1 = ratio<1, 1000> source=deduced
+    specialize #1 = 1 source=deduced
+    specialize #2 = 1000 source=deduced
+template-closure-events
+  variable-instantiation
+    entity is_ratio

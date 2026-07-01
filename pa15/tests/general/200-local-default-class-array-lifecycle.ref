@@ -1,10 +1,7 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
-
 global @constructed : i32 [binding=strong, object=_Z11constructed] = 0
 global @destroyed : i32 [binding=strong, object=_Z9destroyed] = 0
 
-function @observed() -> i32 [binding=strong, object=_Z8observedv] {
+function @observed() -> i32 [unwind=no, binding=strong, object=_Z8observedv] {
   block ^entry:
     %t1 = load i32 @constructed
     %t2 = binary mul i32 %t1, 10
@@ -14,8 +11,7 @@ function @observed() -> i32 [binding=strong, object=_Z8observedv] {
 }
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
   slot $elements : obj<3x1>
-  slot $call__1 : i32
-  slot $cond__2 : i32
+  slot $cond__1 : i32
 
   block ^entry:
     %t1 = addr $elements
@@ -30,80 +26,58 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t8 = unary decay ptr %t7
     %t9 = index i8 [projection=array_element] %t8, 2
     call void @Element__Element(%t9)
-    eh_try ^call_unwind_dispatch_4
     %t10 = call i32 @observed()
-    store i32 %t10, $call__1
-    %t11 = load i32 $call__1
-    %t12 = cmp ne i32 %t11, 30
-    eh_end
-    jump ^call_unwind_end_5
-
-  block ^call_unwind_dispatch_4:
-    %t13 = addr $elements
-    %t14 = unary decay ptr %t13
-    %t15 = index i8 [projection=array_element] %t14, 0
-    call void @Element___Element(%t15)
-    %t16 = addr $elements
-    %t17 = unary decay ptr %t16
-    %t18 = index i8 [projection=array_element] %t17, 1
-    call void @Element___Element(%t18)
-    %t19 = addr $elements
-    %t20 = unary decay ptr %t19
-    %t21 = index i8 [projection=array_element] %t20, 2
-    call void @Element___Element(%t21)
-    resume
-
-  block ^call_unwind_end_5:
-    branch %t12, ^if_then_1, ^if_else_2
+    %t11 = cmp ne i32 %t10, 30
+    branch %t11, ^if_then_1, ^if_else_2
 
   block ^if_then_1:
-    %t22 = addr $elements
-    %t23 = unary decay ptr %t22
-    %t24 = index i8 [projection=array_element] %t23, 0
-    call void @Element___Element(%t24)
-    %t25 = addr $elements
-    %t26 = unary decay ptr %t25
-    %t27 = index i8 [projection=array_element] %t26, 1
-    call void @Element___Element(%t27)
-    %t28 = addr $elements
-    %t29 = unary decay ptr %t28
-    %t30 = index i8 [projection=array_element] %t29, 2
-    call void @Element___Element(%t30)
+    %t12 = addr $elements
+    %t13 = unary decay ptr %t12
+    %t14 = index i8 [projection=array_element] %t13, 0
+    call void @Element___Element(%t14)
+    %t15 = addr $elements
+    %t16 = unary decay ptr %t15
+    %t17 = index i8 [projection=array_element] %t16, 1
+    call void @Element___Element(%t17)
+    %t18 = addr $elements
+    %t19 = unary decay ptr %t18
+    %t20 = index i8 [projection=array_element] %t19, 2
+    call void @Element___Element(%t20)
     return i32 1
 
   block ^if_else_2:
     jump ^if_end_3
 
   block ^if_end_3:
-    %t31 = addr $elements
-    %t32 = unary decay ptr %t31
-    %t33 = index i8 [projection=array_element] %t32, 0
-    call void @Element___Element(%t33)
-    %t34 = addr $elements
-    %t35 = unary decay ptr %t34
-    %t36 = index i8 [projection=array_element] %t35, 1
-    call void @Element___Element(%t36)
-    %t37 = addr $elements
-    %t38 = unary decay ptr %t37
-    %t39 = index i8 [projection=array_element] %t38, 2
-    call void @Element___Element(%t39)
-    %t40 = call i32 @observed()
-    %t41 = cmp eq i32 %t40, 33
-    branch %t41, ^cond_then_6, ^cond_else_7
+    %t21 = addr $elements
+    %t22 = unary decay ptr %t21
+    %t23 = index i8 [projection=array_element] %t22, 0
+    call void @Element___Element(%t23)
+    %t24 = addr $elements
+    %t25 = unary decay ptr %t24
+    %t26 = index i8 [projection=array_element] %t25, 1
+    call void @Element___Element(%t26)
+    %t27 = addr $elements
+    %t28 = unary decay ptr %t27
+    %t29 = index i8 [projection=array_element] %t28, 2
+    call void @Element___Element(%t29)
+    %t30 = call i32 @observed()
+    %t31 = cmp eq i32 %t30, 33
+    branch %t31, ^cond_then_4, ^cond_else_5
 
-  block ^cond_then_6:
-    store i32 0, $cond__2
-    jump ^cond_end_8
+  block ^cond_then_4:
+    store i32 0, $cond__1
+    jump ^cond_end_6
 
-  block ^cond_else_7:
-    store i32 2, $cond__2
-    jump ^cond_end_8
+  block ^cond_else_5:
+    store i32 2, $cond__1
+    jump ^cond_end_6
 
-  block ^cond_end_8:
-    %t42 = load i32 $cond__2
-    return i32 %t42
+  block ^cond_end_6:
+    %t32 = load i32 $cond__1
+    return i32 %t32
 }
-function @Element__Element(%this : ptr) -> void [binding=weak, object=_ZN7ElementC1Ev] {
+function @Element__Element(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7ElementC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -113,7 +87,7 @@ function @Element__Element(%this : ptr) -> void [binding=weak, object=_ZN7Elemen
     store i32 %t2, @constructed
     return void
 }
-function @Element___Element(%this : ptr) -> void [binding=weak, object=_ZN7ElementD1Ev] {
+function @Element___Element(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7ElementD1Ev] {
   slot $this : ptr
 
   block ^entry:

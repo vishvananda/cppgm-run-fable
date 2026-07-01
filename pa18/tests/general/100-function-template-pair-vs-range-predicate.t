@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Algorithm is_palindrome reduction: in a non-dependent function body,
 // ordinary lookup must use the overload set visible at the definition, and
 // the pair template must beat the range+predicate template.

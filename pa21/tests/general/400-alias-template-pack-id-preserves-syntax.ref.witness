@@ -1,0 +1,17 @@
+translation-unit
+  class-use at pa21/tests/general/400-alias-template-pack-id-preserves-syntax.t:8:1
+    template tuple
+    selected primary
+    bind #1 = <int> source=explicit
+  alias-use at pa21/tests/general/400-alias-template-pack-id-preserves-syntax.t:12:17
+    template decay_t
+    bind #1 = BoundArgs source=explicit
+  class-use at pa21/tests/general/400-alias-template-pack-id-preserves-syntax.t:20:1
+    template outer
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = <int, char> source=explicit
+  class-use at pa21/tests/general/400-alias-template-pack-id-preserves-syntax.t:20:1
+    template tuple
+    selected primary
+    bind #1 = <int, char> source=deduced

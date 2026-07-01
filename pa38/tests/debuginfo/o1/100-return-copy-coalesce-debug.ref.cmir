@@ -1,0 +1,18 @@
+machine_ir x86_64 <host-target>
+
+startup
+    call @main
+    mov rdi, rax
+    exit
+
+function @main
+  abi
+    return i64 -> rax
+  frame
+    stack_size 0
+    scratch_bytes 0
+
+  block ^entry
+    mov r8, 1 !dbg(test.cpp, 1, 1)
+    add r8, 2 !dbg(test.cpp, 3, 1)
+    ret r8 !dbg(test.cpp, 4, 1)

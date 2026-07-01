@@ -1,0 +1,51 @@
+machine_ir x86_64 <host-target>
+
+startup
+    call @main
+    mov rdi, rax
+    exit
+
+function @main
+  abi
+    return i64 -> rax
+  frame
+    stack_size 16
+    scratch_bytes 0
+    preserve <gpr0>
+    slot $box__0 -> [rbp-<off0>] : i64
+
+  block ^entry
+    lea rdi, [rbp-<off0>]
+    call @Box_int___Box
+    mov rax, 7
+    store.i32 [rbp-<off0>], rax
+    lea rcx, [rbp-<off0>]
+    load.i32 r8, [rbp-<off0>]
+    sext.i32 r8
+    mov <gpr0>, r8
+    sub <gpr0>, 7
+    lea rdi, [rbp-<off0>]
+    call @Box_int____Box
+    ret <gpr0>
+
+function @Box_int___Box
+  abi
+    param %this -> rdi : ptr
+    return void -> void
+  frame
+    stack_size 16
+    scratch_bytes 0
+
+  block ^entry
+    ret
+
+function @Box_int____Box
+  abi
+    param %this -> rdi : ptr
+    return void -> void
+  frame
+    stack_size 16
+    scratch_bytes 0
+
+  block ^entry
+    ret

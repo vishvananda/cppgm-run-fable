@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Built-in prefix increment and decrement produce an lvalue designating the
 // original operand storage, so taking the address of the prefix expression
 // must produce the address of the pointer variable rather than its stored

@@ -1,0 +1,11 @@
+translation-unit
+  alias-use at pa22/tests/general/500-function-template-parameter-alias-sees-previous-param.t:33:19
+    template enable_if_t
+    bind #1 = is_same<decltype(*t), T &>::value source=explicit
+  function-call at pa22/tests/general/500-function-template-parameter-alias-sees-previous-param.t:37:17
+    callee helper
+    selected instantiation
+    bind #1 = value source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_same<value &, value &>::value

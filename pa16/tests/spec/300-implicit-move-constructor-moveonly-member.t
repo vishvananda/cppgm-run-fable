@@ -1,30 +1,29 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 12.8 [class.copy]
 
 struct Inner
 {
-  Inner() : value(new int(7)) {}
-  ~Inner() { delete value; }
+  Inner() noexcept : value(7) {}
+  ~Inner() noexcept {}
 
   Inner(const Inner &) = delete;
   Inner & operator=(const Inner &) = delete;
 
-  Inner(Inner && other) : value(other.value)
+  Inner(Inner && other) noexcept : value(other.value)
   {
-    other.value = 0;
+    other.value = -1;
   }
 
-  Inner & operator=(Inner && other)
+  Inner & operator=(Inner && other) noexcept
   {
     if(this != &other) {
-      delete value;
       value = other.value;
-      other.value = 0;
+      other.value = -1;
     }
     return *this;
   }
 
-  int * value;
+  int value;
 };
 
 struct Outer
@@ -36,5 +35,5 @@ int main()
 {
   Outer source;
   Outer moved(static_cast<Outer &&>(source));
-  return *moved.inner.value == 7 ? 0 : 1;
+  return moved.inner.value == 7 ? 0 : 1;
 }

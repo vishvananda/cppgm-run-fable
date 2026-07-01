@@ -27,10 +27,8 @@ function @pair_sum(%left : i32, %right : f64) -> i32 [binding=weak, object=_Z8pa
     store f64 %right, $right
     %t1 = load i32 $left
     %t2 = load f64 $right
-    %t3 = binary shl i64 %t1, 32
-    %t4 = binary shr i64 %t3, 32
-    %t5 = convert sitofp f64 i32 %t4
-    %t6 = binary add f64 %t5, %t2
-    %t7 = convert fptosi i32 f64 %t6
-    return i32 %t7
+    %t3 = convert sitofp f64 i32 %t1
+    %t4 = binary add f64 %t3, %t2
+    %t5 = convert fptosi i32 f64 %t4
+    return i32 %t5
 }

@@ -1,0 +1,26 @@
+translation-unit
+  alias-use at pa23/tests/general/400-current-instantiation-base-alias-traits.t:42:5
+    template iterator_base
+    bind #1 = reverse_iterator<Iter> source=explicit
+    bind #2 = typename iterator_traits<Iter>::iterator_category source=explicit
+    bind #3 = typename iterator_traits<Iter>::value_type source=explicit
+    bind #4 = typename iterator_traits<Iter>::difference_type source=explicit
+    bind #5 = typename iterator_traits<Iter>::pointer source=explicit
+    bind #6 = typename iterator_traits<Iter>::reference source=explicit
+  class-use at pa23/tests/general/400-current-instantiation-base-alias-traits.t:52:10
+    template same
+    selected partial
+    bind #1 = random_access_iterator_tag source=explicit
+    bind #2 = random_access_iterator_tag source=explicit
+    specialize #1 = random_access_iterator_tag source=deduced
+  class-use at pa23/tests/general/400-current-instantiation-base-alias-traits.t:52:15
+    template reverse_iterator
+    selected primary
+    bind #1 = raw_iter<int> source=explicit
+  class-use at pa23/tests/general/400-current-instantiation-base-alias-traits.t:52:32
+    template raw_iter
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  variable-instantiation
+    entity same<random_access_iterator_tag, random_access_iterator_tag>::value

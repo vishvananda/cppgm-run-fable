@@ -21,7 +21,7 @@ function @N__forward_as_tuple(%__param0 : ptr [pass=reference]) -> obj<1x1> [bin
     call void @N__tuple_int_____tuple(%t1)
     return obj<1x1> $retobj__1
 }
-function @N__tuple_int_____tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1N5tupleIJRiEEC1Ev] {
+function @N__tuple_int_____tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1N5tupleIJRiEEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

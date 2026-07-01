@@ -131,10 +131,11 @@ bool find_unique_base_path(const Node & current,
   return false;
 }
 
-int main()
+bool unique_base_path_anchor()
 {
   Node root;
   size_t offset = 0;
   Access access = PUBLIC;
-  return find_unique_base_path(root, &root, offset, access) ? 0 : 1;
+  return find_unique_base_path(root, &root, offset, access);
 }
+static_assert(sizeof(&unique_base_path_anchor) > 0, "base path body anchor");

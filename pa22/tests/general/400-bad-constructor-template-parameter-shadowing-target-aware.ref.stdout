@@ -1,0 +1,8 @@
+ERROR: no viable constructor [class duration_like<int>] [arg_count 1] [ctor-set duration_like<int>::duration_like:function of (pointer to struct duration_like<int>, lvalue-reference to const struct duration_like<int>) returning void; duration_like<int>::duration_like:function of (pointer to struct duration_like<int>, rvalue-reference to struct duration_like<int>) returning void] [rejections duration_like<int>::duration_like: arg 0 conversion failed param=lvalue-reference to const struct duration_like<int> arg=long long int category=0; duration_like<int>::duration_like: arg 0 conversion failed param=rvalue-reference to struct duration_like<int> arg=long long int category=0] [context target-aware construction] [function make_duration] [is_method no] [body_parent_scope <here>] [body_parent_bindings {types:Rep2=long long int}] [body_function_scope <here>] [body_function_bindings {values:r=long long int} {types:Rep2=long long int}]
+Diagnostic context:
+analyze_function_binding_output [make_duration inst=long long int]
+  analyze_statement [return-statement] at tests/general/400-bad-constructor-template-parameter-shadowing-target-aware.t:43:3
+    analyze_expression_for_target [ -> struct duration_like<int>] at tests/general/400-bad-constructor-template-parameter-shadowing-target-aware.t:43:10
+      semantic_expression::analyze_expression_for_target [ -> struct duration_like<int>] at tests/general/400-bad-constructor-template-parameter-shadowing-target-aware.t:43:10
+        try_argument_conversion [target rvalue-reference to struct duration_like<int>]
+          select_constructor_from_exprs [duration_like<int>, args=1]

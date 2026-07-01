@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 6.5.4 [stmt.ranged]
 
 struct Range

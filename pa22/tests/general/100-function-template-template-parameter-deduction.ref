@@ -1,0 +1,20 @@
+declare function @ttp_deduce__get_box() -> ptr [binding=strong, object=_ZN10ttp_deduce7get_boxEv]
+
+function @ttp_deduce__test() -> i32 [binding=strong, object=_ZN10ttp_deduce4testEv] {
+  block ^entry:
+    %t1 = call ptr @ttp_deduce__get_box()
+    %t2 = call i32 @ttp_deduce__pass(%t1)
+    return i32 %t2
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  block ^entry:
+    %t1 = call i32 @ttp_deduce__test()
+    return i32 %t1
+}
+function @ttp_deduce__pass(%__param0 : ptr [pass=reference]) -> i32 [binding=weak, object=_ZN10ttp_deduce4passIdNS_3boxEEEiRKNS1_IdEE] {
+  slot $__param0 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    return i32 0
+}

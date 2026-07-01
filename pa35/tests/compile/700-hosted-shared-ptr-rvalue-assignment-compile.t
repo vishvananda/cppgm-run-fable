@@ -6,4 +6,11 @@ struct Owner {
   typedef std::shared_ptr<const Blacklist> BlacklistPtr;
   void add(BlacklistPtr & shared_blacklist) { shared_blacklist = std::make_shared<Blacklist>(); }
 };
-int main() { Owner owner; Owner::BlacklistPtr ptr; owner.add(ptr); return ptr ? 0 : 1; }
+bool shared_ptr_assignment_anchor()
+{
+  Owner owner;
+  Owner::BlacklistPtr ptr;
+  owner.add(ptr);
+  return static_cast<bool>(ptr);
+}
+static_assert(sizeof(&shared_ptr_assignment_anchor) > 0, "shared_ptr assignment body anchor");

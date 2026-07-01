@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Alias-template SFINAE may test a static bool inherited by the condition type.
 
 template<bool B, class T>

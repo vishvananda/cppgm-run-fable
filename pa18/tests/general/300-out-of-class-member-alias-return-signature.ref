@@ -40,7 +40,7 @@ function @tree_int___get(%this : ptr, %value : ptr [pass=reference]) -> obj<16x8
     call void @pair_node_base____node_base_____pair(%t1)
     return obj<16x8> $retobj__1
 }
-function @pair_node_base____node_base_____pair(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4pairIP9node_baseS1_EC1Ev] {
+function @pair_node_base____node_base_____pair(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4pairIP9node_baseS1_EC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

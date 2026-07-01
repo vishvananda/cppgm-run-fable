@@ -1,0 +1,17 @@
+translation-unit
+  class-use at pa22/tests/spec/300-cross-specialization-converting-ctor-operator-template.t:62:22
+    template box
+    selected explicit
+    bind #1 = double source=explicit
+  class-use at pa22/tests/spec/300-cross-specialization-converting-ctor-operator-template.t:82:13
+    template box
+    selected explicit
+    bind #1 = float source=explicit
+  class-use at pa22/tests/spec/300-cross-specialization-converting-ctor-operator-template.t:95:8
+    template box
+    selected explicit
+    bind #1 = float source=explicit
+  class-use at pa22/tests/spec/300-cross-specialization-converting-ctor-operator-template.t:95:30
+    template box
+    selected explicit
+    bind #1 = double source=explicit

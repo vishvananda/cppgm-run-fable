@@ -1,0 +1,37 @@
+translation-unit
+  class-use at pa22/tests/spec/500-unqualified-member-template-local-alias-deduction.t:26:1
+    template flag
+    selected primary
+    bind #1 = true source=explicit
+  alias-use at pa22/tests/spec/500-unqualified-member-template-local-alias-deduction.t:35:22
+    template compiler::matcher
+    bind #1 = B source=explicit
+  alias-use at pa22/tests/spec/500-unqualified-member-template-local-alias-deduction.t:46:3
+    template compiler::matcher
+    bind #1 = B source=explicit
+  alias-use at pa22/tests/spec/500-unqualified-member-template-local-alias-deduction.t:52:33
+    template compiler::matcher
+    bind #1 = B source=explicit
+  class-use at pa22/tests/spec/500-unqualified-member-template-local-alias-deduction.t:57:1
+    template compiler
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa22/tests/spec/500-unqualified-member-template-local-alias-deduction.t:61:26
+    callee compiler<int>::bracket
+    selected instantiation
+    bind #1 = true source=deduced
+template-closure-events
+  ensure-definition
+    entity compiler<int>::bracket
+  function-instantiation
+    entity compiler<int>::bracket
+  function-instantiation
+    entity compiler<int>::term
+  function-instantiation
+    entity get_matcher
+  require-definition
+    entity compiler<int>::bracket
+  require-definition
+    entity compiler<int>::term
+  require-definition
+    entity get_matcher

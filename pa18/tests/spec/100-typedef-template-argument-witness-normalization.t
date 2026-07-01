@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.3.1 [temp.arg.type], 7.1.3 [dcl.typedef]
 
 typedef unsigned int mask;

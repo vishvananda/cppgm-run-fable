@@ -1,0 +1,23 @@
+translation-unit
+  alias-use at pa23/tests/spec/300-deleted-function-template-expression-sfinae.t:17:29
+    template void_t
+    bind #1 = decltype(deleted_probe(declval<T>())) source=explicit
+  class-use at pa23/tests/spec/300-deleted-function-template-expression-sfinae.t:36:11
+    template has_deleted_probe
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = void source=defaulted
+  function-call at pa23/tests/spec/300-deleted-function-template-expression-sfinae.t:37:10
+    callee call_deleted_probe
+    selected instantiation
+    bind #1 = int source=deduced
+    drop call_deleted_probe reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity call_deleted_probe
+  function-instantiation
+    entity call_deleted_probe
+  require-definition
+    entity call_deleted_probe
+  variable-instantiation
+    entity has_deleted_probe<int>::value

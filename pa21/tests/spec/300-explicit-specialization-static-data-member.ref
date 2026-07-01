@@ -1,0 +1,38 @@
+global @code_int___value : i32 [binding=weak, object=_ZN4codeIiE5valueE] = 7
+global @code_char___value : i32 [binding=weak, object=_ZN4codeIcE5valueE] = 1
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $cond__1 : i32
+  slot $land__2 : i64
+
+  block ^entry:
+    %t1 = load i32 @code_char___value
+    %t2 = cmp eq i32 %t1, 1
+    branch %t2, ^land_rhs_4, ^land_short_5
+
+  block ^land_rhs_4:
+    %t3 = cmp eq i32 7, 7
+    %t4 = cmp ne i64 %t3, 0
+    store i64 %t4, $land__2
+    jump ^land_end_6
+
+  block ^land_short_5:
+    store i64 0, $land__2
+    jump ^land_end_6
+
+  block ^land_end_6:
+    %t5 = load i64 $land__2
+    branch %t5, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t6 = load i32 $cond__1
+    return i32 %t6
+}

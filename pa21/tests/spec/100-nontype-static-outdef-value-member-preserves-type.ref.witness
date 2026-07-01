@@ -1,0 +1,25 @@
+translation-unit
+  class-use at pa21/tests/spec/100-nontype-static-outdef-value-member-preserves-type.t:31:16
+    template ratio
+    selected primary
+    bind #1 = 1 source=explicit
+    bind #2 = 1000000000 source=explicit
+  class-use at pa21/tests/spec/100-nontype-static-outdef-value-member-preserves-type.t:34:16
+    template ratio
+    selected primary
+    bind #1 = 1 source=explicit
+    bind #2 = 1000000000 source=explicit
+  class-use at pa21/tests/spec/100-nontype-static-outdef-value-member-preserves-type.t:36:18
+    template ratio
+    selected primary
+    bind #1 = 1 source=explicit
+    bind #2 = 1000000000 source=explicit
+template-closure-events
+  variable-instantiation
+    entity ratio<1, 1000000000>::den
+  variable-instantiation
+    entity ratio<1, 1000000000>::num
+  variable-instantiation
+    entity value_constant<1000000000>::value
+  variable-instantiation
+    entity value_constant<1>::value

@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/general/400-partial-specialization-fixed-nontype-cv-ref.t:31:15
+    template child_c
+    selected partial
+    bind #1 = const X & source=explicit
+    bind #2 = 1 source=explicit
+    specialize #1 = X source=deduced
+  class-use at pa21/tests/general/400-partial-specialization-fixed-nontype-cv-ref.t:35:10
+    template child_c
+    selected partial
+    bind #1 = const X & source=explicit
+    bind #2 = 1 source=explicit
+    specialize #1 = X source=deduced
+template-closure-events
+  variable-instantiation
+    entity child_c<const X &, 1>::value

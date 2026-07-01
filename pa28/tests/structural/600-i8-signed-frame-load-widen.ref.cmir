@@ -11,12 +11,12 @@ function @main
   frame
     stack_size 16
     scratch_bytes 0
-    slot $x -> [rbp-1] : i8
+    slot $x -> [rbp-<off0>] : i8
 
   block ^entry
     mov rax, -1
-    store.i8 [rbp-1], rax
-    lea rcx, [rbp-1]
+    store.i8 [rbp-<off0>], rax
+    lea rcx, [rbp-<off0>]
     load.i8 r8, [rcx]
     sext.i8 r8
     mov rdx, -1

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A class-template member body may call a namespace function template whose
 // return type is selected by an alias-template SFINAE expression.
 

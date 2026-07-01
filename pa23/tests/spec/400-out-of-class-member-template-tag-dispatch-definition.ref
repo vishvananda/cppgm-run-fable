@@ -36,7 +36,7 @@ function @box_int___pick__ov2(%this : ptr, %__param1 : ptr, %__param2 : ptr, %__
     store ptr %__param2, $__param2
     return i32 2
 }
-function @forward_tag__forward_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN11forward_tagC1Ev] {
+function @forward_tag__forward_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN11forward_tagC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

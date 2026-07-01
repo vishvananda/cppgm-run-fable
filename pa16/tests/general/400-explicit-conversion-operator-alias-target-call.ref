@@ -57,7 +57,7 @@ function @compile_traits__operatoradaptor_type(%this : ptr) -> obj<4x4> [binding
     copyobj 4x4 %t5, %t4
     return obj<4x4> $retobj__1
 }
-function @compile_traits__compile_traits(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN14compile_traitsC1Ev] {
+function @compile_traits__compile_traits(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN14compile_traitsC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

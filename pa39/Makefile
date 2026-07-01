@@ -15,9 +15,27 @@ TARGETS = \
 	cppgm++-self
 
 DEFAULT_BUILD_JOBS = $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+INCEPTION_DEFAULT_BUILD_JOB_CAP ?= 8
+INCEPTION_BUILD_JOBS ?= $(shell \
+	jobs='$(DEFAULT_BUILD_JOBS)'; cap='$(INCEPTION_DEFAULT_BUILD_JOB_CAP)'; \
+	if [ "$$cap" -gt 0 ] 2>/dev/null && [ "$$jobs" -gt "$$cap" ] 2>/dev/null; then echo "$$cap"; else echo "$$jobs"; fi)
+INCEPTION_BUILD_MISSING_FIRST ?= 1
 HOST_UNAME_S = $(shell uname -s)
+CPPGM_EXPLICIT_MAKE_JOB_FLAGS := $(filter -j% --jobs=%,$(MAKEFLAGS))
 ifeq ($(findstring -j,$(MAKEFLAGS)),)
 MAKEFLAGS += -j$(DEFAULT_BUILD_JOBS)
+endif
+ifeq ($(MAKELEVEL),0)
+CPPGM_MAKE_JOB_FLAGS := $(CPPGM_EXPLICIT_MAKE_JOB_FLAGS)
+CPPGM_MAKE_JOB_LIMIT := $(patsubst --jobs=%,%,$(patsubst -j%,%,$(lastword $(CPPGM_MAKE_JOB_FLAGS))))
+ifneq ($(CPPGM_MAKE_JOB_LIMIT),)
+CPPGM_MAKE_LOW_JOB_LIMIT = $(shell \
+	limit='$(CPPGM_MAKE_JOB_LIMIT)'; cpus='$(DEFAULT_BUILD_JOBS)'; \
+	if [ "$$limit" -gt 0 ] 2>/dev/null && [ "$$cpus" -gt "$$limit" ] 2>/dev/null; then echo 1; else echo 0; fi)
+ifeq ($(CPPGM_MAKE_LOW_JOB_LIMIT),1)
+$(warning make is limited to -j$(CPPGM_MAKE_JOB_LIMIT) on a $(DEFAULT_BUILD_JOBS)-core machine; large compiler builds, especially self-host and PA39/inception builds, will be very slow. Omit -j or use -j$(DEFAULT_BUILD_JOBS).)
+endif
+endif
 endif
 
 
@@ -38,6 +56,9 @@ TEST_RUNNER_SHARED_FLAGS = $(if $(filter 1,$(CPPGM_TEST_RUNNER)),-DTEST_RUNNER_E
 TEST_RUNNER_ENTRY_FLAGS = $(if $(filter 1,$(CPPGM_TEST_RUNNER)),-Dmain=test_runner_real_main,)
 CPPGM_STDLIB_FLAGS ?=
 CPPGM_TEXT_TEST_TIMEOUT_SEC ?= 30
+INCEPTION_SELFHOST_COMPILE_TIMEOUT_SEC ?= 900
+INCEPTION_INCEPTION_COMPILE_TIMEOUT_SEC ?= 3600
+INCEPTION_COMPILE_TIMEOUT_SEC ?= $(if $(filter inception,$(INCEPTION_COMPILER_FLAVOR)),$(INCEPTION_INCEPTION_COMPILE_TIMEOUT_SEC),$(if $(filter selfhost,$(INCEPTION_COMPILER_FLAVOR)),$(INCEPTION_SELFHOST_COMPILE_TIMEOUT_SEC),0))
 export CPPGM_TEST_JOBS
 export CPPGM_HOST_CXX
 export CPPGM_STDLIB_FLAGS
@@ -62,6 +83,7 @@ INCEPTION_COMPILER_FLAVOR ?= selfhost
 else
 INCEPTION_COMPILER_FLAVOR ?= host
 endif
+INCEPTION_OBJECT_BUILD_JOBS ?= $(if $(filter inception,$(INCEPTION_COMPILER_FLAVOR)),$(INCEPTION_BUILD_JOBS),$(DEFAULT_BUILD_JOBS))
 
 ifneq ($(filter ./% ../% /%,$(CXX)),)
 INCEPTION_CXX_DEP := $(CXX)
@@ -72,6 +94,18 @@ endif
 INCEPTION_OBJ_ROOT ?= $(INCEPTION_OBJ_ROOT_BASE)/$(INCEPTION_COMPILER_FLAVOR)
 INCEPTION_BIN_ROOT ?= $(INCEPTION_BIN_ROOT_BASE)/$(INCEPTION_COMPILER_FLAVOR)
 INCEPTION_OUTPUT_SUFFIX ?= -self
+INCEPTION_SELFHOST_OBJ_ROOT ?= $(INCEPTION_OBJ_ROOT_BASE)/selfhost
+INCEPTION_COMPARE_OBJECTS ?= $(if $(filter inception,$(INCEPTION_COMPILER_FLAVOR)),$(if $(wildcard $(INCEPTION_SELFHOST_OBJ_ROOT)),1,0),0)
+PROBE_CXX ?= ../dev/cppgm++
+PROBE_TARGET ?= cppgm++
+PROBE_OBJ_ROOT_BASE ?= $(INCEPTION_OBJ_ROOT_BASE)/probe
+PROBE_OBJ_ROOT ?= $(PROBE_OBJ_ROOT_BASE)/selfhost
+PROBE_BIN_ROOT ?= $(PROBE_OBJ_ROOT_BASE)/bin/selfhost
+PROBE_SHARED_OBJDIR ?= $(PROBE_OBJ_ROOT)/shared/release
+PROBE_SHARED_DEPDIR ?= $(PROBE_SHARED_OBJDIR)/.d
+PROBE_CANON_OBJ_ROOT ?= $(INCEPTION_OBJ_ROOT_BASE)/selfhost
+PROBE_TIMEOUT_SEC ?= $(INCEPTION_SELFHOST_COMPILE_TIMEOUT_SEC)
+PROBE_LINK_OUTPUT ?= $(PROBE_BIN_ROOT)/$(PROBE_TARGET)-probe
 
 CHECKPOINTS = pptoken posttoken ctrlexpr macro preproc recog nsdecl nsinit cy86 cppgm++ abimangle lowiropt lowir2cy86 lowir2native
 TEST_TARGETS = $(addprefix test-,$(CHECKPOINTS))
@@ -292,6 +326,9 @@ inception_binary_path = $(INCEPTION_BIN_ROOT)/$(1)$(INCEPTION_OUTPUT_SUFFIX)
 inception_link_output_path = $(INCEPTION_BIN_ROOT)/$(1)
 inception_self_binary_path = $(INCEPTION_BIN_ROOT_BASE)/selfhost/$(1)-self
 inception_inception_binary_path = $(INCEPTION_BIN_ROOT_BASE)/inception/$(1)-inception
+inception_selfhost_entry_object_path = $(INCEPTION_SELFHOST_OBJ_ROOT)/$(1)/release/$(call inception_stem,$(INCEPTION_ENTRY_$(1)))$(inception_entry_suffix).o
+inception_selfhost_runner_object_path = $(INCEPTION_SELFHOST_OBJ_ROOT)/shared/release/test_runner$(inception_runner_suffix).o
+inception_selfhost_shared_object_path = $(INCEPTION_SELFHOST_OBJ_ROOT)/shared/release/$(call inception_stem,$(1)).o
 INCEPTION_RESTORED_CPPGM_SELF ?= $(call inception_self_binary_path,cppgm++)
 inception_entry_object_path = $(call inception_objdir,$(1))/$(call inception_stem,$(INCEPTION_ENTRY_$(1)))$(inception_entry_suffix).o
 inception_entry_depfile_path = $(call inception_depdir,$(1))/$(call inception_stem,$(INCEPTION_ENTRY_$(1)))$(inception_entry_suffix).d
@@ -301,6 +338,10 @@ inception_shared_object_path = $(INCEPTION_SHARED_OBJDIR)/$(call inception_stem,
 inception_shared_depfile_path = $(INCEPTION_SHARED_DEPDIR)/$(call inception_stem,$(1)).d
 inception_object_list = $(foreach src,$(INCEPTION_SOURCES_$(1)),$(call inception_shared_object_path,$(src)))
 inception_link_inputs = $(call inception_entry_object_path,$(1)) $(call inception_object_list,$(1)) $(if $(filter 1,$(CPPGM_TEST_RUNNER)),$(inception_runner_object_path))
+# Build never-seen objects in a separate recursive pass, but keep final linking
+# on inception_link_inputs.
+inception_missing_link_inputs = $(strip $(foreach obj,$(call inception_link_inputs,$(1)),$(if $(wildcard $(obj)),,$(obj))))
+inception_existing_link_inputs = $(filter-out $(call inception_missing_link_inputs,$(1)),$(call inception_link_inputs,$(1)))
 inception_stage_binary = $(call inception_self_binary_path,$(INCEPTION_CHECKPOINT_FOR_$(1)))
 INCEPTION_INCEPTION_CXX ?= $(call inception_self_binary_path,cppgm++)
 
@@ -323,12 +364,15 @@ cppgm++-inception-from-restored-self:
 		echo "missing restored self compiler: $(INCEPTION_RESTORED_CPPGM_SELF)" >&2; \
 		exit 2; \
 	fi
-	$(MAKE) "$(call inception_inception_binary_path,cppgm++)" \
+	+env MAKEFLAGS= $(MAKE) -j$(INCEPTION_BUILD_JOBS) "$(call inception_inception_binary_path,cppgm++)" \
 		INCEPTION_COMPILER_FLAVOR=inception \
+		INCEPTION_COMPARE_OBJECTS=0 \
 		INCEPTION_OUTPUT_SUFFIX=-inception \
 		INCEPTION_OBJ_ROOT_BASE="$(INCEPTION_OBJ_ROOT_BASE)" \
 		INCEPTION_BIN_ROOT_BASE="$(INCEPTION_BIN_ROOT_BASE)" \
 		INCEPTION_SELFHOST_OPT_LEVEL="$(INCEPTION_SELFHOST_OPT_LEVEL)" \
+		INCEPTION_BUILD_JOBS="$(INCEPTION_BUILD_JOBS)" \
+		INCEPTION_BUILD_MISSING_FIRST="$(INCEPTION_BUILD_MISSING_FIRST)" \
 		CXX="$(INCEPTION_RESTORED_CPPGM_SELF)" \
 		CPPGM_HOST_CXX="$(CPPGM_HOST_CXX)" \
 		CPPGM_STDLIB_FLAGS="$(CPPGM_STDLIB_FLAGS)" \
@@ -360,6 +404,125 @@ compiler-ready:
 		fi; \
 	fi
 
+probe-compiler-ready:
+	@if [ -x "$(PROBE_CXX)" ]; then \
+		exit 0; \
+	fi; \
+	if command -v "$(PROBE_CXX)" >/dev/null 2>&1; then \
+		exit 0; \
+	fi; \
+	if [ "$(PROBE_CXX)" = "../dev/cppgm++" ]; then \
+		$(MAKE) -C ../dev cppgm++ \
+			CXX="$(CPPGM_HOST_CXX)" \
+			CPPGM_HOST_CXX="$(CPPGM_HOST_CXX)" \
+			CPPGM_TEST_RUNNER="$(CPPGM_TEST_RUNNER)"; \
+	else \
+		echo "missing probe compiler: $(PROBE_CXX)" >&2; \
+		exit 1; \
+	fi
+
+probe-self-object: probe-compiler-ready $(INCEPTION_BUILTIN_HOST_CONFIG)
+	@if [ -z "$(strip $(SOURCE))" ]; then \
+		echo "Usage: make probe-self-object SOURCE=../dev/src/<file>.cpp [PROBE_CXX=../dev/cppgm++]" >&2; \
+		exit 2; \
+	fi
+	@src='$(SOURCE)'; \
+	case "$$src" in \
+		dev/*) src="../$$src" ;; \
+		./dev/*) src="../$${src#./}" ;; \
+	esac; \
+	if [ ! -f "$$src" ]; then \
+		echo "missing source: $$src" >&2; \
+		exit 2; \
+	fi; \
+	stem=$$(basename "$$src" .cpp); \
+	case "$$src" in \
+		../dev/src/test_runner.cpp) \
+			kind=runner; \
+			obj="$(PROBE_SHARED_OBJDIR)/test_runner$(inception_runner_suffix).o"; \
+			dep="$(PROBE_SHARED_DEPDIR)/test_runner$(inception_runner_suffix).d" ;; \
+		../dev/src/*.cpp) \
+			kind=shared; \
+			obj="$(PROBE_SHARED_OBJDIR)/$$stem.o"; \
+			dep="$(PROBE_SHARED_DEPDIR)/$$stem.d" ;; \
+		../dev/*.cpp) \
+			kind=entry; \
+			obj="$(PROBE_OBJ_ROOT)/$$stem/release/$$stem$(inception_entry_suffix).o"; \
+			dep="$(PROBE_OBJ_ROOT)/$$stem/release/.d/$$stem$(inception_entry_suffix).d" ;; \
+		*) \
+			echo "unsupported probe source: $$src" >&2; \
+			echo "Use ../dev/src/<file>.cpp, dev/src/<file>.cpp, or ../dev/<tool>.cpp" >&2; \
+			exit 2 ;; \
+	esac; \
+	mkdir -p "$${obj%/*}" "$${dep%/*}"; \
+	echo "PROBE source: $$src"; \
+	echo "PROBE compiler: $(PROBE_CXX)"; \
+	echo "PROBE object: $$obj"; \
+	echo "PROBE depfile: $$dep"; \
+	if [ "$$kind" = runner ]; then \
+		perl ../scripts/run_with_timeout.pl --timeout-sec "$(PROBE_TIMEOUT_SEC)" --label "probe self compile $$src" -- $(PROBE_CXX) $(INCEPTION_CC_FLAGS) $(TEST_RUNNER_SHARED_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF "$$dep" -c -o "$$obj" "$$src"; \
+	elif [ "$$kind" = entry ]; then \
+		perl ../scripts/run_with_timeout.pl --timeout-sec "$(PROBE_TIMEOUT_SEC)" --label "probe self compile $$src" -- $(PROBE_CXX) $(INCEPTION_ENTRY_CC_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF "$$dep" -c -o "$$obj" "$$src"; \
+	else \
+		perl ../scripts/run_with_timeout.pl --timeout-sec "$(PROBE_TIMEOUT_SEC)" --label "probe self compile $$src" -- $(PROBE_CXX) $(INCEPTION_CC_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF "$$dep" -c -o "$$obj" "$$src"; \
+	fi
+
+probe-self-link:
+	@if [ -z "$(filter $(PROBE_TARGET),$(CHECKPOINTS))" ]; then \
+		echo "unknown PROBE_TARGET=$(PROBE_TARGET)" >&2; \
+		echo "known targets: $(CHECKPOINTS)" >&2; \
+		exit 2; \
+	fi
+	@src='$(SOURCE)'; \
+	case "$$src" in \
+		dev/*) src="../$$src" ;; \
+		./dev/*) src="../$${src#./}" ;; \
+	esac; \
+	stem=$$(basename "$$src" .cpp); \
+	case "$$src" in \
+		../dev/src/test_runner.cpp) \
+			probe_obj="$(PROBE_SHARED_OBJDIR)/test_runner$(inception_runner_suffix).o"; \
+			canon_obj="$(PROBE_CANON_OBJ_ROOT)/shared/release/test_runner$(inception_runner_suffix).o" ;; \
+		../dev/src/*.cpp) \
+			probe_obj="$(PROBE_SHARED_OBJDIR)/$$stem.o"; \
+			canon_obj="$(PROBE_CANON_OBJ_ROOT)/shared/release/$$stem.o" ;; \
+		../dev/*.cpp) \
+			probe_obj="$(PROBE_OBJ_ROOT)/$$stem/release/$$stem$(inception_entry_suffix).o"; \
+			canon_obj="$(PROBE_CANON_OBJ_ROOT)/$$stem/release/$$stem$(inception_entry_suffix).o" ;; \
+		*) \
+			echo "unsupported probe source: $$src" >&2; \
+			exit 2 ;; \
+	esac; \
+	mkdir -p "$(PROBE_BIN_ROOT)"; \
+	inputs=; replaced=0; \
+	for input in $(subst $(INCEPTION_OBJ_ROOT),$(PROBE_CANON_OBJ_ROOT),$(call inception_link_inputs,$(PROBE_TARGET))); do \
+		use="$$input"; \
+		if [ "$$input" = "$$canon_obj" ]; then \
+			use="$$probe_obj"; \
+			replaced=1; \
+		fi; \
+		inputs="$$inputs $$use"; \
+	done; \
+	if [ "$$replaced" != 1 ]; then \
+		echo "probe object $$canon_obj is not part of PROBE_TARGET=$(PROBE_TARGET)" >&2; \
+		exit 2; \
+	fi; \
+	$(MAKE) probe-self-object SOURCE='$(SOURCE)' PROBE_CXX='$(PROBE_CXX)' PROBE_TIMEOUT_SEC='$(PROBE_TIMEOUT_SEC)' || exit $$?; \
+	missing=0; \
+	for input in $$inputs; do \
+		if [ ! -f "$$input" ]; then \
+			echo "missing link input: $$input" >&2; \
+			missing=1; \
+		fi; \
+	done; \
+	if [ "$$missing" != 0 ]; then \
+		echo "Build the canonical self checkpoint first, then rerun this scratch link." >&2; \
+		exit 2; \
+	fi; \
+	echo "PROBE link target: $(PROBE_TARGET)"; \
+	echo "PROBE binary: $(PROBE_LINK_OUTPUT)"; \
+	$(CPPGM_HOST_CXX) $(INCEPTION_LINK_FLAGS) -I../dev/src -o "$(PROBE_LINK_OUTPUT)" $$inputs
+
 $(INCEPTION_BUILTIN_HOST_CONFIG): FORCE
 	@mkdir -p $(dir $@)
 	@CPPGM_BUILD_HOST_CXX='$(CPPGM_HOST_CXX)' \
@@ -374,9 +537,16 @@ $(INCEPTION_BUILTIN_HOST_CONFIG): FORCE
 		CPPGM_TEST_RUNNER="$(CPPGM_TEST_RUNNER)"
 
 define INCEPTION_SOURCE_RULE
-$(call inception_shared_object_path,$(1)): $(1) $(INCEPTION_CXX_DEP) | compiler-ready $(INCEPTION_SHARED_OBJDIR) $(INCEPTION_SHARED_DEPDIR)
+$(call inception_shared_object_path,$(1)): $(1) $(INCEPTION_CXX_DEP) $(if $(filter 1,$(INCEPTION_COMPARE_OBJECTS)),$(call inception_selfhost_shared_object_path,$(1))) | compiler-ready $(INCEPTION_SHARED_OBJDIR) $(INCEPTION_SHARED_DEPDIR)
 	@mkdir -p $$(@D) $(INCEPTION_SHARED_DEPDIR)
-	$(CXX) $(INCEPTION_CC_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF $(call inception_shared_depfile_path,$(1)) -c -o $$@ $$<
+	perl ../scripts/run_with_timeout.pl --timeout-sec "$(INCEPTION_COMPILE_TIMEOUT_SEC)" --label "$(INCEPTION_COMPILER_FLAVOR) compile $$<" -- $(CXX) $(INCEPTION_CC_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF $(call inception_shared_depfile_path,$(1)) -c -o $$@ $$<
+	@if [ "$(INCEPTION_COMPARE_OBJECTS)" = "1" ]; then \
+		if ! cmp -s "$(call inception_selfhost_shared_object_path,$(1))" "$$@"; then \
+			echo "object mismatch: $(call inception_selfhost_shared_object_path,$(1)) != $$@" >&2; \
+			exit 1; \
+		fi; \
+		echo "MATCH object: $$@"; \
+	fi
 endef
 
 $(INCEPTION_BIN_ROOT):
@@ -387,21 +557,46 @@ $(INCEPTION_SHARED_OBJDIR) $(INCEPTION_SHARED_DEPDIR):
 
 $(call inception_shared_object_path,../dev/src/preprocessor.cpp): $(INCEPTION_BUILTIN_HOST_CONFIG)
 
-$(inception_runner_object_path): ../dev/src/test_runner.cpp $(INCEPTION_CXX_DEP) | compiler-ready $(INCEPTION_SHARED_OBJDIR) $(INCEPTION_SHARED_DEPDIR)
+$(inception_runner_object_path): ../dev/src/test_runner.cpp $(INCEPTION_CXX_DEP) $(if $(filter 1,$(INCEPTION_COMPARE_OBJECTS)),$(inception_selfhost_runner_object_path)) | compiler-ready $(INCEPTION_SHARED_OBJDIR) $(INCEPTION_SHARED_DEPDIR)
 	@mkdir -p $(@D) $(INCEPTION_SHARED_DEPDIR)
-	$(CXX) $(INCEPTION_CC_FLAGS) $(TEST_RUNNER_SHARED_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF $(inception_runner_depfile_path) -c -o $@ $<
+	perl ../scripts/run_with_timeout.pl --timeout-sec "$(INCEPTION_COMPILE_TIMEOUT_SEC)" --label "$(INCEPTION_COMPILER_FLAVOR) compile $<" -- $(CXX) $(INCEPTION_CC_FLAGS) $(TEST_RUNNER_SHARED_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF $(inception_runner_depfile_path) -c -o $@ $<
+	@if [ "$(INCEPTION_COMPARE_OBJECTS)" = "1" ]; then \
+		if ! cmp -s "$(inception_selfhost_runner_object_path)" "$@"; then \
+			echo "object mismatch: $(inception_selfhost_runner_object_path) != $@" >&2; \
+			exit 1; \
+		fi; \
+		echo "MATCH object: $@"; \
+	fi
 
 define INCEPTION_CHECKPOINT_RULES
 $(call inception_objdir,$(1)) $(call inception_depdir,$(1)):
 	@mkdir -p $$@
 
-$(call inception_entry_object_path,$(1)): $(INCEPTION_ENTRY_$(1)) $(INCEPTION_CXX_DEP) | compiler-ready $(call inception_objdir,$(1)) $(call inception_depdir,$(1))
+$(call inception_entry_object_path,$(1)): $(INCEPTION_ENTRY_$(1)) $(INCEPTION_CXX_DEP) $(if $(filter 1,$(INCEPTION_COMPARE_OBJECTS)),$(call inception_selfhost_entry_object_path,$(1))) | compiler-ready $(call inception_objdir,$(1)) $(call inception_depdir,$(1))
 	@mkdir -p $$(@D) $(call inception_depdir,$(1))
-	$(CXX) $(INCEPTION_ENTRY_CC_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF $(call inception_entry_depfile_path,$(1)) -c -o $$@ $$<
+	perl ../scripts/run_with_timeout.pl --timeout-sec "$(INCEPTION_COMPILE_TIMEOUT_SEC)" --label "$(INCEPTION_COMPILER_FLAVOR) compile $$<" -- $(CXX) $(INCEPTION_ENTRY_CC_FLAGS) $(foreach inc,$(INCEPTION_INCLUDE_PATHS),-I$(inc)) $(foreach def,$(INCEPTION_DEFINES),-D$(def)) -MMD -MP -MF $(call inception_entry_depfile_path,$(1)) -c -o $$@ $$<
+	@if [ "$(INCEPTION_COMPARE_OBJECTS)" = "1" ]; then \
+		if ! cmp -s "$(call inception_selfhost_entry_object_path,$(1))" "$$@"; then \
+			echo "object mismatch: $(call inception_selfhost_entry_object_path,$(1)) != $$@" >&2; \
+			exit 1; \
+		fi; \
+		echo "MATCH object: $$@"; \
+	fi
 
-$(call inception_binary_path,$(1)): $(call inception_link_inputs,$(1)) | $(INCEPTION_BIN_ROOT)
+$(call inception_binary_path,$(1)): FORCE | $(INCEPTION_BIN_ROOT)
+	+@if [ "$(INCEPTION_BUILD_MISSING_FIRST)" = "1" ] && [ -n "$(call inception_missing_link_inputs,$(1))" ]; then \
+		echo "Building missing $(1) objects first"; \
+		env MAKEFLAGS= $$(MAKE) -j$(INCEPTION_OBJECT_BUILD_JOBS) $(call inception_missing_link_inputs,$(1)); \
+	fi
+	+@if [ "$(INCEPTION_BUILD_MISSING_FIRST)" = "1" ]; then \
+		if [ -n "$(call inception_existing_link_inputs,$(1))" ]; then \
+			env MAKEFLAGS= $$(MAKE) -j$(INCEPTION_OBJECT_BUILD_JOBS) $(call inception_existing_link_inputs,$(1)); \
+		fi; \
+	else \
+		env MAKEFLAGS= $$(MAKE) -j$(INCEPTION_OBJECT_BUILD_JOBS) $(call inception_link_inputs,$(1)); \
+	fi
 	@rm -f "$(call inception_link_output_path,$(1))"
-	$(CPPGM_HOST_CXX) $(INCEPTION_LINK_FLAGS) -I../dev/src -o "$(call inception_link_output_path,$(1))" $$^
+	$(CPPGM_HOST_CXX) $(INCEPTION_LINK_FLAGS) -I../dev/src -o "$(call inception_link_output_path,$(1))" $(call inception_link_inputs,$(1))
 	@mv -f "$(call inception_link_output_path,$(1))" $$@
 
 $(1)-self: $(call inception_binary_path,$(1))
@@ -469,13 +664,15 @@ test-through-$(1): $(if $(INCEPTION_PREV_STAGE_$(1)),test-through-$(INCEPTION_PR
 endef
 
 define INCEPTION_INCEPTION_RULES
-$(1)-inception: cppgm++-self
-	$$(MAKE) "$(call inception_inception_binary_path,$(1))" \
+$(1)-inception: cppgm++-self $(1)-self
+	+env MAKEFLAGS= $$(MAKE) -j$(INCEPTION_BUILD_JOBS) "$(call inception_inception_binary_path,$(1))" \
 		INCEPTION_COMPILER_FLAVOR=inception \
 		INCEPTION_OUTPUT_SUFFIX=-inception \
 		INCEPTION_OBJ_ROOT_BASE="$(INCEPTION_OBJ_ROOT_BASE)" \
 		INCEPTION_BIN_ROOT_BASE="$(INCEPTION_BIN_ROOT_BASE)" \
 		INCEPTION_SELFHOST_OPT_LEVEL="$(INCEPTION_SELFHOST_OPT_LEVEL)" \
+		INCEPTION_BUILD_JOBS="$(INCEPTION_BUILD_JOBS)" \
+		INCEPTION_BUILD_MISSING_FIRST="$(INCEPTION_BUILD_MISSING_FIRST)" \
 		CXX="$(INCEPTION_INCEPTION_CXX)" \
 		CPPGM_HOST_CXX="$(CPPGM_HOST_CXX)" \
 		CPPGM_STDLIB_FLAGS="$(CPPGM_STDLIB_FLAGS)" \
@@ -504,6 +701,7 @@ clean:
 	inception compare-inception bitcmp \
 	cppgm++-inception-from-restored-self \
 	compare-cppgm++-inception-from-restored-self \
+	probe-compiler-ready probe-self-object probe-self-link \
 	$(TARGETS) $(INCEPTION_TARGETS) $(INCEPTION_COMPARE_TARGETS) \
 	$(TEST_TARGETS) $(THROUGH_TARGETS) $(TEST_THROUGH_TARGETS) \
 	$(PA_THROUGH_TARGETS) $(PA_TEST_THROUGH_TARGETS) $(PA_TEST_TARGETS) \

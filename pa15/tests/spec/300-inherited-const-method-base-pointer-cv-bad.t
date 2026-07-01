@@ -1,5 +1,5 @@
 // VALIDATION: compile-fail
-// N3485 focus: 4.10 [conv.ptr], 10 [class.derived], 13.3.1.1.1 [over.match.funcs]
+// N3485 focus: 4.10 [conv.ptr], 10 [class.derived], 13.3.1 [over.match.funcs]
 
 struct Cell
 {

@@ -20,4 +20,5 @@ std::string f2()
   std::sort(v.begin(), v.end(), [](const Local& a, const Local& b) { return a.s < b.s; });
   return std::string();
 }
-int main() { return 0; }
+static_assert(sizeof(&f1) > 0, "first local-class sort body anchor");
+static_assert(sizeof(&f2) > 0, "second local-class sort body anchor");

@@ -1,0 +1,52 @@
+declare function @get_expr() -> ptr [binding=strong, object=_Z8get_exprv]
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $cond__1 : i32
+
+  block ^entry:
+    %t1 = call ptr @get_expr()
+    %t2 = call i64 @detail__expression_detail__matcher_traits____get_width(%t1)
+    %t3 = convert sext i64 i32 1
+    %t4 = cmp eq i64 %t2, %t3
+    branch %t4, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t5 = load i32 $cond__1
+    return i32 %t5
+}
+function @detail__expression_detail__matcher_traits____get_width(%this : ptr) -> i64 [binding=weak, object=_ZNK6detail10expressionINS_7matcherI6traitsEEE9get_widthEv] {
+  slot $this : ptr
+  slot $argobj__1 : obj<1x1>
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = addr $argobj__1
+    call void @mpl___size_t_1___size_t(%t2)
+    %t3 = call i64 @detail__expression_detail__matcher_traits____get_width___ov2(%t1, $argobj__1)
+    return i64 %t3
+}
+function @mpl___size_t_1___size_t(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4mpl_6size_tILm1EEC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @detail__expression_detail__matcher_traits____get_width___ov2(%this : ptr, %__param1 : obj<1x1>) -> i64 [binding=weak, object=_ZNK6detail10expressionINS_7matcherI6traitsEEE10get_width_ILm1EEEmN4mpl_6size_tIXT_EEE] {
+  slot $this : ptr
+  slot $__param1 : obj<1x1>
+
+  block ^entry:
+    store ptr %this, $this
+    return i64 1
+}
+alias object _ZN4mpl_6size_tILm1EEC2Ev = @mpl___size_t_1___size_t

@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa22/tests/general/500-source-owner-member-template-sfinae-default.t:55:3
+    template string_like
+    selected primary
+    bind #1 = char source=explicit
+  function-call at pa22/tests/general/500-source-owner-member-template-sfinae-default.t:57:12
+    callee string_like<char>::insert
+    selected instantiation
+    bind #1 = view_like source=deduced
+template-closure-events
+  ensure-definition
+    entity string_like<char>::insert
+  function-instantiation
+    entity string_like<char>::insert
+  require-definition
+    entity string_like<char>::insert

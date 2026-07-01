@@ -67,11 +67,37 @@ cppgm++ --emit-lowir -gline-tables-only -O2 -o <outfile> <srcfile>...
 
 The ordinary `cppgm++ -c` and link-driver paths must also accept `-O0`, `-O1`,
 and `-O2` and use the same LowIR optimization level before object generation.
+Compile mode must also accept serialized LowIR text as an input:
+
+```sh
+cppgm++ -c -O0 -o <objfile> <lowirfile>
+cppgm++ -c -O1 -o <objfile> <lowirfile>
+cppgm++ -c -O2 -o <objfile> <lowirfile>
+```
+
+This LowIR object input mode parses LowIR text, runs the same object-prep and
+optimization path used by source object compilation, and writes the same
+host-compatible relocatable object format.
 
 ### Output Format
 
 `lowiropt` writes LowIR text to `<outfile>`. The output must remain valid LowIR
 and must preserve the behavior of every defined input program.
+
+The optimizer works on the same LowIR program representation that the object
+path consumes. It may use typed internal data structures, but optimized output
+must serialize back to valid LowIR, and object generation at a chosen
+optimization level must not require extra semantic facts unavailable from that
+optimized LowIR text.
+
+This LowIR/object boundary is a required PA37 contract. A correct compile path
+may keep LowIR in memory for speed, but it must not pass private frontend or
+semantic side data around the serialized LowIR representation. If object
+emission needs a fact after optimization, that fact must either be represented
+in LowIR or derived again by the object-lowering layer from LowIR. The direct
+`cppgm++ -c` source object and the object produced by `--emit-lowir -O0`
+followed by `cppgm++ -c -O<level>` on that LowIR file should therefore match
+for the same source, flags, and optimization level.
 
 LowIR top-level declaration/definition order is a presentation convention, not
 a dependency order. Reference outputs and canonical dumps use the order defined
@@ -185,6 +211,7 @@ make test
 - `tests/o2`
 - `tests/driver/o1`
 - `tests/driver/o2`
+- `tests/object-roundtrip`
 
 These directories are organized by tool mode and validation mode, not by N3485
 source-language clauses.
@@ -194,12 +221,24 @@ source-language clauses.
 - `tests/o2` runs `lowiropt -O2` on handwritten LowIR.
 - `tests/driver/o1` runs `cppgm++ --emit-lowir -g0 -O1` on source programs.
 - `tests/driver/o2` runs `cppgm++ --emit-lowir -g0 -O2` on source programs.
+- `tests/object-roundtrip` compares direct `cppgm++ -c` output against an
+  object produced by `cppgm++ --emit-lowir -O0` followed by `cppgm++ -c` on
+  the generated LowIR file. This checks that object emission can be
+  reconstructed from serialized LowIR instead of from hidden frontend side
+  data. These tests may be standalone `.cpp` files or symlinks to existing
+  `.t` harness cases; a selected `.t` test expands to its numbered `.t.1`,
+  `.t.2`, ... source files when those sidecars exist. The harness checks
+  no-debug objects at `-O0`, `-O1`, and `-O2`.
 
 Run the debug metadata preservation lanes with:
 
 ```sh
 make test-debuginfo
 ```
+
+This also runs `tests/object-roundtrip` in debuginfo mode, comparing direct
+`cppgm++ -c` output against LowIR-input `cppgm++ -c` output with
+`-gline-tables-only` at `-O0` and `-O1`.
 
 `make test-debuginfo` runs:
 

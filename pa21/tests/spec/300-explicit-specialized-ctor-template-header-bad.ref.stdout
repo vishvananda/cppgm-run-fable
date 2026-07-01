@@ -1,0 +1,10 @@
+ERROR: member of explicit class specialization must not use template<> at tests/spec/300-explicit-specialized-ctor-template-header-bad.t:4:1 [top-level declaration 2 kind=template-declaration ast={template-declaration
+  template-parameter-clause
+  special-member-definition box<int>::box
+    declarator
+      identifier box<int>::box
+      parameter-clause
+    compound-statement
+}]
+Diagnostic context:
+collect_template_declaration [template<>box<int>::box(){}] at tests/spec/300-explicit-specialized-ctor-template-header-bad.t:16:1

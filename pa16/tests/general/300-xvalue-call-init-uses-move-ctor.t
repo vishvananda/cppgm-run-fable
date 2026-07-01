@@ -23,4 +23,4 @@ int main()
   Owner moved = make(source);
   return source.ptr == 0 && moved.ptr == &value ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

@@ -1,0 +1,5 @@
+translation-unit
+  class-use at pa21/tests/general/300-template-specialization-qualified-constructor-declaration.t:7:1
+    template S
+    selected primary
+    bind #1 = int source=explicit

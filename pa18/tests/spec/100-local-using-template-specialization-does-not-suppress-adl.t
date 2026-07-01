@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 3.4.2 [basic.lookup.argdep], 7.3.3 [namespace.udecl]
 
 namespace boost_no_using_breaks_adl

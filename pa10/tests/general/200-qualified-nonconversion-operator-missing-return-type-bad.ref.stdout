@@ -1,1 +1,0 @@
-ERROR: tests/general/200-qualified-nonconversion-operator-missing-return-type-bad.t: expected declaration near TT_IDENTIFIER:C at token 13 at tests/general/200-qualified-nonconversion-operator-missing-return-type-bad.t:5:1

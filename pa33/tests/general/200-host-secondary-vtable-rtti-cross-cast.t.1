@@ -1,11 +1,9 @@
-#include <exception>
-
 struct Tag
 {
   virtual ~Tag() {}
 };
 
-struct HostError : virtual Tag, virtual std::exception
+struct HostError : virtual Tag
 {
   virtual ~HostError() {}
 };
@@ -30,13 +28,13 @@ struct WrappedError : CloneBase, Error, EmptyBase
   virtual ~WrappedError() {}
 };
 
-int check_std_catch()
+int check_secondary_catch()
 {
   try
   {
     throw WrappedError<DerivedError>();
   }
-  catch (std::exception const & error)
+  catch (HostError const & error)
   {
     return dynamic_cast<Tag const *>(&error) ? 0 : 2;
   }
@@ -66,7 +64,7 @@ int check_base_catch()
 
 int main()
 {
-  int result = check_std_catch();
+  int result = check_secondary_catch();
   if(result != 0)
   {
     return result;

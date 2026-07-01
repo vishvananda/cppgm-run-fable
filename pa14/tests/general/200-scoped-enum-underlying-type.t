@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 7.2 [dcl.enum]
 
 enum class Flag : unsigned short

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Reduced from Boost.Proto via Boost.Xpressive.
 // A using-declaration may name an inherited type alias as the qualifier for an
 // inherited member operator template while the derived class reference members

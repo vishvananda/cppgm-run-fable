@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Direct-object ABI parameters are already initialized at the call boundary.
 // Materializing the local parameter slot must copy the object payload, not pass
 // the payload itself as the address of a constructor source object.

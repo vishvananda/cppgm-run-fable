@@ -161,6 +161,15 @@ The checked-in PA32 tests cover:
 - duplicate-definition/coalescing behavior for inline and template output
 - host symbol spelling for user-defined entities and selected template cases
 
+PA32 does not require hosted standard-library header support. Your compiler does
+not need hosted include search, hosted preprocessor compatibility, or semantic
+support for hosted headers such as `<exception>` or `<typeinfo>` yet. The PA32
+tests cover object emission, host linking, symbol spelling, and cross-object
+interoperability through declarations and helper objects that expose the object
+boundary directly. Hosted header compatibility begins in a later assignment, and
+hosted exception-library runtime behavior is introduced after hosted headers
+compile.
+
 ### Using PA30 ABI Names
 
 PA32 is still before the broader host C++ ABI/runtime stage in PA33, but ordinary

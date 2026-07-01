@@ -1,0 +1,10 @@
+translation-unit
+  class-use at pa21/tests/spec/300-explicit-instantiation-static-member-function.t:20:10
+    template tester
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  ensure-definition
+    entity tester<int>::test
+  function-instantiation
+    entity tester<int>::test

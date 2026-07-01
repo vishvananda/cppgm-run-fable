@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // HHC-102
 
 typedef unsigned long uintptr_t;

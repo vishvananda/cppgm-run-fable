@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-reference-pass-nonptr.t:1: function @main parameter %x with pass mode 'reference' must have type ptr

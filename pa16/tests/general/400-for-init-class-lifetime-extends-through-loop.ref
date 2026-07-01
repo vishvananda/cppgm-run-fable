@@ -1,16 +1,12 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
-
 global @live : i32 [binding=strong, object=_Z4live] = 0
 global @destroyed : i32 [binding=strong, object=_Z9destroyed] = 0
 
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
   slot $saw_live : i32
   slot $current : obj<1x1>
-  slot $call__1 : u8
-  slot $cond__2 : i32
+  slot $cond__1 : i32
+  slot $land__2 : i64
   slot $land__3 : i64
-  slot $land__4 : i64
 
   block ^entry:
     store i32 0, $saw_live
@@ -19,25 +15,13 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     jump ^for_cond_1
 
   block ^for_cond_1:
-    eh_try ^call_unwind_dispatch_5
     %t2 = addr $current
     %t3 = call u8 @Guard__operatorbool(%t2)
-    store u8 %t3, $call__1
-    %t4 = load u8 $call__1
-    eh_end
-    jump ^call_unwind_end_6
-
-  block ^call_unwind_dispatch_5:
-    %t5 = addr $current
-    call void @Guard___Guard(%t5)
-    resume
-
-  block ^call_unwind_end_6:
-    branch %t4, ^for_body_2, ^for_end_4
+    branch %t3, ^for_body_2, ^for_end_4
 
   block ^for_body_2:
-    %t6 = load i32 @live
-    store i32 %t6, $saw_live
+    %t4 = load i32 @live
+    store i32 %t4, $saw_live
     jump ^for_iter_3
 
   block ^for_iter_3:
@@ -45,55 +29,55 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     jump ^for_cond_1
 
   block ^for_end_4:
-    %t7 = addr $current
-    call void @Guard___Guard(%t7)
-    %t8 = load i32 $saw_live
-    %t9 = cmp eq i32 %t8, 1
-    branch %t9, ^land_rhs_13, ^land_short_14
+    %t5 = addr $current
+    call void @Guard___Guard(%t5)
+    %t6 = load i32 $saw_live
+    %t7 = cmp eq i32 %t6, 1
+    branch %t7, ^land_rhs_11, ^land_short_12
 
-  block ^land_rhs_13:
-    %t10 = load i32 @live
-    %t11 = cmp eq i32 %t10, 0
-    %t12 = cmp ne i64 %t11, 0
-    store i64 %t12, $land__4
-    jump ^land_end_15
+  block ^land_rhs_11:
+    %t8 = load i32 @live
+    %t9 = cmp eq i32 %t8, 0
+    %t10 = cmp ne i64 %t9, 0
+    store i64 %t10, $land__3
+    jump ^land_end_13
 
-  block ^land_short_14:
-    store i64 0, $land__4
-    jump ^land_end_15
-
-  block ^land_end_15:
-    %t13 = load i64 $land__4
-    branch %t13, ^land_rhs_10, ^land_short_11
-
-  block ^land_rhs_10:
-    %t14 = load i32 @destroyed
-    %t15 = cmp eq i32 %t14, 1
-    %t16 = cmp ne i64 %t15, 0
-    store i64 %t16, $land__3
-    jump ^land_end_12
-
-  block ^land_short_11:
+  block ^land_short_12:
     store i64 0, $land__3
-    jump ^land_end_12
+    jump ^land_end_13
 
-  block ^land_end_12:
-    %t17 = load i64 $land__3
-    branch %t17, ^cond_then_7, ^cond_else_8
+  block ^land_end_13:
+    %t11 = load i64 $land__3
+    branch %t11, ^land_rhs_8, ^land_short_9
 
-  block ^cond_then_7:
-    store i32 0, $cond__2
-    jump ^cond_end_9
+  block ^land_rhs_8:
+    %t12 = load i32 @destroyed
+    %t13 = cmp eq i32 %t12, 1
+    %t14 = cmp ne i64 %t13, 0
+    store i64 %t14, $land__2
+    jump ^land_end_10
 
-  block ^cond_else_8:
-    store i32 1, $cond__2
-    jump ^cond_end_9
+  block ^land_short_9:
+    store i64 0, $land__2
+    jump ^land_end_10
 
-  block ^cond_end_9:
-    %t18 = load i32 $cond__2
-    return i32 %t18
+  block ^land_end_10:
+    %t15 = load i64 $land__2
+    branch %t15, ^cond_then_5, ^cond_else_6
+
+  block ^cond_then_5:
+    store i32 0, $cond__1
+    jump ^cond_end_7
+
+  block ^cond_else_6:
+    store i32 1, $cond__1
+    jump ^cond_end_7
+
+  block ^cond_end_7:
+    %t16 = load i32 $cond__1
+    return i32 %t16
 }
-function @Guard__Guard(%this : ptr) -> void [binding=weak, object=_ZN5GuardC1Ev] {
+function @Guard__Guard(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5GuardC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -101,7 +85,7 @@ function @Guard__Guard(%this : ptr) -> void [binding=weak, object=_ZN5GuardC1Ev]
     store i32 1, @live
     return void
 }
-function @Guard__operatorbool(%this : ptr) -> u8 [binding=weak, object=_ZNK5GuardcvbEv] {
+function @Guard__operatorbool(%this : ptr) -> u8 [unwind=no, binding=weak, object=_ZNK5GuardcvbEv] {
   slot $this : ptr
 
   block ^entry:
@@ -110,7 +94,7 @@ function @Guard__operatorbool(%this : ptr) -> u8 [binding=weak, object=_ZNK5Guar
     %t2 = cmp ne i32 %t1, 0
     return u8 %t2
 }
-function @Guard___Guard(%this : ptr) -> void [binding=weak, object=_ZN5GuardD1Ev] {
+function @Guard___Guard(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5GuardD1Ev] {
   slot $this : ptr
 
   block ^entry:

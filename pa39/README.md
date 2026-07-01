@@ -29,6 +29,11 @@ PA39 does not add a new language feature, command-line mode, object format, or
 runtime ABI. It reuses the compiler implementation and checks that the existing
 implementation can compile itself reproducibly.
 
+It also does not relax the LowIR or MIR boundaries established earlier. If a
+self-host or inception failure shows that object output behaves differently
+from output reconstructed through LowIR/MIR text, treat that as an earlier
+compiler contract bug rather than adding a PA39-only side channel.
+
 If the earlier assignment tests cover every language, lowering, runtime,
 linking, and optimization feature used by your implementation, PA39 should be a
 straightforward build plus a few reproducibility cleanups. In practice, the
@@ -66,6 +71,30 @@ make compare-cppgm++-inception CXX=../dev/cppgm++ CPPGM_HOST_CXX=g++
 If `../dev/cppgm++` does not exist yet, the PA39 Makefile first builds it with
 `CPPGM_HOST_CXX`.
 
+PA39 applies a per-file wall timeout to self-hosted compile steps so a single
+source file cannot stall the ladder indefinitely. The defaults are intentionally
+generous:
+
+- `INCEPTION_SELFHOST_COMPILE_TIMEOUT_SEC=900` for `*-self` object compiles
+- `INCEPTION_INCEPTION_COMPILE_TIMEOUT_SEC=3600` for `*-inception` object
+  compiles
+
+A timeout usually points to a performance or nontermination bug in an earlier
+compiler surface. Prefer reducing and fixing that bug over increasing the
+timeout.
+
+The compile wrapper also applies a default per-command RSS cap. By default,
+commands that exceed 8 GiB RSS fail with `EXIT_OOM`; set
+`CPPGM_RUN_MAX_RSS_KB=0` to disable that guard for diagnosis, or set it to a
+larger value if you have already reduced the memory use and need a temporary
+validation run.
+
+The initial `*-self` build uses the normal make parallelism default. The
+`*-inception` subbuild is capped separately with `INCEPTION_BUILD_JOBS`, which
+defaults to the smaller of the available CPU count and
+`INCEPTION_DEFAULT_BUILD_JOB_CAP=8`. Raise that only if the machine has enough
+memory for several simultaneous self-built compiler processes.
+
 ### Inception Targets
 
 The focused PA39 goal is:
@@ -86,6 +115,22 @@ make bitcmp CXX=../dev/cppgm++ CPPGM_HOST_CXX=g++
 `inception` builds all inception checkpoint binaries. `compare-inception` and
 `bitcmp` compare all self-built checkpoint binaries against their inception
 versions.
+
+During a normal in-tree inception build, PA39 also checks each newly built
+inception object before the final target link finishes. The check does not
+wait for the final executable link: it byte-compares the new inception `.o`
+against the corresponding self-host `.o` and stops at the first mismatch. That
+catches object-level reproducibility drift as soon as the responsible source
+file finishes compiling while still leaving the final linked executable compare
+as the PA39 result. The restored-self diagnostic target disables this object
+check because it may not have a matching self-host object tree.
+
+For both self-host and inception checkpoint binary builds, PA39 schedules
+missing `.o` inputs before stale existing inputs by default. If an earlier run
+stopped partway through the object tree, this usually reaches the next never-seen
+compile failure faster. The final link still uses the canonical object order, so
+the scheduling change does not affect reproducibility. Set
+`INCEPTION_BUILD_MISSING_FIRST=0` to disable this behavior.
 
 ### Intermediate Ladder
 
@@ -123,6 +168,40 @@ The test targets reuse the earlier assignment harnesses. PA39 changes which
 binary those harnesses run; it does not change the expected PA1 through PA38
 outputs.
 
+### Single-Object Probes
+
+During PA39, changing one `dev/src/*.cpp` file and then rerunning a canonical
+self-host target can rebuild every self-host object. That rebuild is correct:
+the object files depend on the compiler binary that produced them, and mixing
+objects from different compiler generations would make the inception result
+untrustworthy.
+
+For quick iteration, use a scratch object probe instead:
+
+```sh
+make probe-self-object SOURCE=../dev/src/semantic_output.cpp
+make probe-self-object SOURCE=dev/src/semantic_output.cpp
+make probe-self-object SOURCE=../dev/cppgm++.cpp
+```
+
+The probe uses the PA39 self-host compile flags and timeout, but writes to
+`../obj/pa39/probe/selfhost/...` instead of the canonical
+`../obj/pa39/selfhost/...` tree. It prints the compiler, source, object, and
+depfile paths. By default it uses `PROBE_CXX=../dev/cppgm++`; set `PROBE_CXX`
+if you need to test a different compiler binary.
+
+If the canonical checkpoint objects already exist, you can link one scratch
+replacement object into a scratch binary:
+
+```sh
+make probe-self-link SOURCE=../dev/src/semantic_output.cpp PROBE_TARGET=cppgm++
+```
+
+`probe-self-link` refuses to link if the probed object is not part of
+`PROBE_TARGET`, or if any required canonical object is missing. This keeps the
+probe from silently becoming a mixed or incomplete build. Probe targets are
+only for diagnosis; final validation still requires the canonical PA39 targets.
+
 ### Checkpoint Ownership
 
 The checkpoint used for each assignment stage is:
@@ -154,6 +233,13 @@ Do not rewrite tests around a failure, and do not add a self-hosting special
 case just to make the build move forward. Find the first incorrect behavior and
 fix the underlying parser, semantic, lowering, optimizer, backend, runtime, or
 reproducibility bug.
+
+When an inception compile is far slower than the corresponding host-seeded
+compile, look for divergent algorithmic behavior in the self-built compiler,
+not just less optimized machine instructions. A large slowdown often means the
+self-built compiler is following a different branch, repeatedly redoing
+semantic work, or missing a cache because an earlier stage miscompiled the
+compiler itself.
 
 A useful workflow is:
 

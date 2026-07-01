@@ -1,0 +1,14 @@
+translation-unit
+  class-use at pa21/tests/general/400-nontype-pack-comma-expression-syntax.t:19:10
+    template all
+    selected primary
+    bind #1 = <true> source=explicit
+  class-use at pa21/tests/general/400-nontype-pack-comma-expression-syntax.t:19:31
+    template all
+    selected primary
+    bind #1 = <false> source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_same<all_dummy<false>, all_dummy<true>>::value
+  variable-instantiation
+    entity is_same<all_dummy<true>, all_dummy<true>>::value

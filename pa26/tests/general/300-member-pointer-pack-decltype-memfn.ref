@@ -1,0 +1,109 @@
+function @test(%log : ptr, %out : ptr [pass=reference]) -> i32 [binding=strong, object=_Z4testP5log_tR6stream] {
+  slot $log : ptr
+  slot $out : ptr
+  slot $discard__1 : obj<16x8>
+  slot $argobj__2 : obj<1x1>
+
+  block ^entry:
+    store ptr %log, $log
+    store ptr %out, $out
+    %t1 = addr $discard__1
+    %t2 = addr @log_t__set_stream
+    %t3 = copy i64 %t2
+    %t4 = convert zext i128 i64 %t3
+    %t5 = load ptr $log
+    %t6 = addr $argobj__2
+    %t7 = load ptr $out
+    %t8 = call obj<16x8> @model__bind__ov2(%t4, %t5, 1, $argobj__2)
+    copyobj 16x8 %t8, %t1
+    return i32 0
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $log : obj<1x1>
+  slot $out : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $log
+    %t2 = addr $out
+    %t3 = addr $log
+    %t4 = addr $out
+    %t5 = call i32 @test(%t3, %t4)
+    return i32 %t5
+}
+function @model__bind__ov2(%f : i128, %a1 : ptr, %a2 : i32, %a3 : obj<1x1>) -> obj<16x8> [binding=weak, object=_ZN5model4bindIv5log_tiR6streamPS1_iS2_EEDTclsr5modelE4bindclsr5modelE6mem_fnfp_Efp0_fp1_fp2_EEMS1_FviS3_ET3_T4_T5_] {
+  slot $f : i128
+  slot $a1 : ptr
+  slot $a2 : i32
+  slot $a3 : obj<1x1>
+  slot $retobj__1 : obj<16x8>
+  slot $argobj__2 : obj<16x8>
+  slot $argobj__3 : obj<1x1>
+
+  block ^entry:
+    store i128 %f, $f
+    store ptr %a1, $a1
+    store i32 %a2, $a2
+    %t1 = addr $retobj__1
+    %t2 = addr $argobj__2
+    %t3 = load i128 $f
+    %t4 = call obj<16x8> @model__mem_fn(%t3)
+    copyobj 16x8 %t4, %t2
+    %t5 = load ptr $a1
+    %t6 = load i32 $a2
+    %t7 = addr $argobj__3
+    %t8 = addr $a3
+    %t9 = call obj<16x8> @model__bind($argobj__2, %t5, %t6, $argobj__3)
+    copyobj 16x8 %t9, %t1
+    return obj<16x8> $retobj__1
+}
+function @model__mem_fn(%pmf : i128) -> obj<16x8> [binding=weak, object=_ZN5model6mem_fnIv5log_tJiR6streamEEENS_16function_wrapperIMS1_FviS3_EvS1_JiS3_EEES7_] {
+  slot $pmf : i128
+  slot $out : obj<16x8>
+  slot $retobj__1 : obj<16x8>
+
+  block ^entry:
+    store i128 %pmf, $pmf
+    %t1 = addr $out
+    %t2 = load i128 $pmf
+    %t3 = addr $out
+    %t4 = index i8 [projection=field] %t3, 0
+    store i128 %t2, %t4
+    %t5 = addr $retobj__1
+    %t6 = addr $out
+    copyobj 16x8 %t6, %t5
+    return obj<16x8> $retobj__1
+}
+function @model__bind(%f : obj<16x8>, %__param1 : ptr, %__param2 : i32, %__param3 : obj<1x1>) -> obj<16x8> [binding=weak, object=_ZN5model4bindINS_16function_wrapperIM5log_tFviR6streamEvS3_JiS5_EEEJPS3_iS4_EEENS_6bind_tINS_11unspecifiedET_NS_7list_avIJDpT0_EE4typeEEESD_DpSF_] {
+  slot $f : obj<16x8>
+  slot $__param1 : ptr
+  slot $__param2 : i32
+  slot $__param3 : obj<1x1>
+  slot $out : obj<16x8>
+  slot $retobj__1 : obj<16x8>
+
+  block ^entry:
+    %t1 = addr $f
+    copyobj 16x8 %f, %t1
+    store ptr %__param1, $__param1
+    store i32 %__param2, $__param2
+    %t2 = addr $out
+    %t3 = addr $out
+    %t4 = index i8 [projection=field] %t3, 0
+    %t5 = addr $f
+    copyobj 16x8 %t5, %t4
+    %t6 = addr $retobj__1
+    %t7 = addr $out
+    copyobj 16x8 %t7, %t6
+    return obj<16x8> $retobj__1
+}
+function @log_t__set_stream(%this : ptr, %__param1 : i32, %__param2 : ptr [pass=reference]) -> void [binding=weak, object=_ZN5log_t10set_streamEiR6stream] {
+  slot $this : ptr
+  slot $__param1 : i32
+  slot $__param2 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store i32 %__param1, $__param1
+    store ptr %__param2, $__param2
+    return void
+}

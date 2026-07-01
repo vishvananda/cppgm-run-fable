@@ -79,7 +79,7 @@ function @Foo__Foo(%this : ptr, %v : i32) -> void [binding=weak, object=_ZN3FooC
     store i32 %t1, %t3
     return void
 }
-function @Foo__Foo__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN3FooC1ERKS_] {
+function @Foo__Foo__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN3FooC1ERKS_, trivial_lifecycle=yes] {
   slot $this : ptr
   slot $other : ptr
 

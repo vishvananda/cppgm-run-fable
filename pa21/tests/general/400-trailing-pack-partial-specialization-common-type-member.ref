@@ -1,0 +1,11 @@
+global @g1 : i64 [binding=strong, object=_Z2g1] = zero
+global @g2 : i64 [binding=strong, object=_Z2g2] = zero
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  block ^entry:
+    %t1 = load i64 @g1
+    %t2 = load i64 @g2
+    %t3 = binary add i64 %t1, %t2
+    %t4 = convert trunc i32 i64 %t3
+    return i32 %t4
+}

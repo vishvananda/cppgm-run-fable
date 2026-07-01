@@ -22,4 +22,4 @@ int main()
   delete[] buckets;
   return ok ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

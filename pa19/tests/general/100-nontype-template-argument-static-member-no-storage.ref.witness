@@ -1,0 +1,18 @@
+translation-unit
+  class-use at pa19/tests/general/100-nontype-template-argument-static-member-no-storage.t:7:9
+    template value_source
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = -100 source=explicit
+  class-use at pa19/tests/general/100-nontype-template-argument-static-member-no-storage.t:9:17
+    template value_source
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = -100 source=explicit
+  class-use at pa19/tests/general/100-nontype-template-argument-static-member-no-storage.t:21:1
+    template use_value
+    selected primary
+    bind #1 = -50 source=explicit
+template-closure-events
+  variable-instantiation
+    entity value_source<int, -100>::const_min

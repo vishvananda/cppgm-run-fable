@@ -1,0 +1,49 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $a : obj<16x4>
+  slot $b : obj<16x4>
+  slot $cond__1 : i32
+
+  block ^entry:
+    %t1 = addr $a
+    store i32 0, %t1
+    %t2 = index i8 %t1, 4
+    store i32 1, %t2
+    %t3 = index i8 %t1, 8
+    store i32 2, %t3
+    %t4 = index i8 %t1, 12
+    store i32 3, %t4
+    %t5 = addr $b
+    store i32 4, %t5
+    %t6 = index i8 %t5, 4
+    store i32 5, %t6
+    %t7 = index i8 %t5, 8
+    store i32 6, %t7
+    %t8 = index i8 %t5, 12
+    store i32 7, %t8
+    %t9 = addr $a
+    %t10 = addr $b
+    %t11 = call i32 @same_extent(%t9, %t10)
+    %t12 = cmp eq i32 %t11, 4
+    branch %t12, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t13 = load i32 $cond__1
+    return i32 %t13
+}
+function @same_extent(%__param0 : ptr [pass=reference], %__param1 : ptr [pass=reference]) -> i32 [binding=weak, object=_Z11same_extentIiLi4EEiRAT0__T_S2_] {
+  slot $__param0 : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    store ptr %__param1, $__param1
+    return i32 4
+}

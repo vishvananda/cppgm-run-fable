@@ -33,7 +33,7 @@ function @Holder_int___eval__ov2(%__param0 : obj<1x1>) -> i32 [binding=weak, obj
   block ^entry:
     return i32 1
 }
-function @integral_constant_bool__true___integral_constant(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN17integral_constantIbLb1EEC1Ev] {
+function @integral_constant_bool__true___integral_constant(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN17integral_constantIbLb1EEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

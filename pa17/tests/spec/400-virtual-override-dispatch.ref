@@ -1,7 +1,5 @@
 declare global @__external_rtti_vtable____class_type_info [binding=strong, object=_ZTVN10__cxxabiv117__class_type_infoE]
 declare global @__external_rtti_vtable____si_class_type_info [binding=strong, object=_ZTVN10__cxxabiv120__si_class_type_infoE]
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
 declare function @operator_delete(%arg0 : ptr) -> void [unwind=no, binding=strong, object=cppgm_builtin_operator_delete]
 
 global @__typeinfo_name__struct_Base [storage=readonly, binding=weak, object=_ZTS4Base] = {
@@ -51,7 +49,6 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
   slot $d : obj<8x8>
   slot $b : ptr
   slot $cond__1 : i32
-  slot $call__2 : i32
 
   block ^entry:
     %t1 = addr $d
@@ -59,24 +56,12 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t2 = addr $d
     %t3 = index i8 [projection=base_subobject] %t2, 0
     store ptr %t3, $b
-    eh_try ^call_unwind_dispatch_4
     %t4 = load ptr $b
     %t5 = load ptr %t4
     %t6 = load ptr %t5
     %t7 = call i32 %t6(%t4) as (%arg0 : ptr) -> i32
-    store i32 %t7, $call__2
-    %t8 = load i32 $call__2
-    %t9 = cmp eq i32 %t8, 2
-    eh_end
-    jump ^call_unwind_end_5
-
-  block ^call_unwind_dispatch_4:
-    %t10 = addr $d
-    call void @Derived___Derived(%t10)
-    resume
-
-  block ^call_unwind_end_5:
-    branch %t9, ^cond_then_1, ^cond_else_2
+    %t8 = cmp eq i32 %t7, 2
+    branch %t8, ^cond_then_1, ^cond_else_2
 
   block ^cond_then_1:
     store i32 0, $cond__1
@@ -87,19 +72,19 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     jump ^cond_end_3
 
   block ^cond_end_3:
-    %t11 = load i32 $cond__1
-    %t12 = addr $d
-    call void @Derived___Derived(%t12)
-    return i32 %t11
+    %t9 = load i32 $cond__1
+    %t10 = addr $d
+    call void @Derived___Derived(%t10)
+    return i32 %t9
 }
-function @Base__f(%this : ptr) -> i32 [binding=weak, object=_ZNK4Base1fEv] {
+function @Base__f(%this : ptr) -> i32 [unwind=no, binding=weak, object=_ZNK4Base1fEv] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return i32 1
 }
-function @Base___Base__base_entry(%this : ptr) -> void [binding=weak, object=_ZN4BaseD2Ev] {
+function @Base___Base__base_entry(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4BaseD2Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -110,7 +95,7 @@ function @Base___Base__base_entry(%this : ptr) -> void [binding=weak, object=_ZN
     store ptr %t3, %t1
     return void
 }
-function @Base___Base__deleting_entry(%this : ptr) -> void [binding=weak, object=_ZN4BaseD0Ev] {
+function @Base___Base__deleting_entry(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4BaseD0Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -123,7 +108,7 @@ function @Base___Base__deleting_entry(%this : ptr) -> void [binding=weak, object
     call void @operator_delete(%t4)
     return void
 }
-function @Base___Base(%this : ptr) -> void [binding=weak, object=_ZN4BaseD1Ev] {
+function @Base___Base(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4BaseD1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -148,14 +133,14 @@ function @Derived__Derived(%this : ptr) -> void [unwind=no, binding=weak, object
     store ptr %t5, %t3
     return void
 }
-function @Derived__f(%this : ptr) -> i32 [binding=weak, object=_ZNK7Derived1fEv] {
+function @Derived__f(%this : ptr) -> i32 [unwind=no, binding=weak, object=_ZNK7Derived1fEv] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return i32 2
 }
-function @Derived___Derived__deleting_entry(%this : ptr) -> void [binding=weak, object=_ZN7DerivedD0Ev] {
+function @Derived___Derived__deleting_entry(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7DerivedD0Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -171,7 +156,7 @@ function @Derived___Derived__deleting_entry(%this : ptr) -> void [binding=weak, 
     call void @operator_delete(%t6)
     return void
 }
-function @Derived___Derived(%this : ptr) -> void [binding=weak, object=_ZN7DerivedD1Ev] {
+function @Derived___Derived(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7DerivedD1Ev] {
   slot $this : ptr
 
   block ^entry:

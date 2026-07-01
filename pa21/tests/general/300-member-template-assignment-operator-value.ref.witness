@@ -1,0 +1,19 @@
+translation-unit
+  class-use at pa21/tests/general/300-member-template-assignment-operator-value.t:27:3
+    template wrapper
+    selected partial
+    bind #1 = void () source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  function-call at pa21/tests/general/300-member-template-assignment-operator-value.t:28:6
+    callee wrapper<void ()>::operator=
+    selected instantiation
+    bind #1 = int source=deduced
+    drop wrapper<void ()>::operator= reason=bad_conversion
+template-closure-events
+  ensure-definition
+    entity wrapper<void ()>::operator=
+  function-instantiation
+    entity wrapper<void ()>::operator=
+  require-definition
+    entity wrapper<void ()>::operator=

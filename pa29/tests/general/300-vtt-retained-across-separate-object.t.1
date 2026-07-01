@@ -1,0 +1,13 @@
+#include "300-vtt-retained-across-separate-object.shared.h"
+
+V::V() : v(2) {}
+V::~V() {}
+
+A::A() : a(3) {}
+A::A(const A & other) : V(), a(other.a) {}
+A::~A() {}
+
+int A::f()
+{
+  return a + v;
+}

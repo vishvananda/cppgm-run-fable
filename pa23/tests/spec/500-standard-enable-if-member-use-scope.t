@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.2 [temp.deduct], 14.8.2.5 [temp.deduct.type]
 // The arguments of a qualified std::enable_if<...>::type are parsed at the
 // source use site, not in namespace std. Boost.Exception uses this form with a

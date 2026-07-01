@@ -1,0 +1,15 @@
+translation-unit
+  class-use at pa21/tests/general/400-reference-member-lookup-in-progress-base-typedef.t:58:9
+    template in_sequence
+    selected primary
+    bind #1 = as_matcher source=explicit
+  class-use at pa21/tests/general/400-reference-member-lookup-in-progress-base-typedef.t:58:34
+    template in_sequence<as_matcher>::impl
+    selected primary
+    bind #1 = const expr & source=explicit
+    bind #2 = state source=explicit
+    bind #3 = visitor<tag> & source=explicit
+  class-use at pa21/tests/general/400-reference-member-lookup-in-progress-base-typedef.t:58:60
+    template visitor
+    selected primary
+    bind #1 = tag source=explicit

@@ -1,11 +1,10 @@
-function @check(%value : ptr [pass=by_address]) -> u8 [binding=strong, object=_Z5check6holderIiE] {
+function @check(%value : ptr [pass=by_address]) -> u8 [unwind=no, binding=strong, object=_Z5check6holderIiE] {
   slot $value : obj<8x8>
 
   block ^entry:
     %t1 = index i8 [projection=field] %value, 0
     %t2 = load ptr %t1
     %t3 = cmp ne ptr %t2, 0
-    call void @holder_int____holder(%value)
     return u8 %t3
 }
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
@@ -42,7 +41,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t10 = load i32 $cond__1
     return i32 %t10
 }
-function @holder_int___holder(%this : ptr) -> void [binding=weak, object=_ZN6holderIiEC1Ev] {
+function @holder_int___holder(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6holderIiEC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -55,30 +54,17 @@ function @holder_int___holder(%this : ptr) -> void [binding=weak, object=_ZN6hol
 function @invoke(%function : ptr, %value : ptr [pass=by_address]) -> u8 [binding=weak, object=_Z6invokeI6holderIiEEbPFbT_ES2_] {
   slot $function : ptr
   slot $value : obj<8x8>
-  slot $call__1 : u8
-  slot $arg__2 : obj<8x8>
+  slot $arg__1 : obj<8x8>
 
   block ^entry:
     store ptr %function, $function
-    eh_try ^call_unwind_dispatch_1
-    %t1 = addr $arg__2
+    %t1 = addr $arg__1
     call void @holder_int___holder__ov3(%t1, %value)
     %t2 = load ptr $function
     %t3 = call u8 %t2(%t1) as (%arg0 : ptr [pass=by_address]) -> u8
-    store u8 %t3, $call__1
-    %t4 = load u8 $call__1
-    eh_end
-    jump ^call_unwind_end_2
-
-  block ^call_unwind_dispatch_1:
-    call void @holder_int____holder(%value)
-    resume
-
-  block ^call_unwind_end_2:
-    call void @holder_int____holder(%value)
-    return u8 %t4
+    return u8 %t3
 }
-function @holder_int___holder__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN6holderIiEC1ERKS0_] {
+function @holder_int___holder__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN6holderIiEC1ERKS0_] {
   slot $this : ptr
   slot $other : ptr
 
@@ -93,7 +79,7 @@ function @holder_int___holder__ov2(%this : ptr, %other : ptr [pass=reference]) -
     store ptr %t3, %t5
     return void
 }
-function @holder_int___holder__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN6holderIiEC1EOS0_] {
+function @holder_int___holder__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN6holderIiEC1EOS0_] {
   slot $this : ptr
   slot $other : ptr
 
@@ -111,14 +97,6 @@ function @holder_int___holder__ov3(%this : ptr, %other : ptr [pass=reference]) -
     store ptr 0, %t7
     return void
 }
-function @holder_int____holder(%this : ptr) -> void [binding=weak, object=_ZN6holderIiED1Ev] {
-  slot $this : ptr
-
-  block ^entry:
-    store ptr %this, $this
-    return void
-}
 alias object _ZN6holderIiEC2Ev = @holder_int___holder
 alias object _ZN6holderIiEC2ERKS0_ = @holder_int___holder__ov2
 alias object _ZN6holderIiEC2EOS0_ = @holder_int___holder__ov3
-alias object _ZN6holderIiED2Ev = @holder_int____holder

@@ -1,9 +1,0 @@
-function @pick() -> i64 {
-  block ^entry:
-    return i64 2
-}
-function @main() -> i64 {
-  block ^entry:
-    %t1 = call i64 @pick(0)
-    return i64 %t1
-}

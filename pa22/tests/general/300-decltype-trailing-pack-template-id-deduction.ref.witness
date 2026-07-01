@@ -1,0 +1,18 @@
+translation-unit
+  class-use at pa22/tests/general/300-decltype-trailing-pack-template-id-deduction.t:31:18
+    template probe
+    selected primary
+    bind #1 = <A, B> source=explicit
+  class-use at pa22/tests/general/300-decltype-trailing-pack-template-id-deduction.t:32:9
+    template list
+    selected primary
+    bind #1 = <A, B> source=explicit
+  class-use at pa22/tests/general/300-decltype-trailing-pack-template-id-deduction.t:34:15
+    template is_same
+    selected partial
+    bind #1 = list<A, B> source=explicit
+    bind #2 = list<A, B> source=explicit
+    specialize #1 = list<A, B> source=deduced
+template-closure-events
+  variable-instantiation
+    entity is_same<list<A, B>, list<A, B>>::value

@@ -51,7 +51,7 @@ function @main
   frame
     stack_size 16
     scratch_bytes 0
-    preserve <gpr0> <gpr1>
+    preserve <gpr0>
 
   block ^entry
     call @one

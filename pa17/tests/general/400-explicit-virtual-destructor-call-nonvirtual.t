@@ -1,14 +1,14 @@
 struct Base
 {
-  virtual ~Base() {}
-  virtual void destroy() {}
+  virtual ~Base() noexcept {}
+  virtual void destroy() noexcept {}
 };
 
 struct Derived : Base
 {
-  ~Derived() override {}
+  ~Derived() noexcept override {}
 
-  void destroy() override
+  void destroy() noexcept override
   {
     this->~Derived();
   }

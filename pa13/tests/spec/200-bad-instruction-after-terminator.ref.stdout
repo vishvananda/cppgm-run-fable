@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-instruction-after-terminator.t:4: block ^entry has instruction after terminator

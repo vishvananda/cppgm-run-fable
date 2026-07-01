@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/spec/300-out-of-class-member-template-tag-dispatch-definition.t:29:3
+    template box
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa21/tests/spec/300-out-of-class-member-template-tag-dispatch-definition.t:30:13
+    callee box<int>::pick
+    selected instantiation
+    bind #1 = char * source=deduced
+template-closure-events
+  ensure-definition
+    entity box<int>::pick
+  function-instantiation
+    entity box<int>::pick
+  require-definition
+    entity box<int>::pick

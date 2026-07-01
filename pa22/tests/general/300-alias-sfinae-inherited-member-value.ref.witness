@@ -1,0 +1,43 @@
+translation-unit
+  class-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:29:9
+    template bool_holder
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:30:9
+    template bool_holder
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:60:10
+    template __bool_constant
+    bind #1 = Nothrow && !Dangle source=explicit
+  class-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:75:11
+    template success_type
+    selected primary
+    bind #1 = int source=explicit
+  alias-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:92:22
+    template enable_if_t
+    bind #1 = Cond::value source=explicit
+    bind #2 = T source=explicit
+  alias-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:94:29
+    template function<type-parameter-0-0 ()>::requires_t
+    bind #1 = callable<F> source=explicit
+  class-use at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:100:3
+    template function
+    selected partial
+    bind #1 = int () source=explicit
+    specialize #1 = int source=deduced
+  function-call at pa22/tests/general/300-alias-sfinae-inherited-member-value.t:100:23
+    callee function<int ()>::function
+    selected instantiation
+    bind #1 = int (&)() source=deduced
+    bind #2 = void source=defaulted
+    drop function<int ()>::function reason=bad_conversion
+template-closure-events
+  ensure-definition
+    entity function<int ()>::function
+  function-instantiation
+    entity function<int ()>::function
+  require-definition
+    entity function<int ()>::function
+  variable-instantiation
+    entity integral_constant<bool, true>::value

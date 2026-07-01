@@ -25,4 +25,4 @@ int main()
   delete[] items;
   return ok && !fail && destroyed == 6 && expected == 0 ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

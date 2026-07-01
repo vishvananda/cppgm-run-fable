@@ -1,0 +1,18 @@
+translation-unit
+  class-use at pa23/tests/general/400-nested-type-pack-function-pointer-typedef.t:26:9
+    template list_av
+    selected primary
+    bind #1 = <bool (*)()> source=explicit
+  class-use at pa23/tests/general/400-nested-type-pack-function-pointer-typedef.t:27:9
+    template list
+    selected primary
+    bind #1 = <bool (*)()> source=explicit
+  class-use at pa23/tests/general/400-nested-type-pack-function-pointer-typedef.t:31:10
+    template is_same
+    selected partial
+    bind #1 = list<bool (*)()> source=explicit
+    bind #2 = list<bool (*)()> source=explicit
+    specialize #1 = list<bool (*)()> source=deduced
+template-closure-events
+  variable-instantiation
+    entity is_same<list<bool (*)()>, list<bool (*)()>>::value

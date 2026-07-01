@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Algorithm find_backward reduction: a member function template from a
 // class-template base must merge the owner-prefixed declaration specialization
 // with the materialized empty-pack definition specialization.

@@ -1,1 +1,0 @@
-ERROR: tests/general/200-malformed-function-parameter-list.t: expected declaration near KW_INT:int at token 0 at tests/general/200-malformed-function-parameter-list.t:1:1

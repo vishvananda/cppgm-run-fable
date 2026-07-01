@@ -7,7 +7,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t2 = call i32 @fn_int___f(%t1, 0)
     return i32 %t2
 }
-function @fn_int___fn(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2fnIiEC1Ev] {
+function @fn_int___fn(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2fnIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

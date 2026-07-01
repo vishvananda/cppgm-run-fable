@@ -1,0 +1,20 @@
+translation-unit
+  class-use at pa21/tests/general/400-function-pointer-varargs-partial-specialization-order.t:21:15
+    template components
+    selected partial
+    bind #1 = void (*)(int) source=explicit
+    bind #2 = void source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = int source=deduced
+    specialize #3 = void source=deduced
+  class-use at pa21/tests/general/400-function-pointer-varargs-partial-specialization-order.t:25:10
+    template components
+    selected partial
+    bind #1 = void (*)(int) source=explicit
+    bind #2 = void source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = int source=deduced
+    specialize #3 = void source=deduced
+template-closure-events
+  variable-instantiation
+    entity components<void (*)(int), void>::value

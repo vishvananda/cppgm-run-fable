@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 12.8 [class.copy]
 
 struct CopiesOnMove

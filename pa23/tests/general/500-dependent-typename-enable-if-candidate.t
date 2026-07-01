@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Container reduction: while instantiating a template body, overload
 // resolution examines an enable_if candidate whose return type contains a
 // dependent typename template argument. The candidate must remain dependent

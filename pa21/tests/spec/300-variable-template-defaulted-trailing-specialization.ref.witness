@@ -1,0 +1,12 @@
+translation-unit
+  variable-use at pa21/tests/spec/300-variable-template-defaulted-trailing-specialization.t:12:10
+    template pair_v
+    selected partial
+    bind #1 = int source=deduced
+    bind #2 = int * source=deduced
+    bind #3 = void source=defaulted
+    specialize #1 = int source=deduced
+    specialize #2 = int source=deduced
+template-closure-events
+  variable-instantiation
+    entity pair_v

@@ -8,9 +8,9 @@ enum Policy
 template<class T, Policy P>
 struct Control
 {
-  virtual ~Control() {}
+  virtual ~Control() noexcept {}
 
-  virtual int value()
+  virtual int value() noexcept
   {
     return P;
   }

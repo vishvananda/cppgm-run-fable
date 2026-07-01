@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Container reduction: template argument deduction must analyze
 // `shadow_maker(&value)` as construction of the nested type, not as a call to
 // the hidden outer function with the same unqualified name.

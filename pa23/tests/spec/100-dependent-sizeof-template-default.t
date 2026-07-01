@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.1 [temp.param], 14.3.2 [temp.arg.nontype]
 
 template<class T, int N = sizeof(T)>

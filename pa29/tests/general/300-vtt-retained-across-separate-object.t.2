@@ -1,0 +1,17 @@
+#include "300-vtt-retained-across-separate-object.shared.h"
+
+X::X() : A(), x(4) {}
+X::X(const X & other) : A(other), x(other.x) {}
+X::~X() {}
+
+int X::f()
+{
+  return x + A::f();
+}
+
+int main()
+{
+  X x;
+  X y(x);
+  return y.f() == 9 ? 0 : 1;
+}

@@ -1,5 +1,5 @@
 // N3485 focus: 7.3.2 [namespace.alias], 6 [stmt.stmt], 5.2.2 [expr.call]
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 
 namespace outer {
 namespace inner {

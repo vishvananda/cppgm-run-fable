@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.2 [temp.names], 14.6.2.1 [temp.dep.type]
 
 namespace meta {

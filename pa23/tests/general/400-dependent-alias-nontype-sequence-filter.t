@@ -35,6 +35,22 @@ struct first_impl<L<T1, T...> > {
 template<class L>
 using first = typename first_impl<L>::type;
 
+template<class... L>
+struct append_impl;
+
+template<class... T>
+struct append_impl<list<T...> > {
+  typedef list<T...> type;
+};
+
+template<class... T, class... U, class... Rest>
+struct append_impl<list<T...>, list<U...>, Rest...>
+    : append_impl<list<T..., U...>, Rest...> {
+};
+
+template<class... L>
+using append = typename append_impl<L...>::type;
+
 template<class L>
 struct size_impl;
 
@@ -50,8 +66,22 @@ template<class T, T... I>
 struct integer_sequence {
 };
 
+template<class T, T N, bool Done, T... I>
+struct make_integer_sequence_impl;
+
+template<class T, T N, T... I>
+struct make_integer_sequence_impl<T, N, false, I...>
+    : make_integer_sequence_impl<T, N - 1, (N - 1) == 0, N - 1, I...> {
+};
+
+template<class T, T N, T... I>
+struct make_integer_sequence_impl<T, N, true, I...> {
+  typedef integer_sequence<T, I...> type;
+};
+
 template<class T, T N>
-using make_integer_sequence = __make_integer_seq<integer_sequence, T, N>;
+using make_integer_sequence =
+    typename make_integer_sequence_impl<T, N, N == 0>::type;
 
 template<class S, class F, bool Z>
 struct from_sequence_impl;
@@ -89,27 +119,19 @@ struct if_impl<true, T, E> {
 template<class C, class T, class E>
 using if_ = typename if_impl<C::value, T, E>::type;
 
-template<template<class...> class F, class... L>
-struct transform_impl;
+template<template<class...> class P, class L1, class... L>
+struct filter_impl;
 
-template<template<class...> class F,
+template<template<class...> class P,
          template<class...> class L1,
          class... T1,
          template<class...> class L2,
          class... T2>
-struct transform_impl<F, L1<T1...>, L2<T2...> > {
-  typedef L1<F<T1, T2>...> type;
-};
+struct filter_impl<P, L1<T1...>, L2<T2...> > {
+  template<class A, class B>
+  using f = if_<P<A, B>, list<A>, list<> >;
 
-template<template<class...> class F, class... L>
-using transform = typename transform_impl<F, L...>::type;
-
-template<template<class...> class P, class L1, class... L>
-struct filter_impl {
-  template<class T1, class... T>
-  using f = if_<P<T1, T...>, list<T1>, list<> >;
-
-  typedef transform<f, L1, L...> type;
+  typedef append<f<T1, T2>...> type;
 };
 
 template<class Q, class... L>
@@ -126,6 +148,7 @@ using at_c = first<filter_q<second_is<N>, L, iota<size<L> > > >;
 
 typedef iota_c<3> input;
 typedef at_c<input, 1> result;
+static_assert(result::value == 1, "filter selected the wrong value");
 
 int main()
 {

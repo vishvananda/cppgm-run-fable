@@ -1,0 +1,36 @@
+translation-unit
+  class-use at pa22/tests/general/400-conversion-function-template-prefers-nontemplate.t:26:3
+    template box
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = long source=explicit
+    bind #3 = char source=explicit
+  class-use at pa22/tests/general/400-conversion-function-template-prefers-nontemplate.t:27:7
+    template source
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  ensure-definition
+    entity box<int, long, char>::box
+  ensure-definition
+    entity box<int, long, char>::operator=
+  ensure-definition
+    entity source<int>::operator box
+  ensure-definition
+    entity source<int>::source
+  function-instantiation
+    entity box<int, long, char>::box
+  function-instantiation
+    entity box<int, long, char>::operator=
+  function-instantiation
+    entity source<int>::operator box
+  function-instantiation
+    entity source<int>::source
+  require-definition
+    entity box<int, long, char>::box
+  require-definition
+    entity box<int, long, char>::operator=
+  require-definition
+    entity source<int>::operator box
+  require-definition
+    entity source<int>::source

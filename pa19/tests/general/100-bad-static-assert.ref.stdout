@@ -1,0 +1,5 @@
+ERROR: static_assert false: N > 0 [bindings Box<0>{types:Box=struct Box<0>,N=int:0} {types:Box<0>=struct Box<0>,N=int:0}] [instantiated class Box<0>] [source template Box] [dependent-instantiation no] [member-scope-placeholders no] [template-args 0] [function main] [is_method no] [body_parent_scope <here>] [body_parent_bindings ] [body_function_scope <here>] [body_function_bindings ]
+Diagnostic context:
+analyze_function_binding_output [main]
+  analyze_statement [simple-declaration] at tests/general/100-bad-static-assert.t:8:3
+    populate_class_info [Box<0>] at tests/general/100-bad-static-assert.t:2:1

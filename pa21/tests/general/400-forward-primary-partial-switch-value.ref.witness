@@ -1,0 +1,127 @@
+translation-unit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:12:27
+    template bool_
+    selected primary
+    bind #1 = false source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:73:18
+    template bool_
+    selected primary
+    bind #1 = false source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:78:7
+    template basic_expr
+    selected primary
+    bind #1 = terminal_tag source=explicit
+    bind #2 = term<any_> source=explicit
+    bind #3 = 0 source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:78:32
+    template term
+    selected primary
+    bind #1 = any_ source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:95:27
+    template bool_
+    selected primary
+    bind #1 = false source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:99:33
+    template bool_
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:103:36
+    template bool_
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:122:5
+    template bool_
+    selected primary
+    bind #1 = false source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:144:9
+    template expr
+    selected primary
+    bind #1 = terminal_tag source=explicit
+    bind #2 = term<left_token> source=explicit
+    bind #3 = 0 source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:144:28
+    template term
+    selected primary
+    bind #1 = left_token source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:145:9
+    template expr
+    selected primary
+    bind #1 = terminal_tag source=explicit
+    bind #2 = term<right_token> source=explicit
+    bind #3 = 0 source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:145:28
+    template term
+    selected primary
+    bind #1 = right_token source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:146:9
+    template expr
+    selected primary
+    bind #1 = sequence_tag source=explicit
+    bind #2 = list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &> source=explicit
+    bind #3 = 2 source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:146:28
+    template list2
+    selected primary
+    bind #1 = const expr<terminal_tag, term<left_token>, 0> & source=explicit
+    bind #2 = const expr<terminal_tag, term<right_token>, 0> & source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:147:9
+    template grammar
+    selected primary
+    bind #1 = char_type source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:148:9
+    template basic_expr
+    selected primary
+    bind #1 = sequence_tag source=explicit
+    bind #2 = list2<grammar<char_type>, grammar<char_type>> source=explicit
+    bind #3 = 2 source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:148:34
+    template list2
+    selected primary
+    bind #1 = grammar<char_type> source=explicit
+    bind #2 = grammar<char_type> source=explicit
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:150:15
+    template matches_
+    selected partial
+    bind #1 = expr<terminal_tag, term<left_token>, 0> source=explicit
+    bind #2 = basic_expr<terminal_tag, term<left_token>, 0> source=explicit
+    bind #3 = switch_<cases<char_type, grammar<char_type>>> source=explicit
+    specialize #1 = expr<terminal_tag, term<left_token>, 0> source=deduced
+    specialize #2 = terminal_tag source=deduced
+    specialize #3 = term<left_token> source=deduced
+    specialize #4 = 0 source=deduced
+    specialize #5 = cases<char_type, grammar<char_type>> source=deduced
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:154:15
+    template matches_
+    selected partial
+    bind #1 = expr<terminal_tag, term<right_token>, 0> source=explicit
+    bind #2 = basic_expr<terminal_tag, term<right_token>, 0> source=explicit
+    bind #3 = switch_<cases<char_type, grammar<char_type>>> source=explicit
+    specialize #1 = expr<terminal_tag, term<right_token>, 0> source=deduced
+    specialize #2 = terminal_tag source=deduced
+    specialize #3 = term<right_token> source=deduced
+    specialize #4 = 0 source=deduced
+    specialize #5 = cases<char_type, grammar<char_type>> source=deduced
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:158:15
+    template matches_
+    selected partial
+    bind #1 = expr<sequence_tag, list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &>, 2> source=explicit
+    bind #2 = basic_expr<sequence_tag, list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &>, 2> source=explicit
+    bind #3 = basic_expr<sequence_tag, list2<grammar<char_type>, grammar<char_type>>, 2> source=explicit
+    specialize #1 = expr<sequence_tag, list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &>, 2> source=deduced
+    specialize #2 = sequence_tag source=deduced
+    specialize #3 = list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &> source=deduced
+    specialize #4 = list2<grammar<char_type>, grammar<char_type>> source=deduced
+  class-use at pa21/tests/general/400-forward-primary-partial-switch-value.t:164:15
+    template matches_
+    selected partial
+    bind #1 = expr<sequence_tag, list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &>, 2> source=explicit
+    bind #2 = basic_expr<sequence_tag, list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &>, 2> source=explicit
+    bind #3 = switch_<cases<char_type, grammar<char_type>>> source=explicit
+    specialize #1 = expr<sequence_tag, list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &>, 2> source=deduced
+    specialize #2 = sequence_tag source=deduced
+    specialize #3 = list2<const expr<terminal_tag, term<left_token>, 0> &, const expr<terminal_tag, term<right_token>, 0> &> source=deduced
+    specialize #4 = 2 source=deduced
+    specialize #5 = cases<char_type, grammar<char_type>> source=deduced
+template-closure-events
+  variable-instantiation
+    entity bool_<true>::value

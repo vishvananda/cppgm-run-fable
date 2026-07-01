@@ -1,0 +1,4 @@
+translation-unit
+  alias-use at pa21/tests/general/200-alias-template-binds-forward-specialization-member.t:24:1
+    template Buffer
+    bind #1 = Item source=explicit

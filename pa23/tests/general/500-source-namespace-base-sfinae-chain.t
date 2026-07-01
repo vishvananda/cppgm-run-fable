@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A dependent base specifier that names a helper namespace from the source
 // template's declaration context must keep that base when the class template is
 // replayed through a reference member. Boost.MPL's or_ uses this shape, and the

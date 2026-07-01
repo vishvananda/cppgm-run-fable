@@ -1,0 +1,29 @@
+translation-unit
+  class-use at pa22/tests/spec/200-dependent-specialized-default-arg-deduction.t:29:9
+    template lib::basic_string
+    selected primary
+    bind #1 = char source=explicit
+    bind #2 = lib::char_traits<char> source=defaulted
+    bind #3 = lib::allocator<char> source=defaulted
+  class-use at pa22/tests/spec/200-dependent-specialized-default-arg-deduction.t:56:3
+    template boostish::basic_cstring
+    selected primary
+    bind #1 = const char source=explicit
+  class-use at pa22/tests/spec/200-dependent-specialized-default-arg-deduction.t:64:1
+    template lib::basic_string
+    selected primary
+    bind #1 = char source=deduced
+    bind #2 = lib::char_traits<char> source=defaulted
+    bind #3 = lib::allocator<char> source=defaulted
+  function-call at pa22/tests/spec/200-dependent-specialized-default-arg-deduction.t:68:3
+    callee boostish::assign_op
+    selected instantiation
+    bind #1 = char source=deduced
+    bind #2 = const char source=deduced
+template-closure-events
+  ensure-definition
+    entity boostish::assign_op
+  function-instantiation
+    entity boostish::assign_op
+  require-definition
+    entity boostish::assign_op

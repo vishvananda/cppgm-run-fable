@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.1 [temp.param], 14.8 [temp.fct.spec], 7.3.1 [namespace.def]
 
 namespace s {

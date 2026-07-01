@@ -1,2 +1,2 @@
 frame function=add2 file=source.cpp line=2
-var x=<variable not available>
+var x=<optimized out>

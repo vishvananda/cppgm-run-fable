@@ -91,7 +91,7 @@ test-strict: $(TEST_DEPS)
 endif
 
 ref-test:
-	@scripts/run_all_tests.pl $(REF_TEST_APP) ref tests
+	@$(REF_TEST_RUN)
 
 ref-test-strict:
 	@../scripts/run_witness_tests.pl $(REF_TEST_APP) ref tests

@@ -1,0 +1,25 @@
+translation-unit
+  function-call at pa22/tests/general/200-range-array-reference-mutable-begin.t:59:17
+    callee find_not
+    selected instantiation
+    bind #1 = int[5] source=deduced
+    bind #2 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity find_not
+  function-instantiation
+    entity begin
+  function-instantiation
+    entity find_first
+  function-instantiation
+    entity find_not
+  function-instantiation
+    entity range_begin
+  require-definition
+    entity begin
+  require-definition
+    entity find_first
+  require-definition
+    entity find_not
+  require-definition
+    entity range_begin

@@ -1,0 +1,12 @@
+translation-unit
+  function-call at pa22/tests/spec/200-nondeduced-qualified-member-type-allows-conversion.t:24:11
+    callee next
+    selected instantiation
+    bind #1 = const char * source=deduced
+template-closure-events
+  ensure-definition
+    entity next
+  function-instantiation
+    entity next
+  require-definition
+    entity next

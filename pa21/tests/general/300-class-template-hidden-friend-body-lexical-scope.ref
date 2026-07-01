@@ -25,14 +25,14 @@ function @flip(%__param0 : ptr [pass=reference], %__param1 : obj<1x1>) -> obj<1x
     call void @pair_box_second__first___pair_box(%t1)
     return obj<1x1> $retobj__1
 }
-function @pair_box_second__first___pair_box(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8pair_boxI6second5firstEC1Ev] {
+function @pair_box_second__first___pair_box(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8pair_boxI6second5firstEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return void
 }
-function @second__second(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6secondC1Ev] {
+function @second__second(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6secondC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

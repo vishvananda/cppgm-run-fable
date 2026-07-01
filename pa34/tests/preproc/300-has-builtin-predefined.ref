@@ -1,4 +1,0 @@
-preproc 1
-sof tests/preproc/300-has-builtin-predefined.t
-identifier good
-eof

@@ -1,0 +1,9 @@
+global @force_full_collection : i32 [binding=strong, object=_Z21force_full_collection] = 1
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  block ^entry:
+    %t1 = load i32 @force_full_collection
+    %t2 = cmp eq i32 %t1, 0
+    %t3 = convert zext i32 u8 %t2
+    return i32 %t3
+}

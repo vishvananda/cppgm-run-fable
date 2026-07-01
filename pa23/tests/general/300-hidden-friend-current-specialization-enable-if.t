@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Asio reduction: a hidden friend function template declared inside a
 // class template can use the current specialization name in an enable_if
 // return type.

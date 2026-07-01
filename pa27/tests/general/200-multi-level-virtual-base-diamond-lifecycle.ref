@@ -1,8 +1,6 @@
 declare global @__external_rtti_vtable____class_type_info [binding=strong, object=_ZTVN10__cxxabiv117__class_type_infoE]
 declare global @__external_rtti_vtable____si_class_type_info [binding=strong, object=_ZTVN10__cxxabiv120__si_class_type_infoE]
 declare global @__external_rtti_vtable____vmi_class_type_info [binding=strong, object=_ZTVN10__cxxabiv121__vmi_class_type_infoE]
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
 declare function @operator_delete(%arg0 : ptr) -> void [unwind=no, binding=strong, object=cppgm_builtin_operator_delete]
 
 global @__typeinfo_name__struct_D [storage=readonly, binding=weak, object=_ZTSN12_GLOBAL__N_11DE] = {
@@ -232,7 +230,7 @@ global @_GLOBAL__N_1__D____construction___GLOBAL__N_1__B__8__s1__vtable [storage
   ptr addr @__GLOBAL__N_1__B___B__vtable_return_adjust
   ptr addr @__GLOBAL__N_1__B___B__deleting_entry__vtable_return_adjust
 }
-global @_GLOBAL__N_1__D____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_11DE] = {
+global @_GLOBAL__N_1__D____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_11DE, object_root=yes] = {
   ptr addr @_GLOBAL__N_1__D__vtable + 24
   ptr addr @_GLOBAL__N_1__D____construction___GLOBAL__N_1__AB__0__s0__vtable + 24
   ptr addr @_GLOBAL__N_1__D____construction___GLOBAL__N_1__A__0__s0__vtable + 24
@@ -303,7 +301,7 @@ global @_GLOBAL__N_1__AB____construction___GLOBAL__N_1__B__8__s1__vtable [storag
   ptr addr @__GLOBAL__N_1__B___B__vtable_return_adjust
   ptr addr @__GLOBAL__N_1__B___B__deleting_entry__vtable_return_adjust
 }
-global @_GLOBAL__N_1__AB____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_12ABE] = {
+global @_GLOBAL__N_1__AB____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_12ABE, object_root=yes] = {
   ptr addr @_GLOBAL__N_1__AB__vtable + 24
   ptr addr @_GLOBAL__N_1__AB____construction___GLOBAL__N_1__A__0__s0__vtable + 24
   ptr addr @_GLOBAL__N_1__AB____construction___GLOBAL__N_1__A__0__s1__vtable + 24
@@ -328,7 +326,7 @@ global @_GLOBAL__N_1__A____view___GLOBAL__N_1__V__8__vtable [storage=readonly, b
   ptr addr @__GLOBAL__N_1__A___A__vtable_return_adjust
   ptr addr @__GLOBAL__N_1__A___A__deleting_entry__vtable_return_adjust
 }
-global @_GLOBAL__N_1__A____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_11AE] = {
+global @_GLOBAL__N_1__A____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_11AE, object_root=yes] = {
   ptr addr @_GLOBAL__N_1__A__vtable + 24
   ptr addr @_GLOBAL__N_1__A____view___GLOBAL__N_1__V__8__vtable + 24
 }
@@ -348,7 +346,7 @@ global @_GLOBAL__N_1__B____view___GLOBAL__N_1__V__8__vtable [storage=readonly, b
   ptr addr @__GLOBAL__N_1__B___B__vtable_return_adjust
   ptr addr @__GLOBAL__N_1__B___B__deleting_entry__vtable_return_adjust
 }
-global @_GLOBAL__N_1__B____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_11BE] = {
+global @_GLOBAL__N_1__B____vtt [storage=readonly, binding=weak, object=_ZTTN12_GLOBAL__N_11BE, object_root=yes] = {
   ptr addr @_GLOBAL__N_1__B__vtable + 24
   ptr addr @_GLOBAL__N_1__B____view___GLOBAL__N_1__V__8__vtable + 24
 }

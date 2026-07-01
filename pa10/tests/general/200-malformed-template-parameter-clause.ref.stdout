@@ -1,1 +1,0 @@
-ERROR: tests/general/200-malformed-template-parameter-clause.t: expected declaration near KW_TEMPLATE:template at token 0 at tests/general/200-malformed-template-parameter-clause.t:1:1

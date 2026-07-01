@@ -251,8 +251,13 @@ This PA14 milestone supports the following:
   enum lowering
 - built-in casts over the supported scalar, function, reference, and pointer
   types, including C-style casts, `static_cast`, and `const_cast`
+- source-to-LowIR floating scalar literals and conversions among supported
+  scalar types, including float/integer conversions needed for calls, returns,
+  comparisons, and branch conditions
+- C-style variadic function calls over supported scalar arguments, including
+  source-to-LowIR default argument promotion before the call
 - expressions:
-  - integer literals and `true` / `false`
+  - integer literals, floating literals, and `true` / `false`
   - id-expressions naming supported locals, globals, and resolved functions
   - `sizeof(expr)` and `sizeof(type-id)` when PA12 has resolved them
   - unary `+`, `-`, `!`, `~`, `&`, `*`, prefix `++`, and prefix `--`
@@ -272,14 +277,13 @@ The following are explicitly out of scope for this PA14 milestone:
 - string literals and string-literal-backed object initialization
 - global or local initialization forms that require a richer constant-evaluation or aggregate
   initialization layer than PA12 currently provides
-- floating-point code generation
 - function-local static objects and guard variables
 - class/object semantics
 - synthesized class helper output of any kind
 - template code generation
 - exception-aware control flow
 - fully general shadowing-sensitive lowering of same-name local bindings
-- backend/runtime parity for floating-point conversions and variadic promotions
+- native backend/runtime parity for floating-point conversions and variadic promotions
 - hosted or vendor integer extensions such as 128-bit integer types
 
 Inputs that rely on those features have undefined behaviour for this milestone.

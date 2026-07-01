@@ -1,0 +1,5 @@
+ERROR: unsupported local decl-specifier-seq [specifiers ] [spec_kinds decl-specifier=A<T>::other] [declarator_kinds init-declarator] [declaration ] [function A<int>::f] [is_method yes] [body_parent_scope A<int>::<here>] [body_parent_bindings A<int>{types:A=struct A<int>,T=int,type=int} {types:A<int>=struct A<int>,T=int}] [body_function_scope A<int>::<here>] [body_function_bindings {values:this=pointer to struct A<int>} A<int>{types:A=struct A<int>,T=int,type=int} {types:A<int>=struct A<int>,T=int}]
+Diagnostic context:
+output_class_member_function_definition [] at tests/general/100-current-instantiation-missing-member-bad.t:10:3
+  analyze_function_binding_output [A<int>::f owner=A<int>]
+    analyze_statement [simple-declaration] at tests/general/100-current-instantiation-missing-member-bad.t:12:5

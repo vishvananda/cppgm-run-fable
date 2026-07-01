@@ -44,7 +44,7 @@ function @target__id(%this : ptr) -> i32 [binding=weak, object=_ZNK6target2idEv]
     store ptr %this, $this
     return i32 0
 }
-function @example__maker_int__target_______const___maker(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7example5makerIM6targetKFivEEC1Ev] {
+function @example__maker_int__target_______const___maker(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7example5makerIM6targetKFivEEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

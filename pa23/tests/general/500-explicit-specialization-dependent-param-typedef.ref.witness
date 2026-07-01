@@ -1,6 +1,0 @@
-translation-unit
-  function-call at pa23/tests/general/500-explicit-specialization-dependent-param-typedef.t:26:14
-    callee convert
-    selected explicit_specialization
-    bind #1 = float source=explicit
-    bind #2 = traits_float source=explicit

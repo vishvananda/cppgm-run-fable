@@ -62,7 +62,8 @@ endif
 endif
 
 ref-test:
-	@scripts/run_all_tests.pl $(REF_TEST_APP) ref tests
+	@$(REF_TEST_RUN)
+	@if [ -d tests/structural ]; then perl ../scripts/canonicalize_lowir_native_refs.pl tests/structural; fi
 
 include ../scripts/pa_run_check_targets.mk
 

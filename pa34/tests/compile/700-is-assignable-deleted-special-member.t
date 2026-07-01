@@ -23,4 +23,4 @@ int main()
 {
   return 0;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

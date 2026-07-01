@@ -29,6 +29,7 @@ if (-f $tests_root)
 my @suites = (
 	["mir_t", "$tests_root/strict"],
 	["mir_structural_t", "$tests_root/structural"],
+	["mir_t", "$tests_root/behavior"],
 );
 my $ran_suite = 0;
 

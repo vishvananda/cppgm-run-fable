@@ -4,7 +4,7 @@
 
 namespace std
 {
-typedef __SIZE_TYPE__ size_t;
+typedef unsigned long size_t;
 }
 
 template<bool Flag>

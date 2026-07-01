@@ -1,0 +1,20 @@
+translation-unit
+  class-use at pa21/tests/spec/300-explicit-specialization-static-data-member.t:11:11
+    template code
+    selected primary
+    bind #1 = char source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-static-data-member.t:14:11
+    template code
+    selected primary
+    bind #1 = int source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-static-data-member.t:18:10
+    template code
+    selected primary
+    bind #1 = char source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-static-data-member.t:18:36
+    template code
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  variable-instantiation
+    entity code<char>::value

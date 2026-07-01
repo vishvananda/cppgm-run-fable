@@ -1,0 +1,17 @@
+translation-unit
+  class-use at pa22/tests/general/400-qualified-member-alias-sfinae.t:45:3
+    template box
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa22/tests/general/400-qualified-member-alias-sfinae.t:46:16
+    callee box<int>::insert
+    selected instantiation
+    bind #1 = int source=deduced
+    bind #2 = 0 source=defaulted
+template-closure-events
+  ensure-definition
+    entity box<int>::insert
+  function-instantiation
+    entity box<int>::insert
+  require-definition
+    entity box<int>::insert

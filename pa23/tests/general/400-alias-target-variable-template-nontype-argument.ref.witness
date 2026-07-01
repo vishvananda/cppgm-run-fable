@@ -1,0 +1,21 @@
+translation-unit
+  variable-use at pa23/tests/general/400-alias-target-variable-template-nontype-argument.t:18:37
+    template same_type_value
+    selected partial
+    bind #1 = S source=deduced
+    bind #2 = S source=deduced
+    bind #3 = void source=defaulted
+    specialize #1 = S source=deduced
+  alias-use at pa23/tests/general/400-alias-target-variable-template-nontype-argument.t:20:15
+    template wrapped_same
+    bind #1 = S source=explicit
+    bind #2 = S source=explicit
+  alias-use at pa23/tests/general/400-alias-target-variable-template-nontype-argument.t:25:10
+    template wrapped_same
+    bind #1 = S source=explicit
+    bind #2 = S source=explicit
+template-closure-events
+  variable-instantiation
+    entity constant<bool, true>::result
+  variable-instantiation
+    entity same_type_value

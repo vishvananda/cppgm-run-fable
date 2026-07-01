@@ -1,41 +1,30 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: core-language reduction of map subscript insertion surface
 
 struct value_box
 {
   int value;
 
-  value_box() : value(0) {}
-};
-
-template<typename Key, typename Value>
-struct entry
-{
-  Key key;
-  Value value;
-
-  explicit entry(const Key & init_key) : key(init_key), value() {}
+  value_box() noexcept : value(0) {}
 };
 
 template<typename Key, typename Value>
 struct tiny_assoc
 {
-  entry<Key, Value> * slot;
+  Key stored_key;
+  Value stored_value;
+  bool occupied;
 
-  tiny_assoc() : slot(0) {}
+  tiny_assoc() noexcept : stored_key(), stored_value(), occupied(false) {}
 
-  ~tiny_assoc()
+  Value & subscript(const Key & key) noexcept
   {
-    delete slot;
-  }
-
-  Value & subscript(const Key & key)
-  {
-    if(!slot || slot->key != key) {
-      delete slot;
-      slot = new entry<Key, Value>(key);
+    if(!occupied || stored_key != key) {
+      stored_key = key;
+      stored_value = Value();
+      occupied = true;
     }
-    return slot->value;
+    return stored_value;
   }
 };
 

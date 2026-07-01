@@ -1,19 +1,19 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 10.3 [class.virtual]
 
 struct Base
 {
-  virtual int f() const
+  virtual int f() const noexcept
   {
     return 1;
   }
 
-  virtual ~Base() {}
+  virtual ~Base() noexcept {}
 };
 
 struct Derived : Base
 {
-  int f() const override
+  int f() const noexcept override
   {
     return 2;
   }

@@ -1,0 +1,37 @@
+translation-unit
+  alias-use at pa22/tests/general/400-alias-template-function-argument-cv.t:28:49
+    template decay_t
+    bind #1 = Functor source=explicit
+  alias-use at pa22/tests/general/400-alias-template-function-argument-cv.t:33:13
+    template function_box<type-parameter-0-0 (type-parameter-0-1...)>::handler_type
+    bind #1 = Functor source=explicit
+  class-use at pa22/tests/general/400-alias-template-function-argument-cv.t:46:3
+    template function_box
+    selected partial
+    bind #1 = int (const token<char> &, const token<char> &) source=explicit
+    specialize #1 = int source=deduced
+    specialize #2 = <const token<char> &, const token<char> &> source=deduced
+  class-use at pa22/tests/general/400-alias-template-function-argument-cv.t:46:26
+    template token
+    selected primary
+    bind #1 = char source=explicit
+  class-use at pa22/tests/general/400-alias-template-function-argument-cv.t:46:47
+    template token
+    selected primary
+    bind #1 = char source=explicit
+  function-call at pa22/tests/general/400-alias-template-function-argument-cv.t:46:63
+    callee function_box<int (const token<char> &, const token<char> &)>::function_box
+    selected instantiation
+    bind #1 = callable source=deduced
+    drop function_box<int (const token<char> &, const token<char> &)>::function_box reason=bad_conversion
+template-closure-events
+  ensure-definition
+    entity function_box<int (const token<char> &, const token<char> &)>::function_box
+  function-instantiation
+    entity function_box<int (const token<char> &, const token<char> &)>::function_box
+  function-instantiation
+    entity handler<int (const token<char> &, const token<char> &), callable>::invoke
+  require-definition
+    entity function_box<int (const token<char> &, const token<char> &)>::function_box
+  require-definition
+    entity handler<int (const token<char> &, const token<char> &), callable>::invoke

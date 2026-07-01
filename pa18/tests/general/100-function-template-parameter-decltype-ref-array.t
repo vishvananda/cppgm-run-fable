@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 
 namespace dep_param_ref_array {
 template <typename T>

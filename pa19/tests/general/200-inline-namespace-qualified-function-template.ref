@@ -1,0 +1,16 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $b : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $b
+    %t2 = addr $b
+    %t3 = call i32 @boost__asio__v1__execution__pick(%t2)
+    return i32 %t3
+}
+function @boost__asio__v1__execution__pick(%__param0 : ptr [pass=reference]) -> i32 [binding=weak, object=_ZN5boost4asio2v19execution4pickIiEEiRNS2_3boxIT_EE] {
+  slot $__param0 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    return i32 0
+}

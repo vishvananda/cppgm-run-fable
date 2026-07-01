@@ -1,0 +1,53 @@
+translation-unit
+  alias-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:40:16
+    template assign
+    bind #1 = L source=explicit
+    bind #2 = typename take_c_impl<N, rename<L, list>>::type source=explicit
+  alias-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:40:50
+    template rename
+    bind #1 = L source=explicit
+    bind #2 = list source=explicit
+  alias-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:43:14
+    template take_c
+    bind #1 = L source=explicit
+    bind #2 = size_t{N::value} source=explicit
+  alias-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:46:15
+    template take
+    bind #1 = take<L, J> source=explicit
+    bind #2 = I source=explicit
+  alias-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:46:20
+    template take
+    bind #1 = L source=explicit
+    bind #2 = J source=explicit
+  alias-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:52:9
+    template slice
+    bind #1 = list<int, char> source=explicit
+    bind #2 = index<1> source=explicit
+    bind #3 = index<1> source=explicit
+  class-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:52:15
+    template list
+    selected primary
+    bind #1 = <int, char> source=explicit
+  class-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:52:32
+    template index
+    selected primary
+    bind #1 = 1 source=explicit
+  class-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:52:42
+    template index
+    selected primary
+    bind #1 = 1 source=explicit
+  class-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:62:15
+    template same
+    selected partial
+    bind #1 = list<int> source=explicit
+    bind #2 = list<int> source=explicit
+    specialize #1 = list<int> source=deduced
+  class-use at pa21/tests/general/400-dependent-alias-member-template-id-defer.t:62:32
+    template list
+    selected primary
+    bind #1 = <int> source=explicit
+template-closure-events
+  variable-instantiation
+    entity index<1>::value
+  variable-instantiation
+    entity same<list<int>, list<int>>::value

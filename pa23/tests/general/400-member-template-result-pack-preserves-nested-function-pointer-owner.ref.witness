@@ -1,0 +1,35 @@
+translation-unit
+  class-use at pa23/tests/general/400-member-template-result-pack-preserves-nested-function-pointer-owner.t:44:3
+    template op
+    selected primary
+    bind #1 = bind_like<void (*)(int *, const error_code &), int *&, int> source=explicit
+    bind #2 = timer source=explicit
+    bind #3 = <void (error_code)> source=explicit
+  class-use at pa23/tests/general/400-member-template-result-pack-preserves-nested-function-pointer-owner.t:44:6
+    template bind_like
+    selected primary
+    bind #1 = void (*)(int *, const error_code &) source=explicit
+    bind #2 = int *& source=explicit
+    bind #3 = int source=explicit
+  function-call at pa23/tests/general/400-member-template-result-pack-preserves-nested-function-pointer-owner.t:48:13
+    callee op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::start
+    selected instantiation
+    bind #1 = init source=deduced
+    bind #2 = <> source=deduced
+template-closure-events
+  class-instantiation
+    entity op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::proxy
+  ensure-definition
+    entity op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::start
+  function-instantiation
+    entity op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::proxy::proxy
+  function-instantiation
+    entity op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::start
+  function-instantiation
+    entity slot::emplace
+  require-definition
+    entity op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::proxy::proxy
+  require-definition
+    entity op<bind_like<void (*)(int *, const error_code &), int *&, int>, timer, void (error_code)>::start
+  require-definition
+    entity slot::emplace

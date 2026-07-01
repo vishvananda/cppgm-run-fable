@@ -1,0 +1,40 @@
+translation-unit
+  class-use at pa21/tests/general/400-function-type-ref-qualified-partial-specialization.t:34:15
+    template holder
+    selected partial
+    bind #1 = void () source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-ref-qualified-partial-specialization.t:35:15
+    template holder
+    selected partial
+    bind #1 = void () & source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-ref-qualified-partial-specialization.t:36:15
+    template holder
+    selected partial
+    bind #1 = void () const & source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-ref-qualified-partial-specialization.t:37:15
+    template holder
+    selected partial
+    bind #1 = void () && source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-ref-qualified-partial-specialization.t:41:10
+    template holder
+    selected partial
+    bind #1 = void () & source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+template-closure-events
+  variable-instantiation
+    entity holder<void () &&>::value
+  variable-instantiation
+    entity holder<void () &>::value
+  variable-instantiation
+    entity holder<void () const &>::value
+  variable-instantiation
+    entity holder<void ()>::value

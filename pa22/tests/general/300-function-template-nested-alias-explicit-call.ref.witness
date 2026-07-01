@@ -1,0 +1,32 @@
+translation-unit
+  alias-use at pa22/tests/general/300-function-template-nested-alias-explicit-call.t:44:27
+    template iter_diff_t
+    bind #1 = Iter source=explicit
+  alias-use at pa22/tests/general/300-function-template-nested-alias-explicit-call.t:47:40
+    template enable_if_t
+    bind #1 = is_ptr<In>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/general/300-function-template-nested-alias-explicit-call.t:53:40
+    template enable_if_t
+    bind #1 = !is_ptr<In>::value source=explicit
+    bind #2 = int source=explicit
+  function-call at pa22/tests/general/300-function-template-nested-alias-explicit-call.t:64:10
+    callee helper
+    selected instantiation
+    bind #1 = Policy source=explicit
+    bind #2 = char * source=deduced
+    bind #3 = char * source=deduced
+    bind #4 = 0 source=defaulted
+    drop helper reason=substitution_failure
+  alias-use at pa22/tests/general/300-function-template-nested-alias-explicit-call.t:64:30
+    template iter_diff_t
+    bind #1 = char * source=explicit
+template-closure-events
+  ensure-definition
+    entity helper
+  function-instantiation
+    entity helper
+  require-definition
+    entity helper
+  variable-instantiation
+    entity is_ptr<char *>::value

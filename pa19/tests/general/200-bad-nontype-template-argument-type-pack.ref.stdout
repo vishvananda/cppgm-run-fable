@@ -1,0 +1,25 @@
+ERROR: template argument for non-type template parameter must be an expression: T... [parameter I] [phase template-resolution] [top-level declaration 1 kind=template-declaration ast={template-declaration
+  template-parameter-clause
+    template-parameter-list
+      non-type-template-parameter
+        decl-specifier-seq
+          decl-specifier KW_UNSIGNED:unsigned
+          decl-specifier KW_LONG:long
+        declarator
+          identifier I
+      type-parameter
+        parameter-key KW_CLASS:class
+        parameter-pack ...
+        identifier T
+  simple-declaration
+    decl-specifier-seq
+      decl-specifier tuple<T...>
+    init-declarator-list
+      init-declarator
+        declarator
+          ptr-operator OP_STAR:*
+          identifier g
+          parameter-clause
+}]
+Diagnostic context:
+collect_template_declaration [template<unsigned long I,class...T>tuple<T...>*g();] at tests/general/200-bad-nontype-template-argument-type-pack.t:4:1

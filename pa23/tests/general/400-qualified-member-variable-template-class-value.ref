@@ -1,0 +1,43 @@
+global @prop_0___static_query_v_ex__prop_0__ [binding=weak, object=_ZN4propILi0EE14static_query_vI2exS_ILi0EEEE] = {
+  zero 1
+}
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $p : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $p
+    %t2 = call obj<1x1> @static_query_trait_ex__prop_0___void___value()
+    copyobj 1x1 %t2, %t1
+    %t3 = addr $p
+    return i32 0
+}
+function @static_query_trait_ex__prop_0___void___value() -> obj<1x1> [binding=weak, object=_ZN18static_query_traitI2ex4propILi0EEvE5valueEv] {
+  slot $retobj__1 : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $retobj__1
+    %t2 = addr @prop_0___static_query_v_ex__prop_0__
+    return obj<1x1> $retobj__1
+}
+function @prop_0___static_query() -> obj<1x1> [binding=weak, object=_ZN4propILi0EE12static_queryI2exEES0_v] {
+  slot $retobj__1 : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $retobj__1
+    call void @prop_0___prop(%t1)
+    return obj<1x1> $retobj__1
+}
+function @prop_0___prop(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4propILi0EEC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @__cppgm_init() -> void [role=init, binding=internal] {
+  block ^entry:
+    %t1 = addr @prop_0___static_query_v_ex__prop_0__
+    return void
+}
+alias object _ZN4propILi0EEC2Ev = @prop_0___prop

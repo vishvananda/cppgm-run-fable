@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.1 [temp.arg.explicit], 14.8.2 [temp.deduct]
 // A function-template overload with too few non-pack template parameters is
 // not viable for an explicit template-id with more arguments.

@@ -1,0 +1,86 @@
+global @destroyed : i32 [binding=strong, object=_Z9destroyed] = 0
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $flag : i32
+  slot $q : ptr
+  slot $cond__1 : ptr
+  slot $call__2 : ptr
+  slot $tmpobj__3 : obj<1x1>
+  slot $cond__4 : i32
+  slot $land__5 : i64
+
+  block ^entry:
+    store i32 0, $flag
+    %t1 = load i32 $flag
+    branch %t1, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    eh_try ^call_unwind_dispatch_4
+    %t2 = addr $tmpobj__3
+    call void @Box__Box(%t2)
+    eh_end
+    jump ^call_unwind_end_5
+
+  block ^call_unwind_dispatch_4:
+    resume
+
+  block ^call_unwind_end_5:
+    %t3 = call ptr @Box__get(%t2)
+    store ptr %t3, $call__2
+    %t4 = load ptr $call__2
+    store ptr %t4, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store ptr 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t5 = load ptr $cond__1
+    store ptr %t5, $q
+    %t6 = load ptr $q
+    %t7 = cmp eq ptr %t6, 0
+    branch %t7, ^land_rhs_9, ^land_short_10
+
+  block ^land_rhs_9:
+    %t8 = load i32 @destroyed
+    %t9 = cmp eq i32 %t8, 0
+    %t10 = cmp ne i64 %t9, 0
+    store i64 %t10, $land__5
+    jump ^land_end_11
+
+  block ^land_short_10:
+    store i64 0, $land__5
+    jump ^land_end_11
+
+  block ^land_end_11:
+    %t11 = load i64 $land__5
+    branch %t11, ^cond_then_6, ^cond_else_7
+
+  block ^cond_then_6:
+    store i32 0, $cond__4
+    jump ^cond_end_8
+
+  block ^cond_else_7:
+    store i32 1, $cond__4
+    jump ^cond_end_8
+
+  block ^cond_end_8:
+    %t12 = load i32 $cond__4
+    return i32 %t12
+}
+function @Box__Box(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3BoxC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @Box__get(%this : ptr) -> ptr [unwind=no, binding=weak, object=_ZNK3Box3getEv] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return ptr 0
+}
+alias object _ZN3BoxC2Ev = @Box__Box

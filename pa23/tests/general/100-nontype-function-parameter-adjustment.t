@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.1 [temp.param], function-type non-type parameters.
 
 int target(short, long, double)

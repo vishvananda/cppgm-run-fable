@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // An out-of-class member definition can cause a dependent source-owner class
 // template to collect member templates before a concrete instantiation uses
 // them. A member template trailing return still needs the concrete owner

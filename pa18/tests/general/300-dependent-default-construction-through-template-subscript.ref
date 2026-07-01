@@ -1,165 +1,116 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
-declare function @operator_delete(%arg0 : ptr) -> void [unwind=no, binding=strong, object=cppgm_builtin_operator_delete]
-declare function @operator_new(%arg0 : i64) -> ptr [binding=strong, object=cppgm_builtin_operator_new]
-
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
-  slot $values : obj<8x8>
+  slot $values : obj<12x4>
   slot $key : u8
-  slot $call__1 : ptr
-  slot $cond__2 : i32
-  slot $call__3 : ptr
+  slot $cond__1 : i32
 
   block ^entry:
     %t1 = addr $values
     call void @tiny_assoc_unsigned_char__value_box___tiny_assoc(%t1)
     store u8 1, $key
-    eh_try ^call_unwind_dispatch_1
     %t2 = addr $values
     %t3 = addr $key
     %t4 = call ptr @tiny_assoc_unsigned_char__value_box___subscript(%t2, %t3)
-    store ptr %t4, $call__1
-    %t5 = load ptr $call__1
-    %t6 = index i8 [projection=field] %t5, 0
-    store i32 3, %t6
-    eh_end
-    jump ^call_unwind_end_2
+    %t5 = index i8 [projection=field] %t4, 0
+    store i32 3, %t5
+    %t6 = addr $values
+    %t7 = addr $key
+    %t8 = call ptr @tiny_assoc_unsigned_char__value_box___subscript(%t6, %t7)
+    %t9 = index i8 [projection=field] %t8, 0
+    %t10 = load i32 %t9
+    %t11 = cmp eq i32 %t10, 3
+    branch %t11, ^cond_then_1, ^cond_else_2
 
-  block ^call_unwind_dispatch_1:
-    %t7 = addr $values
-    call void @tiny_assoc_unsigned_char__value_box____tiny_assoc(%t7)
-    resume
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
 
-  block ^call_unwind_end_2:
-    eh_try ^call_unwind_dispatch_1
-    %t8 = addr $values
-    %t9 = addr $key
-    %t10 = call ptr @tiny_assoc_unsigned_char__value_box___subscript(%t8, %t9)
-    store ptr %t10, $call__3
-    %t11 = load ptr $call__3
-    %t12 = index i8 [projection=field] %t11, 0
-    %t13 = load i32 %t12
-    %t14 = cmp eq i32 %t13, 3
-    eh_end
-    branch %t14, ^cond_then_3, ^cond_else_4
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
 
-  block ^cond_then_3:
-    store i32 0, $cond__2
-    jump ^cond_end_5
-
-  block ^cond_else_4:
-    store i32 1, $cond__2
-    jump ^cond_end_5
-
-  block ^cond_end_5:
-    %t15 = load i32 $cond__2
-    %t16 = addr $values
-    call void @tiny_assoc_unsigned_char__value_box____tiny_assoc(%t16)
-    return i32 %t15
+  block ^cond_end_3:
+    %t12 = load i32 $cond__1
+    return i32 %t12
 }
-function @tiny_assoc_unsigned_char__value_box___tiny_assoc(%this : ptr) -> void [binding=weak, object=_ZN10tiny_assocIh9value_boxEC1Ev] {
+function @tiny_assoc_unsigned_char__value_box___tiny_assoc(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN10tiny_assocIh9value_boxEC1Ev] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     %t1 = load ptr $this
     %t2 = index i8 [projection=field] %t1, 0
-    store ptr 0, %t2
+    store u8 0, %t2
+    %t3 = load ptr $this
+    %t4 = index i8 [projection=field] %t3, 4
+    call void @value_box__value_box(%t4)
+    %t5 = load ptr $this
+    %t6 = index i8 [projection=field] %t5, 8
+    store u8 0, %t6
     return void
 }
-function @tiny_assoc_unsigned_char__value_box____tiny_assoc(%this : ptr) -> void [binding=weak, object=_ZN10tiny_assocIh9value_boxED1Ev] {
-  slot $this : ptr
-
-  block ^entry:
-    store ptr %this, $this
-    %t1 = load ptr $this
-    %t2 = index i8 [projection=field] %t1, 0
-    %t3 = load ptr %t2
-    %t4 = cmp ne ptr %t3, 0
-    branch %t4, ^delete_nonnull_1, ^delete_end_2
-
-  block ^delete_nonnull_1:
-    call void @operator_delete(%t3)
-    jump ^delete_end_2
-
-  block ^delete_end_2:
-    return void
-}
-function @tiny_assoc_unsigned_char__value_box___subscript(%this : ptr, %key : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN10tiny_assocIh9value_boxE9subscriptERKh] {
+function @tiny_assoc_unsigned_char__value_box___subscript(%this : ptr, %key : ptr [pass=reference]) -> ptr [unwind=no, binding=weak, object=_ZN10tiny_assocIh9value_boxE9subscriptERKh] {
   slot $this : ptr
   slot $key : ptr
+  slot $arg__1 : obj<4x4>
 
   block ^entry:
     store ptr %this, $this
     store ptr %key, $key
     %t1 = load ptr $this
-    %t2 = index i8 [projection=field] %t1, 0
-    %t3 = load ptr %t2
-    %t4 = cmp eq ptr %t3, 0
+    %t2 = index i8 [projection=field] %t1, 8
+    %t3 = load u8 %t2
+    %t4 = cmp eq i64 %t3, 0
     branch %t4, ^if_then_1, ^lor_rhs_4
 
   block ^lor_rhs_4:
     %t5 = load ptr $this
     %t6 = index i8 [projection=field] %t5, 0
-    %t7 = load ptr %t6
-    %t8 = index i8 [projection=field] %t7, 0
+    %t7 = load u8 %t6
+    %t8 = load ptr $key
     %t9 = load u8 %t8
-    %t10 = load ptr $key
-    %t11 = load u8 %t10
-    %t12 = convert zext i32 u8 %t9
-    %t13 = convert zext i32 u8 %t11
-    %t14 = cmp ne i32 %t12, %t13
-    branch %t14, ^if_then_1, ^if_else_2
+    %t10 = convert zext i32 u8 %t7
+    %t11 = convert zext i32 u8 %t9
+    %t12 = cmp ne i32 %t10, %t11
+    branch %t12, ^if_then_1, ^if_else_2
 
   block ^if_then_1:
+    %t13 = load ptr $key
+    %t14 = load u8 %t13
     %t15 = load ptr $this
     %t16 = index i8 [projection=field] %t15, 0
-    %t17 = load ptr %t16
-    %t18 = cmp ne ptr %t17, 0
-    branch %t18, ^delete_nonnull_5, ^delete_end_6
-
-  block ^delete_nonnull_5:
-    call void @operator_delete(%t17)
-    jump ^delete_end_6
-
-  block ^delete_end_6:
-    %t19 = convert sext i64 i32 8
-    %t20 = call ptr @operator_new(%t19)
-    %t21 = load ptr $key
-    call void @entry_unsigned_char__value_box___entry(%t20, %t21)
-    %t22 = load ptr $this
-    %t23 = index i8 [projection=field] %t22, 0
-    store ptr %t20, %t23
+    store u8 %t14, %t16
+    %t17 = load ptr $this
+    %t18 = index i8 [projection=field] %t17, 4
+    %t19 = addr $arg__1
+    call void @value_box__value_box(%t19)
+    %t20 = call ptr @value_box__operator___ov2(%t18, %t19)
+    %t21 = load ptr $this
+    %t22 = index i8 [projection=field] %t21, 8
+    store u8 1, %t22
     jump ^if_end_3
 
   block ^if_else_2:
     jump ^if_end_3
 
   block ^if_end_3:
-    %t24 = load ptr $this
-    %t25 = index i8 [projection=field] %t24, 0
-    %t26 = load ptr %t25
-    %t27 = index i8 [projection=field] %t26, 4
-    return ptr %t27
+    %t23 = load ptr $this
+    %t24 = index i8 [projection=field] %t23, 4
+    return ptr %t24
 }
-function @entry_unsigned_char__value_box___entry(%this : ptr, %init_key : ptr [pass=reference]) -> void [binding=weak, object=_ZN5entryIh9value_boxEC1ERKh] {
+function @value_box__operator___ov2(%this : ptr, %other : ptr [pass=reference]) -> ptr [unwind=no, binding=weak, object=_ZN9value_boxaSEOS_] {
   slot $this : ptr
-  slot $init_key : ptr
+  slot $other : ptr
 
   block ^entry:
     store ptr %this, $this
-    store ptr %init_key, $init_key
-    %t1 = load ptr $init_key
-    %t2 = load u8 %t1
+    store ptr %other, $other
+    %t1 = load ptr $this
+    %t2 = load ptr $other
+    copyobj 4x4 %t2, %t1
     %t3 = load ptr $this
-    %t4 = index i8 [projection=field] %t3, 0
-    store u8 %t2, %t4
-    %t5 = load ptr $this
-    %t6 = index i8 [projection=field] %t5, 4
-    call void @value_box__value_box(%t6)
-    return void
+    return ptr %t3
 }
-function @value_box__value_box(%this : ptr) -> void [binding=weak, object=_ZN9value_boxC1Ev] {
+function @value_box__value_box(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN9value_boxC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -170,6 +121,4 @@ function @value_box__value_box(%this : ptr) -> void [binding=weak, object=_ZN9va
     return void
 }
 alias object _ZN10tiny_assocIh9value_boxEC2Ev = @tiny_assoc_unsigned_char__value_box___tiny_assoc
-alias object _ZN10tiny_assocIh9value_boxED2Ev = @tiny_assoc_unsigned_char__value_box____tiny_assoc
-alias object _ZN5entryIh9value_boxEC2ERKh = @entry_unsigned_char__value_box___entry
 alias object _ZN9value_boxC2Ev = @value_box__value_box

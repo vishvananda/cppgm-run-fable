@@ -1,0 +1,29 @@
+translation-unit
+  class-use at pa22/tests/general/400-member-alias-template-template-sfinae-owner.t:6:9
+    template bool_
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa22/tests/general/400-member-alias-template-template-sfinae-owner.t:7:9
+    template bool_
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa22/tests/general/400-member-alias-template-template-sfinae-owner.t:49:15
+    template if_
+    bind #1 = valid<F, T...> source=explicit
+    bind #2 = defer_impl<F, T...> source=explicit
+    bind #3 = no_type source=explicit
+  alias-use at pa22/tests/general/400-member-alias-template-template-sfinae-owner.t:49:19
+    template valid
+    bind #1 = F source=explicit
+    bind #2 = T... source=explicit
+  class-use at pa22/tests/general/400-member-alias-template-template-sfinae-owner.t:57:9
+    template quote_trait
+    selected primary
+    bind #1 = identity source=explicit
+  alias-use at pa22/tests/general/400-member-alias-template-template-sfinae-owner.t:58:9
+    template valid
+    bind #1 = quoted_identity::template fn source=explicit
+    bind #2 = void source=explicit
+template-closure-events
+  variable-instantiation
+    entity bool_<true>::value

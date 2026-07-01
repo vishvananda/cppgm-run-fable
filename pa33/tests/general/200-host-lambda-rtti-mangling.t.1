@@ -1,4 +1,6 @@
-#include <typeinfo>
+namespace std {
+class type_info;
+}
 
 struct LambdaRttiHost {
   const void *capture(int base)

@@ -1,0 +1,13 @@
+translation-unit
+  function-call at pa22/tests/spec/100-function-template-array-bound-deduction.t:13:10
+    callee array_size
+    selected instantiation
+    bind #1 = int source=deduced
+    bind #2 = 3 source=deduced
+template-closure-events
+  ensure-definition
+    entity array_size
+  function-instantiation
+    entity array_size
+  require-definition
+    entity array_size

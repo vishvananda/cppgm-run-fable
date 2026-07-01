@@ -64,7 +64,7 @@ function @Wrapper__Wrapper(%this : ptr, %ptr : ptr) -> void [binding=weak, objec
     call void @Owner__Owner(%t2, %t3)
     return void
 }
-function @Wrapper__Wrapper__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN7WrapperC1EOS_] {
+function @Wrapper__Wrapper__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN7WrapperC1EOS_, trivial_lifecycle=yes] {
   slot $this : ptr
   slot $other : ptr
 

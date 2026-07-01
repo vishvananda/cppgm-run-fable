@@ -1,0 +1,44 @@
+translation-unit
+  alias-use at pa23/tests/spec/300-trailing-return-expression-sfinae-default-param.t:71:27
+    template conditional_t
+    bind #1 = true source=explicit
+    bind #2 = T source=explicit
+    bind #3 = P source=explicit
+  class-use at pa23/tests/spec/300-trailing-return-expression-sfinae-default-param.t:86:15
+    template can_require
+    selected primary
+    bind #1 = wrapper source=explicit
+    bind #2 = supported source=explicit
+  class-use at pa23/tests/spec/300-trailing-return-expression-sfinae-default-param.t:88:16
+    template can_require
+    selected primary
+    bind #1 = wrapper source=explicit
+    bind #2 = unsupported source=explicit
+  class-use at pa23/tests/spec/300-trailing-return-expression-sfinae-default-param.t:90:15
+    template can_require_proxy
+    selected primary
+    bind #1 = wrapper source=explicit
+    bind #2 = supported source=explicit
+  class-use at pa23/tests/spec/300-trailing-return-expression-sfinae-default-param.t:92:16
+    template can_require_proxy
+    selected primary
+    bind #1 = wrapper source=explicit
+    bind #2 = unsupported source=explicit
+  class-use at pa23/tests/spec/300-trailing-return-expression-sfinae-default-param.t:97:10
+    template can_require_proxy
+    selected primary
+    bind #1 = wrapper source=explicit
+    bind #2 = unsupported source=explicit
+template-closure-events
+  class-instantiation
+    entity proxy<wrapper>::type
+  variable-instantiation
+    entity can_require<wrapper, supported>::value
+  variable-instantiation
+    entity can_require<wrapper, unsupported>::value
+  variable-instantiation
+    entity can_require_proxy<wrapper, supported>::value
+  variable-instantiation
+    entity can_require_proxy<wrapper, unsupported>::value
+  variable-instantiation
+    entity is_supported<unsupported>::value

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // An out-of-class static member definition can cause a dependent source-owner
 // class template to collect member templates before a concrete instantiation
 // uses them. A defaulted SFINAE parameter on those member templates must still

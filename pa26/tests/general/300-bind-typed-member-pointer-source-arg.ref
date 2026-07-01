@@ -33,7 +33,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t13 = load i32 $cond__2
     return i32 %t13
 }
-function @type_tag_void___type_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8type_tagIvEC1Ev] {
+function @type_tag_void___type_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8type_tagIvEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

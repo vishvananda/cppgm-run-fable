@@ -62,7 +62,7 @@ global @D____construction__B__0__s1__vtable [storage=readonly, binding=weak, obj
   ptr addr @__rtti_struct_V
   ptr addr @V__anchor
 }
-global @D____vtt [storage=readonly, binding=weak, object=_ZTT1D] = {
+global @D____vtt [storage=readonly, binding=weak, object=_ZTT1D, object_root=yes] = {
   ptr addr @D__vtable + 24
   ptr addr @D____construction__B__0__s0__vtable + 24
   ptr addr @D____construction__B__0__s1__vtable + 24
@@ -81,7 +81,7 @@ global @B____view__V__16__vtable [storage=readonly, binding=weak, object=@B____v
   ptr addr @__rtti_struct_B
   ptr addr @V__anchor
 }
-global @B____vtt [storage=readonly, binding=weak, object=_ZTT1B] = {
+global @B____vtt [storage=readonly, binding=weak, object=_ZTT1B, object_root=yes] = {
   ptr addr @B__vtable + 24
   ptr addr @B____view__V__16__vtable + 24
 }

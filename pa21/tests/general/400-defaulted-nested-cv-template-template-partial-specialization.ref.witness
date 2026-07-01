@@ -1,0 +1,64 @@
+translation-unit
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:41:15
+    template holder
+    selected partial
+    bind #1 = map<int, value> source=explicit
+    specialize #1 = map source=deduced
+    specialize #2 = int source=deduced
+    specialize #3 = value source=deduced
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:41:22
+    template map
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = value source=explicit
+    bind #3 = less<int> source=defaulted
+    bind #4 = allocator<pair<const int, value>> source=defaulted
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:42:15
+    template holder
+    selected partial
+    bind #1 = unordered_map<int, value> source=explicit
+    specialize #1 = unordered_map source=deduced
+    specialize #2 = int source=deduced
+    specialize #3 = value source=deduced
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:42:22
+    template unordered_map
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = value source=explicit
+    bind #3 = hash<int> source=defaulted
+    bind #4 = equal_to<int> source=defaulted
+    bind #5 = allocator<pair<const int, value>> source=defaulted
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:46:10
+    template holder
+    selected partial
+    bind #1 = map<int, value> source=explicit
+    specialize #1 = map source=deduced
+    specialize #2 = int source=deduced
+    specialize #3 = value source=deduced
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:46:17
+    template map
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = value source=explicit
+    bind #3 = less<int> source=defaulted
+    bind #4 = allocator<pair<const int, value>> source=defaulted
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:47:10
+    template holder
+    selected partial
+    bind #1 = unordered_map<int, value> source=explicit
+    specialize #1 = unordered_map source=deduced
+    specialize #2 = int source=deduced
+    specialize #3 = value source=deduced
+  class-use at pa21/tests/general/400-defaulted-nested-cv-template-template-partial-specialization.t:47:17
+    template unordered_map
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = value source=explicit
+    bind #3 = hash<int> source=defaulted
+    bind #4 = equal_to<int> source=defaulted
+    bind #5 = allocator<pair<const int, value>> source=defaulted
+template-closure-events
+  variable-instantiation
+    entity holder<map<int, value>>::value
+  variable-instantiation
+    entity holder<unordered_map<int, value>>::value

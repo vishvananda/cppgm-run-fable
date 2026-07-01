@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Container reduction: a qualified enable_if return type can contain a
 // bool expression that references a trait instantiated with
 // typename Container::value_type. The trait namespace is not the lookup context

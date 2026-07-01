@@ -1,15 +1,15 @@
 struct S {
-  S();
-  S(const S&);
-  ~S();
+  S() noexcept;
+  S(const S&) noexcept;
+  ~S() noexcept;
 };
 
-S::S() {}
-S::S(const S&) {}
-S::~S() {}
+S::S() noexcept {}
+S::S(const S&) noexcept {}
+S::~S() noexcept {}
 
-S f() { return S(); }
-S g() { return S(); }
+S f() noexcept { return S(); }
+S g() noexcept { return S(); }
 
 int main() {
   bool c = true;

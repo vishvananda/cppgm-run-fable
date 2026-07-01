@@ -1,0 +1,20 @@
+translation-unit
+  alias-use at pa21/tests/general/400-alias-nontype-expression-declaration-scope.t:28:15
+    template meta::bool_
+    bind #1 = (N <= size<L>::value) source=explicit
+  alias-use at pa21/tests/general/400-alias-nontype-expression-declaration-scope.t:28:27
+    template meta::size
+    bind #1 = L source=explicit
+  alias-use at pa21/tests/general/400-alias-nontype-expression-declaration-scope.t:34:16
+    template meta::check
+    bind #1 = meta::list<int, char> source=explicit
+    bind #2 = 1 source=explicit
+  class-use at pa21/tests/general/400-alias-nontype-expression-declaration-scope.t:34:28
+    template meta::list
+    selected primary
+    bind #1 = <int, char> source=explicit
+template-closure-events
+  variable-instantiation
+    entity meta::constant<bool, true>::value
+  variable-instantiation
+    entity meta::constant<unsigned long, 2>::value

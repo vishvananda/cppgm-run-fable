@@ -1,5 +1,5 @@
 translation-unit
-  class-use at pa18/tests/general/300-dependent-default-construction-through-template-subscript.t:44:3
+  class-use at pa18/tests/general/300-dependent-default-construction-through-template-subscript.t:33:3
     template tiny_assoc
     selected primary
     bind #1 = unsigned char source=explicit
@@ -9,21 +9,11 @@ template-closure-events
     entity tiny_assoc<unsigned char, value_box>::subscript
   ensure-definition
     entity tiny_assoc<unsigned char, value_box>::tiny_assoc
-  ensure-definition
-    entity tiny_assoc<unsigned char, value_box>::~tiny_assoc
-  function-instantiation
-    entity entry<unsigned char, value_box>::entry
   function-instantiation
     entity tiny_assoc<unsigned char, value_box>::subscript
   function-instantiation
     entity tiny_assoc<unsigned char, value_box>::tiny_assoc
-  function-instantiation
-    entity tiny_assoc<unsigned char, value_box>::~tiny_assoc
-  require-definition
-    entity entry<unsigned char, value_box>::entry
   require-definition
     entity tiny_assoc<unsigned char, value_box>::subscript
   require-definition
     entity tiny_assoc<unsigned char, value_box>::tiny_assoc
-  require-definition
-    entity tiny_assoc<unsigned char, value_box>::~tiny_assoc

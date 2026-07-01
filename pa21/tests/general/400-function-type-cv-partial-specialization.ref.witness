@@ -1,0 +1,32 @@
+translation-unit
+  class-use at pa21/tests/general/400-function-type-cv-partial-specialization.t:28:15
+    template holder
+    selected partial
+    bind #1 = void () source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-cv-partial-specialization.t:29:15
+    template holder
+    selected partial
+    bind #1 = void () const source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-cv-partial-specialization.t:30:15
+    template holder
+    selected partial
+    bind #1 = void () volatile source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-function-type-cv-partial-specialization.t:34:10
+    template holder
+    selected partial
+    bind #1 = void () source=explicit
+    specialize #1 = void source=deduced
+    specialize #2 = <> source=deduced
+template-closure-events
+  variable-instantiation
+    entity holder<void () const>::value
+  variable-instantiation
+    entity holder<void () volatile>::value
+  variable-instantiation
+    entity holder<void ()>::value

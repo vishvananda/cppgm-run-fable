@@ -1,0 +1,18 @@
+function @g(%x : ptr [pass=reference]) -> i32 [binding=strong, object=_Z1gRi] {
+  slot $x : ptr
+
+  block ^entry:
+    store ptr %x, $x
+    %t1 = load ptr $x
+    %t2 = call ptr @forward(%t1)
+    %t3 = load i32 %t2
+    return i32 %t3
+}
+function @forward(%t : ptr [pass=reference]) -> ptr [binding=weak, object=_Z7forwardIRiEOT_RN16remove_referenceIS1_E4typeE] {
+  slot $t : ptr
+
+  block ^entry:
+    store ptr %t, $t
+    %t1 = load ptr $t
+    return ptr %t1
+}

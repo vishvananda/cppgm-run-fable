@@ -1,0 +1,66 @@
+global @string_like_char___npos : i32 [binding=weak, object=_ZN11string_likeIcE4nposE] = 0
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $s : obj<1x1>
+  slot $v : obj<1x1>
+  slot $cond__1 : i32
+  slot $argobj__2 : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $s
+    %t2 = addr $v
+    %t3 = addr $s
+    %t4 = addr $argobj__2
+    %t5 = addr $v
+    %t6 = call ptr @string_like_char___insert(%t3, $argobj__2)
+    %t7 = cmp eq ptr %t6, 0
+    branch %t7, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t8 = load i32 $cond__1
+    return i32 %t8
+}
+function @string_like_char___insert(%this : ptr, %sv : obj<1x1>) -> ptr [binding=weak, object=_ZN11string_likeIcE6insertI9view_likeEEPcT_] {
+  slot $this : ptr
+  slot $sv : obj<1x1>
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = addr $sv
+    %t3 = call ptr @view_like__data(%t2)
+    %t4 = addr $sv
+    %t5 = call ptr @view_like__data(%t4)
+    %t6 = call ptr @string_like_char___insert__ov2(%t1, 0, %t3, %t5, 0)
+    return ptr %t6
+}
+function @string_like_char___insert__ov2(%this : ptr, %__param1 : ptr, %__param2 : ptr, %__param3 : ptr, %__param4 : ptr) -> ptr [binding=weak, object=_ZN11string_likeIcE6insertIPKcEEPcS3_T_S5_Pv] {
+  slot $this : ptr
+  slot $__param1 : ptr
+  slot $__param2 : ptr
+  slot $__param3 : ptr
+  slot $__param4 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    store ptr %__param2, $__param2
+    store ptr %__param3, $__param3
+    store ptr %__param4, $__param4
+    return ptr 0
+}
+function @view_like__data(%this : ptr) -> ptr [binding=weak, object=_ZNK9view_like4dataEv] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return ptr 0
+}

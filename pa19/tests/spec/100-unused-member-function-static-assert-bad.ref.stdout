@@ -1,0 +1,4 @@
+ERROR: static_assert false:  ==  [bindings {values:this=pointer to struct YS} YS{types:YS=struct YS,c=char,x=int}] [top-level declaration 0 kind=class-specifier value=YS text=YS]
+Diagnostic context:
+collect_class_declaration [YS] at tests/spec/100-unused-member-function-static-assert-bad.t:4:1
+  class_member_function_definition [] at tests/spec/100-unused-member-function-static-assert-bad.t:8:3

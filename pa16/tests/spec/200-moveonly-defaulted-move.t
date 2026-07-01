@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 8.4.3 [dcl.fct.def.delete], 12.8 [class.copy]
 
 struct MoveOnly

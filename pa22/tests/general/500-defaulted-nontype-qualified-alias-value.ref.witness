@@ -1,0 +1,51 @@
+translation-unit
+  class-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:10:9
+    template integral_constant
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:11:9
+    template integral_constant
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:31:1
+    template expand_to_true
+    bind #1 = enable_if_t<P>... source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:31:16
+    template enable_if_t
+    bind #1 = P source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:50:16
+    template BoolConstant
+    bind #1 = !A::value source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:57:9
+    template And
+    bind #1 = BoolConstant<sizeof...(T) >= 1> source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:57:13
+    template BoolConstant
+    bind #1 = sizeof...(T) >= 1 source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:63:16
+    template And
+    bind #1 = BoolConstant<sizeof...(U) == sizeof...(T)> source=explicit
+  alias-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:63:20
+    template BoolConstant
+    bind #1 = sizeof...(U) == sizeof...(T) source=explicit
+  class-use at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:72:3
+    template tuple
+    selected primary
+    bind #1 = <X &&> source=explicit
+  function-call at pa22/tests/general/500-defaulted-nontype-qualified-alias-value.t:72:14
+    callee tuple<X &&>::tuple
+    selected instantiation
+    bind #1 = <X> source=deduced
+    bind #2 = 0 source=defaulted
+    drop tuple<X &&>::tuple reason=worse_conversion
+template-closure-events
+  ensure-definition
+    entity tuple<X &&>::tuple
+  function-instantiation
+    entity tuple<X &&>::tuple
+  require-definition
+    entity tuple<X &&>::tuple
+  variable-instantiation
+    entity integral_constant<false>::value
+  variable-instantiation
+    entity integral_constant<true>::value

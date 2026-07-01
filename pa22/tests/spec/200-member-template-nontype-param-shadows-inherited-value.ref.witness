@@ -1,0 +1,32 @@
+translation-unit
+  class-use at pa22/tests/spec/200-member-template-nontype-param-shadows-inherited-value.t:16:15
+    template mpl_::size_t
+    selected primary
+    bind #1 = 1073741822 source=explicit
+  class-use at pa22/tests/spec/200-member-template-nontype-param-shadows-inherited-value.t:25:18
+    template detail::base_value
+    selected primary
+    bind #1 = 1 source=explicit
+  class-use at pa22/tests/spec/200-member-template-nontype-param-shadows-inherited-value.t:56:9
+    template detail::expression
+    selected primary
+    bind #1 = detail::matcher<traits> source=explicit
+  class-use at pa22/tests/spec/200-member-template-nontype-param-shadows-inherited-value.t:56:28
+    template detail::matcher
+    selected primary
+    bind #1 = traits source=explicit
+template-closure-events
+  ensure-definition
+    entity detail::expression<detail::matcher<traits>>::get_width
+  function-instantiation
+    entity detail::expression<detail::matcher<traits>>::get_width
+  function-instantiation
+    entity detail::expression<detail::matcher<traits>>::get_width_
+  require-definition
+    entity detail::expression<detail::matcher<traits>>::get_width
+  require-definition
+    entity detail::expression<detail::matcher<traits>>::get_width_
+  variable-instantiation
+    entity detail::base_value<1>::width
+  variable-instantiation
+    entity detail::expression<detail::matcher<traits>>::width

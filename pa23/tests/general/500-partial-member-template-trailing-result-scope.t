@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.2 [temp.deduct], 14.8.2.5 [temp.deduct.type]
 // A member template of a selected class partial specialization must reparse
 // its trailing result type with the partial-specialization parameters in scope.

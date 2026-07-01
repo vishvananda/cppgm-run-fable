@@ -1,0 +1,26 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $ar : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $ar
+    %t2 = addr $ar
+    call void @archive_access__save(%t2)
+    return i32 0
+}
+function @archive_access__save(%ar : ptr [pass=reference]) -> void [binding=weak, object=_ZN14archive_access4saveER7archive] {
+  slot $ar : ptr
+
+  block ^entry:
+    store ptr %ar, $ar
+    %t1 = load ptr $ar
+    %t2 = index i8 [projection=base_subobject] %t1, 0
+    call void @archive_base__end_preamble(%t2)
+    return void
+}
+function @archive_base__end_preamble(%this : ptr) -> void [binding=weak, object=_ZN12archive_base12end_preambleEv] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}

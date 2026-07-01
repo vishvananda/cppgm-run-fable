@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-switch-target.t:4: switch default target requires block label

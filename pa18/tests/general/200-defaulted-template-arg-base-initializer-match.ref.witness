@@ -1,0 +1,28 @@
+translation-unit
+  class-use at pa18/tests/general/200-defaulted-template-arg-base-initializer-match.t:10:18
+    template Base
+    selected primary
+    bind #1 = char source=explicit
+    bind #2 = Def<char> source=defaulted
+  class-use at pa18/tests/general/200-defaulted-template-arg-base-initializer-match.t:11:15
+    template Base
+    selected primary
+    bind #1 = char source=explicit
+    bind #2 = Def<char> source=defaulted
+  class-use at pa18/tests/general/200-defaulted-template-arg-base-initializer-match.t:12:30
+    template Base
+    selected primary
+    bind #1 = char source=explicit
+    bind #2 = Def<char> source=defaulted
+  class-use at pa18/tests/general/200-defaulted-template-arg-base-initializer-match.t:12:53
+    template Base
+    selected primary
+    bind #1 = char source=explicit
+    bind #2 = Def<char> source=defaulted
+template-closure-events
+  ensure-definition
+    entity Base<char>::Base
+  function-instantiation
+    entity Base<char>::Base
+  require-definition
+    entity Base<char>::Base

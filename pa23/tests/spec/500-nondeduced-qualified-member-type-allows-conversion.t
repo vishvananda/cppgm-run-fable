@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.2.5 [temp.deduct.type], 13.3.3.1 [over.best.ics]
 
 namespace nondeduced_qualified_member_type_conversion

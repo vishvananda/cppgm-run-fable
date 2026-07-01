@@ -1,5 +1,5 @@
-// VALIDATION: run-pass
-// N3485 focus: 14.5.5 [temp.class.spec], 14.5.6 [temp.var]
+// VALIDATION: compile-pass
+// N3485 focus: 14.5.5 [temp.class.spec]; variable templates are post-N3485.
 
 template<class T, class U>
 constexpr int pick_v = 0;

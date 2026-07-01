@@ -41,6 +41,10 @@ The starter kit contains:
 - a student-editable `dev/lowir2native.cpp` starter scaffold
 - the `pa28/lowir2native.cpp` symlink back to `../dev/lowir2native.cpp`
 - shared support sources and headers under `dev/src/`
+- optional typed LowIR and machine-IR model scaffolding in
+  `dev/src/lowir_model.h` and `dev/src/mir_model.h`, with shared
+  exported-symbol and register support in `dev/src/ir_symbol_model.h` and
+  `dev/src/x86_register_model.h`
 - a local test suite under `pa28/tests/`
 - the grammar for this assignment called `pa28.gram`
 - the authoritative LowIR specification in `../pa13/lowir.md`
@@ -48,6 +52,7 @@ The starter kit contains:
 - checked-in golden result files under `tests/`
 - `tests/strict/` for raw-MIR oracle tests
 - `tests/structural/` for canonical-MIR oracle tests
+- `tests/behavior/` for generated-program behavior tests without a machine-IR oracle
 
 Students should implement the assignment in `dev/lowir2native.cpp` and any reusable
 student-owned helpers they add under `dev/src/`. The assignment directory, grammar files,
@@ -100,6 +105,16 @@ program to `<outfile>`.
 If `--dump-machine-ir <mirfile>` is provided, `lowir2native` shall also write a
 deterministic machine-IR dump to `<mirfile>`.
 
+The machine-IR dump is the serialized form of the backend model used for native
+emission. You may keep a typed MIR internally, and the optional
+`dev/src/mir_model.h` scaffold gives one possible representation, but the dump
+must describe the same program that native emission consumes.
+
+Frame metadata is part of that final MIR contract. In particular, the
+callee-saved `preserve` list should name the callee-saved registers that the
+final instruction body actually uses after local setup/copy cleanup, and the
+stack size should match that final frame layout.
+
 That MIR dump path must work even for helper-only LowIR inputs that have no
 entry function. In that case the dumped MIR should simply omit the optional
 `startup` section.
@@ -140,10 +155,11 @@ For each test case `x`:
 - its standard output is recorded in `x.my.program.stdout`
 - its numeric exit status is recorded in `x.my.program.exit_status`
 
-The checked-in `.ref` files are compared the same way:
+The checked-in `.ref` files are compared the same way for the outputs that are
+part of that test's oracle:
 
 - `x.ref.impl.exit_status`
-- `x.ref.mir`
+- `x.ref.mir` for tests with a raw MIR dump oracle
 - `x.ref.program.stdout`
 - `x.ref.program.exit_status`
 
@@ -181,15 +197,18 @@ for testing is still this textual machine-IR form:
 - per-function `abi`, `frame`, and ordered `block ^...` sections
 - one instruction or metadata line per indented row beneath those sections
 
-The raw `.mir` file is still checked in because it is the debugging-oriented dump students
-see directly from `--dump-machine-ir`.
+For strict and structural MIR tests, the raw `.ref.mir` file is still checked in because it
+is the debugging-oriented dump students see directly from `--dump-machine-ir`.
+Structural tests also keep `x.ref.cmir`, the canonical oracle used for grading.
 
-For testing, PA28 uses two explicit MIR comparison modes, split by directory:
+For testing, PA28 uses three explicit comparison modes, split by directory:
 
 1. `tests/strict/` compares the raw checked-in `.ref.mir` against the generated `.my.mir`,
    after only normalizing the host-target tag in the `machine_ir x86_64 <target>` header.
 2. `tests/structural/` compares the checked-in `.ref.cmir` against a canonicalized form of
    the generated `.my.mir`.
+3. `tests/behavior/` checks compilation and generated-program behavior only. It intentionally
+   has no machine-IR oracle.
 
 The structural canonicalization pass is intentionally conservative. It hides:
 
@@ -214,10 +233,11 @@ That means a successful `PA28` test anchor now validates exactly these output fi
 - `x.ref.impl.exit_status`: exact compiler success/failure result
 - `x.ref.program.exit_status`: exact generated-program exit status
 - `x.ref.program.stdout`: exact generated-program standard output
-- `x.ref.mir`: the checked-in raw MIR oracle
 - plus either:
-  - strict raw-MIR comparison with header normalization only, or
-  - structural canonical-MIR comparison using checked-in `x.ref.cmir`
+  - `x.ref.mir` with strict raw-MIR comparison and header normalization only
+  - `x.ref.mir` plus `x.ref.cmir`, with structural canonical-MIR comparison using
+    checked-in `x.ref.cmir`
+  - no MIR reference files for `tests/behavior/`
 
 In other words, `PA28` is not just "program behavior matches." The tests also validate the
 shape of the lowered backend output through one of those two explicit MIR oracles.
@@ -229,10 +249,16 @@ For structural failures, the harness leaves behind:
 Those are debugging artifacts only. Students are not expected to emit `.cmir` files. They
 only need to implement `--dump-machine-ir` and produce raw `.mir`.
 
-`make test` recursively runs both checked-in local suites:
+The `tests/behavior/` directory is for correctness cases where several reasonable
+register-allocation or spill strategies are acceptable. Those tests still require
+successful compilation and matching generated-program behavior, but they intentionally do
+not compare a machine-IR oracle.
+
+`make test` recursively runs the checked-in local suites:
 
 - `tests/strict/`
 - `tests/structural/`
+- `tests/behavior/`
 
 These directories contain PA28-specific backend oracle tests, not source-standard tests.
 PA28 has no `tests/spec/` directory because the tested contract is the
@@ -328,6 +354,11 @@ PA28 must also expose a deterministic machine IR for successful compilations. Th
 the structural proof that lowering is happening directly from LowIR into a target-specific
 backend representation rather than only through a CY86 scaffold.
 
+The LowIR input path should parse the same LowIR text accepted by PA13 rather
+than relying on a private object, semantic, or source-level backchannel. Any
+backend fact needed below PA28 belongs either in LowIR text or in the
+target-specific MIR produced from that LowIR.
+
 Within the supported subset, PA28 should lower:
 
 - direct function calls to direct machine-IR call sites
@@ -390,95 +421,61 @@ To complete PA28, implement these goals:
 7. Preserve direct compare-fed branch lowering for ordinary scalar cases.
    When a compare result feeds exactly one branch, PA28 should lower that as a direct
    machine compare plus conditional branch rather than materializing a boolean temporary
-   and branching on that temporary afterward. If the compared scalar already
-   lives in one obvious home slot, PA28 may also compare that slot directly against the
-   branch literal instead of first reloading the value into a scratch register solely to
-   perform the compare.
+   and branching on that temporary afterward.
 
-8. Keep trivial leaf scalar temps register-resident by default.
-   In small leaf functions, ordinary scalar temps should not be frame-backed unless
-   pressure or ABI boundaries require it.
+8. Keep simple scalar and floating work on the appropriate machine path.
+   Small leaf scalar expressions should normally stay in registers, and ordinary `f32` /
+   `f64` operations should stay on the floating-register path. A conservative stack spill
+   is acceptable when pressure or an ABI boundary requires it, as long as the generated
+   program is correct and the checked structural MIR cases still match their oracles.
 
-9. Keep ordinary `f32` and `f64` work on the floating register path.
-   Simple leaf floating arithmetic and floating copies should stay in XMM-backed MIR
-   rather than degrading into integer-side or stack-first lowering by default.
+9. Implement call-boundary correctness without requiring a clever allocator.
+   PA28 must respect the native calling convention for direct calls, indirect calls,
+   mixed GPR/XMM arguments, stack arguments, returned values, and values that remain live
+   across calls. The tests intentionally check some high-pressure call cases by program
+   behaviour only; those cases should compile and run correctly but do not require the
+   exact spill/register strategy used by the reference implementation.
 
-10. Keep ABI-pressure behavior intentional rather than blanket stackified.
-   Values that stay live across a call may move or spill when the calling convention
-   requires it, but PA28 should still preserve a register-backed view of ordinary temps
-   where possible instead of collapsing whole functions back into an all-stack model.
-   Call-setup-only temps should not be treated as if they were live across the call just
-   because they feed the call target or argument registers. Ordinary pointer parameters in
-   wrapper-style code should likewise be allowed to stay in registers instead of forcing
-   an all-stack model. If a scalar slot only mirrors one incoming parameter and its address
-   is never taken, PA28 may also elide that trivial home slot entirely instead of
-   materializing `store %param, $slot` / `load $slot` traffic. Likewise, if a by-value
-   object slot only exists to clone one incoming object parameter so later code can take a
-   stable address, PA28 may reuse the already-materialized parameter home slot instead of
-   allocating a second object slot and emitting a redundant `copyobj` first. The same
-   backend-quality rule applies to direct object call results that only feed one final slot:
-   PA28 may store the returned ABI chunks straight into that slot rather than spilling a
-   hidden temporary object and immediately copying it again. Once a pointer temp already
-   lives in a register, ordinary `load`/`store` and atomic memory operations
-   may dereference that register directly instead of bouncing through an extra fixed
-   scratch base first. Likewise, if a temp is only `addr $slot`, PA28 may rematerialize
-   that frame address with a later `lea` at each use site instead of reserving a preserved
-   register or hidden frame temp just to keep the address live across nearby calls. Single-use
-   constant `index ptr` temps that only feed outgoing ABI arguments may likewise materialize
-   directly into the final argument registers instead of first reserving their own temp homes,
-   and the base pointer value still needs to stay live through that call setup.
-   Likewise, read-only shadow slots for incoming integer or pointer register parameters may
-   disappear entirely when PA28 can keep those values in ordinary temp registers instead of
-   forcing a backend home slot.
-   When a
-   scalar value is already in the register that a nearby
-   `load` result, store sink, or outgoing ABI argument actually wants, PA28 may also use
-   that final register directly instead of forcing an extra `mov` shell first.
-
-11. Keep mixed-width conversion and floating-bool materialization explicit.
+10. Keep mixed-width conversion and floating-bool materialization explicit.
    Mixed integer/float conversion chains should keep their conversion family and width
    visible in MIR, and floating compare results used as values may materialize booleans
    in registers without an unnecessary stack round-trip.
 
-12. Preserve narrow integer width behavior in MIR.
+11. Preserve narrow integer width behavior in MIR.
    Ordinary `i8`/`u16` compare-fed branches should stay visibly narrow, and small signed
    or unsigned integer arithmetic should show the expected post-operation normalization
    instead of silently widening into an untyped 64-bit path.
 
-13. Keep the conservative `f80` path explicit rather than implicit.
+12. Keep the conservative `f80` path explicit rather than implicit.
    PA28 does not need to treat `f80` like ordinary XMM-resident `f32`/`f64`, but its
    conversions and truncation/extension path should still stay visible and testable in
    MIR.
 
-14. Cover direct compare-fed branch lowering at ordinary 64-bit integer width too.
+13. Cover direct compare-fed branch lowering at ordinary 64-bit integer width too.
    The direct compare/branch quality rule is not limited to `i32` and `u32`. PA28 should
    also show the same direct branch shape for straightforward `i64` comparisons. The core
    oracle for this is the `500-i64-direct-compare-branch` family.
 
-15. Keep pointer/null comparisons on the direct machine compare/branch path.
+14. Keep pointer/null comparisons on the direct machine compare/branch path.
    Ordinary pointer/null tests should remain visibly pointer-typed in MIR and branch
    directly rather than degrading into a less explicit scalarized path, including
    null values first introduced through `const ptr 0`.
 
-16. Keep pointer/index address calculation visible as pointer arithmetic.
+15. Keep pointer/index address calculation visible as pointer arithmetic.
    Pointer indexing and pointer-difference behavior should stay structurally visible in MIR
-   rather than being hidden behind an unrelated compatibility path, and dead base-pointer
-   temps should be allowed to flow directly into the indexed destination rather than
-   forcing an extra scratch copy first.
+   rather than being hidden behind an unrelated compatibility path.
 
-17. Preserve mixed integer/floating call ABI classification.
+16. Preserve mixed integer/floating call ABI classification.
    Calls that mix GPR and XMM arguments should keep that classification visible in MIR so
    students can tell whether the backend is respecting the native calling convention.
 
-18. Keep ordinary `f80` arithmetic and comparison behavior executable and visible.
+17. Keep ordinary `f80` arithmetic and comparison behavior executable and visible.
    Even though `f80` remains the conservative floating special case, simple `f80`
    arithmetic and `cmp` behavior should still run correctly and remain explicit in MIR.
 
-19. Exercise non-64-bit atomic widths explicitly.
+18. Exercise non-64-bit atomic widths explicitly.
    The PA28 atomic contract is not only about `i64`; smaller-width atomic load/store
-   behavior should survive through the direct native backend, including direct dereference
-   of a register-backed pointer temp rather than an unnecessary scratch-register bounce
-   first.
+   behavior should survive through the direct native backend.
 
 The PA28 tests intentionally include all of those cases so students can tell whether they
 have actually implemented a direct `LowIR -> machine IR -> native` path, rather than only

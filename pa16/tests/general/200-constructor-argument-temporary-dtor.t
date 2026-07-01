@@ -5,22 +5,22 @@ struct Counter
 {
   static int count;
 
-  Counter()
+  Counter() noexcept
   {
     ++count;
   }
 
-  Counter(const Counter &)
+  Counter(const Counter &) noexcept
   {
     ++count;
   }
 
-  Counter & operator=(const Counter &)
+  Counter & operator=(const Counter &) noexcept
   {
     return *this;
   }
 
-  ~Counter()
+  ~Counter() noexcept
   {
     --count;
   }
@@ -36,7 +36,7 @@ struct Holder
   Counter d;
   Counter e;
 
-  Holder(int, const Counter & value)
+  Holder(int, const Counter & value) noexcept
       : a(value), b(value), c(value), d(value), e(value)
   {}
 };

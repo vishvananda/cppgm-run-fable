@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.1 [temp.class], 10 [class.derived], 3.4.1 [basic.lookup.unqual]
 
 template<class T>

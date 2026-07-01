@@ -10,4 +10,4 @@ std::pair<std::string const, V> f(std::string const &s, V const &v) {
   std::tuple<V const &> second(v);
   return std::pair<std::string const, V>(std::piecewise_construct, first, second);
 }
-int main() { return 0; }
+static_assert(sizeof(&f) > 0, "piecewise pair body anchor");

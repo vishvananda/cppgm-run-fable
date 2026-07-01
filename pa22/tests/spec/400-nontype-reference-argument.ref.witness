@@ -1,0 +1,12 @@
+translation-unit
+  class-use at pa22/tests/spec/400-nontype-reference-argument.t:14:3
+    template ref_counter
+    selected primary
+    bind #1 = global_value source=explicit
+template-closure-events
+  ensure-definition
+    entity ref_counter<global_value>::bump
+  function-instantiation
+    entity ref_counter<global_value>::bump
+  require-definition
+    entity ref_counter<global_value>::bump

@@ -1,0 +1,46 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $buf : obj<5x1>
+  slot $cond__1 : i32
+  slot $arg__2 : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $buf
+    %t2 = addr $arg__2
+    call void @array_bound_only_deduction__tag__tag(%t2)
+    %t3 = call ptr @array_bound_only_deduction__to_zstr(%t1, %t2)
+    %t4 = addr $buf
+    %t5 = unary decay ptr %t4
+    %t6 = cmp eq ptr %t3, %t5
+    branch %t6, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t7 = load i32 $cond__1
+    return i32 %t7
+}
+function @array_bound_only_deduction__to_zstr(%zstr : ptr [pass=reference], %__param1 : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN26array_bound_only_deduction7to_zstrILm5EEEPcRAT__cRKNS_3tagE] {
+  slot $zstr : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %zstr, $zstr
+    store ptr %__param1, $__param1
+    %t1 = load ptr $zstr
+    %t2 = unary decay ptr %t1
+    return ptr %t2
+}
+function @array_bound_only_deduction__tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN26array_bound_only_deduction3tagC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+alias object _ZN26array_bound_only_deduction3tagC2Ev = @array_bound_only_deduction__tag__tag

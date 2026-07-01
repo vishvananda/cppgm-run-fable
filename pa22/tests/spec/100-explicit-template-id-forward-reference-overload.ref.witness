@@ -1,0 +1,13 @@
+translation-unit
+  function-call at pa22/tests/spec/100-explicit-template-id-forward-reference-overload.t:49:10
+    callee forward
+    selected instantiation
+    bind #1 = int & source=explicit
+    drop forward reason=bad_conversion
+template-closure-events
+  ensure-definition
+    entity forward
+  function-instantiation
+    entity forward
+  require-definition
+    entity forward

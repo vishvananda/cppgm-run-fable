@@ -1,0 +1,42 @@
+translation-unit
+  class-use at pa21/tests/general/400-repeated-argument-partial-specialization-ordering.t:27:15
+    template iter_fold_impl
+    selected partial
+    bind #1 = -1 source=explicit
+    bind #2 = iter<2> source=explicit
+    bind #3 = iter<2> source=explicit
+    bind #4 = state source=explicit
+    bind #5 = op source=explicit
+    specialize #1 = iter<2> source=deduced
+    specialize #2 = state source=deduced
+    specialize #3 = op source=deduced
+  class-use at pa21/tests/general/400-repeated-argument-partial-specialization-ordering.t:27:34
+    template iter
+    selected primary
+    bind #1 = 2 source=explicit
+  class-use at pa21/tests/general/400-repeated-argument-partial-specialization-ordering.t:27:43
+    template iter
+    selected primary
+    bind #1 = 2 source=explicit
+  class-use at pa21/tests/general/400-repeated-argument-partial-specialization-ordering.t:32:10
+    template iter_fold_impl
+    selected partial
+    bind #1 = -1 source=explicit
+    bind #2 = iter<2> source=explicit
+    bind #3 = iter<2> source=explicit
+    bind #4 = state source=explicit
+    bind #5 = op source=explicit
+    specialize #1 = iter<2> source=deduced
+    specialize #2 = state source=deduced
+    specialize #3 = op source=deduced
+  class-use at pa21/tests/general/400-repeated-argument-partial-specialization-ordering.t:32:29
+    template iter
+    selected primary
+    bind #1 = 2 source=explicit
+  class-use at pa21/tests/general/400-repeated-argument-partial-specialization-ordering.t:32:38
+    template iter
+    selected primary
+    bind #1 = 2 source=explicit
+template-closure-events
+  variable-instantiation
+    entity iter_fold_impl<-1, iter<2>, iter<2>, state, op>::value

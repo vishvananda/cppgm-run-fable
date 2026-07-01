@@ -44,15 +44,78 @@ sub get_timeout_from_env
 	return $value > 0 ? $value : $default;
 }
 
+sub env_flag_enabled
+{
+	my ($name) = @_;
+	return 0 if !defined($ENV{$name});
+	my $value = $ENV{$name};
+	return 0 if $value eq '';
+	return 0 if $value eq '0';
+	return 0 if $value =~ /^(?:false|no|off)$/i;
+	return 1;
+}
+
 sub collect_tests
 {
-	my ($root, $pattern) = @_;
+	my ($spec, $pattern) = @_;
+	my @roots = shellwords($spec);
+	die "Test path '$spec' does not exist\n" if scalar(@roots) == 0;
+
 	my @tests;
-	find(sub {
-		return if !-f $_;
-		push @tests, $File::Find::name if $File::Find::name =~ $pattern;
-	}, $root);
-	return sort @tests;
+	my %seen;
+	for my $term (@roots)
+	{
+		my @matches = $term =~ /[*?\[]/ ? glob($term) : ($term);
+		die "Test path '$term' does not exist\n" if scalar(@matches) == 0;
+		for my $root (sort @matches)
+		{
+			die "Test path '$root' does not exist\n" if !-e $root;
+			my @found;
+			if (-f $root)
+			{
+				@found = $root =~ $pattern ? ($root) : ();
+			}
+			elsif (-d $root)
+			{
+				find(sub {
+					return if !-f $_;
+					push @found, $File::Find::name if $File::Find::name =~ $pattern;
+				}, $root);
+				@found = sort @found;
+			}
+
+			for my $test (@found)
+			{
+				next if $seen{$test}++;
+				push @tests, $test;
+			}
+		}
+	}
+	return @tests;
+}
+
+sub ensure_test_app_available
+{
+	my ($app, $suffix, $tests) = @_;
+	my $exec_path = local_exec_path($app);
+	return if -x $exec_path;
+
+	my $kind = $suffix eq 'ref' ? 'reference test app' : 'test app';
+	my $message = "ERROR: $kind '$app' does not exist or is not executable";
+	$message .= " at '$exec_path'" if $exec_path ne $app;
+	$message .= ".\n";
+
+	if ($suffix eq 'ref')
+	{
+		my $regular_app = $app;
+		$regular_app =~ s/-ref$//;
+		my $test_arg = defined($tests) && $tests ne '' ? " TEST=$tests" : "";
+		$message .= "No .ref files were written.\n";
+		$message .= "Build/export the reference binary, or intentionally regenerate with the current compiler using:\n";
+		$message .= "  make ref-test$test_arg REF_TEST_APP=$regular_app\n";
+	}
+
+	die $message;
 }
 
 sub write_named_status_code
@@ -70,6 +133,10 @@ sub write_named_status_code
 	elsif ($status == 124)
 	{
 		print $fh "EXIT_TIMEOUT\n";
+	}
+	elsif ($status == 125)
+	{
+		print $fh "EXIT_OOM\n";
 	}
 	elsif ($status == 86)
 	{
@@ -104,6 +171,18 @@ sub write_file
 	open(my $fh, '>', $path) or die "Unable to write $path: $!";
 	print $fh $contents;
 	close($fh) or die "Unable to close $path: $!";
+}
+
+sub read_status_file
+{
+	my ($path) = @_;
+	return undef if !-e $path;
+	open(my $fh, '<', $path) or die "Unable to read $path: $!";
+	my $data = <$fh>;
+	close($fh) or die "Unable to close $path: $!";
+	return undef if !defined($data);
+	chomp($data);
+	return $data;
 }
 
 sub encode_env
@@ -230,6 +309,7 @@ sub submit_wrapped_request
 	chomp($status);
 	return 0 if $status eq 'EXIT_SUCCESS';
 	return 124 if $status eq 'EXIT_TIMEOUT';
+	return 125 if $status eq 'EXIT_OOM';
 	return 86 if $status eq 'EXIT_NOT_IMPLEMENTED';
 	return 1 if $status eq 'EXIT_FAILURE';
 	return $status if $status =~ m/^\d+$/;
@@ -656,6 +736,22 @@ sub run_batch
 	die "Unsupported wrapped batch mode $mode";
 }
 
+sub witness_test_has_successful_reference
+{
+	my ($test) = @_;
+	my $test_out = $test;
+	$test_out =~ s/\.t$/.ref/;
+	my $status = read_status_file("$test_out.exit_status");
+	return 1 if !defined($status);
+	return $status eq "EXIT_SUCCESS";
+}
+
+sub filter_witness_tests
+{
+	my ($tests) = @_;
+	return [grep { witness_test_has_successful_reference($_) } @{$tests}];
+}
+
 sub run_single
 {
 	my ($mode, $app, $suffix, $tests, $jobs, $verbose, $assignment) = @_;
@@ -686,6 +782,7 @@ my $suffix = $ARGV[1];
 my $tests = $ARGV[2];
 my $verbose = $ENV{VERBOSE} || $ENV{CPGM_TEST_VERBOSE};
 my $keep_going = $ENV{KEEP_GOING};
+my $check_mode = env_flag_enabled('CPPGM_CHECK_MODE');
 my $jobs = detect_jobs();
 my $assignment = basename(getcwd());
 
@@ -697,12 +794,26 @@ my %patterns = (
 );
 die "Unsupported run_all_tests mode $mode" if !exists($patterns{$mode});
 
+ensure_test_app_available($app, $suffix, $tests);
+
 my @tests = collect_tests($tests, $patterns{$mode});
+if ($mode eq 'witness_t' && $suffix eq 'ref')
+{
+	@tests = @{filter_witness_tests(\@tests)};
+}
 my $ntests = scalar(@tests);
 if (!$verbose && !$keep_going)
 {
-	print "$assignment $tests: running $ntests test";
+	if ($check_mode)
+	{
+		print "$assignment check: running $ntests test";
+	}
+	else
+	{
+		print "$assignment $tests: running $ntests test";
+	}
 	print "s" if $ntests != 1;
+	print " ($tests[0])" if $check_mode && $ntests == 1;
 	print "\n";
 }
 

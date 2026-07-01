@@ -1,0 +1,24 @@
+translation-unit
+  class-use at pa21/tests/general/400-void-head-pack-partial-specialization-ordering.t:12:16
+    template typelist
+    selected primary
+    bind #1 = <> source=deduced
+  class-use at pa21/tests/general/400-void-head-pack-partial-specialization-ordering.t:38:9
+    template do_pack
+    selected partial
+    bind #1 = typelist<void, int, char> source=explicit
+    specialize #1 = <int, char> source=deduced
+  class-use at pa21/tests/general/400-void-head-pack-partial-specialization-ordering.t:38:17
+    template typelist
+    selected primary
+    bind #1 = <void, int, char> source=explicit
+  class-use at pa21/tests/general/400-void-head-pack-partial-specialization-ordering.t:39:9
+    template do_pack
+    selected partial
+    bind #1 = typelist<int, char> source=explicit
+    specialize #1 = int source=deduced
+    specialize #2 = char source=deduced
+  class-use at pa21/tests/general/400-void-head-pack-partial-specialization-ordering.t:39:17
+    template typelist
+    selected primary
+    bind #1 = <int, char> source=explicit

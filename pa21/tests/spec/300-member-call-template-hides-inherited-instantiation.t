@@ -1,5 +1,5 @@
-// VALIDATION: run-pass
-// N3485 focus: 10.2 [class.member.lookup], 13.3.1.1.1 [over.call.object], 14.5.2 [temp.mem]
+// VALIDATION: compile-pass
+// N3485 focus: 10.2 [class.member.lookup], 13.3.1.1.2 [over.call.object], 14.5.2 [temp.mem]
 
 struct base_fn
 {

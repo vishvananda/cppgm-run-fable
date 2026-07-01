@@ -1,7 +1,5 @@
 declare global @__external_rtti_vtable____class_type_info [binding=strong, object=_ZTVN10__cxxabiv117__class_type_infoE]
 declare global @__external_rtti_vtable____si_class_type_info [binding=strong, object=_ZTVN10__cxxabiv120__si_class_type_infoE]
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
 declare function @operator_delete(%arg0 : ptr) -> void [unwind=no, binding=strong, object=cppgm_builtin_operator_delete]
 
 global @__typeinfo_name__class_YB [storage=readonly, binding=weak, object=_ZTS2YB] = {
@@ -40,7 +38,7 @@ global @YD__vtable [storage=readonly, binding=weak, object=_ZTV2YD] = {
   ptr addr @YD___YD__deleting_entry
 }
 
-function @g(%b : ptr [pass=reference]) -> i32 [binding=strong, object=_Z1gR2YB] {
+function @g(%b : ptr [pass=reference]) -> i32 [unwind=no, binding=strong, object=_Z1gR2YB] {
   slot $b : ptr
 
   block ^entry:
@@ -53,38 +51,25 @@ function @g(%b : ptr [pass=reference]) -> i32 [binding=strong, object=_Z1gR2YB] 
 }
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
   slot $d : obj<8x8>
-  slot $call__1 : i32
 
   block ^entry:
     %t1 = addr $d
     call void @YD__YD(%t1)
-    eh_try ^call_unwind_dispatch_1
     %t2 = addr $d
     %t3 = index i8 [projection=base_subobject] %t2, 0
     %t4 = call i32 @g(%t3)
-    store i32 %t4, $call__1
-    %t5 = load i32 $call__1
-    eh_end
-    jump ^call_unwind_end_2
-
-  block ^call_unwind_dispatch_1:
-    %t6 = addr $d
-    call void @YD___YD(%t6)
-    resume
-
-  block ^call_unwind_end_2:
-    %t7 = addr $d
-    call void @YD___YD(%t7)
-    return i32 %t5
+    %t5 = addr $d
+    call void @YD___YD(%t5)
+    return i32 %t4
 }
-function @YB__f(%this : ptr) -> i32 [binding=weak, object=_ZN2YB1fEv] {
+function @YB__f(%this : ptr) -> i32 [unwind=no, binding=weak, object=_ZN2YB1fEv] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return i32 1
 }
-function @YB___YB__base_entry(%this : ptr) -> void [binding=weak, object=_ZN2YBD2Ev] {
+function @YB___YB__base_entry(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2YBD2Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -95,7 +80,7 @@ function @YB___YB__base_entry(%this : ptr) -> void [binding=weak, object=_ZN2YBD
     store ptr %t3, %t1
     return void
 }
-function @YB___YB__deleting_entry(%this : ptr) -> void [binding=weak, object=_ZN2YBD0Ev] {
+function @YB___YB__deleting_entry(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2YBD0Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -108,7 +93,7 @@ function @YB___YB__deleting_entry(%this : ptr) -> void [binding=weak, object=_ZN
     call void @operator_delete(%t4)
     return void
 }
-function @YB___YB(%this : ptr) -> void [binding=weak, object=_ZN2YBD1Ev] {
+function @YB___YB(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2YBD1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -133,14 +118,14 @@ function @YD__YD(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2YDC1E
     store ptr %t5, %t3
     return void
 }
-function @YD__f(%this : ptr) -> i32 [binding=weak, object=_ZN2YD1fEv] {
+function @YD__f(%this : ptr) -> i32 [unwind=no, binding=weak, object=_ZN2YD1fEv] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return i32 2
 }
-function @YD___YD__deleting_entry(%this : ptr) -> void [binding=weak, object=_ZN2YDD0Ev] {
+function @YD___YD__deleting_entry(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2YDD0Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -156,7 +141,7 @@ function @YD___YD__deleting_entry(%this : ptr) -> void [binding=weak, object=_ZN
     call void @operator_delete(%t6)
     return void
 }
-function @YD___YD(%this : ptr) -> void [binding=weak, object=_ZN2YDD1Ev] {
+function @YD___YD(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2YDD1Ev] {
   slot $this : ptr
 
   block ^entry:

@@ -28,7 +28,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t3 = load i32 $cond__1
     return i32 %t3
 }
-function @S__S(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1SC1Ev] {
+function @S__S(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1SC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.1 [temp.arg.explicit], 14.8.2 [temp.deduct], 14.8.3 [temp.over]
 
 namespace std {

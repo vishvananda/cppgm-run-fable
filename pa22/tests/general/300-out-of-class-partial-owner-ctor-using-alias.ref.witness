@@ -1,0 +1,40 @@
+translation-unit
+  alias-use at pa22/tests/general/300-out-of-class-partial-owner-ctor-using-alias.t:21:22
+    template enable_if_t
+    bind #1 = accepts<It>::value source=explicit
+    bind #2 = int source=explicit
+  class-use at pa22/tests/general/300-out-of-class-partial-owner-ctor-using-alias.t:22:34
+    template shell
+    selected explicit
+    bind #1 = bool source=explicit
+    bind #2 = type-parameter-0-0 source=explicit
+  alias-use at pa22/tests/general/300-out-of-class-partial-owner-ctor-using-alias.t:26:20
+    template enable_if_t
+    bind #1 = accepts<It>::value source=explicit
+    bind #2 = int source=explicit
+  class-use at pa22/tests/general/300-out-of-class-partial-owner-ctor-using-alias.t:27:1
+    template shell
+    selected explicit
+    bind #1 = bool source=explicit
+    bind #2 = type-parameter-0-0 source=explicit
+  class-use at pa22/tests/general/300-out-of-class-partial-owner-ctor-using-alias.t:35:3
+    template shell
+    selected partial
+    bind #1 = bool source=explicit
+    bind #2 = int source=explicit
+    specialize #1 = int source=deduced
+  function-call at pa22/tests/general/300-out-of-class-partial-owner-ctor-using-alias.t:35:20
+    callee shell<bool, int>::shell
+    selected instantiation
+    bind #1 = int source=deduced
+    bind #2 = 0 source=defaulted
+    drop shell<bool, int>::shell reason=too_many_arguments
+template-closure-events
+  ensure-definition
+    entity shell<bool, int>::shell
+  function-instantiation
+    entity shell<bool, int>::shell
+  require-definition
+    entity shell<bool, int>::shell
+  variable-instantiation
+    entity accepts<int>::value

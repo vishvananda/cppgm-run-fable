@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_IDENTIFIER:thread_api_platform at token 0 at tests/preproc/300-thread-api-platform.t:1:1

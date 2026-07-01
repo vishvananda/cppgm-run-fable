@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A qualified member class template inherited from a concrete specialization
 // can feed a boolean non-type template argument.
 

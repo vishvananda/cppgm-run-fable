@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_IDENTIFIER:have_user_label_prefix at token 0 at tests/preproc/400-host-user-label-prefix-macro.t:1:1

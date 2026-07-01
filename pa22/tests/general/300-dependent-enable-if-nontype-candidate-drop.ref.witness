@@ -1,0 +1,12 @@
+translation-unit
+  alias-use at pa22/tests/general/300-dependent-enable-if-nontype-candidate-drop.t:19:19
+    template enable_if_t
+    bind #1 = enabled<T> source=explicit
+    bind #2 = int source=explicit
+  variable-use at pa22/tests/general/300-dependent-enable-if-nontype-candidate-drop.t:19:31
+    template enabled
+    selected primary
+    bind #1 = int source=deduced
+template-closure-events
+  variable-instantiation
+    entity enabled

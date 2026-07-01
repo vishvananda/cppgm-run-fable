@@ -1,0 +1,28 @@
+translation-unit
+  class-use at pa22/tests/general/300-structured-enable-if-sizeof-pack-value.t:22:14
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  alias-use at pa22/tests/general/300-structured-enable-if-sizeof-pack-value.t:27:12
+    template enable_if_t
+    bind #1 = all<bool_constant<sizeof...(T) >= 1>>::value source=explicit
+    bind #2 = int source=explicit
+  class-use at pa22/tests/general/300-structured-enable-if-sizeof-pack-value.t:33:3
+    template tuple
+    selected primary
+    bind #1 = <int> source=explicit
+  function-call at pa22/tests/general/300-structured-enable-if-sizeof-pack-value.t:33:14
+    callee tuple<int>::tuple
+    selected instantiation
+    bind #1 = void source=defaulted
+    bind #2 = 0 source=defaulted
+    drop tuple<int>::tuple reason=too_few_arguments
+template-closure-events
+  ensure-definition
+    entity tuple<int>::tuple
+  function-instantiation
+    entity tuple<int>::tuple
+  require-definition
+    entity tuple<int>::tuple
+  variable-instantiation
+    entity bool_constant<true>::value

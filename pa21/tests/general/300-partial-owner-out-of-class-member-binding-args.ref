@@ -1,0 +1,30 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $bits : ptr
+  slot $cond__1 : i32
+
+  block ^entry:
+    store ptr 0, $bits
+    %t1 = load ptr $bits
+    %t2 = call i32 @box_bool__int___f(%t1)
+    %t3 = cmp eq i32 %t2, 4
+    branch %t3, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t4 = load i32 $cond__1
+    return i32 %t4
+}
+function @box_bool__int___f(%this : ptr) -> i32 [binding=weak, object=_ZN3boxIbiE1fEv] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return i32 4
+}

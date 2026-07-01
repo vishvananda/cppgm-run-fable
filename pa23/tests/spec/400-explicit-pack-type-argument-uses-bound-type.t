@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.3 [temp.variadic], 14.8.1 [temp.arg.explicit]
 // An explicit function-template argument produced by pack expansion must keep
 // the already-bound type, even when a local typedef has the same name as the

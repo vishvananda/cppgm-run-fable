@@ -1,0 +1,13 @@
+translation-unit
+  function-call at pa22/tests/spec/300-expression-sfinae-decltype.t:31:10
+    callee test_run
+    selected instantiation
+    bind #1 = good source=deduced
+    drop test_run reason=worse_conversion
+template-closure-events
+  ensure-definition
+    entity test_run
+  function-instantiation
+    entity test_run
+  require-definition
+    entity test_run

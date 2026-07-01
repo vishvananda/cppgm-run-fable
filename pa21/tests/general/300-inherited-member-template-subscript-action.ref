@@ -67,7 +67,7 @@ function @rule__operator___ov3(%this : ptr, %parser : ptr [pass=reference]) -> p
     %t6 = load ptr $this
     return ptr %t6
 }
-function @action__action(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6actionC1Ev] {
+function @action__action(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6actionC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

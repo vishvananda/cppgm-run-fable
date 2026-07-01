@@ -1,6 +1,0 @@
-function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
-  block ^entry:
-    %t1 = cmp ne i32 2, 2
-    %t2 = convert zext i32 u8 %t1
-    return i32 %t2
-}

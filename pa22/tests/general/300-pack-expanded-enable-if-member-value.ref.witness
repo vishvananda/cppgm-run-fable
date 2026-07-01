@@ -1,0 +1,33 @@
+translation-unit
+  class-use at pa22/tests/general/300-pack-expanded-enable-if-member-value.t:7:9
+    template ns::integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = true source=explicit
+  alias-use at pa22/tests/general/300-pack-expanded-enable-if-member-value.t:24:13
+    template ns::expand_to_true
+    bind #1 = enable_if_t<Pred::value>... source=explicit
+  alias-use at pa22/tests/general/300-pack-expanded-enable-if-member-value.t:24:28
+    template ns::enable_if_t
+    bind #1 = Pred::value source=explicit
+  alias-use at pa22/tests/general/300-pack-expanded-enable-if-member-value.t:29:24
+    template ns::enable_if_t
+    bind #1 = ns::All<ns::true_type, ns::true_type>::value source=explicit
+  alias-use at pa22/tests/general/300-pack-expanded-enable-if-member-value.t:30:20
+    template ns::All
+    bind #1 = ns::true_type source=explicit
+  function-call at pa22/tests/general/300-pack-expanded-enable-if-member-value.t:46:5
+    callee Function::operator=
+    selected instantiation
+    bind #1 = S::G source=deduced
+    bind #2 = void source=defaulted
+    drop Function::operator= reason=bad_conversion
+template-closure-events
+  ensure-definition
+    entity Function::operator=
+  function-instantiation
+    entity Function::operator=
+  require-definition
+    entity Function::operator=
+  variable-instantiation
+    entity ns::integral_constant<bool, true>::value

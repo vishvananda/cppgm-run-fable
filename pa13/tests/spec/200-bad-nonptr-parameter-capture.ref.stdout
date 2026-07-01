@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-nonptr-parameter-capture.t:1: function @main parameter %x with capture mode 'nocapture' must have type ptr

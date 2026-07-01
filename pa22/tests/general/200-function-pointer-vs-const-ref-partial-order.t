@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.2.4 [temp.deduct.partial], 13.3.3 [over.match.best]
 
 template<class T>

@@ -1,0 +1,37 @@
+translation-unit
+  alias-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:23:26
+    template void_t
+    bind #1 = Op<Args...> source=explicit
+  alias-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:38:11
+    template detected_or_t
+    bind #1 = int * source=explicit
+    bind #2 = pointer_member source=explicit
+    bind #3 = Missing<int> source=explicit
+  class-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:38:48
+    template Missing
+    selected primary
+    bind #1 = int source=explicit
+  alias-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:39:11
+    template detected_or_t
+    bind #1 = int * source=explicit
+    bind #2 = pointer_member source=explicit
+    bind #3 = Present<int> source=explicit
+  class-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:39:48
+    template Present
+    selected primary
+    bind #1 = int source=explicit
+  class-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:41:15
+    template is_same
+    selected partial
+    bind #1 = int * source=explicit
+    bind #2 = int * source=explicit
+    specialize #1 = int * source=deduced
+  class-use at pa22/tests/spec/300-detected-or-sfinae-fallback.t:42:15
+    template is_same
+    selected partial
+    bind #1 = int * source=explicit
+    bind #2 = int * source=explicit
+    specialize #1 = int * source=deduced
+template-closure-events
+  variable-instantiation
+    entity is_same<int *, int *>::value

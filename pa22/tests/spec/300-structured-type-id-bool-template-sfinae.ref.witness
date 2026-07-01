@@ -1,0 +1,25 @@
+translation-unit
+  alias-use at pa22/tests/spec/300-structured-type-id-bool-template-sfinae.t:38:3
+    template enable_if_t
+    bind #1 = is_convertible<iter_category_t<InIter>, input_iterator_tag>::value source=explicit
+  alias-use at pa22/tests/spec/300-structured-type-id-bool-template-sfinae.t:38:30
+    template iter_category_t
+    bind #1 = InIter source=explicit
+  alias-use at pa22/tests/spec/300-structured-type-id-bool-template-sfinae.t:41:32
+    template RequireInputIter
+    bind #1 = InIter source=explicit
+  function-call at pa22/tests/spec/300-structured-type-id-bool-template-sfinae.t:52:10
+    callee f
+    selected instantiation
+    bind #1 = int * source=deduced
+    bind #2 = void source=defaulted
+    drop f reason=bad_conversion
+template-closure-events
+  ensure-definition
+    entity f
+  function-instantiation
+    entity f
+  require-definition
+    entity f
+  variable-instantiation
+    entity is_convertible<random_access_iterator_tag, input_iterator_tag>::value

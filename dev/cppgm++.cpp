@@ -107,6 +107,14 @@ bool is_optimization_flag(const string & arg)
   return starts_with(arg, "-O");
 }
 
+bool is_debug_info_flag(const string & arg)
+{
+  return arg == "-g0" ||
+      arg == "-gline-tables-only" ||
+      arg == "-g" ||
+      starts_with(arg, "-g");
+}
+
 bool is_benign_driver_flag(const string & arg)
 {
   return arg == "-Wall" ||
@@ -220,7 +228,8 @@ SourceOutputInvocation parse_source_output_invocation(
       explicit_outfile = true;
       continue;
     }
-    if(allow_lowir_options && is_optimization_flag(args[i])) {
+    if(allow_lowir_options &&
+       (is_optimization_flag(args[i]) || is_debug_info_flag(args[i]))) {
       continue;
     }
     if(allow_lowir_options &&
@@ -294,10 +303,7 @@ bool consume_dependency_option(const vector<string> & args, size_t & i)
 
 bool consume_toolchain_option(const vector<string> & args, size_t & i)
 {
-  if(args[i] == "-g0" ||
-     args[i] == "-gline-tables-only" ||
-     args[i] == "-g" ||
-     starts_with(args[i], "-g")) {
+  if(is_debug_info_flag(args[i])) {
     return true;
   }
   if(is_optimization_flag(args[i])) {

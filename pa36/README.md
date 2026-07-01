@@ -89,6 +89,12 @@ The PA36 contract is not a new file format. It is correct symbol ownership,
 ABI spelling, and runtime behavior for hosted header-generated code once those
 objects are host-linked.
 
+Hosted objects should still be generated from the same LowIR facts exposed by
+`cppgm++ --emit-lowir`. If hosted header emission needs symbol ownership,
+object symbol spellings, TLS wrapper facts, or runtime hooks, those facts
+belong in LowIR metadata, declarations, definitions, or object aliases rather
+than in a hosted-only side channel.
+
 The PA36 tests observe:
 
 - `cppgm++ -c` exit status

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 13.5 [over.oper], 14.5.2 [temp.mem]
 
 template<class NP, class Rest>

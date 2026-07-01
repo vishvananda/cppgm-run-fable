@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-unknown-global-storage-metadata.t:1: unknown global storage 'sticky'

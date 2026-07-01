@@ -1,0 +1,22 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $lhs : obj<1x1>
+  slot $rhs : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $lhs
+    %t2 = addr $rhs
+    %t3 = addr $lhs
+    %t4 = addr $rhs
+    %t5 = call ptr @function_void_____operator_(%t3, %t4)
+    return i32 0
+}
+function @function_void_____operator_(%this : ptr, %__param1 : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN8functionIFvvEEaSERKS1_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    %t1 = load ptr $this
+    return ptr %t1
+}

@@ -1,0 +1,6 @@
+translation-unit
+  alias-use at pa21/tests/spec/200-elaborated-type-template-argument.t:19:1
+    template If
+    bind #1 = false source=explicit
+    bind #2 = struct PrivateNat source=explicit
+    bind #3 = int source=explicit

@@ -82,6 +82,11 @@ cppgm++ -c -D <macro> -U <macro> -include <file> -o <objfile> <srcfile>
 PA32/PA33/PA34. For PA35 the emitted object is discarded — the contract is
 simply that the heavy hosted header compiles cleanly to an object without error.
 
+The hosted header path should still lower through the same LowIR representation
+used by `cppgm++ --emit-lowir`. Performance work may avoid unnecessary file
+I/O, but it must not create a separate hosted-only backend route that depends
+on facts unavailable in serialized LowIR.
+
 ### Error Handling
 
 If preprocessing, parsing, semantic analysis, lowering, object emission, or

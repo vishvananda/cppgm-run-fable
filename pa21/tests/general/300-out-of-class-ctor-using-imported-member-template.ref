@@ -1,0 +1,46 @@
+declare function @consume(%arg0 : obj<1x1>) -> void [binding=strong, object=_Z7consume5TableIiE]
+declare function @source() -> ptr [binding=strong, object=_Z6sourcev]
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $argobj__1 : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $argobj__1
+    %t2 = call ptr @source()
+    %t3 = call ptr @source()
+    %t4 = convert sext i64 i32 0
+    call void @Table_int___Table(%t1, %t2, %t3, %t4)
+    call void @consume($argobj__1)
+    return i32 0
+}
+function @Table_int___Table(%this : ptr, %first : ptr, %last : ptr, %hint : i64) -> void [binding=weak, object=_ZN5TableIiEC1IPiEET_S3_m] {
+  slot $this : ptr
+  slot $first : ptr
+  slot $last : ptr
+  slot $hint : i64
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %first, $first
+    store ptr %last, $last
+    store i64 %hint, $hint
+    %t1 = load i64 $hint
+    %t2 = load ptr $this
+    %t3 = index i8 [projection=base_subobject] %t2, 0
+    %t4 = load ptr $first
+    %t5 = load ptr $last
+    call void @InsertBase_int___insert__ov3(%t3, %t4, %t5)
+    return void
+}
+function @InsertBase_int___insert__ov3(%this : ptr, %__param1 : ptr, %__param2 : ptr) -> void [binding=weak, object=_ZN10InsertBaseIiE6insertIPiEEvT_S3_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+  slot $__param2 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    store ptr %__param2, $__param2
+    return void
+}
+alias object _ZN5TableIiEC2IPiEET_S3_m = @Table_int___Table

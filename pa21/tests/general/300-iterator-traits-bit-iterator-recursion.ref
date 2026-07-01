@@ -1,8 +1,0 @@
-function @main() -> i64 {
-  slot $x : i32
-
-  block ^entry:
-    store i32 0, $x
-    %t1 = load i32 $x
-    return i64 %t1
-}

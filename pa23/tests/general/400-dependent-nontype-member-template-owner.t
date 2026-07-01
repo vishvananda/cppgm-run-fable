@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.6.2.1 [temp.dep.type], 14.3.2 [temp.arg.nontype],
 //              14.5.2 [temp.mem], 14.7.3 [temp.expl.spec]
 

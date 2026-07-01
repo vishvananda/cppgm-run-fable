@@ -1,0 +1,45 @@
+translation-unit
+  class-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:6:9
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:7:9
+    template bool_constant
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:49:15
+    template if_
+    bind #1 = valid<F, T...> source=explicit
+    bind #2 = defer_impl<F, T...> source=explicit
+    bind #3 = no_type source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:49:19
+    template valid
+    bind #1 = F source=explicit
+    bind #2 = T... source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:60:42
+    template defer
+    bind #1 = F source=explicit
+    bind #2 = U... source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:74:15
+    template eval_if
+    bind #1 = C source=explicit
+    bind #2 = T source=explicit
+    bind #3 = cond source=explicit
+    bind #4 = E... source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:77:20
+    template defer
+    bind #1 = cond_ source=explicit
+    bind #2 = C source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:86:15
+    template valid
+    bind #1 = cond_ source=explicit
+    bind #2 = false_type source=explicit
+  alias-use at pa23/tests/general/500-dependent-alias-template-id-syntax-clone.t:97:10
+    template valid
+    bind #1 = cond_ source=explicit
+    bind #2 = false_type source=explicit
+template-closure-events
+  variable-instantiation
+    entity bool_constant<false>::value
+  variable-instantiation
+    entity bool_constant<true>::value

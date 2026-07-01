@@ -1,0 +1,54 @@
+translation-unit
+  class-use at pa21/tests/general/300-local-qualified-argument-replay.t:54:16
+    template proto::expr
+    selected partial
+    bind #1 = tag_assign source=explicit
+    bind #2 = proto::list2<const mark_type &, plus_leaf &> source=explicit
+    bind #3 = 2 source=explicit
+    specialize #1 = tag_assign source=deduced
+    specialize #2 = const mark_type & source=deduced
+    specialize #3 = plus_leaf & source=deduced
+  class-use at pa21/tests/general/300-local-qualified-argument-replay.t:54:40
+    template proto::list2
+    selected primary
+    bind #1 = const mark_type & source=explicit
+    bind #2 = plus_leaf & source=explicit
+  class-use at pa21/tests/general/300-local-qualified-argument-replay.t:56:16
+    template proto::expr
+    selected partial
+    bind #1 = tag_assign source=explicit
+    bind #2 = proto::list2<const mark_type &, deref_leaf &> source=explicit
+    bind #3 = 2 source=explicit
+    specialize #1 = tag_assign source=deduced
+    specialize #2 = const mark_type & source=deduced
+    specialize #3 = deref_leaf & source=deduced
+  class-use at pa21/tests/general/300-local-qualified-argument-replay.t:56:40
+    template proto::list2
+    selected primary
+    bind #1 = const mark_type & source=explicit
+    bind #2 = deref_leaf & source=explicit
+  class-use at pa21/tests/general/300-local-qualified-argument-replay.t:87:14
+    template as_marker::impl
+    selected primary
+    bind #1 = const proto::expr<tag_assign, proto::list2<const mark_type &, plus_leaf &>, 2> & source=explicit
+  class-use at pa21/tests/general/300-local-qualified-argument-replay.t:88:14
+    template as_marker::impl
+    selected primary
+    bind #1 = const proto::expr<tag_assign, proto::list2<const mark_type &, deref_leaf &>, 2> & source=explicit
+template-closure-events
+  ensure-definition
+    entity as_marker::impl<const proto::expr<tag_assign, proto::list2<const mark_type &, deref_leaf &>, 2> &>::operator()
+  ensure-definition
+    entity as_marker::impl<const proto::expr<tag_assign, proto::list2<const mark_type &, plus_leaf &>, 2> &>::operator()
+  function-instantiation
+    entity as_marker::impl<const proto::expr<tag_assign, proto::list2<const mark_type &, deref_leaf &>, 2> &>::operator()
+  function-instantiation
+    entity as_marker::impl<const proto::expr<tag_assign, proto::list2<const mark_type &, plus_leaf &>, 2> &>::operator()
+  function-instantiation
+    entity proto::right
+  require-definition
+    entity as_marker::impl<const proto::expr<tag_assign, proto::list2<const mark_type &, deref_leaf &>, 2> &>::operator()
+  require-definition
+    entity as_marker::impl<const proto::expr<tag_assign, proto::list2<const mark_type &, plus_leaf &>, 2> &>::operator()
+  require-definition
+    entity proto::right

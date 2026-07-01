@@ -90,7 +90,7 @@ function @Box_int___operator__(%this : ptr, %n : i64) -> ptr [binding=weak, obje
     %t9 = load ptr $this
     return ptr %t9
 }
-function @Box_int___Box__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN3BoxIiEC1ERKS0_] {
+function @Box_int___Box__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN3BoxIiEC1ERKS0_, trivial_lifecycle=yes] {
   slot $this : ptr
   slot $__param1 : ptr
 

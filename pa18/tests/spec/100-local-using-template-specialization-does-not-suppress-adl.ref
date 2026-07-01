@@ -48,7 +48,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t1 = call i32 @boost_no_using_breaks_adl__test()
     return i32 %t1
 }
-function @boost_no_using_breaks_adl__lib__inner__X_int___X(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN25boost_no_using_breaks_adl3lib5inner1XIiEC1Ev] {
+function @boost_no_using_breaks_adl__lib__inner__X_int___X(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN25boost_no_using_breaks_adl3lib5inner1XIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

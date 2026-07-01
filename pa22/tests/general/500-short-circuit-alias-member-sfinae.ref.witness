@@ -1,0 +1,25 @@
+translation-unit
+  alias-use at pa22/tests/general/500-short-circuit-alias-member-sfinae.t:28:22
+    template remove_const_ref_t
+    bind #1 = Arg source=explicit
+  alias-use at pa22/tests/general/500-short-circuit-alias-member-sfinae.t:29:26
+    template remove_const_t
+    bind #1 = typename remove_const_ref_t<Arg>::first_type source=explicit
+  alias-use at pa22/tests/general/500-short-circuit-alias-member-sfinae.t:29:50
+    template remove_const_ref_t
+    bind #1 = Arg source=explicit
+  function-call at pa22/tests/general/500-short-circuit-alias-member-sfinae.t:39:10
+    callee probe
+    selected instantiation
+    bind #1 = Key source=explicit
+    bind #2 = Key & source=deduced
+    drop probe reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity probe
+  function-instantiation
+    entity probe
+  require-definition
+    entity probe
+  variable-instantiation
+    entity is_pair<Key>::value

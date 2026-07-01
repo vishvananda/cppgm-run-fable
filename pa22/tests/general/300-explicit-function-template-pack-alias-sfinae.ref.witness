@@ -1,0 +1,21 @@
+translation-unit
+  class-use at pa22/tests/general/300-explicit-function-template-pack-alias-sfinae.t:9:9
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa22/tests/general/300-explicit-function-template-pack-alias-sfinae.t:10:9
+    template bool_constant
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa22/tests/general/300-explicit-function-template-pack-alias-sfinae.t:29:1
+    template expand_to_true
+    bind #1 = enable_if_t<Pred::value>... source=explicit
+  alias-use at pa22/tests/general/300-explicit-function-template-pack-alias-sfinae.t:29:16
+    template enable_if_t
+    bind #1 = Pred::value source=explicit
+  alias-use at pa22/tests/general/300-explicit-function-template-pack-alias-sfinae.t:39:3
+    template And
+    bind #1 = AlwaysTrue source=explicit
+template-closure-events
+  variable-instantiation
+    entity integral_constant<bool, true>::value

@@ -1,0 +1,18 @@
+translation-unit
+  class-use at pa21/tests/general/400-forward-function-type-partial-specialization-pack-arity.t:14:10
+    template box
+    selected partial
+    bind #1 = int () source=explicit
+    specialize #1 = int source=deduced
+    specialize #2 = <> source=deduced
+  class-use at pa21/tests/general/400-forward-function-type-partial-specialization-pack-arity.t:14:36
+    template box
+    selected partial
+    bind #1 = int (int, float) source=explicit
+    specialize #1 = int source=deduced
+    specialize #2 = <int, float> source=deduced
+template-closure-events
+  variable-instantiation
+    entity box<int ()>::arity
+  variable-instantiation
+    entity box<int (int, float)>::arity

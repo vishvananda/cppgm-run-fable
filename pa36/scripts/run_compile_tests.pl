@@ -22,6 +22,12 @@ sub detect_jobs
 sub collect_tests
 {
 	my ($root, $pattern) = @_;
+	die "Test path '$root' does not exist\n" if !-e $root;
+	if (-f $root)
+	{
+		return $root =~ $pattern ? ($root) : ();
+	}
+
 	my @tests;
 	find(sub {
 		return if !-f $_;
@@ -63,6 +69,29 @@ sub system_status_to_exit_code
 	return 1 if !defined($status) || $status == -1;
 	return $status >> 8 if ($status & 127) == 0;
 	return 128 + ($status & 127);
+}
+
+sub ensure_test_app_available
+{
+	my ($app, $suffix, $tests) = @_;
+	my $exec_path = $app =~ m{/} ? $app : "./$app";
+	return if -x $exec_path;
+
+	my $kind = $suffix eq 'ref' ? 'reference test app' : 'test app';
+	my $message = "ERROR: $kind '$app' does not exist or is not executable";
+	$message .= " at '$exec_path'" if $exec_path ne $app;
+	$message .= ".\n";
+
+	if ($suffix eq 'ref')
+	{
+		my $regular_app = $app;
+		$regular_app =~ s/-ref$//;
+		$message .= "No .ref files were written.\n";
+		$message .= "Build/export the reference binary, or intentionally regenerate with the current compiler using:\n";
+		$message .= "  make ref-test TEST=$tests REF_TEST_APP=$regular_app\n";
+	}
+
+	die $message;
 }
 
 sub run_tests
@@ -117,6 +146,7 @@ my $suffix = $ARGV[1];
 my $tests = $ARGV[2];
 my $jobs = detect_jobs();
 
+ensure_test_app_available($app, $suffix, $tests);
 my @tests = collect_tests($tests, qr/\.t$/);
 run_tests(\@tests, $jobs, sub {
 	my ($test) = @_;

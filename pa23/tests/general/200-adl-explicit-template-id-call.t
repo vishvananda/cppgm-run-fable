@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.MultiIndex reduction: an unqualified explicit non-type template-id call
 // should use the base template name when adding ADL candidates from argument
 // types.

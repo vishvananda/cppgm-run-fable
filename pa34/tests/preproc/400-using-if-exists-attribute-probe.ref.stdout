@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_IDENTIFIER:have_using_if_exists_attr at token 0 at tests/preproc/400-using-if-exists-attribute-probe.t:1:1

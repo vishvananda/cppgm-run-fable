@@ -1,0 +1,12 @@
+translation-unit
+  class-use at pa23/tests/spec/100-nontype-function-pointer-argument.t:20:10
+    template evaluator
+    selected primary
+    bind #1 = &square source=explicit
+template-closure-events
+  ensure-definition
+    entity evaluator<&square>::run
+  function-instantiation
+    entity evaluator<&square>::run
+  require-definition
+    entity evaluator<&square>::run

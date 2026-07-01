@@ -37,7 +37,7 @@ function @outer__inner__dispatch_int___operator__(%this : ptr, %__param1 : ptr [
     store ptr %__param1, $__param1
     return void
 }
-function @outer__inner__empty_work__empty_work(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5outer5inner10empty_workC1Ev] {
+function @outer__inner__empty_work__empty_work(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5outer5inner10empty_workC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

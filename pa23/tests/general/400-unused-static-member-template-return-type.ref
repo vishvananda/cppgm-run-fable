@@ -19,7 +19,7 @@ function @convert_iterator_map_iterator_map_const__0____call__ov3(%x : ptr [pass
     %t3 = call ptr @convert_iterator_map_iterator_map_const__0____call(%t1, $argobj__1)
     return ptr %t3
 }
-function @true_tag__true_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8true_tagC1Ev] {
+function @true_tag__true_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8true_tagC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

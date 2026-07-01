@@ -1,0 +1,67 @@
+global @basic_tests_basic_any_8__8____copy_counter__count : i32 [binding=weak, object=_ZN11basic_testsI9basic_anyILi8ELi8EEE12copy_counter5countE] = 0
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $result : i32
+
+  block ^entry:
+    %t1 = call i32 @basic_tests_basic_any_8__8____run_tests()
+    store i32 %t1, $result
+    %t2 = load i32 $result
+    %t3 = binary sub i32 %t2, 17
+    return i32 %t3
+}
+function @basic_tests_basic_any_8__8____run_tests() -> i32 [binding=weak, object=_ZN11basic_testsI9basic_anyILi8ELi8EEE9run_testsEv] {
+  slot $value : obj<1x1>
+  slot $first : obj<1x1>
+  slot $second : obj<1x1>
+  slot $observed : i32
+
+  block ^entry:
+    %t1 = addr $value
+    call void @basic_any_8__8___basic_any(%t1)
+    %t2 = addr $first
+    call void @basic_tests_basic_any_8__8____copy_counter__copy_counter(%t2)
+    %t3 = addr $second
+    %t4 = addr $first
+    call void @basic_tests_basic_any_8__8____copy_counter__copy_counter__ov2(%t3, %t4)
+    %t5 = call i32 @basic_tests_basic_any_8__8____copy_counter__get_count()
+    store i32 %t5, $observed
+    %t6 = load i32 $observed
+    %t7 = binary add i32 %t6, 8
+    %t8 = binary add i32 %t7, 8
+    return i32 %t8
+}
+function @basic_any_8__8___basic_any(%this : ptr) -> void [binding=weak, object=_ZN9basic_anyILi8ELi8EEC1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @basic_tests_basic_any_8__8____copy_counter__copy_counter(%this : ptr) -> void [binding=weak, object=_ZN11basic_testsI9basic_anyILi8ELi8EEE12copy_counterC1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @basic_tests_basic_any_8__8____copy_counter__copy_counter__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN11basic_testsI9basic_anyILi8ELi8EEE12copy_counterC1ERKS3_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    %t1 = load i32 @basic_tests_basic_any_8__8____copy_counter__count
+    %t2 = binary add i32 %t1, 1
+    store i32 %t2, @basic_tests_basic_any_8__8____copy_counter__count
+    return void
+}
+function @basic_tests_basic_any_8__8____copy_counter__get_count() -> i32 [binding=weak, object=_ZN11basic_testsI9basic_anyILi8ELi8EEE12copy_counter9get_countEv] {
+  block ^entry:
+    %t1 = load i32 @basic_tests_basic_any_8__8____copy_counter__count
+    return i32 %t1
+}
+alias object _ZN9basic_anyILi8ELi8EEC2Ev = @basic_any_8__8___basic_any
+alias object _ZN11basic_testsI9basic_anyILi8ELi8EEE12copy_counterC2Ev = @basic_tests_basic_any_8__8____copy_counter__copy_counter
+alias object _ZN11basic_testsI9basic_anyILi8ELi8EEE12copy_counterC2ERKS3_ = @basic_tests_basic_any_8__8____copy_counter__copy_counter__ov2

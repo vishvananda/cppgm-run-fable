@@ -1,8 +1,0 @@
-global @g : i64 [binding=strong, object=_Z1g] = zero
-
-function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
-  block ^entry:
-    %t1 = load i64 @g
-    %t2 = convert trunc i32 i64 %t1
-    return i32 %t2
-}

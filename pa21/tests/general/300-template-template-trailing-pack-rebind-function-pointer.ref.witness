@@ -1,0 +1,27 @@
+translation-unit
+  class-use at pa21/tests/general/300-template-template-trailing-pack-rebind-function-pointer.t:33:5
+    template is_same
+    selected partial
+    bind #1 = allocator<int (*)(int)> source=explicit
+    bind #2 = allocator<int (*)(int)> source=explicit
+    specialize #1 = allocator<int (*)(int)> source=deduced
+  class-use at pa21/tests/general/300-template-template-trailing-pack-rebind-function-pointer.t:34:9
+    template allocator
+    selected primary
+    bind #1 = int (*)(int) source=explicit
+  class-use at pa21/tests/general/300-template-template-trailing-pack-rebind-function-pointer.t:35:9
+    template rebind
+    selected partial
+    bind #1 = allocator<int (*)(int)> source=explicit
+    bind #2 = int (*)(int) source=explicit
+    specialize #1 = allocator source=deduced
+    specialize #2 = int (*)(int) source=deduced
+    specialize #3 = <> source=deduced
+    specialize #4 = int (*)(int) source=deduced
+  class-use at pa21/tests/general/300-template-template-trailing-pack-rebind-function-pointer.t:35:16
+    template allocator
+    selected primary
+    bind #1 = int (*)(int) source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_same<allocator<int (*)(int)>, allocator<int (*)(int)>>::value

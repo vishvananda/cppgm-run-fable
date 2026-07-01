@@ -1,0 +1,41 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $h : ptr
+  slot $cond__1 : i32
+
+  block ^entry:
+    store ptr 0, $h
+    %t1 = load ptr $h
+    %t2 = call i32 @N__Holder_int___make(%t1, 3, 0, 120)
+    %t3 = cmp eq i32 %t2, 5
+    branch %t3, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t4 = load i32 $cond__1
+    return i32 %t4
+}
+function @N__Holder_int___make(%this : ptr, %h : i32, %args : i32, %args__pack2 : i8) -> i32 [binding=weak, object=_ZN1N6HolderIiE4makeIJicEEEiiDpT_] {
+  slot $this : ptr
+  slot $h : i32
+  slot $args : i32
+  slot $args__pack2 : i8
+
+  block ^entry:
+    store ptr %this, $this
+    store i32 %h, $h
+    store i32 %args, $args
+    store i8 %args__pack2, $args__pack2
+    %t1 = load i32 $h
+    %t2 = const i64 2
+    %t3 = convert sext i64 i32 %t1
+    %t4 = binary add i64 %t3, %t2
+    %t5 = convert trunc i32 i64 %t4
+    return i32 %t5
+}

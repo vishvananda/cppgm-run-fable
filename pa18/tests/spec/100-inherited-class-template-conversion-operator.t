@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 10.2 [class.member.lookup], 12.3.2 [class.conv.fct], 14.7.1 [temp.inst]
 
 struct empty_base

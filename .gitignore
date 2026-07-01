@@ -31,3 +31,4 @@ pa*/tests/*.check.*
 !pa*/tests/*.ref.program.exit_status
 .tmp-bsc*.cpp
 .test_counts
+scratch/

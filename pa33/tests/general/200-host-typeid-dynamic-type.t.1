@@ -1,4 +1,6 @@
-#include <typeinfo>
+namespace std {
+class type_info;
+}
 
 struct Base {
   virtual ~Base() {}
@@ -11,5 +13,5 @@ int main()
 {
   Derived derived;
   Base * base = &derived;
-  return typeid(*base) == typeid(Derived) ? 0 : 1;
+  return &typeid(*base) == &typeid(Derived) ? 0 : 1;
 }

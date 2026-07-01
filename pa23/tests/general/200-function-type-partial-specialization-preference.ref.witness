@@ -1,9 +1,0 @@
-translation-unit
-  class-use at pa23/tests/general/200-function-type-partial-specialization-preference.t:14:10
-    template box
-    selected partial
-    bind #1 = void (int) source=explicit
-    specialize #1 = <int> source=deduced
-template-closure-events
-  variable-instantiation
-    entity box<void (int)>::value

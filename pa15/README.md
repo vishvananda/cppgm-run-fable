@@ -87,9 +87,10 @@ subset of that IR with the object-model lowering needed by this milestone.
 
 When PA15 emits function-boundary metadata such as `unwind=no`, treat that as a
 truthful emitted fact, not as a promise that every semantically equivalent C++
-exception specification is normalized. PA15 requires only the explicit
-exception-specification forms covered by the tests; other explicit
-`noexcept(expr)` forms may lower conservatively without `unwind=no`.
+exception specification is normalized. The direct `noexcept` form on free
+functions, member functions, constructors, and destructors is in scope for the
+tested metadata path. Other explicit `noexcept(expr)` forms may lower
+conservatively without `unwind=no`.
 
 PA15 writes a single concatenated LowIR program consisting of:
 

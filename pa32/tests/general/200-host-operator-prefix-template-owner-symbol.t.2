@@ -1,0 +1,9 @@
+#include "200-host-operator-prefix-template-owner-symbol.helper.h"
+
+int one();
+
+int main()
+{
+  sample x = {22};
+  return one() + call_operator_prefix_owner(x) - 42;
+}

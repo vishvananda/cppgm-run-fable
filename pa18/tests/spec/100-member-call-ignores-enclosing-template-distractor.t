@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 5.2.2 [expr.call], 14.8.2.1 [temp.deduct.call]
 
 struct String {};

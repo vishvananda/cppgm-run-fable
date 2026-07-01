@@ -1,0 +1,23 @@
+function @one() -> i32 [binding=strong, object=_Z3onev] {
+  block ^entry:
+    return i32 1
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $f : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $f
+    %t2 = addr @one
+    call void @function_int_____function__ov3(%t1, %t2)
+    return i32 0
+}
+function @function_int_____function__ov3(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN8functionIFivEEC1IRS0_vEEOT_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    return void
+}
+alias object _ZN8functionIFivEEC2IRS0_vEEOT_ = @function_int_____function__ov3

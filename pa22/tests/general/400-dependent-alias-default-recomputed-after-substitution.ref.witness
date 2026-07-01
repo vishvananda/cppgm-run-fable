@@ -1,0 +1,21 @@
+translation-unit
+  alias-use at pa22/tests/general/400-dependent-alias-default-recomputed-after-substitution.t:9:29
+    template decay_t
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/400-dependent-alias-default-recomputed-after-substitution.t:14:29
+    template decay_t
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/400-dependent-alias-default-recomputed-after-substitution.t:19:11
+    template dependent_default_t
+    bind #1 = T source=explicit
+  function-call at pa22/tests/general/400-dependent-alias-default-recomputed-after-substitution.t:28:10
+    callee make_value
+    selected instantiation
+    bind #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity make_value
+  function-instantiation
+    entity make_value
+  require-definition
+    entity make_value

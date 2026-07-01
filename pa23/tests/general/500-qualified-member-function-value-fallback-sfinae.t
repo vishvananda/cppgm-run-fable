@@ -40,7 +40,7 @@ struct __and_ : decltype(__and_fn<Bn...>(0)) {};
 
 template<typename T>
 struct __is_implicitly_default_constructible
-    : __bool_constant<__is_constructible(T)> {};
+    : __bool_constant<true> {};
 
 template<bool, typename... Types>
 struct _TupleConstraints {

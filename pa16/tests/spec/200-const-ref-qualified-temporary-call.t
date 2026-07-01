@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 9.3.1 [class.mfct.non-static]
 
 struct Fun

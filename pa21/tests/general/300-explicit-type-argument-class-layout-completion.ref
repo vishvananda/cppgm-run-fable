@@ -1,9 +1,0 @@
-function @main() -> i64 {
-  block ^entry:
-    call void @check()
-    return i64 0
-}
-function @check() -> void {
-  block ^entry:
-    return void
-}

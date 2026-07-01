@@ -1,0 +1,15 @@
+translation-unit
+  class-use at pa23/tests/general/300-sfinae-primary-static-const-value-fold.t:39:10
+    template sfinae_primary_result
+    selected primary
+    bind #1 = sfinae_primary_trait<sfinae_primary_type> source=explicit
+  class-use at pa23/tests/general/300-sfinae-primary-static-const-value-fold.t:40:7
+    template sfinae_primary_trait
+    selected primary
+    bind #1 = sfinae_primary_type source=explicit
+    bind #2 = void source=defaulted
+template-closure-events
+  variable-instantiation
+    entity sfinae_primary_result<sfinae_primary_trait<sfinae_primary_type>>::value
+  variable-instantiation
+    entity sfinae_primary_trait<sfinae_primary_type>::value

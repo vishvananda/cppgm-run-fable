@@ -40,4 +40,4 @@ int main()
   outer::status s = {0};
   return outer::detail::run(s) == 1 ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

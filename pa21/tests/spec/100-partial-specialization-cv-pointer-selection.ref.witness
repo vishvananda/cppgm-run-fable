@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/spec/100-partial-specialization-cv-pointer-selection.t:24:10
+    template pick
+    selected partial
+    bind #1 = int * source=explicit
+    specialize #1 = int source=deduced
+  class-use at pa21/tests/spec/100-partial-specialization-cv-pointer-selection.t:24:37
+    template pick
+    selected partial
+    bind #1 = const int * source=explicit
+    specialize #1 = int source=deduced
+template-closure-events
+  variable-instantiation
+    entity pick<const int *>::value
+  variable-instantiation
+    entity pick<int *>::value

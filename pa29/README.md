@@ -10,7 +10,7 @@ used since PA10 with practical compiler-driver behavior.
 `cppgm++` has two required PA29 modes:
 
 - compile mode, `-c`, which takes one C++ source file and writes one
-  implementation-defined machine-object file
+  implementation-defined compiler object file
 - default link mode, which takes one or more inputs and writes one native
   executable program
 
@@ -18,7 +18,7 @@ In link mode, each input may be either:
 
 - a C++ source file, which `cppgm++` compiles as its own translation unit before
   linking
-- a machine-object file previously produced by `cppgm++ -c`
+- a compiler object file previously produced by `cppgm++ -c`
 
 The contract is source-driven. The PA29 tests start from C++ source
 files, validate explicit separate compilation with `cppgm++ -c`, and then link
@@ -152,14 +152,16 @@ All linked inputs in one invocation must target the same native backend target.
 
 ### Output Format
 
-In compile mode, `cppgm++` shall write one machine-object file to `<objfile>`.
+In compile mode, `cppgm++` shall write one compiler object file to `<objfile>`.
 
 In link mode, `cppgm++` shall write one native executable program to
 `<outfile>`.
 
-The exact object-file encoding is not directly compared by the PA29 tests. The
-exact final binary encoding is also not directly compared. Instead, the tests
-compare:
+The PA29 object-file encoding is intentionally an internal `cppgm++` contract:
+the file must be consumable by `cppgm++` link mode, but it does not need to be
+accepted by the host linker. The exact object-file encoding is not directly
+compared by the PA29 tests. The exact final binary encoding is also not
+directly compared. Instead, the tests compare:
 
 - compile/link exit status
 - generated program exit status
@@ -252,8 +254,8 @@ milestone.
 
 Within that supported subset, PA29 should:
 
-- compile one C++ source file to one machine-object file with `-c`
-- link machine-object files into a native executable
+- compile one C++ source file to one compiler object file with `-c`
+- link compiler object files into a native executable
 - accept C++ source files directly in link mode by compiling each source as its
   own translation unit before linking
 - support user include search paths through `-I`
@@ -266,9 +268,8 @@ Within that supported subset, PA29 should:
 - support simple complete-program runtime tests written in C++ and linked
   against harness-provided object-style support libraries, without requiring
   host libc or hosted headers
-- allow either an implementation-defined object format with your own linker or
-  host-compatible objects with delegation to the host toolchain, as long as the
-  `cppgm++` behavior matches the contract
+- allow an implementation-defined compiler object format with your own linker
+  for PA29, as long as the `cppgm++` behavior matches the contract
 
 To complete PA29, implement these goals:
 
@@ -301,7 +302,7 @@ The following are out of scope for PA29:
 - hosted preprocessor and hosted-header compatibility, which belong in PA34
   and PA36
 - standalone ABI name construction, which belongs in PA30
-- host-linker-compatible object output, which belongs in PA32
+- host-linker-compatible object output, which belongs in PA31/PA32
 
 ### Design Notes (Non-Normative)
 
@@ -315,9 +316,9 @@ In particular:
   from earlier assignments.
 - The direct source-link path should behave like repeated separate compilation
   followed by linking, not like a special one-off shortcut.
-- If you choose a host-compatible object format, keep the `cppgm++`
-  contract the same; the tests care about observable tool behavior, not which
-  linker implementation you use.
+- Do not carry a private PA29 object encoding forward as the host-object
+  solution. PA31/PA32 replace the internal compiler-object contract with a
+  host-linker-compatible object contract.
 
 ### Stage Handoff
 

@@ -1,0 +1,20 @@
+translation-unit
+  class-use at pa22/tests/general/300-using-declaration-imports-member-template-sfinae-shadow.t:47:10
+    template derived
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa22/tests/general/300-using-declaration-imports-member-template-sfinae-shadow.t:47:10
+    callee base<int>::f
+    selected instantiation
+    bind #1 = int source=deduced
+    drop base<int>::f reason=worse_conversion
+    drop derived<int>::f reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity base<int>::f
+  function-instantiation
+    entity base<int>::f
+  require-definition
+    entity base<int>::f
+  variable-instantiation
+    entity is_custom<int *>::value

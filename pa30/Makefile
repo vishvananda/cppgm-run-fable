@@ -9,6 +9,7 @@ SRC = ../dev/src
 GENERATED = ../obj/generated
 INC = -I$(SRC) -I$(GENERATED)
 OBJ = ../obj
+REF_TEST_ROOT = tests/abi
 VPATH = $(SRC)
 RDEPDIR = $(OBJ)/release/.d
 DDEPDIR = $(OBJ)/debug/.d
@@ -40,7 +41,7 @@ test: $(TEST_DEPS)
 	@scripts/compare_results.pl ref my tests/abi
 
 ref-test:
-	@scripts/run_all_tests.pl $(REF_TEST_APP) ref tests/abi
+	@$(REF_TEST_RUN)
 
 CHECK_RUN = scripts/run_all_tests.pl $(CPPGM_TEST_APP) check "$(TEST)"
 include ../scripts/pa_run_check_targets.mk

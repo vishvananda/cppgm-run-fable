@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_LITERAL:1 at token 0 at tests/preproc/400-pragma-operator-direct.t:1:1

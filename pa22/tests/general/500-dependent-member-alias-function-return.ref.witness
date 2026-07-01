@@ -1,0 +1,22 @@
+translation-unit
+  alias-use at pa22/tests/general/500-dependent-member-alias-function-return.t:22:25
+    template copy_cv_t
+    bind #1 = T source=explicit
+    bind #2 = typename make_unsigned<T>::type source=explicit
+  alias-use at pa22/tests/general/500-dependent-member-alias-function-return.t:25:1
+    template make_unsigned_t
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/500-dependent-member-alias-function-return.t:27:22
+    template make_unsigned_t
+    bind #1 = T source=explicit
+  function-call at pa22/tests/general/500-dependent-member-alias-function-return.t:32:10
+    callee to_unsigned_like
+    selected instantiation
+    bind #1 = long source=deduced
+template-closure-events
+  ensure-definition
+    entity to_unsigned_like
+  function-instantiation
+    entity to_unsigned_like
+  require-definition
+    entity to_unsigned_like

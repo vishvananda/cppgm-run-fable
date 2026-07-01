@@ -1,98 +1,61 @@
-function @f(%pattern : ptr [pass=by_address], %actual : ptr [pass=by_address]) -> u8 [binding=strong, object=_Z1f1SS_] {
+function @f(%pattern : ptr [pass=by_address], %actual : ptr [pass=by_address]) -> u8 [unwind=no, binding=strong, object=_Z1f1SS_] {
   slot $pattern : obj<8x8>
   slot $actual : obj<8x8>
   slot $pattern_cv_inner : obj<8x8>
   slot $actual_cv_inner : obj<8x8>
   slot $pattern_base : obj<8x8>
   slot $actual_base : obj<8x8>
-  slot $call__1 : u8
   slot $deduced_type : obj<8x8>
   slot $actual_cv_inner__shadow2 : obj<8x8>
   slot $pattern_cv_inner__shadow2 : obj<8x8>
-  slot $call__2 : u8
-  slot $call__3 : ptr
 
   block ^entry:
     %t1 = addr $pattern_cv_inner
-    eh_try ^call_unwind_dispatch_1
     call void @S__S(%t1)
-    eh_end
-    jump ^call_unwind_end_2
-
-  block ^call_unwind_dispatch_1:
-    call void @S___S(%actual)
-    call void @S___S(%pattern)
-    resume
-
-  block ^call_unwind_end_2:
     %t2 = addr $actual_cv_inner
-    eh_try ^call_unwind_dispatch_1
     call void @S__S(%t2)
-    eh_end
     %t3 = addr $pattern_base
-    eh_try ^call_unwind_dispatch_1
     call void @S__S__ov2(%t3, %pattern)
-    eh_end
     %t4 = addr $actual_base
-    eh_try ^call_unwind_dispatch_1
     call void @S__S__ov2(%t4, %actual)
-    eh_end
-    eh_try ^call_unwind_dispatch_1
     %t5 = addr $pattern_base
     %t6 = call u8 @S__operatorbool(%t5)
-    store u8 %t6, $call__1
-    %t7 = load u8 $call__1
-    eh_end
-    branch %t7, ^if_then_3, ^if_else_4
+    branch %t6, ^if_then_1, ^if_else_2
 
-  block ^if_then_3:
-    %t8 = addr $deduced_type
-    eh_try ^call_unwind_dispatch_1
-    call void @S__S__ov2(%t8, %actual)
-    eh_end
-    %t9 = addr $actual_cv_inner__shadow2
-    eh_try ^call_unwind_dispatch_1
+  block ^if_then_1:
+    %t7 = addr $deduced_type
+    call void @S__S__ov2(%t7, %actual)
+    %t8 = addr $actual_cv_inner__shadow2
+    call void @S__S(%t8)
+    %t9 = addr $pattern_cv_inner__shadow2
     call void @S__S(%t9)
-    eh_end
-    %t10 = addr $pattern_cv_inner__shadow2
-    eh_try ^call_unwind_dispatch_1
-    call void @S__S(%t10)
-    eh_end
-    eh_try ^call_unwind_dispatch_1
-    %t11 = addr $actual_base
-    %t12 = call u8 @S__operatorbool(%t11)
-    store u8 %t12, $call__2
-    %t13 = load u8 $call__2
-    eh_end
-    branch %t13, ^if_then_6, ^if_else_7
+    %t10 = addr $actual_base
+    %t11 = call u8 @S__operatorbool(%t10)
+    branch %t11, ^if_then_4, ^if_else_5
 
-  block ^if_then_6:
-    eh_try ^call_unwind_dispatch_1
-    %t14 = addr $deduced_type
-    %t15 = addr $actual_cv_inner__shadow2
-    %t16 = call ptr @S__operator_(%t14, %t15)
-    store ptr %t16, $call__3
-    %t17 = load ptr $call__3
-    eh_end
-    jump ^if_end_8
+  block ^if_then_4:
+    %t12 = addr $deduced_type
+    %t13 = addr $actual_cv_inner__shadow2
+    %t14 = call ptr @S__operator_(%t12, %t13)
+    jump ^if_end_6
 
-  block ^if_else_7:
-    jump ^if_end_8
+  block ^if_else_5:
+    jump ^if_end_6
 
-  block ^if_end_8:
+  block ^if_end_6:
     call void @S___S(%actual)
     call void @S___S(%pattern)
     return u8 1
 
-  block ^if_else_4:
-    jump ^if_end_5
+  block ^if_else_2:
+    jump ^if_end_3
 
-  block ^if_end_5:
+  block ^if_end_3:
     call void @S___S(%actual)
     call void @S___S(%pattern)
     return u8 0
 }
-function @S__S(%this : ptr) -> void [binding=weak, object=_ZN1SC1Ev] {
+function @S__S(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1SC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -102,7 +65,7 @@ function @S__S(%this : ptr) -> void [binding=weak, object=_ZN1SC1Ev] {
     store ptr 0, %t2
     return void
 }
-function @S__S__ov2(%this : ptr, %o : ptr [pass=reference]) -> void [binding=weak, object=_ZN1SC1ERKS_] {
+function @S__S__ov2(%this : ptr, %o : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN1SC1ERKS_] {
   slot $this : ptr
   slot $o : ptr
 
@@ -117,7 +80,7 @@ function @S__S__ov2(%this : ptr, %o : ptr [pass=reference]) -> void [binding=wea
     store ptr %t3, %t5
     return void
 }
-function @S__operator_(%this : ptr, %o : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN1SaSERKS_] {
+function @S__operator_(%this : ptr, %o : ptr [pass=reference]) -> ptr [unwind=no, binding=weak, object=_ZN1SaSERKS_] {
   slot $this : ptr
   slot $o : ptr
 
@@ -133,7 +96,7 @@ function @S__operator_(%this : ptr, %o : ptr [pass=reference]) -> ptr [binding=w
     %t6 = load ptr $this
     return ptr %t6
 }
-function @S__operatorbool(%this : ptr) -> u8 [binding=weak, object=_ZNK1ScvbEv] {
+function @S__operatorbool(%this : ptr) -> u8 [unwind=no, binding=weak, object=_ZNK1ScvbEv] {
   slot $this : ptr
 
   block ^entry:
@@ -144,7 +107,7 @@ function @S__operatorbool(%this : ptr) -> u8 [binding=weak, object=_ZNK1ScvbEv] 
     %t4 = cmp ne ptr %t3, 0
     return u8 %t4
 }
-function @S___S(%this : ptr) -> void [binding=weak, object=_ZN1SD1Ev] {
+function @S___S(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1SD1Ev] {
   slot $this : ptr
 
   block ^entry:

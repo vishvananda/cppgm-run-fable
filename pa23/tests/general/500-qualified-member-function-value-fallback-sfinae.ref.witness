@@ -11,6 +11,10 @@ translation-unit
     template mini::__bool_constant
     selected primary
     bind #1 = false source=explicit
+  class-use at pa23/tests/general/500-qualified-member-function-value-fallback-sfinae.t:43:7
+    template mini::__bool_constant
+    selected primary
+    bind #1 = true source=explicit
   alias-use at pa23/tests/general/500-qualified-member-function-value-fallback-sfinae.t:59:32
     template mini::__enable_if_t
     bind #1 = _TupleConstraints<Dummy, U1, U2>::__is_implicitly_default_constructible() source=explicit

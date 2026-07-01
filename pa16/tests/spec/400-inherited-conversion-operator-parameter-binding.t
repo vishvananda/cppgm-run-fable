@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 12.3.2 [class.conv.fct]
 
 struct ReadonlyProperty;

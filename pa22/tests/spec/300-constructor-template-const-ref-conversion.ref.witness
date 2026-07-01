@@ -1,0 +1,39 @@
+translation-unit
+  class-use at pa22/tests/spec/300-constructor-template-const-ref-conversion.t:18:18
+    template duration
+    selected primary
+    bind #1 = long source=explicit
+    bind #2 = tag<1> source=explicit
+  class-use at pa22/tests/spec/300-constructor-template-const-ref-conversion.t:18:33
+    template tag
+    selected primary
+    bind #1 = 1 source=explicit
+  class-use at pa22/tests/spec/300-constructor-template-const-ref-conversion.t:25:17
+    template duration
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = tag<2> source=explicit
+  function-call at pa22/tests/spec/300-constructor-template-const-ref-conversion.t:25:17
+    callee duration<long, tag<1>>::duration
+    selected instantiation
+    bind #1 = int source=deduced
+    bind #2 = tag<2> source=deduced
+    drop duration<long, tag<1>>::duration reason=bad_conversion
+    drop duration<long, tag<1>>::duration reason=bad_conversion
+  class-use at pa22/tests/spec/300-constructor-template-const-ref-conversion.t:25:31
+    template tag
+    selected primary
+    bind #1 = 2 source=explicit
+template-closure-events
+  ensure-definition
+    entity duration<int, tag<2>>::duration
+  ensure-definition
+    entity duration<long, tag<1>>::duration
+  function-instantiation
+    entity duration<int, tag<2>>::duration
+  function-instantiation
+    entity duration<long, tag<1>>::duration
+  require-definition
+    entity duration<int, tag<2>>::duration
+  require-definition
+    entity duration<long, tag<1>>::duration

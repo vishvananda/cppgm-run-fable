@@ -1,0 +1,18 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  block ^entry:
+    %t1 = const i64 1
+    %t2 = convert sext i64 i32 0
+    %t3 = call i32 @char_traits_char16_t___compare(0, 0, %t2)
+    return i32 %t3
+}
+function @char_traits_char16_t___compare(%__param0 : ptr, %__param1 : ptr, %__param2 : i64) -> i32 [unwind=no, binding=weak, object=_ZN11char_traitsIDsE7compareEPKDsS2_m] {
+  slot $__param0 : ptr
+  slot $__param1 : ptr
+  slot $__param2 : i64
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    store ptr %__param1, $__param1
+    store i64 %__param2, $__param2
+    return i32 0
+}

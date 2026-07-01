@@ -1,0 +1,20 @@
+translation-unit
+  alias-use at pa22/tests/spec/300-void-t-detector.t:13:33
+    template void_t
+    bind #1 = typename T::iterator_category source=explicit
+  class-use at pa22/tests/spec/300-void-t-detector.t:29:10
+    template has_iterator_category
+    selected partial
+    bind #1 = iter_like source=explicit
+    bind #2 = void source=defaulted
+    specialize #1 = iter_like source=deduced
+  class-use at pa22/tests/spec/300-void-t-detector.t:30:19
+    template has_iterator_category
+    selected primary
+    bind #1 = plain source=explicit
+    bind #2 = void source=defaulted
+template-closure-events
+  variable-instantiation
+    entity has_iterator_category<iter_like>::value
+  variable-instantiation
+    entity has_iterator_category<plain>::value

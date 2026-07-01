@@ -1,7 +1,8 @@
 #include <deque>
 
-int main()
+unsigned long deque_size_anchor()
 {
   std::deque<int> values;
-  return (int)values.size();
+  return values.size();
 }
+static_assert(sizeof(&deque_size_anchor) > 0, "deque member body anchor");

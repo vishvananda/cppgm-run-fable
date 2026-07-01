@@ -1,0 +1,17 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $p : ptr
+
+  block ^entry:
+    store ptr 0, $p
+    %t1 = load ptr $p
+    %t2 = call ptr @get(%t1)
+    %t3 = load i32 %t2
+    return i32 0
+}
+function @get(%__param0 : ptr [pass=reference]) -> ptr [binding=weak, object=_Z3getILm0EJicEERKN13tuple_elementIXT_EJDpT0_EE4typeERK5tupleIJS2_EE] {
+  slot $__param0 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    return ptr 0
+}

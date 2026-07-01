@@ -1,0 +1,40 @@
+translation-unit
+  alias-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:20:43
+    template index_sequence
+    bind #1 = 0 source=explicit
+  alias-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:20:64
+    template index_sequence
+    bind #1 = 0 source=explicit
+  alias-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:27:8
+    template index_sequence
+    bind #1 = I1... source=explicit
+  alias-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:28:8
+    template index_sequence
+    bind #1 = I2... source=explicit
+  class-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:32:3
+    template tuple
+    selected primary
+    bind #1 = <const int &> source=explicit
+  class-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:33:3
+    template tuple
+    selected primary
+    bind #1 = <const char &> source=explicit
+  class-use at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:34:3
+    template pair
+    selected primary
+    bind #1 = const int source=explicit
+    bind #2 = char source=explicit
+  function-call at pa22/tests/general/500-index-sequence-alias-constructor-deduction.t:34:25
+    callee pair<const int, char>::pair
+    selected instantiation
+    bind #1 = <const int &> source=deduced
+    bind #2 = <const char &> source=deduced
+    drop pair<const int, char>::pair reason=too_many_arguments
+    drop pair<const int, char>::pair reason=too_few_arguments
+template-closure-events
+  ensure-definition
+    entity pair<const int, char>::pair
+  function-instantiation
+    entity pair<const int, char>::pair
+  require-definition
+    entity pair<const int, char>::pair

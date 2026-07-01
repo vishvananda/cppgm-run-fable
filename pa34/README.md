@@ -132,6 +132,12 @@ The new PA34 contract is not a new object format. It is the ability to
 preprocess and compile hosted source/header inputs successfully through the
 `cppgm++` path.
 
+Hosted compatibility should use the same source-to-LowIR-to-object pipeline as
+ordinary compilation. Hosted include search, predefined macros, and builtin
+probes can affect the source program being compiled, but `--emit-lowir` should
+remain representative of the LowIR that object emission consumes. Do not add a
+hosted-only lowering path that carries backend facts outside serialized LowIR.
+
 ### Error Handling
 
 If preprocessing, parsing, semantic analysis, lowering, object emission, or
@@ -154,7 +160,7 @@ To run one test through the shared check target:
 
 ```sh
 make check TEST=tests/preproc/300-has-include.t
-make check TEST=tests/compile/500-builtin-transforms-and-traits.t
+make check TEST=tests/compile/600-builtin-transforms-and-traits.t
 ```
 
 PA34 has two test directories:

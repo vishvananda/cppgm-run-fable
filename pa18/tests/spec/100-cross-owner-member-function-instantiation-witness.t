@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.7.1 [temp.inst]
 // Instantiating a function template body may instantiate an ordinary member
 // function from another class template owner. The witness closure should expose

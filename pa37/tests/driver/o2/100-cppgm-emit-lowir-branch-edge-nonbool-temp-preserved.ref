@@ -1,5 +1,3 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
 declare function @printf(%arg0 : ptr) -> i32 [arity=variadic, linkage=c, binding=strong]
 
 global @__strlit__1 [binding=internal] = {

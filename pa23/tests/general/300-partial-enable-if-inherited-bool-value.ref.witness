@@ -1,0 +1,43 @@
+translation-unit
+  class-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:11:9
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:12:9
+    template bool_constant
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:64:5
+    template enable_if_t
+    bind #1 = execute_member<add_const_t<T>, F>::value source=explicit
+  alias-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:64:32
+    template add_const_t
+    bind #1 = T source=explicit
+  class-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:67:15
+    template execute_member
+    selected primary
+    bind #1 = const executor source=explicit
+    bind #2 = function_object source=explicit
+    bind #3 = void source=defaulted
+  alias-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:67:30
+    template add_const_t
+    bind #1 = executor source=explicit
+  class-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:69:15
+    template is_executor_of_impl
+    selected partial
+    bind #1 = executor source=explicit
+    bind #2 = function_object source=explicit
+    bind #3 = void source=defaulted
+    specialize #1 = executor source=deduced
+    specialize #2 = function_object source=deduced
+  class-use at pa23/tests/general/300-partial-enable-if-inherited-bool-value.t:74:10
+    template is_executor_of_impl
+    selected partial
+    bind #1 = executor source=explicit
+    bind #2 = function_object source=explicit
+    bind #3 = void source=defaulted
+    specialize #1 = executor source=deduced
+    specialize #2 = function_object source=deduced
+template-closure-events
+  variable-instantiation
+    entity bool_constant<true>::value

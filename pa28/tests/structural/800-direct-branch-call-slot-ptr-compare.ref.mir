@@ -42,9 +42,8 @@ function @main
   abi
     return i64 -> rax
   frame
-    stack_size 32
+    stack_size 16
     scratch_bytes 0
-    preserve rbx
     slot $first -> [rbp-8] : ptr
     slot $last -> [rbp-16] : ptr
 

@@ -22,6 +22,12 @@ LowIR is:
 - explicit about globals, functions, stack slots, temporaries, and control flow
 - non-SSA by requirement, but compatible with later SSA conversion if desired
 
+LowIR text is the serialized form of the compiler-owned backend program model.
+Implementations may use a typed in-memory representation, and the starter
+support includes an optional `dev/src/lowir_model.h` scaffold for that shape,
+but the text remains the durable boundary. A backend-visible fact that cannot
+be serialized to LowIR and parsed back is not part of the LowIR contract.
+
 The following naming conventions are used:
 
 - globals: `@name`
@@ -166,13 +172,17 @@ function @main() -> i64 [role=entry, binding=strong, keep_alias=yes] {
 function @helper() -> i64 [binding=strong, object=_ZL6helperv, prefer_local=yes] {
   ...
 }
+function @Tag__Tag(%this : ptr) -> void [binding=weak, trivial_lifecycle=yes] {
+  ...
+}
 function @boot() -> void [role=init, binding=strong] {
   ...
 }
 ```
 
 The currently defined top-level metadata keys are `role`, `linkage`, `binding`, `object`,
-`tls_for` (functions only), `keep_alias`, `prefer_local`, and `storage` (globals only).
+`tls_for` (functions only), `keep_alias`, `prefer_local`, `trivial_lifecycle`
+(functions only), and `storage` (globals only).
 
 The currently defined global `storage` values are:
 
@@ -241,6 +251,13 @@ The `prefer_local` metadata key is a `yes`/`no` flag. `prefer_local=yes` records
 object emission should prefer a local/private binding when that is legal, even if an explicit
 `object=...` spelling is also present.
 
+The `trivial_lifecycle` metadata key is a `yes`/`no` flag for top-level
+function declarations and definitions. `trivial_lifecycle=yes` records that the
+function is a semantically trivial C++ lifecycle helper, such as a trivial
+constructor or destructor wrapper. Object lowering may use this fact to remove
+otherwise unreferenced weak lifecycle wrappers after the frontend has serialized
+the LowIR boundary.
+
 `alias object <object-symbol> = @target` records an additional object-file symbol spelling
 that must resolve to the same emitted top-level LowIR function or global as `@target`.
 Multiple alias lines may target the same LowIR symbol, but each alias object symbol may be
@@ -261,7 +278,10 @@ wrapper, represent it as a normal LowIR function declaration or definition with 
 Canonical `cppgm++ --emit-lowir` output is expected to carry all backend-relevant symbol/export
 and runtime-support information needed by later object preparation. Later object-path steps such
 as debug stripping or LowIR optimization may transform that canonical program, but they should
-not depend on hidden semantic side data that is absent from textual LowIR.
+not depend on hidden semantic side data that is absent from textual LowIR. An in-process
+`cppgm++ -c` implementation may skip writing a temporary `.lowir` file for speed, but it should
+operate on facts that could have been obtained by serializing the LowIR program and parsing it
+again.
 
 Functions may also carry explicit call-boundary metadata after the return type:
 
@@ -329,8 +349,8 @@ normally.
 
 Call signatures only accept call-boundary metadata such as `arity=...`, `effects=...`,
 `unwind=...`, and `return=...`. Top-level symbol metadata such as `role=...`, `linkage=...`,
-`binding=...`, `object=...`, `keep_alias=...`, and `prefer_local=...` is not valid on
-`as (...) -> ...` call signatures.
+`binding=...`, `object=...`, `keep_alias=...`, `prefer_local=...`, and
+`trivial_lifecycle=...` is not valid on `as (...) -> ...` call signatures.
 
 Later backend lowering may also introduce internal compiler builtin helper symbols for
 operations that are still first-class in LowIR but are not emitted directly on the

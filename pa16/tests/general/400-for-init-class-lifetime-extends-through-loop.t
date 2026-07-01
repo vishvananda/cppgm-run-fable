@@ -2,9 +2,9 @@ int live = 0;
 int destroyed = 0;
 
 struct Guard {
-  Guard() { live = 1; }
-  ~Guard() { live = 0; destroyed = destroyed + 1; }
-  operator bool() const { return live != 0; }
+  Guard() noexcept { live = 1; }
+  ~Guard() noexcept { live = 0; destroyed = destroyed + 1; }
+  operator bool() const noexcept { return live != 0; }
 };
 
 int main()

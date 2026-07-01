@@ -1,0 +1,26 @@
+translation-unit
+  alias-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-alias-body.t:42:12
+    template enable_if_t
+    bind #1 = is_constructible<value_type, typename iterator_traits<It>::reference>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-alias-body.t:55:10
+    template enable_if_t
+    bind #1 = is_constructible<T, typename iterator_traits<It>::reference>::value source=explicit
+    bind #2 = int source=explicit
+  class-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-alias-body.t:66:3
+    template box
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  ensure-definition
+    entity box<int>::call
+  function-instantiation
+    entity box<int>::assign
+  function-instantiation
+    entity box<int>::call
+  require-definition
+    entity box<int>::assign
+  require-definition
+    entity box<int>::call
+  variable-instantiation
+    entity is_constructible<int, int &>::value

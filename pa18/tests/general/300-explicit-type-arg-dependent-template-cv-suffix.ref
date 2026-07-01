@@ -46,7 +46,7 @@ function @proto__terminal_reference_wrapper_basic_regex_int__const____type__make
     call void @proto__terminal_reference_wrapper_basic_regex_int__const____type__type(%t1)
     return obj<1x1> $retobj__1
 }
-function @proto__terminal_reference_wrapper_basic_regex_int__const____type__type(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5proto8terminalI17reference_wrapperIK11basic_regexIiEEE4typeC1Ev] {
+function @proto__terminal_reference_wrapper_basic_regex_int__const____type__type(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5proto8terminalI17reference_wrapperIK11basic_regexIiEEE4typeC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

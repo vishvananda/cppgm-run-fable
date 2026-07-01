@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/spec/100-partial-specialization-top-const-reference-mismatch.t:16:16
+    template is_same
+    selected primary
+    bind #1 = char *& source=explicit
+    bind #2 = char *const & source=explicit
+  class-use at pa21/tests/spec/100-partial-specialization-top-const-reference-mismatch.t:17:16
+    template is_same
+    selected primary
+    bind #1 = const char *& source=explicit
+    bind #2 = const char *const & source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_same<char *&, char *const &>::value
+  variable-instantiation
+    entity is_same<const char *&, const char *const &>::value

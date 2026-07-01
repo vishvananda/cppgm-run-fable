@@ -1,0 +1,28 @@
+machine_ir x86_64 <host-target>
+
+startup
+    call @main
+    mov rdi, rax
+    exit
+
+function @main
+  abi
+    return i64 -> rax
+  frame
+    stack_size 48
+    scratch_bytes 48
+
+  block ^entry
+    fmov.f64 xmm0, 1.5
+    fadd.f64 xmm0, xmm0, 2.25
+    fcmp.f64 xmm0, 3.75
+    jp ^bad
+    je ^ok
+
+  block ^bad
+    mov rax, 1
+    ret rax
+
+  block ^ok
+    mov rax, 0
+    ret rax

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.7.1 [temp.inst], 14.8 [temp.fct.spec]
 
 struct token {};

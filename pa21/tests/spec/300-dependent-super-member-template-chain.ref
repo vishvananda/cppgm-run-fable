@@ -107,7 +107,7 @@ function @layer_terminal___insert_(%this : ptr, %__param1 : i32, %position : ptr
     %t12 = binary add i32 %t11, 100
     return i32 %t12
 }
-function @tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3tagC1Ev] {
+function @tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3tagC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

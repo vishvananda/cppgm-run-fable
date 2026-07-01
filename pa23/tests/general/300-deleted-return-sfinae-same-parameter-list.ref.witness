@@ -1,0 +1,21 @@
+translation-unit
+  alias-use at pa23/tests/general/300-deleted-return-sfinae-same-parameter-list.t:32:1
+    template enable_if_t
+    bind #1 = (I >= sizeof...(Types)) source=explicit
+  class-use at pa23/tests/general/300-deleted-return-sfinae-same-parameter-list.t:35:9
+    template tuple
+    selected primary
+    bind #1 = <int, char> source=explicit
+  function-call at pa23/tests/general/300-deleted-return-sfinae-same-parameter-list.t:36:9
+    callee get
+    selected instantiation
+    bind #1 = 0 source=explicit
+    bind #2 = <int, char> source=deduced
+    drop get reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity get
+  function-instantiation
+    entity get
+  require-definition
+    entity get

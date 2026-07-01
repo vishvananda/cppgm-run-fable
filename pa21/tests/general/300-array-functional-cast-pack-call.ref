@@ -59,7 +59,7 @@ function @sink__operator____ov3(%this : ptr, %__param1 : i32) -> void [binding=w
     store i32 %__param1, $__param1
     return void
 }
-function @sink__sink(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4sinkC1Ev] {
+function @sink__sink(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4sinkC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

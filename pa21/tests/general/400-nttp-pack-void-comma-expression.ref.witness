@@ -1,0 +1,8 @@
+translation-unit
+  class-use at pa21/tests/general/400-nttp-pack-void-comma-expression.t:18:10
+    template All
+    selected primary
+    bind #1 = <true, true, true> source=explicit
+template-closure-events
+  variable-instantiation
+    entity Same<AllDummy<true, true, true>, AllDummy<true, true, true>>::value

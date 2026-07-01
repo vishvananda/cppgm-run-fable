@@ -1,0 +1,21 @@
+translation-unit
+  alias-use at pa21/tests/general/400-alias-value-expression-type-argument.t:31:22
+    template bool_
+    bind #1 = (1 <= size<L>::value) source=explicit
+  alias-use at pa21/tests/general/400-alias-value-expression-type-argument.t:31:34
+    template size
+    bind #1 = L source=explicit
+  class-use at pa21/tests/general/400-alias-value-expression-type-argument.t:33:9
+    template list
+    selected primary
+    bind #1 = <int, char> source=explicit
+  alias-use at pa21/tests/general/400-alias-value-expression-type-argument.t:37:10
+    template enabled
+    bind #1 = list_type source=explicit
+template-closure-events
+  variable-instantiation
+    entity gate<integral_constant<bool, true>>::value
+  variable-instantiation
+    entity integral_constant<bool, true>::value
+  variable-instantiation
+    entity integral_constant<unsigned long, 2>::value

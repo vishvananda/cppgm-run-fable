@@ -50,7 +50,7 @@ function @boost__fusion__vector_detail__value_at_impl(%__param0 : ptr) -> obj<1x
     call void @boost__mpl__identity_int___identity(%t1)
     return obj<1x1> $retobj__1
 }
-function @boost__mpl__identity_int___identity(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5boost3mpl8identityIiEC1Ev] {
+function @boost__mpl__identity_int___identity(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5boost3mpl8identityIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

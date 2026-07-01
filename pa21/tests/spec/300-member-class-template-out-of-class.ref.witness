@@ -1,0 +1,12 @@
+translation-unit
+  class-use at pa21/tests/spec/300-member-class-template-out-of-class.t:14:10
+    template outer
+    selected primary
+    bind #1 = int source=explicit
+  class-use at pa21/tests/spec/300-member-class-template-out-of-class.t:14:22
+    template outer<int>::inner
+    selected primary
+    bind #1 = char source=explicit
+template-closure-events
+  variable-instantiation
+    entity outer<int>::inner<char>::value

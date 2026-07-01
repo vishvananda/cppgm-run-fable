@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.2 [temp.deduct], 14.8.2.5 [temp.deduct.type]
 // Substituting an explicit function-template argument can make a non-type
 // template argument's member lookup ambiguous. That invalid immediate context

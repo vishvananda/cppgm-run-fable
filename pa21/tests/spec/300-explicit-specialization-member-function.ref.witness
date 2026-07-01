@@ -1,0 +1,20 @@
+translation-unit
+  class-use at pa21/tests/spec/300-explicit-specialization-member-function.t:14:5
+    template tag
+    selected primary
+    bind #1 = int source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-member-function.t:21:10
+    template tag
+    selected primary
+    bind #1 = char source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-member-function.t:21:34
+    template tag
+    selected primary
+    bind #1 = int source=explicit
+template-closure-events
+  ensure-definition
+    entity tag<char>::id
+  function-instantiation
+    entity tag<char>::id
+  require-definition
+    entity tag<char>::id

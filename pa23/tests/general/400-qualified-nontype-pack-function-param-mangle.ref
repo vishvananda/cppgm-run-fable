@@ -44,7 +44,7 @@ function @boost__container__dtl__proxy_int__int___priv(%this : ptr, %__param1 : 
     store ptr %__param3, $__param3
     return void
 }
-function @boost__container__dtl__index_tuple_0___index_tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5boost9container3dtl11index_tupleIJLm0EEEC1Ev] {
+function @boost__container__dtl__index_tuple_0___index_tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5boost9container3dtl11index_tupleIJLm0EEEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

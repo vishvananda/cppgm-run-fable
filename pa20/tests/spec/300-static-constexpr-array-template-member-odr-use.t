@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.1 [temp.class], 9.4.2 [class.static.data]
 
 template<class T>

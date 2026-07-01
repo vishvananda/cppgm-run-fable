@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/spec/300-static-member-function-template-out-of-class.t:14:10
+    template box
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa21/tests/spec/300-static-member-function-template-out-of-class.t:14:10
+    callee box<int>::cast
+    selected instantiation
+    bind #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity box<int>::cast
+  function-instantiation
+    entity box<int>::cast
+  require-definition
+    entity box<int>::cast

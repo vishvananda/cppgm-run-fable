@@ -42,7 +42,7 @@ function @operator_(%it : obj<8x8>, %__param1 : i32) -> obj<8x8> [binding=weak, 
     store i32 %__param1, $__param1
     %t2 = addr $retobj__1
     %t3 = addr $it
-    call void @wrap_local__local_18179062325960205169_const_____wrap__ov5(%t2, %t3)
+    copyobj 8x8 %t3, %t2
     return obj<8x8> $retobj__1
 }
 function @wrap_local__local_18179062325960205169_const_____wrap__ov5(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN4wrapIPKZ4mainE5localEC1IPS0_EERKS_IT_E] {

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 
 struct base {
   static constexpr unsigned values[] = {1, 2, 3};

@@ -1,0 +1,18 @@
+translation-unit
+  alias-use at pa21/tests/general/400-alias-nontype-pack-partial-specialization-pattern.t:12:28
+    template index_sequence
+    bind #1 = 0 source=explicit
+  alias-use at pa21/tests/general/400-alias-nontype-pack-partial-specialization-pattern.t:18:19
+    template index_sequence
+    bind #1 = I... source=explicit
+  alias-use at pa21/tests/general/400-alias-nontype-pack-partial-specialization-pattern.t:26:22
+    template index_sequence_for
+    bind #1 = T... source=explicit
+  class-use at pa21/tests/general/400-alias-nontype-pack-partial-specialization-pattern.t:32:17
+    template tuple
+    selected primary
+    bind #1 = <int &&, char &&> source=explicit
+  class-use at pa21/tests/general/400-alias-nontype-pack-partial-specialization-pattern.t:33:10
+    template tuple
+    selected primary
+    bind #1 = <int &&, char &&> source=explicit

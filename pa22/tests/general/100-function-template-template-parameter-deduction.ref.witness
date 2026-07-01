@@ -1,0 +1,17 @@
+translation-unit
+  class-use at pa22/tests/general/100-function-template-template-parameter-deduction.t:18:1
+    template ttp_deduce::box
+    selected primary
+    bind #1 = double source=explicit
+  function-call at pa22/tests/general/100-function-template-template-parameter-deduction.t:22:10
+    callee ttp_deduce::pass
+    selected instantiation
+    bind #1 = double source=deduced
+    bind #2 = ttp_deduce::box source=deduced
+template-closure-events
+  ensure-definition
+    entity ttp_deduce::pass
+  function-instantiation
+    entity ttp_deduce::pass
+  require-definition
+    entity ttp_deduce::pass

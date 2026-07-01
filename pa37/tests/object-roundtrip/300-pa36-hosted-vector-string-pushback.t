@@ -1,0 +1,1 @@
+../../../pa36/tests/link/700-hosted-vector-string-pushback-link-smoke.t

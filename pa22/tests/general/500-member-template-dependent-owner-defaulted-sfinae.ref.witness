@@ -1,0 +1,124 @@
+translation-unit
+  class-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:60:22
+    template bool_constant
+    selected primary
+    bind #1 = false source=explicit
+  class-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:64:32
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:68:18
+    template bool_constant
+    selected primary
+    bind #1 = false source=explicit
+  class-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:72:24
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  class-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:84:21
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:89:5
+    template enable_if_t
+    bind #1 = is_same<typename associated_executor<Handler, Executor>::unspecialised, void>::value source=explicit
+  class-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:90:25
+    template bool_constant
+    selected primary
+    bind #1 = false source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:117:7
+    template enable_if_t
+    bind #1 = is_executor<conditional_t<true, executor_type, CompletionHandler>>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:117:31
+    template conditional_t
+    bind #1 = true source=explicit
+    bind #2 = executor_type source=explicit
+    bind #3 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:118:7
+    template enable_if_t
+    bind #1 = !needs_work<decay_t<Function>, decay_t<CompletionHandler>, Executor>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:118:31
+    template decay_t
+    bind #1 = Function source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:118:50
+    template decay_t
+    bind #1 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:125:7
+    template enable_if_t
+    bind #1 = is_executor<conditional_t<true, executor_type, CompletionHandler>>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:125:31
+    template conditional_t
+    bind #1 = true source=explicit
+    bind #2 = executor_type source=explicit
+    bind #3 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:126:7
+    template enable_if_t
+    bind #1 = needs_work<decay_t<Function>, decay_t<CompletionHandler>, Executor>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:126:30
+    template decay_t
+    bind #1 = Function source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:126:49
+    template decay_t
+    bind #1 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:133:7
+    template enable_if_t
+    bind #1 = !is_executor<conditional_t<true, executor_type, CompletionHandler>>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:133:32
+    template conditional_t
+    bind #1 = true source=explicit
+    bind #2 = executor_type source=explicit
+    bind #3 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:134:7
+    template enable_if_t
+    bind #1 = !needs_work<decay_t<Function>, decay_t<CompletionHandler>, Executor>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:134:31
+    template decay_t
+    bind #1 = Function source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:134:50
+    template decay_t
+    bind #1 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:141:7
+    template enable_if_t
+    bind #1 = !is_executor<conditional_t<true, executor_type, CompletionHandler>>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:141:32
+    template conditional_t
+    bind #1 = true source=explicit
+    bind #2 = executor_type source=explicit
+    bind #3 = CompletionHandler source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:142:7
+    template enable_if_t
+    bind #1 = needs_work<decay_t<Function>, decay_t<CompletionHandler>, Executor>::value source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:142:30
+    template decay_t
+    bind #1 = Function source=explicit
+  alias-use at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:142:49
+    template decay_t
+    bind #1 = CompletionHandler source=explicit
+  function-call at pa22/tests/general/500-member-template-dependent-owner-defaulted-sfinae.t:172:10
+    callee post
+    selected instantiation
+    bind #1 = context source=deduced
+    bind #2 = handler source=deduced
+template-closure-events
+  ensure-definition
+    entity post
+  function-instantiation
+    entity async_result_initiate
+  function-instantiation
+    entity initiate<executor>::initiate
+  function-instantiation
+    entity initiate<executor>::operator()
+  function-instantiation
+    entity post
+  require-definition
+    entity async_result_initiate
+  require-definition
+    entity initiate<executor>::initiate
+  require-definition
+    entity initiate<executor>::operator()
+  require-definition
+    entity post
+  variable-instantiation
+    entity bool_constant<false>::value
+  variable-instantiation
+    entity bool_constant<true>::value

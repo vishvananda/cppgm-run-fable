@@ -1,0 +1,24 @@
+translation-unit
+  class-use at pa21/tests/general/300-template-instantiation-use-location-explicit-specialization.t:26:18
+    template Ops
+    selected explicit
+    bind #1 = Policy source=explicit
+  function-call at pa21/tests/general/300-template-instantiation-use-location-explicit-specialization.t:37:3
+    callee sift
+    selected instantiation
+    bind #1 = Local source=deduced
+template-closure-events
+  ensure-definition
+    entity sift
+  function-instantiation
+    entity Ops<Policy>::iter_move
+  function-instantiation
+    entity move_like
+  function-instantiation
+    entity sift
+  require-definition
+    entity Ops<Policy>::iter_move
+  require-definition
+    entity move_like
+  require-definition
+    entity sift

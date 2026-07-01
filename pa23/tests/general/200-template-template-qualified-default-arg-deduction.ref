@@ -37,14 +37,14 @@ function @box_int___value(%this : ptr) -> i32 [binding=weak, object=_ZN3boxIiE5v
     %t3 = load i32 %t2
     return i32 %t3
 }
-function @ns__tuple_int__ns__marker___tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2ns5tupleIiNS_6markerEEC1Ev] {
+function @ns__tuple_int__ns__marker___tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2ns5tupleIiNS_6markerEEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return void
 }
-function @ns__tuple_ns__marker__ns__marker___tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2ns5tupleINS_6markerES1_EC1Ev] {
+function @ns__tuple_ns__marker__ns__marker___tuple(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN2ns5tupleINS_6markerES1_EC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
@@ -75,7 +75,7 @@ function @box_int___box__ov4(%this : ptr, %__param1 : obj<1x1>, %__param2 : obj<
     store i32 2, %t2
     return void
 }
-function @tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3tagC1Ev] {
+function @tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3tagC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

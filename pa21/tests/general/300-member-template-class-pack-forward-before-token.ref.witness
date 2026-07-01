@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa21/tests/general/300-member-template-class-pack-forward-before-token.t:34:3
+    template sender
+    selected primary
+    bind #1 = <error_code, string> source=explicit
+  function-call at pa21/tests/general/300-member-template-class-pack-forward-before-token.t:36:12
+    callee sender<error_code, string>::send
+    selected instantiation
+    bind #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity sender<error_code, string>::send
+  function-instantiation
+    entity sender<error_code, string>::send
+  require-definition
+    entity sender<error_code, string>::send

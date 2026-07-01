@@ -1,0 +1,21 @@
+translation-unit
+  class-use at pa21/tests/spec/300-explicit-specialization-cross-converting-ctor-body.t:12:26
+    template complex
+    selected explicit
+    bind #1 = double source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-cross-converting-ctor-body.t:25:8
+    template complex
+    selected explicit
+    bind #1 = float source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-cross-converting-ctor-body.t:25:38
+    template complex
+    selected explicit
+    bind #1 = double source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-cross-converting-ctor-body.t:29:3
+    template complex
+    selected explicit
+    bind #1 = double source=explicit
+  class-use at pa21/tests/spec/300-explicit-specialization-cross-converting-ctor-body.t:30:3
+    template complex
+    selected explicit
+    bind #1 = float source=explicit

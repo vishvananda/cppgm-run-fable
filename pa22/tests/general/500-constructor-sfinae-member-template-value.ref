@@ -1,0 +1,44 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $ex : obj<1x1>
+  slot $value : obj<4x4>
+  slot $argobj__1 : obj<1x1>
+  slot $cond__2 : i32
+
+  block ^entry:
+    %t1 = addr $ex
+    %t2 = addr $value
+    %t3 = addr $argobj__1
+    %t4 = addr $ex
+    call void @any_completion_executor__any_completion_executor__ov3(%t2, $argobj__1, 0)
+    %t5 = addr $value
+    %t6 = index i8 [projection=field] %t5, 0
+    %t7 = load i32 %t6
+    %t8 = cmp eq i32 %t7, 1
+    branch %t8, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__2
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__2
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t9 = load i32 $cond__2
+    return i32 %t9
+}
+function @any_completion_executor__any_completion_executor__ov3(%this : ptr, %__param1 : obj<1x1>, %__param2 : i32) -> void [binding=weak, object=_ZN23any_completion_executorC1I8executorEET_N10constraintIXsr4typeE5valueEE4typeE] {
+  slot $this : ptr
+  slot $__param1 : obj<1x1>
+  slot $__param2 : i32
+
+  block ^entry:
+    store ptr %this, $this
+    store i32 %__param2, $__param2
+    %t1 = load ptr $this
+    %t2 = index i8 [projection=field] %t1, 0
+    store i32 1, %t2
+    return void
+}
+alias object _ZN23any_completion_executorC2I8executorEET_N10constraintIXsr4typeE5valueEE4typeE = @any_completion_executor__any_completion_executor__ov3

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.7 [temp.alias], 14.8.2 [temp.deduct], 14.8.3 [temp.over]
 
 #include "../support.h"

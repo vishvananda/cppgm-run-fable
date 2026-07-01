@@ -18,7 +18,7 @@ function @wrapper_int___operatorsink_result_type_(%this : ptr) -> obj<1x1> [bind
     call void @sink_int___sink(%t1)
     return obj<1x1> $retobj__1
 }
-function @sink_int___sink(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4sinkIiEC1Ev] {
+function @sink_int___sink(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4sinkIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

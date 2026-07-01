@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A cached implicit specialization of a member function template is not a
 // separate overload candidate. The second call must deduce Handler from the
 // function lvalue instead of also considering the earlier pointer specialization.

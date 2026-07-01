@@ -14,7 +14,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
   block ^entry:
     return i32 0
 }
-function @F__F(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1FC1Ev] {
+function @F__F(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1FC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

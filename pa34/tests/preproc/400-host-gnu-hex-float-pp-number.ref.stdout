@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_LITERAL:0x1.0p-16382Q at token 0 at tests/preproc/400-host-gnu-hex-float-pp-number.t:1:1

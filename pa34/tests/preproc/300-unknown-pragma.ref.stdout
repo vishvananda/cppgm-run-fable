@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_IDENTIFIER:alive at token 0 at tests/preproc/300-unknown-pragma.t:1:1

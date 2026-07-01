@@ -6,16 +6,44 @@ use Cwd qw(getcwd);
 use File::Find;
 use File::Basename qw(basename dirname);
 use Scalar::Util qw(looks_like_number);
+use Text::ParseWords qw(shellwords);
 
 sub collect_tests
 {
-	my ($root, $pattern) = @_;
 	my @tests;
-	find(sub {
-		return if !-f $_;
-		push @tests, $File::Find::name if $File::Find::name =~ $pattern;
-	}, $root);
-	return sort @tests;
+	my ($spec, $pattern) = @_;
+	my @roots = shellwords($spec);
+	die "Test path '$spec' does not exist\n" if scalar(@roots) == 0;
+
+	my %seen;
+	for my $term (@roots)
+	{
+		my @matches = $term =~ /[*?\[]/ ? glob($term) : ($term);
+		die "Test path '$term' does not exist\n" if scalar(@matches) == 0;
+		for my $root (sort @matches)
+		{
+			die "Test path '$root' does not exist\n" if !-e $root;
+			my @found;
+			if (-f $root)
+			{
+				@found = $root =~ $pattern ? ($root) : ();
+			}
+			elsif (-d $root)
+			{
+				find(sub {
+					return if !-f $_;
+					push @found, $File::Find::name if $File::Find::name =~ $pattern;
+				}, $root);
+				@found = sort @found;
+			}
+			for my $test (@found)
+			{
+				next if $seen{$test}++;
+				push @tests, $test;
+			}
+		}
+	}
+	return @tests;
 }
 
 sub getdata
@@ -638,6 +666,7 @@ sub parse_lowir_function_metadata_suffix
 		keep_alias => '',
 		prefer_local => '',
 		object_root => '',
+		trivial_lifecycle => '',
 	);
 	my %saw;
 	pos($suffix) = 0;
@@ -719,6 +748,12 @@ sub parse_lowir_function_metadata_suffix
 					if $value !~ /^(?:yes|no)$/;
 				$metadata{object_root} = $value;
 			}
+			elsif ($key eq 'trivial_lifecycle')
+			{
+				return (0, "unknown trivial_lifecycle mode '$value'")
+					if $value !~ /^(?:yes|no)$/;
+				$metadata{trivial_lifecycle} = $value;
+			}
 			else
 			{
 				return (0, "unknown function metadata key '$key'");
@@ -754,7 +789,13 @@ sub parse_lowir_call_signature_suffix
 	return (0, "call signature metadata does not allow symbol metadata")
 		if $metadata_or_error->{role} ne '' ||
 		   $metadata_or_error->{linkage} ne '' ||
-		   $metadata_or_error->{binding} ne '';
+		   $metadata_or_error->{binding} ne '' ||
+		   $metadata_or_error->{object} ne '' ||
+		   $metadata_or_error->{tls_for} ne '' ||
+		   $metadata_or_error->{keep_alias} ne '' ||
+		   $metadata_or_error->{prefer_local} ne '' ||
+		   $metadata_or_error->{object_root} ne '' ||
+		   $metadata_or_error->{trivial_lifecycle} ne '';
 	$signature{has_signature} = 1;
 	$signature{ret} = $ret_type;
 	$signature{params} = $params_or_error;
@@ -1977,7 +2018,7 @@ sub lowir_metadata_item_ignored_for_compare
 	my ($key, $value) = @_;
 	# Validate full metadata, but do not make early source-to-LowIR oracles depend
 	# on later object/export policy or optional optimizer/provenance annotations.
-	return 1 if $key =~ /^(?:linkage|binding|object|tls_for|keep_alias|prefer_local)$/;
+	return 1 if $key =~ /^(?:linkage|binding|object|tls_for|keep_alias|prefer_local|trivial_lifecycle)$/;
 	return 1 if $key =~ /^(?:effects|unwind|return|capture|access|alias|projection)$/;
 	return 1 if $key eq 'storage' && $value =~ /^(?:readonly|writable)$/;
 	return 0;
@@ -2031,14 +2072,14 @@ sub lowir_function_symbol_records
 
 	for my $line (split(/\n/, $data))
 	{
-		my ($name, $metadata_suffix);
-		if ($line =~ /^declare function @([A-Za-z0-9_]+)\((.*?)\) -> $type_pattern((?:\s+\[[^\]]+\])*)$/)
+		my ($name, $params, $return_type, $metadata_suffix);
+		if ($line =~ /^declare function @([A-Za-z0-9_]+)\((.*?)\) -> ($type_pattern)((?:\s+\[[^\]]+\])*)$/)
 		{
-			($name, $metadata_suffix) = ($1, $3);
+			($name, $params, $return_type, $metadata_suffix) = ($1, $2, $3, $4);
 		}
-		elsif ($line =~ /^function @([A-Za-z0-9_]+)\((.*?)\) -> $type_pattern((?:\s+\[[^\]]+\])*) \{$/)
+		elsif ($line =~ /^function @([A-Za-z0-9_]+)\((.*?)\) -> ($type_pattern)((?:\s+\[[^\]]+\])*) \{$/)
 		{
-			($name, $metadata_suffix) = ($1, $3);
+			($name, $params, $return_type, $metadata_suffix) = ($1, $2, $3, $4);
 		}
 		else
 		{
@@ -2050,6 +2091,7 @@ sub lowir_function_symbol_records
 			$records{$name} = {
 				name => $name,
 				order => scalar(@ordered),
+				signature => lowir_normalize_function_signature($params, $return_type),
 				keys => {},
 			};
 			push @ordered, $name;
@@ -2067,6 +2109,16 @@ sub lowir_function_symbol_records
 	return (\%records, \@ordered);
 }
 
+sub lowir_normalize_function_signature
+{
+	my ($params, $return_type) = @_;
+	$params = lowir_trim($params);
+	$return_type = lowir_trim($return_type);
+	$params =~ s/\s+/ /g;
+	$return_type =~ s/\s+/ /g;
+	return '(' . $params . ') -> ' . $return_type;
+}
+
 sub assign_lowir_function_symbol_pair
 {
 	my ($ref_map, $my_map, $ref_name, $my_name, $next_ref) = @_;
@@ -2076,6 +2128,33 @@ sub assign_lowir_function_symbol_pair
 	$ref_map->{$ref_name} = $placeholder;
 	$my_map->{$my_name} = $placeholder;
 	return $$next_ref;
+}
+
+sub lowir_function_entry_map
+{
+	my ($data) = @_;
+	my %map;
+	for my $entry (split_lowir_top_level_entries($data))
+	{
+		next if $entry !~ /^function \@([A-Za-z0-9_]+)\(/;
+		$map{$1} = $entry;
+	}
+	return \%map;
+}
+
+sub lowir_function_shape_text
+{
+	my ($entry) = @_;
+	my @lines = split(/\n/, $entry, -1);
+	# Drop the function-level [..] metadata (object=, binding=, role=, ...) from
+	# the header so the shape ignores volatile mangle/linkage details. Parameter
+	# brackets (e.g. [pass=reference]) sit inside the parens and are preserved.
+	$lines[0] =~ s/((?:\s+\[[^\]]+\])+)\s*\{\s*$/ {/ if @lines;
+	my $text = join("\n", @lines);
+	# Mask every symbol reference (the function's own name, callees, globals) so
+	# two structurally identical functions match regardless of their mangled names.
+	$text =~ s/\@[^\s(),]+/\@<sym>/g;
+	return $text;
 }
 
 sub paired_lowir_function_symbol_maps
@@ -2116,10 +2195,43 @@ sub paired_lowir_function_symbol_maps
 	for my $name (sort keys(%$ref_records))
 	{
 		next if !exists($my_records->{$name});
+		next if $ref_records->{$name}{signature} ne $my_records->{$name}{signature};
 		$next = assign_lowir_function_symbol_pair(\%ref_map,
 		                                          \%my_map,
 		                                          $name,
 		                                          $name,
+		                                          \$next);
+	}
+
+	# Structural pass: pair any still-unpaired *defined* functions whose
+	# normalized shape (signature + body with symbol names masked) is unique on
+	# both sides. This lets the relaxed compare line functions up by structure
+	# rather than falling back to emission order, so a function whose mangled
+	# name differs (or is absent) no longer forces an order-sensitive mispairing.
+	# Requiring the shape to be unique on both sides keeps this sound: the
+	# correspondence is forced, and a genuinely different body has a different
+	# shape and stays unpaired, so a real codegen diff is never hidden.
+	my $ref_entries = lowir_function_entry_map($ref_data);
+	my $my_entries = lowir_function_entry_map($my_data);
+	my (%ref_by_shape, %my_by_shape);
+	for my $name (@$ref_order)
+	{
+		next if exists($ref_map{$name}) || !exists($ref_entries->{$name});
+		push @{$ref_by_shape{lowir_function_shape_text($ref_entries->{$name})}}, $name;
+	}
+	for my $name (@$my_order)
+	{
+		next if exists($my_map{$name}) || !exists($my_entries->{$name});
+		push @{$my_by_shape{lowir_function_shape_text($my_entries->{$name})}}, $name;
+	}
+	for my $shape (sort keys(%ref_by_shape))
+	{
+		next if !exists($my_by_shape{$shape});
+		next if scalar(@{$ref_by_shape{$shape}}) != 1 || scalar(@{$my_by_shape{$shape}}) != 1;
+		$next = assign_lowir_function_symbol_pair(\%ref_map,
+		                                          \%my_map,
+		                                          $ref_by_shape{$shape}[0],
+		                                          $my_by_shape{$shape}[0],
 		                                          \$next);
 	}
 
@@ -2399,6 +2511,7 @@ sub canonical_exit_status
 	return undef if !defined($status);
 	return 'EXIT_SUCCESS' if $status eq '0' || $status eq 'EXIT_SUCCESS';
 	return 'EXIT_TIMEOUT' if $status eq '124' || $status eq 'EXIT_TIMEOUT';
+	return 'EXIT_OOM' if $status eq '125' || $status eq 'EXIT_OOM';
 	return 'EXIT_NOT_IMPLEMENTED' if $status eq '86' || $status eq 'EXIT_NOT_IMPLEMENTED';
 	return 'EXIT_FAILURE' if $status eq '1' || $status eq 'EXIT_FAILURE';
 	return $status;
@@ -2429,6 +2542,16 @@ sub status_mismatch_message
 	    (!defined($got) || $got ne 'EXIT_TIMEOUT'))
 	{
 		return "ERROR: $label did not time out as expected (expected $expected_text, got $got_text)";
+	}
+	if (defined($got) && $got eq 'EXIT_OOM' &&
+	    (!defined($expected) || $expected ne 'EXIT_OOM'))
+	{
+		return "ERROR: $label ran out of memory (expected $expected_text, got $got_text)";
+	}
+	if (defined($expected) && $expected eq 'EXIT_OOM' &&
+	    (!defined($got) || $got ne 'EXIT_OOM'))
+	{
+		return "ERROR: $label did not run out of memory as expected (expected $expected_text, got $got_text)";
 	}
 	return "ERROR: $label exit status mismatch (expected $expected_text, got $got_text)";
 }
@@ -2558,7 +2681,9 @@ my $ref_suffix = $ARGV[0];
 my $my_suffix = $ARGV[1];
 my $tests = $ARGV[2];
 my $verbose = $ENV{VERBOSE} || $ENV{CPGM_TEST_VERBOSE};
-my $keep_going = $ENV{KEEP_GOING};
+my $requested_keep_going = $ENV{KEEP_GOING};
+my $auto_check_keep_going = env_flag_enabled('CPPGM_CHECK_AUTO_KEEP_GOING');
+my $check_mode = env_flag_enabled('CPPGM_CHECK_MODE');
 my $cwd = getcwd();
 my $assignment = basename($cwd);
 my $repo_root = dirname($cwd);
@@ -2581,11 +2706,18 @@ die "Unsupported compare_results mode $mode" if !exists($patterns{$mode});
 
 my @tests = collect_tests($tests, $patterns{$mode});
 my $suite_total = scalar(@tests);
+my $keep_going = $requested_keep_going || ($auto_check_keep_going && $suite_total > 1);
 my $npass = 0;
 my $failed = 0;
 my $witness_compared = 0;
 my $witness_failures = 0;
 my $witness_skipped = 0;
+
+sub compare_label
+{
+	return "$assignment check" if $check_mode;
+	return "$assignment $tests";
+}
 
 sub rooted_path
 {
@@ -2595,7 +2727,7 @@ sub rooted_path
 
 sub fail_prefix
 {
-	return "$assignment $tests: FAIL after $npass/$suite_total passed\n";
+	return compare_label() . ": FAIL after $npass/$suite_total passed\n";
 }
 
 sub rerun_hint
@@ -2662,6 +2794,9 @@ for my $test (@tests)
 		if ($keep_going)
 		{
 			print "$display_test: $message\n";
+			print witness_output_hint("$testbase.$ref_suffix.witness",
+			                          "$testbase.$my_suffix.witness")
+				if $check_mode && $auto_check_keep_going;
 			$failed = 1;
 			next;
 		}
@@ -2895,6 +3030,7 @@ for my $test (@tests)
 	if ($keep_going)
 	{
 		print "$display_test: $message\n";
+		print $hint if $check_mode && $auto_check_keep_going && defined($hint);
 		$failed = 1;
 		next;
 	}
@@ -2909,11 +3045,30 @@ for my $test (@tests)
 
 if ($mode eq 'witness_t')
 {
-	print "SUMMARY compared=$witness_compared failures=$witness_failures skipped=$witness_skipped\n";
-	append_keep_going_summary($repo_root, $cwd, $npass, $witness_compared, $failed) if $keep_going;
-	exit($failed && !$keep_going ? 1 : 0);
+	if ($check_mode)
+	{
+		print compare_label() . ": " . ($failed ? "FAIL" : "PASS") .
+			" ($npass/$witness_compared compared";
+		print ", $witness_skipped skipped" if $witness_skipped != 0;
+		print ")\n";
+	}
+	else
+	{
+		print "SUMMARY compared=$witness_compared failures=$witness_failures skipped=$witness_skipped\n";
+	}
+	append_keep_going_summary($repo_root, $cwd, $npass, $witness_compared, $failed)
+		if $keep_going && !$check_mode;
+	exit($failed && (!$keep_going || $auto_check_keep_going) ? 1 : 0);
 }
 
-print "$assignment $tests: PASS ($npass/$suite_total)\n" unless $keep_going;
-append_keep_going_summary($repo_root, $cwd, $npass, $suite_total, $failed) if $keep_going;
-exit($failed && !$keep_going ? 1 : 0);
+if ($keep_going && $check_mode)
+{
+	print compare_label() . ": " . ($failed ? "FAIL" : "PASS") . " ($npass/$suite_total)\n";
+}
+elsif (!$keep_going)
+{
+	print compare_label() . ": PASS ($npass/$suite_total)\n";
+}
+append_keep_going_summary($repo_root, $cwd, $npass, $suite_total, $failed)
+	if $keep_going && !$check_mode;
+exit($failed && (!$keep_going || $auto_check_keep_going) ? 1 : 0);

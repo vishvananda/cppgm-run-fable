@@ -3,10 +3,10 @@
 #include <type_traits>
 static_assert(std::is_same<decltype(std::declval<std::string>() + std::declval<char>()), std::string>::value,
               "std::string + char -> std::string");
-int main()
+std::string string_plus_char_anchor()
 {
   std::string delimiter = "";
   char quote = '"';
-  std::string terminator = std::string(")") + delimiter + quote;
-  return terminator == ")\"" ? 0 : 1;
+  return std::string(")") + delimiter + quote;
 }
+static_assert(sizeof(&string_plus_char_anchor) > 0, "string plus char body anchor");

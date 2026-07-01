@@ -1,0 +1,6 @@
+preproc 1
+sof tests/preproc/400-host-windows-1252-comment-byte.t
+simple int KW_INT
+identifier ok
+simple ; OP_SEMICOLON
+eof

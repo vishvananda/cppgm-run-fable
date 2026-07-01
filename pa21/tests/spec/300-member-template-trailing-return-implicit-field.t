@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.2 [temp.mem], 7.1.6.2 [dcl.type.simple]
 
 struct table

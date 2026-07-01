@@ -1,6 +1,8 @@
-#include <stdexcept>
-
 int destroyed = 0;
+
+struct CleanupError
+{
+};
 
 struct Guard
 {
@@ -12,7 +14,7 @@ struct Guard
 
 void boom()
 {
-  throw std::logic_error("resume");
+  throw CleanupError();
 }
 
 void middle()
@@ -27,7 +29,7 @@ int main()
   {
     middle();
   }
-  catch (const std::logic_error &)
+  catch (const CleanupError &)
   {
     return destroyed == 1 ? 0 : 2;
   }

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 8.3.5 [dcl.fct], 14.8.2.1 [temp.deduct.call]
 
 template<class T>

@@ -30,4 +30,4 @@ int main()
   return sink(static_cast<box<move_only> &&>(boxed), &value);
 }
 
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

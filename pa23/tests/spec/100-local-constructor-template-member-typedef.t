@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.2 [temp.mem], 14.6.1 [temp.local], 14.8 [temp.fct.spec]
 
 template<class T>

@@ -65,7 +65,7 @@ function @n__traits_char___length(%__param0 : ptr) -> i32 [binding=weak, object=
     store ptr %__param0, $__param0
     return i32 1
 }
-function @n__tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1n3tagC1Ev] {
+function @n__tag__tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1n3tagC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
@@ -111,7 +111,7 @@ function @n__basic_string_char__n__traits_char___n__alloc_char______alloc_traits
     %t2 = load ptr $a
     return obj<1x1> $retobj__1
 }
-function @n__alloc_char___alloc(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1n5allocIcEC1Ev] {
+function @n__alloc_char___alloc(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1n5allocIcEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -20,4 +20,4 @@ int main()
   int const value = 0;
   return select(value) == 0 && addr(value) == &value ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

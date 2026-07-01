@@ -1,0 +1,6 @@
+translation-unit
+  class-use at pa21/tests/general/300-single-pack-cast-target.t:15:1
+    template invoke_result
+    selected primary
+    bind #1 = Id & source=explicit
+    bind #2 = <int &> source=explicit

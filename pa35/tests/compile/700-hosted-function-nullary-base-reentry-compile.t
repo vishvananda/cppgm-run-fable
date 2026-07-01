@@ -48,7 +48,7 @@ struct Analyzer
   }
 };
 
-int main()
+int function_nullary_reentry_anchor()
 {
   make_string();
   Analyzer analyzer;
@@ -56,3 +56,4 @@ int main()
   TypeTraitCallbacks traits = callbacks.make_type_trait_callbacks();
   return traits.class_info_for_type("x");
 }
+static_assert(sizeof(&function_nullary_reentry_anchor) > 0, "std::function reentry body anchor");

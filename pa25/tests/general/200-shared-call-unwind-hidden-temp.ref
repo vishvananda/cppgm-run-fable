@@ -1,0 +1,297 @@
+declare global @g_runtime_branch : i32 [binding=strong, object=_Z16g_runtime_branch]
+declare function @Cursor__get(%ret : ptr [pass=indirect_result], %arg0 : ptr) -> void [binding=strong, object=_ZN6Cursor3getEv]
+declare function @Macroizer__active(%arg0 : ptr) -> u8 [binding=strong, object=_ZN9Macroizer6activeEv]
+declare function @Macroizer__get(%ret : ptr [pass=indirect_result], %arg0 : ptr) -> void [binding=strong, object=_ZN9Macroizer3getEv]
+declare function @Payload__Payload(%arg0 : ptr) -> void [binding=strong, object=_ZN7PayloadC1Ev]
+declare function @Payload__Payload__ov2(%arg0 : ptr, %arg1 : ptr [pass=reference]) -> void [binding=strong, object=_ZN7PayloadC1EOS_]
+declare function @Payload___Payload(%arg0 : ptr) -> void [binding=strong, object=_ZN7PayloadD1Ev]
+declare function @Payload__operator_(%arg0 : ptr, %arg1 : ptr [pass=reference]) -> ptr [binding=strong, object=_ZN7PayloadaSEOS_]
+declare function @complete(%arg0 : ptr [pass=reference]) -> u8 [binding=strong, object=_Z8completeR6Cursor]
+declare function @process(%arg0 : i32, %arg1 : ptr [pass=reference], %arg2 : u8) -> u8 [binding=strong, object=_Z7processiRK7Payloadb]
+
+function @preproc_get(%ret : ptr [pass=indirect_result], %cursor : ptr [pass=reference], %macroizer : ptr [pass=reference]) -> void [binding=strong, object=_Z11preproc_getR6CursorR9Macroizer] {
+  slot $cursor : ptr
+  slot $macroizer : ptr
+  slot $token : obj<8x4>
+  slot $output : u8
+  slot $call__1 : ptr
+  slot $arg__2 : obj<8x4>
+  slot $call__3 : u8
+  slot $call__4 : u8
+  slot $call__5 : ptr
+  slot $arg__6 : obj<8x4>
+  slot $call__7 : u8
+  slot $call__8 : ptr
+  slot $arg__9 : obj<8x4>
+  slot $call__10 : u8
+
+  block ^entry:
+    store ptr %cursor, $cursor
+    store ptr %macroizer, $macroizer
+    %t1 = load ptr $cursor
+    %t2 = call u8 @complete(%t1)
+    branch %t2, ^if_then_1, ^if_else_2
+
+  block ^if_then_1:
+    call void @Tok__Tok__ov4(%ret, 5)
+    return void
+
+  block ^if_else_2:
+    jump ^if_end_3
+
+  block ^if_end_3:
+    %t3 = addr $token
+    call void @Tok__Tok(%t3)
+    store u8 0, $output
+    jump ^do_body_4
+
+  block ^do_body_4:
+    %t4 = load i32 @g_runtime_branch
+    %t5 = cmp eq i32 %t4, 1
+    branch %t5, ^if_then_7, ^if_else_8
+
+  block ^if_then_7:
+    eh_try ^call_unwind_dispatch_10
+    %t6 = addr $token
+    %t7 = addr $arg__2
+    %t8 = load ptr $cursor
+    call void @Cursor__get(%t7, %t8)
+    eh_end
+    jump ^call_unwind_end_11
+
+  block ^call_unwind_dispatch_10:
+    %t9 = addr $token
+    call void @Tok___Tok(%t9)
+    resume
+
+  block ^call_unwind_end_11:
+    eh_try ^call_unwind_dispatch_12
+    %t10 = call ptr @Tok__operator___ov2(%t6, %t7)
+    store ptr %t10, $call__1
+    %t11 = load ptr $call__1
+    call void @Tok___Tok(%t7)
+    eh_end
+    jump ^call_unwind_end_13
+
+  block ^call_unwind_dispatch_12:
+    call void @Tok___Tok(%t7)
+    %t12 = addr $token
+    call void @Tok___Tok(%t12)
+    resume
+
+  block ^call_unwind_end_13:
+    eh_try ^call_unwind_dispatch_10
+    %t13 = addr $token
+    %t14 = index i8 [projection=field] %t13, 0
+    %t15 = load i32 %t14
+    %t16 = addr $token
+    %t17 = index i8 [projection=field] %t16, 4
+    %t18 = call u8 @process(%t15, %t17, 0)
+    store u8 %t18, $call__3
+    %t19 = load u8 $call__3
+    store u8 %t19, $output
+    eh_end
+    jump ^if_end_9
+
+  block ^if_else_8:
+    eh_try ^call_unwind_dispatch_10
+    %t20 = load ptr $macroizer
+    %t21 = call u8 @Macroizer__active(%t20)
+    store u8 %t21, $call__4
+    %t22 = load u8 $call__4
+    eh_end
+    branch %t22, ^if_then_14, ^if_else_15
+
+  block ^if_then_14:
+    eh_try ^call_unwind_dispatch_10
+    %t23 = addr $token
+    %t24 = addr $arg__6
+    %t25 = load ptr $macroizer
+    call void @Macroizer__get(%t24, %t25)
+    eh_end
+    eh_try ^call_unwind_dispatch_17
+    %t26 = call ptr @Tok__operator___ov2(%t23, %t24)
+    store ptr %t26, $call__5
+    %t27 = load ptr $call__5
+    call void @Tok___Tok(%t24)
+    eh_end
+    jump ^call_unwind_end_18
+
+  block ^call_unwind_dispatch_17:
+    call void @Tok___Tok(%t24)
+    %t28 = addr $token
+    call void @Tok___Tok(%t28)
+    resume
+
+  block ^call_unwind_end_18:
+    %t29 = addr $token
+    %t30 = index i8 [projection=field] %t29, 0
+    %t31 = load i32 %t30
+    %t32 = cmp eq i32 %t31, 5
+    branch %t32, ^if_then_19, ^if_else_20
+
+  block ^if_then_19:
+    jump ^do_cond_5
+
+  block ^if_else_20:
+    jump ^if_end_21
+
+  block ^if_end_21:
+    eh_try ^call_unwind_dispatch_10
+    %t33 = addr $token
+    %t34 = index i8 [projection=field] %t33, 0
+    %t35 = load i32 %t34
+    %t36 = addr $token
+    %t37 = index i8 [projection=field] %t36, 4
+    %t38 = call u8 @process(%t35, %t37, 0)
+    store u8 %t38, $call__7
+    %t39 = load u8 $call__7
+    store u8 %t39, $output
+    eh_end
+    jump ^if_end_16
+
+  block ^if_else_15:
+    eh_try ^call_unwind_dispatch_10
+    %t40 = addr $token
+    %t41 = addr $arg__9
+    %t42 = load ptr $cursor
+    call void @Cursor__get(%t41, %t42)
+    eh_end
+    eh_try ^call_unwind_dispatch_22
+    %t43 = call ptr @Tok__operator___ov2(%t40, %t41)
+    store ptr %t43, $call__8
+    %t44 = load ptr $call__8
+    call void @Tok___Tok(%t41)
+    eh_end
+    jump ^call_unwind_end_23
+
+  block ^call_unwind_dispatch_22:
+    call void @Tok___Tok(%t41)
+    %t45 = addr $token
+    call void @Tok___Tok(%t45)
+    resume
+
+  block ^call_unwind_end_23:
+    eh_try ^call_unwind_dispatch_10
+    %t46 = addr $token
+    %t47 = index i8 [projection=field] %t46, 0
+    %t48 = load i32 %t47
+    %t49 = addr $token
+    %t50 = index i8 [projection=field] %t49, 4
+    %t51 = call u8 @process(%t48, %t50, 1)
+    store u8 %t51, $call__10
+    %t52 = load u8 $call__10
+    store u8 %t52, $output
+    eh_end
+    jump ^if_end_16
+
+  block ^if_end_16:
+    jump ^if_end_9
+
+  block ^if_end_9:
+    jump ^do_cond_5
+
+  block ^do_cond_5:
+    %t53 = load u8 $output
+    %t54 = convert zext i32 u8 %t53
+    %t55 = cmp eq i32 %t54, 0
+    branch %t55, ^do_body_4, ^do_end_6
+
+  block ^do_end_6:
+    %t56 = addr $token
+    %t57 = index i8 [projection=field] %t56, 0
+    %t58 = load i32 %t57
+    %t59 = cmp eq i32 %t58, 1
+    branch %t59, ^if_then_24, ^if_else_25
+
+  block ^if_then_24:
+    %t60 = addr $token
+    %t61 = index i8 [projection=field] %t60, 0
+    store i32 0, %t61
+    jump ^if_end_26
+
+  block ^if_else_25:
+    jump ^if_end_26
+
+  block ^if_end_26:
+    %t62 = addr $token
+    call void @Tok__Tok__ov3(%ret, %t62)
+    %t63 = addr $token
+    call void @Tok___Tok(%t63)
+    return void
+}
+function @Tok__Tok(%this : ptr) -> void [binding=weak, object=_ZN3TokC1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = index i8 [projection=field] %t1, 4
+    call void @Payload__Payload(%t2)
+    return void
+}
+function @Tok__Tok__ov4(%this : ptr, %type : i32) -> void [binding=weak, object=_ZN3TokC1Ei] {
+  slot $this : ptr
+  slot $type : i32
+
+  block ^entry:
+    store ptr %this, $this
+    store i32 %type, $type
+    %t1 = load i32 $type
+    %t2 = load ptr $this
+    %t3 = index i8 [projection=field] %t2, 0
+    store i32 %t1, %t3
+    %t4 = load ptr $this
+    %t5 = index i8 [projection=field] %t4, 4
+    call void @Payload__Payload(%t5)
+    return void
+}
+function @Tok__operator___ov2(%this : ptr, %other : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN3TokaSEOS_] {
+  slot $this : ptr
+  slot $other : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %other, $other
+    %t1 = load ptr $this
+    %t2 = load ptr $other
+    copyobj 4x4 %t2, %t1
+    %t3 = load ptr $this
+    %t4 = index i8 [projection=field] %t3, 4
+    %t5 = load ptr $other
+    %t6 = index i8 [projection=field] %t5, 4
+    %t7 = call ptr @Payload__operator_(%t4, %t6)
+    %t8 = load ptr $this
+    return ptr %t8
+}
+function @Tok___Tok(%this : ptr) -> void [binding=weak, object=_ZN3TokD1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = index i8 [projection=field] %t1, 4
+    call void @Payload___Payload(%t2)
+    return void
+}
+function @Tok__Tok__ov3(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN3TokC1EOS_] {
+  slot $this : ptr
+  slot $other : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %other, $other
+    %t1 = load ptr $this
+    %t2 = load ptr $other
+    copyobj 4x4 %t2, %t1
+    %t3 = load ptr $this
+    %t4 = index i8 [projection=field] %t3, 4
+    %t5 = load ptr $other
+    %t6 = index i8 [projection=field] %t5, 4
+    call void @Payload__Payload__ov2(%t4, %t6)
+    return void
+}
+alias object _ZN3TokC2Ev = @Tok__Tok
+alias object _ZN3TokC2Ei = @Tok__Tok__ov4
+alias object _ZN3TokD2Ev = @Tok___Tok
+alias object _ZN3TokC2EOS_ = @Tok__Tok__ov3

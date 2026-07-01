@@ -1,6 +1,0 @@
-translation-unit
-  class-use at pa23/tests/general/200-nested-template-id-partial-specialization-deduction.t:86:3
-    template map_like
-    selected primary
-    bind #1 = recursive_map source=explicit
-    bind #2 = recursive_map source=explicit

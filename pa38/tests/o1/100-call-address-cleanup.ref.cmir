@@ -1,0 +1,35 @@
+machine_ir x86_64 <host-target>
+
+startup
+    call @main
+    mov rdi, rax
+    exit
+
+function @id
+  abi
+    param %p -> rdi : ptr
+    return i64 -> rax
+  frame
+    stack_size 16
+    scratch_bytes 0
+
+  block ^entry
+    load.i32 r9, [rdi]
+    sext.i32 r9
+    ret r9
+
+function @main
+  abi
+    return i64 -> rax
+  frame
+    stack_size 16
+    scratch_bytes 0
+    slot $x -> [rbp-<off0>] : i64
+
+  block ^entry
+    mov rax, 7
+    lea rcx, [rbp-<off0>]
+    store.i32 [rbp-<off0>], rax
+    lea rdi, [rbp-<off0>]
+    call @id
+    ret rax

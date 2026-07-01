@@ -1,0 +1,1 @@
+ERROR: explicit specialization after instantiation [use tests/spec/300-explicit-specialization-after-instantiation.t:10:28] [specialization tests/spec/300-explicit-specialization-after-instantiation.t:13:1]

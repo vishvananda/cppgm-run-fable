@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 5.2.3 explicit type conversion and 8.5.4 list-initialization.
 // In T({a, b}), the braced-init-list is a single direct-initialization argument.
 

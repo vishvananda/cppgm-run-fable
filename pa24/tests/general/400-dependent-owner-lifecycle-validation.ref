@@ -196,7 +196,7 @@ function @unwrap_impl_like_int____true___unwrap(%value : ptr) -> ptr [binding=we
     %t1 = load ptr $value
     return ptr %t1
 }
-function @copy_algorithm__copy_algorithm(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN14copy_algorithmC1Ev] {
+function @copy_algorithm__copy_algorithm(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN14copy_algorithmC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-missing-indirect-call-signature.t:9: indirect call requires explicit call signature

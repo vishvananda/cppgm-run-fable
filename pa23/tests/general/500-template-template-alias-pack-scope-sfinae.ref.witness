@@ -1,0 +1,20 @@
+translation-unit
+  alias-use at pa23/tests/general/500-template-template-alias-pack-scope-sfinae.t:32:21
+    template void_t
+    bind #1 = A source=explicit
+  alias-use at pa23/tests/general/500-template-template-alias-pack-scope-sfinae.t:37:23
+    template valid
+    bind #1 = F source=explicit
+    bind #2 = U... source=explicit
+  alias-use at pa23/tests/general/500-template-template-alias-pack-scope-sfinae.t:39:16
+    template outer::inner_valid
+    bind #1 = exactly_two source=explicit
+    bind #2 = int source=explicit
+  class-use at pa23/tests/general/500-template-template-alias-pack-scope-sfinae.t:42:15
+    template outer
+    selected primary
+    bind #1 = <char, short, float> source=explicit
+  class-use at pa23/tests/general/500-template-template-alias-pack-scope-sfinae.t:47:10
+    template outer
+    selected primary
+    bind #1 = <char, short, float> source=explicit

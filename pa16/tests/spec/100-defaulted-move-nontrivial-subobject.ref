@@ -104,7 +104,7 @@ function @BaseHolder__BaseHolder(%this : ptr) -> void [binding=weak, object=_ZN1
     call void @Stateful__Stateful__base_entry(%t2, 42)
     return void
 }
-function @BaseHolder__BaseHolder__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN10BaseHolderC1EOS_] {
+function @BaseHolder__BaseHolder__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN10BaseHolderC1EOS_, trivial_lifecycle=yes] {
   slot $this : ptr
   slot $__param1 : ptr
 
@@ -128,7 +128,7 @@ function @MemberHolder__MemberHolder(%this : ptr) -> void [binding=weak, object=
     call void @Stateful__Stateful(%t2, 17)
     return void
 }
-function @MemberHolder__MemberHolder__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN12MemberHolderC1EOS_] {
+function @MemberHolder__MemberHolder__ov2(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN12MemberHolderC1EOS_, trivial_lifecycle=yes] {
   slot $this : ptr
   slot $__param1 : ptr
 

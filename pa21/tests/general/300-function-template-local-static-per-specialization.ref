@@ -136,14 +136,14 @@ function @invoker_init_functor___call() -> i32 [binding=weak, object=_ZN7invoker
   block ^entry:
     return i32 2
 }
-function @log_functor__log_functor(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN11log_functorC1Ev] {
+function @log_functor__log_functor(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN11log_functorC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return void
 }
-function @init_functor__init_functor(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN12init_functorC1Ev] {
+function @init_functor__init_functor(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN12init_functorC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

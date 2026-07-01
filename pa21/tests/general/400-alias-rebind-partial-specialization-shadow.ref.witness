@@ -1,0 +1,25 @@
+translation-unit
+  class-use at pa21/tests/general/400-alias-rebind-partial-specialization-shadow.t:54:17
+    template mini::allocator_traits
+    selected primary
+    bind #1 = mini::allocator<int> source=explicit
+  class-use at pa21/tests/general/400-alias-rebind-partial-specialization-shadow.t:54:40
+    template mini::allocator
+    selected primary
+    bind #1 = int source=explicit
+  alias-use at pa21/tests/general/400-alias-rebind-partial-specialization-shadow.t:54:58
+    template mini::allocator_traits<mini::allocator<int>>::rebind_alloc
+    bind #1 = void * source=explicit
+  class-use at pa21/tests/general/400-alias-rebind-partial-specialization-shadow.t:55:17
+    template is_same
+    selected partial
+    bind #1 = mini::allocator<void *> source=explicit
+    bind #2 = mini::allocator<void *> source=explicit
+    specialize #1 = mini::allocator<void *> source=deduced
+  class-use at pa21/tests/general/400-alias-rebind-partial-specialization-shadow.t:55:40
+    template mini::allocator
+    selected primary
+    bind #1 = void * source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_same<mini::allocator<void *>, mini::allocator<void *>>::value

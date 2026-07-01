@@ -1,0 +1,13 @@
+translation-unit
+  class-use at pa21/tests/general/400-partial-specialization-nontype-pattern-order.t:30:9
+    template return_type_N
+    selected partial
+    bind #1 = function_action<3> source=explicit
+    bind #2 = void source=explicit
+    specialize #1 = 3 source=deduced
+    specialize #2 = void source=deduced
+  class-use at pa21/tests/general/400-partial-specialization-nontype-pattern-order.t:30:23
+    template function_action
+    selected primary
+    bind #1 = 3 source=explicit
+    bind #2 = detail::unspecified source=defaulted

@@ -1,0 +1,22 @@
+translation-unit
+  class-use at pa19/tests/general/200-instantiated-function-fixed-prefix-pack-tail.t:12:10
+    template Box
+    selected primary
+    bind #1 = <> source=deduced
+  class-use at pa19/tests/general/200-instantiated-function-fixed-prefix-pack-tail.t:12:30
+    template Box
+    selected primary
+    bind #1 = <int, float> source=explicit
+template-closure-events
+  ensure-definition
+    entity Box<>::f
+  ensure-definition
+    entity Box<int, float>::f
+  function-instantiation
+    entity Box<>::f
+  function-instantiation
+    entity Box<int, float>::f
+  require-definition
+    entity Box<>::f
+  require-definition
+    entity Box<int, float>::f

@@ -1,5 +1,5 @@
 // VALIDATION: compile-pass
-// N3485 focus: 5.20 [expr.const], 7.1.5 [dcl.constexpr], 14.5.3 [temp.variadic]
+// N3485 focus: 5.19 [expr.const], 7.1.5 [dcl.constexpr], 14.5.3 [temp.variadic]
 
 typedef decltype(sizeof(0)) size_t;
 

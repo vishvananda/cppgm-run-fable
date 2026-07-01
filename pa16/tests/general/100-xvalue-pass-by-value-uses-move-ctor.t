@@ -16,4 +16,4 @@ int main()
   return sink(static_cast<S &&>(source)) == 1 ? 0 : 1;
 }
 
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

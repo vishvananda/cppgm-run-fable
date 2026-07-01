@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Taking the address of an lvalue comma expression must evaluate the left side
 // for effects and use the right side as the selected storage.
 

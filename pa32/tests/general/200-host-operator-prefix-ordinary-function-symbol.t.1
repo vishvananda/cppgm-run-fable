@@ -1,0 +1,11 @@
+namespace boost { namespace container { namespace dtl {
+inline bool operator_new_raw_overaligned(unsigned long alignment)
+{
+  return alignment > 8ul;
+}
+}}}
+
+int main()
+{
+  return boost::container::dtl::operator_new_raw_overaligned(16ul) ? 0 : 1;
+}

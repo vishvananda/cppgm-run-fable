@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-duplicate-parameter.t:1: function @main has duplicate parameter %x

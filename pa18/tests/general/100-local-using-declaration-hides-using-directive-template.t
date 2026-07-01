@@ -22,4 +22,4 @@ int main()
   typedef vector<Y, char, long, X, bool> mpl_vec;
   return mpl_vec::value == 5 ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

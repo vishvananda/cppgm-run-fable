@@ -1,0 +1,21 @@
+translation-unit
+  function-call at pa22/tests/general/300-call-operator-template-use-scope-shadowing.t:48:10
+    callee N::run_algorithm
+    selected instantiation
+    bind #1 = N::copy_impl source=explicit
+    bind #2 = int source=deduced
+    bind #3 = int source=deduced
+    bind #4 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity N::run_algorithm
+  function-instantiation
+    entity N::copy_impl::operator()
+  function-instantiation
+    entity N::run_algorithm
+  require-definition
+    entity N::copy_impl::operator()
+  require-definition
+    entity N::run_algorithm
+  variable-instantiation
+    entity N::specialized_algorithm<N::algorithm::copy, int, int>::has

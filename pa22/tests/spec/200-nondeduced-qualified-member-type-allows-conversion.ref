@@ -1,0 +1,32 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $text : obj<4x1>
+
+  block ^entry:
+    %t1 = addr $text
+    store i8 97, %t1
+    %t2 = index i8 %t1, 1
+    store i8 98, %t2
+    %t3 = index i8 %t1, 2
+    store i8 99, %t3
+    %t4 = index i8 %t1, 3
+    store i8 0, %t4
+    %t5 = addr $text
+    %t6 = unary decay ptr %t5
+    %t7 = call ptr @next(%t6, 2)
+    %t8 = load i8 %t7
+    %t9 = convert sext i32 i8 %t8
+    %t10 = binary sub i32 %t9, 99
+    return i32 %t10
+}
+function @next(%value : ptr, %count : i64) -> ptr [binding=weak, object=_Z4nextIPKcET_S2_N15iterator_traitsIS2_E15difference_typeE] {
+  slot $value : ptr
+  slot $count : i64
+
+  block ^entry:
+    store ptr %value, $value
+    store i64 %count, $count
+    %t1 = load ptr $value
+    %t2 = load i64 $count
+    %t3 = index i8 %t1, %t2
+    return ptr %t3
+}

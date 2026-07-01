@@ -13,7 +13,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     call void @make_holder(0, $argobj__2)
     return i32 0
 }
-function @tag_Deleter___tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3tagI7DeleterEC1Ev] {
+function @tag_Deleter___tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3tagI7DeleterEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
@@ -82,7 +82,7 @@ function @Count__Count__ov3(%this : ptr, %__param1 : ptr, %__param2 : obj<1x1>) 
     store ptr 0, %t2
     return void
 }
-function @Deleter__Deleter(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7DeleterC1Ev] {
+function @Deleter__Deleter(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7DeleterC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

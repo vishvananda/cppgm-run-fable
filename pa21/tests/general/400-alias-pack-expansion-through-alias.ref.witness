@@ -1,0 +1,63 @@
+translation-unit
+  alias-use at pa21/tests/general/400-alias-pack-expansion-through-alias.t:30:18
+    template IsOneOf
+    bind #1 = Tp source=explicit
+    bind #2 = signed char source=explicit
+  alias-use at pa21/tests/general/400-alias-pack-expansion-through-alias.t:33:20
+    template IsOneOf
+    bind #1 = Tp source=explicit
+    bind #2 = unsigned char source=explicit
+  alias-use at pa21/tests/general/400-alias-pack-expansion-through-alias.t:37:30
+    template IsSigned
+    bind #1 = Tp source=explicit
+  alias-use at pa21/tests/general/400-alias-pack-expansion-through-alias.t:37:44
+    template IsUnsigned
+    bind #1 = Tp source=explicit
+  alias-use at pa21/tests/general/400-alias-pack-expansion-through-alias.t:40:10
+    template IsStandardInteger
+    bind #1 = int source=explicit
+template-closure-events
+  variable-instantiation
+    entity Or<Or<Same<int, signed char>, Same<int, short>, Same<int, int>, Same<int, long>, Same<int, long long>>, Or<Same<int, unsigned char>, Same<int, unsigned short>, Same<int, unsigned>, Same<int, unsigned long>, Same<int, unsigned long long>>>::value
+  variable-instantiation
+    entity Or<Or<Same<int, unsigned char>, Same<int, unsigned short>, Same<int, unsigned>, Same<int, unsigned long>, Same<int, unsigned long long>>>::value
+  variable-instantiation
+    entity Or<Same<int, int>, Same<int, long>, Same<int, long long>>::value
+  variable-instantiation
+    entity Or<Same<int, long long>>::value
+  variable-instantiation
+    entity Or<Same<int, long>, Same<int, long long>>::value
+  variable-instantiation
+    entity Or<Same<int, short>, Same<int, int>, Same<int, long>, Same<int, long long>>::value
+  variable-instantiation
+    entity Or<Same<int, signed char>, Same<int, short>, Same<int, int>, Same<int, long>, Same<int, long long>>::value
+  variable-instantiation
+    entity Or<Same<int, unsigned char>, Same<int, unsigned short>, Same<int, unsigned>, Same<int, unsigned long>, Same<int, unsigned long long>>::value
+  variable-instantiation
+    entity Or<Same<int, unsigned long long>>::value
+  variable-instantiation
+    entity Or<Same<int, unsigned long>, Same<int, unsigned long long>>::value
+  variable-instantiation
+    entity Or<Same<int, unsigned short>, Same<int, unsigned>, Same<int, unsigned long>, Same<int, unsigned long long>>::value
+  variable-instantiation
+    entity Or<Same<int, unsigned>, Same<int, unsigned long>, Same<int, unsigned long long>>::value
+  variable-instantiation
+    entity Same<int, int>::value
+  variable-instantiation
+    entity Same<int, long long>::value
+  variable-instantiation
+    entity Same<int, long>::value
+  variable-instantiation
+    entity Same<int, short>::value
+  variable-instantiation
+    entity Same<int, signed char>::value
+  variable-instantiation
+    entity Same<int, unsigned char>::value
+  variable-instantiation
+    entity Same<int, unsigned long long>::value
+  variable-instantiation
+    entity Same<int, unsigned long>::value
+  variable-instantiation
+    entity Same<int, unsigned short>::value
+  variable-instantiation
+    entity Same<int, unsigned>::value

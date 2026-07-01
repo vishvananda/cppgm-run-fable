@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa23/tests/spec/400-conversion-function-template-selection.t:21:3
+    template from
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa23/tests/spec/400-conversion-function-template-selection.t:22:22
+    callee from<int>::operator int
+    selected instantiation
+    bind #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity from<int>::operator int
+  function-instantiation
+    entity from<int>::operator int
+  require-definition
+    entity from<int>::operator int

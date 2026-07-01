@@ -1,4 +1,4 @@
-machine_ir x86_64 macos
+machine_ir x86_64 <host-target>
 
 startup
     call @main
@@ -11,13 +11,13 @@ function @main
   frame
     stack_size 16
     scratch_bytes 0
-    slot $x -> [rbp-8] : i64
+    slot $x -> [rbp-<off0>] : i64
 
   block ^entry
     mov rax, 0
-    store.i64 [rbp-8], rax
-    lea rax, [rbp-8]
-    lea rdx, [rbp-8]
+    store.i64 [rbp-<off0>], rax
+    lea rax, [rbp-<off0>]
+    lea rdx, [rbp-<off0>]
     cmp.ptr rax, rdx
     je ^same
     jmp ^different

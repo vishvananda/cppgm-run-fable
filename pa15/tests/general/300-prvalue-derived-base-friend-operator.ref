@@ -21,7 +21,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t5 = call i32 @operator_(%t2, %t4)
     return i32 %t5
 }
-function @Derived__Derived(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7DerivedC1Ev] {
+function @Derived__Derived(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7DerivedC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

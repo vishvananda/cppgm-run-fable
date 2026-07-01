@@ -19,9 +19,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t2 = addr $f
     %t3 = call ptr @operatornew(%t1, %t2)
     %t4 = load i32 $i
-    %t5 = binary shl i64 %t4, 32
-    %t6 = binary shr i64 %t5, 32
-    %t7 = convert sitofp f32 i32 %t6
-    store f32 %t7, %t3
+    %t5 = convert sitofp f32 i32 %t4
+    store f32 %t5, %t3
     return i32 0
 }

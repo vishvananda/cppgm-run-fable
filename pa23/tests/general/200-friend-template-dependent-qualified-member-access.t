@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A friend function-template declaration can use a renamed template parameter
 // inside a dependent qualified member type and still refer to the existing
 // namespace function template entity.

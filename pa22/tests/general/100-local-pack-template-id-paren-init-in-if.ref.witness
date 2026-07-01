@@ -1,0 +1,16 @@
+translation-unit
+  function-call at pa22/tests/general/100-local-pack-template-id-paren-init-in-if.t:20:10
+    callee probe
+    selected instantiation
+    bind #1 = <int, int> source=deduced
+template-closure-events
+  ensure-definition
+    entity probe
+  function-instantiation
+    entity pair<const int &, const int &>::pair
+  function-instantiation
+    entity probe
+  require-definition
+    entity pair<const int &, const int &>::pair
+  require-definition
+    entity probe

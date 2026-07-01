@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // libc++ error_condition reduction: a local using-declaration inside a member
 // template should not be mistaken for class-member lookup that suppresses ADL.
 

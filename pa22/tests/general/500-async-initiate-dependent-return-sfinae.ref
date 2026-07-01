@@ -1,0 +1,61 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $t : obj<1x1>
+  slot $cond__1 : i32
+  slot $refarg__2 : i32
+
+  block ^entry:
+    %t1 = addr $t
+    %t2 = addr $t
+    store i32 1, $refarg__2
+    %t3 = addr $refarg__2
+    %t4 = call i32 @timer_int___async_wait(%t2, %t3)
+    %t5 = cmp eq i32 %t4, 7
+    branch %t5, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t6 = load i32 $cond__1
+    return i32 %t6
+}
+function @timer_int___async_wait(%this : ptr, %token : ptr [pass=reference]) -> i32 [binding=weak, object=_ZN5timerIiE10async_waitIiEEDTcl14async_initiateIT_FviEEcl7declvalIiEEfp_EEOS2_] {
+  slot $this : ptr
+  slot $token : ptr
+  slot $initiation : i32
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %token, $token
+    store i32 0, $initiation
+    %t1 = addr $initiation
+    %t2 = load ptr $token
+    %t3 = call i32 @async_initiate__ov5(%t1, %t2)
+    return i32 %t3
+}
+function @async_initiate__ov5(%initiation : ptr [pass=reference], %token : ptr [pass=reference]) -> i32 [binding=weak, object=_Z14async_initiateIiJFviEEiEDTclsr11enable_if_tIXsr11enable_if_tIXsr25are_completion_signaturesIDpT0_EE5valueE12has_initiateIT_JS2_EEEE5valueE12async_resultIS4_JS2_EEEE8initiatescT1_fp_scS4_fp0_EEOS8_RN13type_identityIS4_E4typeE] {
+  slot $initiation : ptr
+  slot $token : ptr
+
+  block ^entry:
+    store ptr %initiation, $initiation
+    store ptr %token, $token
+    %t1 = load ptr $initiation
+    %t2 = load ptr $token
+    %t3 = call i32 @async_result_int__void_int____initiate(%t1, %t2)
+    return i32 %t3
+}
+function @async_result_int__void_int____initiate(%__param0 : ptr [pass=reference], %__param1 : ptr [pass=reference]) -> i32 [binding=weak, object=_ZN12async_resultIiJFviEEE8initiateIiiEEiOT_OT0_] {
+  slot $__param0 : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    store ptr %__param1, $__param1
+    return i32 7
+}

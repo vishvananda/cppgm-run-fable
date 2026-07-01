@@ -1,1 +1,0 @@
-ERROR: tests/general/100-bad.t: expected declaration near KW_INT:int at token 0 at tests/general/100-bad.t:1:1

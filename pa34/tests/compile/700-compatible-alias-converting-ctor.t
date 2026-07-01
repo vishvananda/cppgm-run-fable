@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Regex shared_ptr<implementation> to shared_ptr<named_subexpressions>
 // reduction: libc++ wraps __is_convertible in an _Or alias before using it as
 // the enable_if condition on the converting constructor.

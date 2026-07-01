@@ -1,0 +1,19 @@
+translation-unit
+  class-use at pa21/tests/general/300-partial-owner-out-of-class-member-binding-args.t:22:5
+    template box
+    selected explicit
+    bind #1 = bool source=explicit
+    bind #2 = type-parameter-0-0 source=explicit
+  class-use at pa21/tests/general/300-partial-owner-out-of-class-member-binding-args.t:29:3
+    template box
+    selected partial
+    bind #1 = bool source=explicit
+    bind #2 = int source=explicit
+    specialize #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity box<bool, int>::f
+  function-instantiation
+    entity box<bool, int>::f
+  require-definition
+    entity box<bool, int>::f

@@ -56,7 +56,7 @@ function @iter_ops__adv(%__param0 : ptr [pass=reference], %n : i32, %__param2 : 
     %t2 = binary add i32 %t1, 1
     return i32 %t2
 }
-function @traits_iter___cat__cat(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6traitsI4iterE3catC1Ev] {
+function @traits_iter___cat__cat(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN6traitsI4iterE3catC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -1,0 +1,18 @@
+translation-unit
+  function-call at pa22/tests/general/300-decltype-default-type-arg-construction-sfinae.t:24:22
+    callee default_construct_probe
+    selected instantiation
+    bind #1 = default_ctor source=explicit
+    bind #2 = default_ctor source=defaulted
+    drop default_construct_probe reason=worse_conversion
+  function-call at pa22/tests/general/300-decltype-default-type-arg-construction-sfinae.t:26:22
+    callee default_construct_probe
+    selected instantiation
+    bind #1 = no_default_ctor source=explicit
+    drop default_construct_probe reason=substitution_failure
+  function-call at pa22/tests/general/300-decltype-default-type-arg-construction-sfinae.t:28:22
+    callee default_construct_probe
+    selected instantiation
+    bind #1 = void source=explicit
+    bind #2 = void source=defaulted
+    drop default_construct_probe reason=worse_conversion

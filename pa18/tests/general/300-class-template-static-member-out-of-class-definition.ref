@@ -18,7 +18,7 @@ function @D_int___R__f(%this : ptr) -> i64 [binding=weak, object=_ZNK1DIiE1R1fEv
     store ptr %this, $this
     return i64 7
 }
-function @D_int___R__R(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1DIiE1RC1Ev] {
+function @D_int___R__R(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1DIiE1RC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -9,19 +9,14 @@ fi
 outfile=$2
 shift 2
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd) || exit 1
+. "$SCRIPT_DIR/cppgm-dwarf-dump-common.sh"
+
 objfile="${outfile}.o"
-dwarfdump_bin=
-if command -v dwarfdump >/dev/null 2>&1; then
-  dwarfdump_bin=dwarfdump
-elif command -v llvm-dwarfdump >/dev/null 2>&1; then
-  dwarfdump_bin=llvm-dwarfdump
-else
-  echo "missing dwarfdump or llvm-dwarfdump" >&2
-  exit 1
-fi
+cleanup() {
+  rm -f "$objfile"
+}
+trap cleanup EXIT INT TERM
 
 "${CPPGM_CPPGM_APP:-../dev/cppgm++}" -c -g0 -O0 -o "$objfile" "$@"
-"$dwarfdump_bin" --debug-line --debug-info --debug-loc "$objfile" \
-  | sed -E '1s#^.*:#object:#; s#0x[0-9a-fA-F]+#<hex>#g' \
-  > "$outfile"
-rm -f "$objfile"
+cppgm_dump_dwarf "$objfile" 1 > "$outfile"

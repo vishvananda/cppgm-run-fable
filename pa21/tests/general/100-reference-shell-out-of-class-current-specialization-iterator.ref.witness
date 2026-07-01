@@ -1,0 +1,21 @@
+translation-unit
+  class-use at pa21/tests/general/100-reference-shell-out-of-class-current-specialization-iterator.t:34:10
+    template Vec
+    selected explicit
+    bind #1 = bool source=explicit
+    bind #2 = type-parameter-0-0 source=explicit
+  class-use at pa21/tests/general/100-reference-shell-out-of-class-current-specialization-iterator.t:34:33
+    template Vec
+    selected explicit
+    bind #1 = bool source=explicit
+    bind #2 = type-parameter-0-0 source=explicit
+  class-use at pa21/tests/general/100-reference-shell-out-of-class-current-specialization-iterator.t:40:3
+    template Vec
+    selected partial
+    bind #1 = bool source=explicit
+    bind #2 = Alloc<int> source=explicit
+    specialize #1 = Alloc<int> source=deduced
+  class-use at pa21/tests/general/100-reference-shell-out-of-class-current-specialization-iterator.t:40:13
+    template Alloc
+    selected primary
+    bind #1 = int source=explicit

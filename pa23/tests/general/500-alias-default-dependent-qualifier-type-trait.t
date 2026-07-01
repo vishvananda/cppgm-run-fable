@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Regression: substituting a type parameter into a dependent qualifier can
 // expand one source qualifier into a qualified template-id. The semantic
 // qualifier type must still be used when evaluating a type trait.

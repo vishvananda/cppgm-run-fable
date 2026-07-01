@@ -1,0 +1,14 @@
+translation-unit
+  function-call at pa22/tests/general/200-function-template-trailing-pack-partial-order.t:15:10
+    callee invoke
+    selected instantiation
+    bind #1 = int (*&)() source=deduced
+    bind #2 = <> source=deduced
+    drop invoke reason=better_candidate_selected
+template-closure-events
+  ensure-definition
+    entity invoke
+  function-instantiation
+    entity invoke
+  require-definition
+    entity invoke

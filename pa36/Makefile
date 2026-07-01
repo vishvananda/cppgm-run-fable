@@ -114,12 +114,21 @@ test-batch: $(TEST_DEPS)
 	$(call run_link_course_bucket,$(COURSE_LINK_TEST_ROOT))
 
 ref-test:
+ifneq ($(strip $(TEST)),)
+	@$(REF_TEST_RUN)
+else
 	@CPPGM_CMAKE_COMPILER=$(REF_TEST_APP) \
 		perl ../scripts/run_cpphostinterop_tests_worker.pl $(REF_TEST_APP) ref $(LINK_TEST_ROOT)
+endif
 
 ref-test-batch:
 	@CPPGM_CMAKE_COMPILER=$(REF_TEST_APP) \
 		perl ../scripts/run_cpphostinterop_tests_worker.pl $(REF_TEST_APP) ref $(LINK_TEST_ROOT)
+
+REF_TEST_RUN = case "$(TEST)" in \
+	$(LINK_TEST_ROOT)/*|$(COURSE_LINK_TEST_ROOT)/*) CPPGM_CMAKE_COMPILER=$(REF_TEST_APP) perl ../scripts/run_cpphostinterop_tests_worker.pl $(REF_TEST_APP) ref "$(TEST)" ;; \
+	*) echo "Usage: make ref-test TEST=$(LINK_TEST_ROOT)/<file>.t"; exit 1 ;; \
+esac
 
 CHECK_RUN = perl ../scripts/run_cpphostinterop_tests_worker.pl $(CPPGM_TEST_APP) check "$(TEST)"
 include ../scripts/pa_run_check_targets.mk

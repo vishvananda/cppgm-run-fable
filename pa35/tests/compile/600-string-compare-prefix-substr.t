@@ -9,4 +9,4 @@ bool category_matches(const std::string & configured, const char * category)
      std::string(category).compare(0, dot, configured, 0, dot) == 0) { return true; }
   return false;
 }
-int main() { return category_matches("abc.*", "abcx") ? 0 : 1; }
+static_assert(sizeof(&category_matches) > 0, "string compare body anchor");

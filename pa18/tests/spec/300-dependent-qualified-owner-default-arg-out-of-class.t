@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A dependent out-of-class member definition may need to parse the class
 // owner while preserving the semantic spelling of a dependent rebound type.
 

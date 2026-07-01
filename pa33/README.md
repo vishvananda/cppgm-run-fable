@@ -156,6 +156,19 @@ The checked-in PA33 tests cover:
 - object facts such as unwind sections, relocation classes, weak/undefined
   symbols, and vtable/RTTI ownership when a test includes an inspect sidecar
 
+PA33 does not require general hosted-header support. Your compiler must support
+the host ABI behavior for user-defined RTTI and exception cases: emitted RTTI
+objects, `dynamic_cast`, `typeid`, vtables, catches, cleanup, and unwind
+interoperability. The PA33 tests exercise that behavior without including hosted
+headers. For `typeid`, it is enough in this assignment to support the language
+operation with a narrow declaration of `std::type_info`; the tests do not depend
+on the hosted `<typeinfo>` header or on `std::type_info` member APIs.
+
+Parsing hosted `<exception>` and `<typeinfo>` headers, implementing APIs such
+as `std::type_info::name()` or `hash_code()`, compiling hosted exception
+classes, and supporting `std::exception_ptr` are later hosted-header/runtime
+work.
+
 ### Host ABI Symbol Names
 
 PA33 extends the PA32 object contract into host C++ ABI/runtime behavior. The

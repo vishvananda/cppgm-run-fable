@@ -1,5 +1,5 @@
 // VALIDATION: compile-pass
-// N3485 focus: 5.20 [expr.const], 7.1.5 [dcl.constexpr]
+// N3485 focus: 5.19 [expr.const], 7.1.5 [dcl.constexpr]
 
 struct duration
 {

@@ -1,0 +1,59 @@
+translation-unit
+  class-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:13:18
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = false source=explicit
+  class-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:16:24
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = true source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:21:19
+    template bool_constant
+    bind #1 = true source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:22:20
+    template bool_constant
+    bind #1 = false source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:62:16
+    template size_constant
+    bind #1 = count_true(is_same<T, V>::value...) source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:69:17
+    template bool_constant
+    bind #1 = static_cast<bool>(T::value) source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:72:13
+    template bool_constant
+    bind #1 = count<list<to_bool<T>...>, true_type>::value != 0 source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:72:27
+    template count
+    bind #1 = list<to_bool<T>...> source=explicit
+    bind #2 = true_type source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:72:38
+    template to_bool
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:96:15
+    template if_
+    bind #1 = valid<F, T...> source=explicit
+    bind #2 = defer_impl<F, T...> source=explicit
+    bind #3 = no_type source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:96:19
+    template valid
+    bind #1 = F source=explicit
+    bind #2 = T... source=explicit
+  alias-use at pa22/tests/general/500-alias-template-template-defaulted-sfinae-canonical-args.t:98:11
+    template defer
+    bind #1 = any source=explicit
+    bind #2 = false_type source=explicit
+template-closure-events
+  ensure-definition
+    entity count_true
+  function-instantiation
+    entity count_true
+  require-definition
+    entity count_true
+  variable-instantiation
+    entity integral_constant<bool, false>::value
+  variable-instantiation
+    entity integral_constant<bool, true>::value
+  variable-instantiation
+    entity integral_constant<unsigned long, 0>::value

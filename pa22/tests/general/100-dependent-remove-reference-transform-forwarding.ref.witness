@@ -1,0 +1,30 @@
+translation-unit
+  alias-use at pa22/tests/general/100-dependent-remove-reference-transform-forwarding.t:20:1
+    template remove_reference_t
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/100-dependent-remove-reference-transform-forwarding.t:21:22
+    template remove_reference_t
+    bind #1 = T source=explicit
+  class-use at pa22/tests/general/100-dependent-remove-reference-transform-forwarding.t:49:3
+    template function
+    selected primary
+    bind #1 = G source=explicit
+template-closure-events
+  ensure-definition
+    entity function<G>::function
+  function-instantiation
+    entity function<G>::function
+  function-instantiation
+    entity move
+  function-instantiation
+    entity stored<G>::stored
+  function-instantiation
+    entity value_func::value_func
+  require-definition
+    entity function<G>::function
+  require-definition
+    entity move
+  require-definition
+    entity stored<G>::stored
+  require-definition
+    entity value_func::value_func

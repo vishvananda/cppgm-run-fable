@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_LITERAL:0b1010 at token 0 at tests/preproc/400-host-binary-integer-ud-literal.t:1:1

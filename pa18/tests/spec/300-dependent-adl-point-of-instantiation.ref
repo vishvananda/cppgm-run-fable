@@ -27,7 +27,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t4 = load i32 $cond__1
     return i32 %t4
 }
-function @lib__tag_int___tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3lib3tagIiEC1Ev] {
+function @lib__tag_int___tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3lib3tagIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

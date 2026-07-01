@@ -1,0 +1,26 @@
+translation-unit
+  alias-use at pa22/tests/spec/500-member-alias-pack-owner-sfinae.t:63:10
+    template Require
+    bind #1 = Has<T, Args...> source=explicit
+  alias-use at pa22/tests/spec/500-member-alias-pack-owner-sfinae.t:63:18
+    template Traits::Has
+    bind #1 = T source=explicit
+    bind #2 = Args... source=explicit
+  class-use at pa22/tests/spec/500-member-alias-pack-owner-sfinae.t:75:10
+    template Traits
+    selected primary
+    bind #1 = Alloc source=explicit
+  function-call at pa22/tests/spec/500-member-alias-pack-owner-sfinae.t:75:10
+    callee Traits<Alloc>::construct
+    selected instantiation
+    bind #1 = Widget source=deduced
+    bind #2 = <int &, long &> source=deduced
+template-closure-events
+  ensure-definition
+    entity Traits<Alloc>::construct
+  function-instantiation
+    entity Traits<Alloc>::construct
+  require-definition
+    entity Traits<Alloc>::construct
+  variable-instantiation
+    entity And<Good>::value

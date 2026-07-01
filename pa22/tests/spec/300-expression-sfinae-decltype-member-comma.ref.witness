@@ -1,0 +1,18 @@
+translation-unit
+  function-call at pa22/tests/spec/300-expression-sfinae-decltype-member-comma.t:30:10
+    callee has_value
+    selected instantiation
+    bind #1 = present source=deduced
+    drop has_value reason=worse_conversion
+  function-call at pa22/tests/spec/300-expression-sfinae-decltype-member-comma.t:30:32
+    callee has_value
+    selected instantiation
+    bind #1 = missing source=deduced
+    drop has_value reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity has_value
+  function-instantiation
+    entity has_value
+  require-definition
+    entity has_value

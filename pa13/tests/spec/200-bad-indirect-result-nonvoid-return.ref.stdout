@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-indirect-result-nonvoid-return.t:1: function @main indirect result parameter requires return type void

@@ -1,0 +1,44 @@
+declare function @first() -> ptr [binding=strong, object=_Z5firstv]
+declare function @last() -> ptr [binding=strong, object=_Z4lastv]
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $c : ptr
+
+  block ^entry:
+    store ptr 0, $c
+    %t1 = load ptr $c
+    %t2 = call ptr @first()
+    %t3 = call ptr @last()
+    %t4 = call i32 @C_int___f(%t1, %t2, %t3)
+    return i32 %t4
+}
+function @C_int___f(%this : ptr, %first : ptr, %last : ptr) -> i32 [binding=weak, object=_ZN1CIiE1fIPiEEiT_S3_] {
+  slot $this : ptr
+  slot $first : ptr
+  slot $last : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %first, $first
+    store ptr %last, $last
+    %t1 = load ptr $this
+    %t2 = load ptr $first
+    %t3 = load ptr $last
+    %t4 = call i32 @C_int___g__ov2(%t1, %t2, %t3, 1)
+    return i32 %t4
+}
+function @C_int___g__ov2(%this : ptr, %first : ptr, %last : ptr, %n : i32) -> i32 [binding=weak, object=_ZN1CIiE1gIPiEEiT_S3_i] {
+  slot $this : ptr
+  slot $first : ptr
+  slot $last : ptr
+  slot $n : i32
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %first, $first
+    store ptr %last, $last
+    store i32 %n, $n
+    %t1 = load ptr $first
+    %t2 = load i32 %t1
+    return i32 %t2
+}

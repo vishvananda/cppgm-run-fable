@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-indirect-result-not-first.t:1: function @main indirect result parameter must appear first

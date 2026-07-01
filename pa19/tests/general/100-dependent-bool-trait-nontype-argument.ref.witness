@@ -1,0 +1,38 @@
+translation-unit
+  class-use at pa19/tests/general/100-dependent-bool-trait-nontype-argument.t:7:9
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = true source=explicit
+  class-use at pa19/tests/general/100-dependent-bool-trait-nontype-argument.t:8:9
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = false source=explicit
+  class-use at pa19/tests/general/100-dependent-bool-trait-nontype-argument.t:25:15
+    template use_member_value
+    selected primary
+    bind #1 = integral_constant<bool, true> source=explicit
+  class-use at pa19/tests/general/100-dependent-bool-trait-nontype-argument.t:26:16
+    template use_member_value
+    selected primary
+    bind #1 = integral_constant<bool, false> source=explicit
+  class-use at pa19/tests/general/100-dependent-bool-trait-nontype-argument.t:27:15
+    template use_constant_object
+    selected primary
+    bind #1 = integral_constant<bool, true> source=explicit
+template-closure-events
+  ensure-definition
+    entity integral_constant<bool, true>::operator bool
+  function-instantiation
+    entity integral_constant<bool, true>::operator bool
+  require-definition
+    entity integral_constant<bool, true>::operator bool
+  variable-instantiation
+    entity box<false>::value
+  variable-instantiation
+    entity box<true>::value
+  variable-instantiation
+    entity integral_constant<bool, false>::value
+  variable-instantiation
+    entity integral_constant<bool, true>::value

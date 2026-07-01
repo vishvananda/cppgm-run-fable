@@ -1,9 +1,10 @@
 #include <sstream>
 #include <string>
 
-int main() {
+void istream_extraction_anchor()
+{
   std::istringstream in("abc");
   std::string out;
   in >> out;
-  return out == "abc" ? 0 : 1;
 }
+static_assert(sizeof(&istream_extraction_anchor) > 0, "istream extraction body anchor");

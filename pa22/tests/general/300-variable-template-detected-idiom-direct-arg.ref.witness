@@ -1,0 +1,19 @@
+translation-unit
+  variable-use at pa22/tests/general/300-variable-template-detected-idiom-direct-arg.t:12:32
+    template has_make_impl
+    selected partial
+    bind #1 = void source=deduced
+    bind #2 = maker source=deduced
+    bind #3 = <int *, int> source=deduced
+    specialize #1 = maker source=deduced
+    specialize #2 = <int *, int> source=deduced
+  variable-use at pa22/tests/general/300-variable-template-detected-idiom-direct-arg.t:20:10
+    template has_make_v
+    selected primary
+    bind #1 = maker source=deduced
+    bind #2 = <int *, int> source=deduced
+template-closure-events
+  variable-instantiation
+    entity has_make_impl
+  variable-instantiation
+    entity has_make_v

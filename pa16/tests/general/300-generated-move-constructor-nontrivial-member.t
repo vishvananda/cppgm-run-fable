@@ -18,4 +18,4 @@ int main()
   Wrapper moved(static_cast<Wrapper &&>(source));
   return source.owner.ptr == 0 && moved.owner.ptr == &value ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

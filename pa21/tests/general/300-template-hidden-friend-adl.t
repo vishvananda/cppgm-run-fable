@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 3.4.2 [basic.lookup.argdep], 14.6.4 [temp.dep.res]
 
 template<typename T>

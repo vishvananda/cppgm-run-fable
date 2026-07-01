@@ -37,6 +37,8 @@ The PA13 starter kit contains:
 - `lowir2cy86.cpp`, a link to the editable `dev/lowir2cy86.cpp` entry point
 - the grammar for this assignment called `pa13.gram`
 - `lowir.md`, the LowIR format reference for this assignment family
+- optional typed LowIR model scaffolding in `dev/src/lowir_model.h` with
+  shared exported-symbol support in `dev/src/ir_symbol_model.h`
 - an HTML grammar explorer of `pa13.gram` in the sub-directory `grammar/`
 - `scripts/run_all_tests.pl` and `scripts/compare_results.pl`
 - `tests/spec/`, the LowIR-to-CY86 tests
@@ -167,6 +169,13 @@ facts in LowIR text. PA13 translates those facts only to the extent needed for
 the CY86 adapter. It does not implement native object symbol binding, host ABI
 register assignment, or debugger behavior.
 
+You may keep a typed LowIR model internally, and the optional
+`dev/src/lowir_model.h` scaffold names the common program, symbol, type,
+operand, block, and instruction pieces. The typed model is support for the
+text format, not a replacement for it: if a later backend or object writer
+needs a fact, that fact must be representable in serialized LowIR text and
+recoverable by parsing that text back in.
+
 Required instructions:
 
 - `const`, `copy`, `addr`, `load`, and `store`
@@ -241,7 +250,7 @@ For PA13:
   `lowir.md`, and the `tests/spec/` suite make them part of the PA13
   adapter contract.
 - Treat `!dbg(...)` as LowIR text metadata. Generating native object-file debug
-  information, validating `dwarfdump` output, and running debugger checks are
+  information, validating DWARF dump output, and running debugger checks are
   outside PA13.
 - Do not implement native code generation, linking, hosted runtime behavior,
   LowIR optimization, or C++ source-to-LowIR lowering as part of PA13.

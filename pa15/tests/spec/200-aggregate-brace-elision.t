@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 8.5.1 [dcl.init.aggr]
 
 struct Inner

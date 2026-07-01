@@ -1,0 +1,29 @@
+ERROR: dependent member template requires template keyword at tests/general/300-dependent-member-template-missing-keyword-bad.t:14:13 [top-level declaration 1 kind=template-declaration ast={template-declaration
+  template-parameter-clause
+    template-parameter-list
+      type-parameter
+        parameter-key KW_TYPENAME:typename
+        identifier Tag
+  function-definition
+    decl-specifier-seq
+      decl-specifier KW_INT:int
+    declarator
+      identifier run
+      parameter-clause
+        parameter-declaration
+          decl-specifier-seq
+            decl-specifier Box<Tag>
+          declarator
+            ptr-operator OP_AMP:&
+            identifier box
+    compound-statement
+      return-statement
+        call-expression
+          member-expression OP_DOT:.
+            id-expression box
+            identifier cast<int>
+          argument-list
+            literal 4
+}]
+Diagnostic context:
+collect_template_declaration [template<typename Tag>int run(Box<Tag>&box){return box.cast<int>(4);}] at tests/general/300-dependent-member-template-missing-keyword-bad.t:11:1

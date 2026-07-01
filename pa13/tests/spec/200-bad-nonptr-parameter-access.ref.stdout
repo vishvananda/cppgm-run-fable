@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-nonptr-parameter-access.t:1: function @main parameter %x with access mode 'read' must have type ptr

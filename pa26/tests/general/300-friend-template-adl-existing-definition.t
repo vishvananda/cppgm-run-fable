@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Exception reduction: a qualified friend function-template declaration
 // should attach ADL friend access to the existing namespace template entity,
 // not leave a declaration-only duplicate that hides the later definition.

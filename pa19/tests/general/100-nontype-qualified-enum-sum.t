@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A parenthesized qualified enum member in an integral non-type argument can
 // look like a C-style cast while parsing; semantic evaluation must recover it
 // as a value expression before combining the sum.

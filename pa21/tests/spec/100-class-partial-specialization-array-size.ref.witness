@@ -1,0 +1,10 @@
+translation-unit
+  class-use at pa21/tests/spec/100-class-partial-specialization-array-size.t:19:10
+    template range_const_iterator
+    selected partial
+    bind #1 = const int[5] source=explicit
+    specialize #1 = const int source=deduced
+    specialize #2 = 5 source=deduced
+template-closure-events
+  variable-instantiation
+    entity range_const_iterator<const int[5]>::selected

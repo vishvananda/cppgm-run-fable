@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-nonptr-parameter-alias.t:1: function @main parameter %x with alias mode 'noalias' must have type ptr

@@ -84,7 +84,7 @@ function @as_marker__impl_proto__expr_tag_assign__proto__list2_mark_type_const__
     %t9 = index i8 [projection=field] %t8, 8
     return void
 }
-function @as_marker__impl_proto__expr_tag_assign__proto__list2_mark_type_const____plus_leaf_____2__const_____impl(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN9as_marker4implIRKN5proto4exprI10tag_assignNS1_5list2IRK9mark_typeR9plus_leafEELi2EEEEC1Ev] {
+function @as_marker__impl_proto__expr_tag_assign__proto__list2_mark_type_const____plus_leaf_____2__const_____impl(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN9as_marker4implIRKN5proto4exprI10tag_assignNS1_5list2IRK9mark_typeR9plus_leafEELi2EEEEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
@@ -114,7 +114,7 @@ function @as_marker__impl_proto__expr_tag_assign__proto__list2_mark_type_const__
     %t9 = index i8 [projection=field] %t8, 8
     return void
 }
-function @as_marker__impl_proto__expr_tag_assign__proto__list2_mark_type_const____deref_leaf_____2__const_____impl(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN9as_marker4implIRKN5proto4exprI10tag_assignNS1_5list2IRK9mark_typeR10deref_leafEELi2EEEEC1Ev] {
+function @as_marker__impl_proto__expr_tag_assign__proto__list2_mark_type_const____deref_leaf_____2__const_____impl(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN9as_marker4implIRKN5proto4exprI10tag_assignNS1_5list2IRK9mark_typeR10deref_leafEELi2EEEEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

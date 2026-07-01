@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.6.2 [temp.dep], 7.3.3 [namespace.udecl]
 
 template<typename T>

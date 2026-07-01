@@ -5,4 +5,9 @@ namespace test_case {
 template<class Tuple, unsigned long I>
 int first_value(Tuple& t) { return get<I>(t); }
 }
-int main() { std::tuple<int> t(7); return test_case::first_value<std::tuple<int>, 0>(t) == 7 ? 0 : 1; }
+int tuple_get_anchor()
+{
+  std::tuple<int> t(7);
+  return test_case::first_value<std::tuple<int>, 0>(t);
+}
+static_assert(sizeof(&tuple_get_anchor) > 0, "tuple get ADL body anchor");

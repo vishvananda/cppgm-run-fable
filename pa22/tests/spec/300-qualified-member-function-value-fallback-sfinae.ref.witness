@@ -1,0 +1,54 @@
+translation-unit
+  class-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:6:9
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = true source=explicit
+  class-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:7:9
+    template integral_constant
+    selected primary
+    bind #1 = bool source=explicit
+    bind #2 = false source=explicit
+  alias-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:24:1
+    template first_t
+    bind #1 = true_type source=explicit
+    bind #2 = enable_if_t<bool(Bn::value)>... source=explicit
+  alias-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:24:20
+    template enable_if_t
+    bind #1 = bool(Bn::value) source=explicit
+  alias-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:47:7
+    template enable_if_t
+    bind #1 = constraints<Dummy, U1, U2>::ok() source=explicit
+    bind #2 = bool source=explicit
+  alias-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:50:12
+    template pair_like::implicit_default_ctor
+    bind #1 = Dummy source=explicit
+    bind #2 = T1 source=explicit
+    bind #3 = T2 source=explicit
+  class-use at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:61:3
+    template pair_like
+    selected primary
+    bind #1 = Owner::Node * source=explicit
+    bind #2 = int source=explicit
+  function-call at pa22/tests/spec/300-qualified-member-function-value-fallback-sfinae.t:62:11
+    callee pair_like<Owner::Node *, int>::pair_like
+    selected instantiation
+    bind #1 = true source=defaulted
+    bind #2 = true source=defaulted
+    drop pair_like<Owner::Node *, int>::pair_like reason=worse_conversion
+    drop pair_like<Owner::Node *, int>::pair_like reason=worse_conversion
+template-closure-events
+  ensure-definition
+    entity constraints<true, Owner::Node *, int>::ok
+  ensure-definition
+    entity pair_like<Owner::Node *, int>::pair_like
+  function-instantiation
+    entity constraints<true, Owner::Node *, int>::ok
+  function-instantiation
+    entity pair_like<Owner::Node *, int>::pair_like
+  require-definition
+    entity constraints<true, Owner::Node *, int>::ok
+  require-definition
+    entity pair_like<Owner::Node *, int>::pair_like
+  variable-instantiation
+    entity integral_constant<bool, true>::value

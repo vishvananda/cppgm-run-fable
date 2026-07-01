@@ -75,7 +75,7 @@ dev-shared-target:
 
 # regenerate reference test output
 ref-test:
-	@scripts/run_all_tests.pl $(REF_TEST_APP) ref tests
+	@$(REF_TEST_RUN)
 
 RUN_CHECK_DEPS = $(TEST_DEPS)
 include ../scripts/pa_run_check_targets.mk

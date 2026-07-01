@@ -1,0 +1,17 @@
+translation-unit
+  class-use at pa22/tests/general/100-type-pack-element-result-selects-copy-ctor.t:59:3
+    template tuple
+    selected primary
+    bind #1 = <const V &> source=explicit
+  function-call at pa22/tests/general/100-type-pack-element-result-selects-copy-ctor.t:60:19
+    callee get
+    selected instantiation
+    bind #1 = 0 source=explicit
+    bind #2 = <const V &> source=deduced
+template-closure-events
+  ensure-definition
+    entity get
+  function-instantiation
+    entity get
+  require-definition
+    entity get

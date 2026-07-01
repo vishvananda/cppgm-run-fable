@@ -1,0 +1,35 @@
+translation-unit
+  alias-use at pa23/tests/general/300-decltype-member-template-callable-pack-result-cache.t:32:27
+    template void_t
+    bind #1 = decltype(declval<F>()(declval<Args>()...)) source=explicit
+  alias-use at pa23/tests/general/300-decltype-member-template-callable-pack-result-cache.t:39:9
+    template invoke_result_t
+    bind #1 = identity & source=explicit
+    bind #2 = const bool & source=explicit
+  alias-use at pa23/tests/general/300-decltype-member-template-callable-pack-result-cache.t:40:9
+    template invoke_result_t
+    bind #1 = identity & source=explicit
+    bind #2 = void *& source=explicit
+  class-use at pa23/tests/general/300-decltype-member-template-callable-pack-result-cache.t:42:15
+    template is_same
+    selected partial
+    bind #1 = const bool & source=explicit
+    bind #2 = const bool & source=explicit
+    specialize #1 = const bool & source=deduced
+  class-use at pa23/tests/general/300-decltype-member-template-callable-pack-result-cache.t:43:15
+    template is_same
+    selected partial
+    bind #1 = void *& source=explicit
+    bind #2 = void *& source=explicit
+    specialize #1 = void *& source=deduced
+  class-use at pa23/tests/general/300-decltype-member-template-callable-pack-result-cache.t:47:10
+    template is_same
+    selected partial
+    bind #1 = void *& source=explicit
+    bind #2 = void *& source=explicit
+    specialize #1 = void *& source=deduced
+template-closure-events
+  variable-instantiation
+    entity is_same<const bool &, const bool &>::value
+  variable-instantiation
+    entity is_same<void *&, void *&>::value

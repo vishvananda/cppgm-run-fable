@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.6.2.1 [temp.dep.type], 14.5.5 [temp.class.spec]
 // When a member function template of a class-template specialization names a
 // nested class template without qualification, lookup must check the current

@@ -1,0 +1,26 @@
+function @test(%source : ptr [pass=reference]) -> void [binding=strong, object=_Z4testRK3boxIJiiEE] {
+  slot $source : ptr
+  slot $value : obj<1x1>
+
+  block ^entry:
+    store ptr %source, $source
+    %t1 = addr $value
+    %t2 = load ptr $source
+    call void @box_box_int__int__const_____box__ov3(%t1, %t2)
+    %t3 = addr $value
+    return void
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  block ^entry:
+    return i32 0
+}
+function @box_box_int__int__const_____box__ov3(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN3boxIJRKS_IJiiEEEEC1IJiiELb0ETnN9enable_ifIXclsr4gateIXT0_EEE2noIDpRKT_EEEbE4typeELb0EEERKS_IJDpS6_EE] {
+  slot $this : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    return void
+}
+alias object _ZN3boxIJRKS_IJiiEEEEC2IJiiELb0ETnN9enable_ifIXclsr4gateIXT0_EEE2noIDpRKT_EEEbE4typeELb0EEERKS_IJDpS6_EE = @box_box_int__int__const_____box__ov3

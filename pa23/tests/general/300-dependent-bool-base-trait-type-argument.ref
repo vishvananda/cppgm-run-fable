@@ -37,7 +37,7 @@ function @std___Enable_default_constructor_true__std____detail___Hash_node_base_
     store ptr %this, $this
     return void
 }
-function @std___Enable_default_constructor_tag___Enable_default_constructor_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZNSt31_Enable_default_constructor_tagC1Ev] {
+function @std___Enable_default_constructor_tag___Enable_default_constructor_tag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZNSt31_Enable_default_constructor_tagC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

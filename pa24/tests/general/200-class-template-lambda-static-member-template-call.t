@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 5.1.2 [expr.prim.lambda], 14.2 [temp.names]
 
 template<typename T>

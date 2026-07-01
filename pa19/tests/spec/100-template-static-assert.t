@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.3.2 [temp.arg.nontype], 7 [dcl.dcl] static_assert
 
 constexpr int K = 3;

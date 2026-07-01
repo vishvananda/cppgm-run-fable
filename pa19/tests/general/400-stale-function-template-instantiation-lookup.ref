@@ -29,7 +29,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t11 = load i32 $cond__1
     return i32 %t11
 }
-function @node_int___node(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4nodeIiEC1Ev] {
+function @node_int___node(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4nodeIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

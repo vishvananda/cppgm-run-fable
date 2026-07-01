@@ -1,0 +1,12 @@
+translation-unit
+  function-call at pa23/tests/spec/400-conversion-function-template-call-argument.t:23:12
+    callee box::operator int
+    selected instantiation
+    bind #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity box::operator int
+  function-instantiation
+    entity box::operator int
+  require-definition
+    entity box::operator int

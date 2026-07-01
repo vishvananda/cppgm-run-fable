@@ -1,0 +1,17 @@
+translation-unit
+  function-call at pa23/tests/general/200-forwarding-pack-pointer-cast-trailing-return.t:16:17
+    callee forward_pointer
+    selected instantiation
+    bind #1 = <int *> source=deduced
+  function-call at pa23/tests/general/200-forwarding-pack-pointer-cast-trailing-return.t:16:33
+    callee declval
+    selected instantiation
+    bind #1 = int * source=explicit
+  function-call at pa23/tests/general/200-forwarding-pack-pointer-cast-trailing-return.t:17:17
+    callee forward_const_pointer
+    selected instantiation
+    bind #1 = <int *const &> source=deduced
+  function-call at pa23/tests/general/200-forwarding-pack-pointer-cast-trailing-return.t:17:39
+    callee declval
+    selected instantiation
+    bind #1 = int *const & source=explicit

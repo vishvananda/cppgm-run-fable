@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.2 [temp.names], 3.4.3 [basic.lookup.qual]
 
 namespace api {

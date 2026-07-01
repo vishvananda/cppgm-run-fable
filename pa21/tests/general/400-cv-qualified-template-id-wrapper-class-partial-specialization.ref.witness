@@ -1,0 +1,37 @@
+translation-unit
+  class-use at pa21/tests/general/400-cv-qualified-template-id-wrapper-class-partial-specialization.t:27:15
+    template holder
+    selected partial
+    bind #1 = box<int, long> source=explicit
+    specialize #1 = box source=deduced
+    specialize #2 = <int, long> source=deduced
+  class-use at pa21/tests/general/400-cv-qualified-template-id-wrapper-class-partial-specialization.t:27:22
+    template box
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = long source=explicit
+  class-use at pa21/tests/general/400-cv-qualified-template-id-wrapper-class-partial-specialization.t:28:15
+    template holder
+    selected partial
+    bind #1 = const box<int, long> source=explicit
+    specialize #1 = box<int, long> source=deduced
+  class-use at pa21/tests/general/400-cv-qualified-template-id-wrapper-class-partial-specialization.t:28:22
+    template box
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = long source=explicit
+  class-use at pa21/tests/general/400-cv-qualified-template-id-wrapper-class-partial-specialization.t:32:10
+    template holder
+    selected partial
+    bind #1 = const box<int, long> source=explicit
+    specialize #1 = box<int, long> source=deduced
+  class-use at pa21/tests/general/400-cv-qualified-template-id-wrapper-class-partial-specialization.t:32:17
+    template box
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = long source=explicit
+template-closure-events
+  variable-instantiation
+    entity holder<box<int, long>>::value
+  variable-instantiation
+    entity holder<const box<int, long>>::value

@@ -13,7 +13,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %t7 = binary sub i32 %t6, 7
     return i32 %t7
 }
-function @F__F(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1FC1Ev] {
+function @F__F(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN1FC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

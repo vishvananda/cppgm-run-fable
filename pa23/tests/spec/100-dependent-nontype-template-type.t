@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.1 [temp.param], 14.3.2 [temp.arg.nontype], 14.6.2.1 [temp.dep.type]
 
 template<class Cp>

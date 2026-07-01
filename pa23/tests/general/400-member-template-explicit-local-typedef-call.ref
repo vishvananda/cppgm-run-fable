@@ -40,7 +40,7 @@ function @Worker__run(%this : ptr) -> i32 [binding=weak, object=_ZN6Worker3runIi
     %t6 = load i32 $cond__2
     return i32 %t6
 }
-function @Flag_false___Flag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4FlagILb0EEC1Ev] {
+function @Flag_false___Flag(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4FlagILb0EEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.2 [temp.mem], 14.8.1 [temp.arg.explicit]
 // A member-template body must resolve explicit template arguments in the
 // member-template parameter scope, even when a dependent base used the same

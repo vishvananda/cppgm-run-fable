@@ -1,0 +1,35 @@
+machine_ir x86_64 <host-target>
+
+startup
+    call @main
+    mov rdi, rax
+    exit
+
+function @id
+  abi
+    param %p -> rdi : ptr
+    return i64 -> rax
+  frame
+    stack_size 16
+    scratch_bytes 0
+
+  block ^entry
+    load.i32 r9, [rdi] !dbg(test.cpp, 1, 1)
+    sext.i32 r9 !dbg(test.cpp, 1, 1)
+    ret r9 !dbg(test.cpp, 2, 1)
+
+function @main
+  abi
+    return i64 -> rax
+  frame
+    stack_size 16
+    scratch_bytes 0
+    slot $x -> [rbp-<off0>] : i64
+
+  block ^entry
+    mov rax, 7 !dbg(test.cpp, 7, 1)
+    lea rcx, [rbp-<off0>] !dbg(test.cpp, 7, 1)
+    store.i32 [rbp-<off0>], rax !dbg(test.cpp, 7, 1)
+    lea rdi, [rbp-<off0>] !dbg(test.cpp, 9, 1)
+    call @id !dbg(test.cpp, 9, 1)
+    ret rax !dbg(test.cpp, 10, 1)

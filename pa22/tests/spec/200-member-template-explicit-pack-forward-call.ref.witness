@@ -1,0 +1,20 @@
+translation-unit
+  function-call at pa22/tests/spec/200-member-template-explicit-pack-forward-call.t:28:12
+    callee box::g
+    selected instantiation
+    bind #1 = <int> source=deduced
+template-closure-events
+  ensure-definition
+    entity box::g
+  function-instantiation
+    entity box::g
+  function-instantiation
+    entity count
+  function-instantiation
+    entity forward
+  require-definition
+    entity box::g
+  require-definition
+    entity count
+  require-definition
+    entity forward

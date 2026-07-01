@@ -1,0 +1,29 @@
+translation-unit
+  alias-use at pa22/tests/general/300-libcpp-style-move-voidptr-deduction.t:39:1
+    template remove_reference_t
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/300-libcpp-style-move-voidptr-deduction.t:41:13
+    template remove_reference_t
+    bind #1 = T source=explicit
+  alias-use at pa22/tests/general/300-libcpp-style-move-voidptr-deduction.t:46:23
+    template enable_if_t
+    bind #1 = true source=explicit
+    bind #2 = void source=explicit
+  alias-use at pa22/tests/general/300-libcpp-style-move-voidptr-deduction.t:49:1
+    template swap_result_t
+    bind #1 = T source=explicit
+  function-call at pa22/tests/general/300-libcpp-style-move-voidptr-deduction.t:58:3
+    callee swap_values
+    selected instantiation
+    bind #1 = void * source=deduced
+template-closure-events
+  ensure-definition
+    entity swap_values
+  function-instantiation
+    entity move_value
+  function-instantiation
+    entity swap_values
+  require-definition
+    entity move_value
+  require-definition
+    entity swap_values

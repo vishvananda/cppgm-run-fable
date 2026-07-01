@@ -1,0 +1,130 @@
+function @make_hooks(%ret : ptr [pass=indirect_result], %p : ptr) -> void [unwind=no, binding=strong, object=_Z10make_hooksPi] {
+  slot $p : ptr
+
+  block ^entry:
+    store ptr %p, $p
+    %t1 = load ptr $p
+    %t2 = index i8 [projection=field] %ret, 0
+    %t3 = index i8 [projection=field] %t2, 0
+    store ptr %t1, %t3
+    return void
+}
+function @read(%h : ptr [pass=reference]) -> i32 [unwind=no, binding=strong, object=_Z4readRK5Hooks] {
+  slot $h : ptr
+
+  block ^entry:
+    store ptr %h, $h
+    %t1 = load ptr $h
+    %t2 = index i8 [projection=field] %t1, 0
+    %t3 = index i8 [projection=field] %t2, 0
+    %t4 = load ptr %t3
+    %t5 = load i32 %t4
+    return i32 %t5
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $destroyed : i32
+  slot $before : i32
+  slot $call__1 : i32
+  slot $arg__2 : obj<8x8>
+  slot $after : i32
+  slot $cond__3 : i32
+  slot $land__4 : i64
+
+  block ^entry:
+    store i32 0, $destroyed
+    eh_try ^call_unwind_dispatch_1
+    %t1 = addr $arg__2
+    %t2 = addr $destroyed
+    call void @make_hooks(%t1, %t2)
+    eh_end
+    jump ^call_unwind_end_2
+
+  block ^call_unwind_dispatch_1:
+    resume
+
+  block ^call_unwind_end_2:
+    eh_try ^call_unwind_dispatch_3
+    %t3 = call i32 @read(%t1)
+    store i32 %t3, $call__1
+    %t4 = load i32 $call__1
+    store i32 %t4, $before
+    call void @Hooks___Hooks(%t1)
+    eh_end
+    jump ^call_unwind_end_4
+
+  block ^call_unwind_dispatch_3:
+    call void @Hooks___Hooks(%t1)
+    resume
+
+  block ^call_unwind_end_4:
+    %t5 = load i32 $destroyed
+    store i32 %t5, $after
+    %t6 = load i32 $before
+    %t7 = cmp eq i32 %t6, 0
+    branch %t7, ^land_rhs_8, ^land_short_9
+
+  block ^land_rhs_8:
+    %t8 = load i32 $after
+    %t9 = cmp eq i32 %t8, 1
+    %t10 = cmp ne i64 %t9, 0
+    store i64 %t10, $land__4
+    jump ^land_end_10
+
+  block ^land_short_9:
+    store i64 0, $land__4
+    jump ^land_end_10
+
+  block ^land_end_10:
+    %t11 = load i64 $land__4
+    branch %t11, ^cond_then_5, ^cond_else_6
+
+  block ^cond_then_5:
+    store i32 0, $cond__3
+    jump ^cond_end_7
+
+  block ^cond_else_6:
+    store i32 1, $cond__3
+    jump ^cond_end_7
+
+  block ^cond_end_7:
+    %t12 = load i32 $cond__3
+    return i32 %t12
+}
+function @Hooks___Hooks(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5HooksD1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = index i8 [projection=field] %t1, 0
+    call void @Counter___Counter(%t2)
+    return void
+}
+function @Counter__Counter__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN7CounterC1ERKS_] {
+  slot $this : ptr
+  slot $other : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %other, $other
+    %t1 = load ptr $this
+    %t2 = load ptr $other
+    copyobj 8x8 %t2, %t1
+    return void
+}
+function @Counter___Counter(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7CounterD1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = index i8 [projection=field] %t1, 0
+    %t3 = load ptr %t2
+    %t4 = load i32 %t3
+    %t5 = binary add i32 %t4, 1
+    store i32 %t5, %t3
+    return void
+}
+alias object _ZN5HooksD2Ev = @Hooks___Hooks
+alias object _ZN7CounterC2ERKS_ = @Counter__Counter__ov2
+alias object _ZN7CounterD2Ev = @Counter___Counter

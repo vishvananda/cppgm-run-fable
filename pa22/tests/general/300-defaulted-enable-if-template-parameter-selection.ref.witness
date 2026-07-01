@@ -1,0 +1,14 @@
+translation-unit
+  function-call at pa22/tests/general/300-defaulted-enable-if-template-parameter-selection.t:47:10
+    callee choose
+    selected instantiation
+    bind #1 = selected source=deduced
+    bind #2 = 0 source=defaulted
+    drop choose reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity choose
+  function-instantiation
+    entity choose
+  require-definition
+    entity choose

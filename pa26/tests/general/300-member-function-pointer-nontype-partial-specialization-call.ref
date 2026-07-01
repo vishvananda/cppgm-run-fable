@@ -86,7 +86,7 @@ function @target__id(%this : ptr) -> i32 [binding=weak, object=_ZNK6target2idEv]
     store ptr %this, $this
     return i32 7
 }
-function @example__fast_mem_fn_int__target_______const___target__id__1___fast_mem_fn(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7example11fast_mem_fnIM6targetKFivEXadL_ZNKS1_2idEvEELi1EEC1Ev] {
+function @example__fast_mem_fn_int__target_______const___target__id__1___fast_mem_fn(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN7example11fast_mem_fnIM6targetKFivEXadL_ZNKS1_2idEvEELi1EEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

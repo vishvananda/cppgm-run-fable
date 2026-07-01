@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 8.5.3 [dcl.init.ref], 4.10 [conv.ptr]
 
 struct Base

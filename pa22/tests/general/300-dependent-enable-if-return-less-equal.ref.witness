@@ -1,0 +1,18 @@
+translation-unit
+  class-use at pa22/tests/general/300-dependent-enable-if-return-less-equal.t:36:14
+    template std::numeric_limits
+    selected primary
+    bind #1 = unsigned long source=explicit
+  function-call at pa22/tests/general/300-dependent-enable-if-return-less-equal.t:51:10
+    callee hash_range
+    selected instantiation
+    bind #1 = iter source=deduced
+template-closure-events
+  ensure-definition
+    entity hash_range
+  function-instantiation
+    entity hash_range
+  require-definition
+    entity hash_range
+  variable-instantiation
+    entity std::numeric_limits<unsigned long>::digits

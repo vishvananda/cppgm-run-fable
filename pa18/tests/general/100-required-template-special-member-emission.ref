@@ -1,6 +1,3 @@
-declare function @__external_runtime___Unwind_Resume() -> void [return=noreturn, role=eh_resume, linkage=c, binding=strong, object=_Unwind_Resume]
-declare function @__external_runtime____gxx_personality_v0() -> void [role=eh_personality, linkage=c, binding=strong, object=__gxx_personality_v0]
-
 global @total : i32 [binding=strong, object=_Z5total] = zero
 
 function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
@@ -12,32 +9,22 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     call void @box_int___box(%t1)
     %t2 = addr $b
     %t3 = addr $a
-    eh_try ^call_unwind_dispatch_1
     call void @box_int___box__ov2(%t2, %t3)
-    eh_end
-    jump ^call_unwind_end_2
-
-  block ^call_unwind_dispatch_1:
-    %t4 = addr $a
-    call void @box_int____box(%t4)
-    resume
-
-  block ^call_unwind_end_2:
-    %t5 = load i32 @total
-    %t6 = addr $b
-    %t7 = index i8 [projection=field] %t6, 0
-    %t8 = load i32 %t7
-    %t9 = binary add i32 %t5, %t8
-    store i32 %t9, @total
-    %t10 = addr $b
+    %t4 = load i32 @total
+    %t5 = addr $b
+    %t6 = index i8 [projection=field] %t5, 0
+    %t7 = load i32 %t6
+    %t8 = binary add i32 %t4, %t7
+    store i32 %t8, @total
+    %t9 = addr $b
+    call void @box_int____box(%t9)
+    %t10 = addr $a
     call void @box_int____box(%t10)
-    %t11 = addr $a
-    call void @box_int____box(%t11)
-    %t12 = load i32 @total
-    %t13 = binary sub i32 %t12, 7
-    return i32 %t13
+    %t11 = load i32 @total
+    %t12 = binary sub i32 %t11, 7
+    return i32 %t12
 }
-function @box_int___box(%this : ptr) -> void [binding=weak, object=_ZN3boxIiEC1Ev] {
+function @box_int___box(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3boxIiEC1Ev] {
   slot $this : ptr
 
   block ^entry:
@@ -47,7 +34,7 @@ function @box_int___box(%this : ptr) -> void [binding=weak, object=_ZN3boxIiEC1E
     store i32 1, %t2
     return void
 }
-function @box_int___box__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [binding=weak, object=_ZN3boxIiEC1ERKS0_] {
+function @box_int___box__ov2(%this : ptr, %other : ptr [pass=reference]) -> void [unwind=no, binding=weak, object=_ZN3boxIiEC1ERKS0_] {
   slot $this : ptr
   slot $other : ptr
 
@@ -63,7 +50,7 @@ function @box_int___box__ov2(%this : ptr, %other : ptr [pass=reference]) -> void
     store i32 %t4, %t6
     return void
 }
-function @box_int____box(%this : ptr) -> void [binding=weak, object=_ZN3boxIiED1Ev] {
+function @box_int____box(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3boxIiED1Ev] {
   slot $this : ptr
 
   block ^entry:

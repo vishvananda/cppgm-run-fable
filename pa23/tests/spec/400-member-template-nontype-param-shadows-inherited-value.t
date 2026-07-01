@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.2 [temp.mem], 14.8.2 [temp.deduct]
 // A member-template non-type parameter must shadow inherited template-parameter
 // value bindings while the member-template signature is collected.

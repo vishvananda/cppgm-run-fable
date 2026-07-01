@@ -11,9 +11,8 @@ function @copy_ref
     param %src -> rsi : ptr
     return void -> void
   frame
-    stack_size 16
+    stack_size 0
     scratch_bytes 0
-    preserve rbx
 
   block ^entry
     mov r8, rdi

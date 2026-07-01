@@ -4,9 +4,9 @@ template<typename T>
 struct box {
   T value;
 
-  box() : value(1) {}
-  box(const box & other) : value(other.value + 2) {}
-  ~box() { total = total + value; }
+  box() noexcept : value(1) {}
+  box(const box & other) noexcept : value(other.value + 2) {}
+  ~box() noexcept { total = total + value; }
 };
 
 int main()

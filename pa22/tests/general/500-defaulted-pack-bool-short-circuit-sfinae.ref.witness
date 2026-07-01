@@ -1,0 +1,62 @@
+translation-unit
+  alias-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:41:17
+    template enable_if_t
+    bind #1 = gate<B>::template yes<Args...>() source=explicit
+    bind #2 = bool source=explicit
+  alias-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:44:16
+    template enable_if_t
+    bind #1 = gate<B>::template no<Args...>() source=explicit
+    bind #2 = bool source=explicit
+  alias-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:49:12
+    template box::yes_t
+    bind #1 = Valid source=explicit
+    bind #2 = const Args &... source=explicit
+  alias-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:56:12
+    template box::no_t
+    bind #1 = Valid source=explicit
+    bind #2 = const Args &... source=explicit
+  class-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:61:17
+    template box
+    selected primary
+    bind #1 = <int, int> source=explicit
+  class-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:63:3
+    template box
+    selected primary
+    bind #1 = <const box<int, int> &> source=explicit
+  class-use at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:63:13
+    template box
+    selected primary
+    bind #1 = <int, int> source=explicit
+  function-call at pa22/tests/general/500-defaulted-pack-bool-short-circuit-sfinae.t:63:30
+    callee box<const box<int, int> &>::box
+    selected instantiation
+    bind #1 = <int, int> source=deduced
+    bind #2 = false source=defaulted
+    bind #3 = false source=defaulted
+    drop box<const box<int, int> &>::box reason=worse_conversion
+    drop box<const box<int, int> &>::box reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity box<const box<int, int> &>::box
+  ensure-definition
+    entity box<const box<int, int> &>::other
+  ensure-definition
+    entity gate<false>::no
+  ensure-definition
+    entity gate<false>::yes
+  function-instantiation
+    entity box<const box<int, int> &>::box
+  function-instantiation
+    entity box<const box<int, int> &>::other
+  function-instantiation
+    entity gate<false>::no
+  function-instantiation
+    entity gate<false>::yes
+  require-definition
+    entity box<const box<int, int> &>::box
+  require-definition
+    entity box<const box<int, int> &>::other
+  require-definition
+    entity gate<false>::no
+  require-definition
+    entity gate<false>::yes

@@ -1,0 +1,8 @@
+translation-unit
+  class-use at pa19/tests/general/100-using-declaration-dependent-member-value.t:20:16
+    template __is_integer_nonstrict
+    selected primary
+    bind #1 = long source=explicit
+template-closure-events
+  variable-instantiation
+    entity std::__is_integer<long>::__value

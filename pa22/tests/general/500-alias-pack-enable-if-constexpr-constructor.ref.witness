@@ -1,0 +1,46 @@
+translation-unit
+  class-use at pa22/tests/general/500-alias-pack-enable-if-constexpr-constructor.t:6:19
+    template bool_constant
+    selected primary
+    bind #1 = true source=explicit
+  alias-use at pa22/tests/general/500-alias-pack-enable-if-constexpr-constructor.t:32:17
+    template enable_if_t
+    bind #1 = and_<Cond...>::value source=explicit
+  alias-use at pa22/tests/general/500-alias-pack-enable-if-constexpr-constructor.t:53:32
+    template Require
+    bind #1 = is_convertible<const Rep2 &, rep> source=explicit
+  class-use at pa22/tests/general/500-alias-pack-enable-if-constexpr-constructor.t:65:15
+    template duration
+    selected primary
+    bind #1 = long long source=explicit
+  class-use at pa22/tests/general/500-alias-pack-enable-if-constexpr-constructor.t:65:52
+    template duration
+    selected primary
+    bind #1 = long long source=explicit
+template-closure-events
+  ensure-definition
+    entity duration<long long>::count
+  ensure-definition
+    entity duration<long long>::duration
+  ensure-definition
+    entity duration<long long>::min
+  ensure-definition
+    entity duration<long long>::zero
+  function-instantiation
+    entity duration<long long>::count
+  function-instantiation
+    entity duration<long long>::duration
+  function-instantiation
+    entity duration<long long>::min
+  function-instantiation
+    entity duration<long long>::zero
+  require-definition
+    entity duration<long long>::count
+  require-definition
+    entity duration<long long>::duration
+  require-definition
+    entity duration<long long>::min
+  require-definition
+    entity duration<long long>::zero
+  variable-instantiation
+    entity bool_constant<true>::value

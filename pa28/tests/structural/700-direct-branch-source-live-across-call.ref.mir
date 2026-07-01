@@ -51,7 +51,7 @@ function @main
   frame
     stack_size 16
     scratch_bytes 0
-    preserve rbx r12
+    preserve rbx
 
   block ^entry
     call @one

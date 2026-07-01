@@ -1,0 +1,25 @@
+translation-unit
+  alias-use at pa23/tests/spec/300-deleted-function-template-callee-detector-sfinae.t:26:26
+    template void_t
+    bind #1 = decltype(deleted_query(declval<T>(), declval<P>())) source=explicit
+  class-use at pa23/tests/spec/300-deleted-function-template-callee-detector-sfinae.t:47:11
+    template has_deleted_query
+    selected primary
+    bind #1 = object source=explicit
+    bind #2 = property source=explicit
+    bind #3 = void source=defaulted
+  function-call at pa23/tests/spec/300-deleted-function-template-callee-detector-sfinae.t:48:10
+    callee call_deleted_query
+    selected instantiation
+    bind #1 = object source=deduced
+    bind #2 = property source=deduced
+    drop call_deleted_query reason=substitution_failure
+template-closure-events
+  ensure-definition
+    entity call_deleted_query
+  function-instantiation
+    entity call_deleted_query
+  require-definition
+    entity call_deleted_query
+  variable-instantiation
+    entity has_deleted_query<object, property>::value

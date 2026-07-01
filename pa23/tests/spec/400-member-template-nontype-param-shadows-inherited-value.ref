@@ -42,7 +42,7 @@ function @detail__expression_detail__matcher_traits____get_width(%this : ptr) ->
     copyobj 8x8 %t4, %t1
     return obj<8x8> $retobj__1
 }
-function @mpl___size_t_1___size_t(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4mpl_6size_tILm1EEC1Ev] {
+function @mpl___size_t_1___size_t(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN4mpl_6size_tILm1EEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

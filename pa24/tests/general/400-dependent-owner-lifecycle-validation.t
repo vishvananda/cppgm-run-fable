@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // A concrete instantiation must resolve auto locals through dependent helper
 // defaults before output/lowering.
 

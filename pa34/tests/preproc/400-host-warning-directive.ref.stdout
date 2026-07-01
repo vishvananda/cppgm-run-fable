@@ -1,2 +1,1 @@
 tests/preproc/400-host-warning-directive.t:4: warning: #warning "vendor header note"
-ERROR: expected declaration near TT_IDENTIFIER:alive at token 0 at tests/preproc/400-host-warning-directive.t:1:1

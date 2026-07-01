@@ -1,5 +1,0 @@
-translation-unit
-  class-use at pa23/tests/spec/300-typedef-class-template-does-not-instantiate.t:9:9
-    template lazy_box
-    selected primary
-    bind #1 = int source=explicit

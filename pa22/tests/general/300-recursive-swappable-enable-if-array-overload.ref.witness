@@ -1,0 +1,19 @@
+translation-unit
+  alias-use at pa22/tests/general/300-recursive-swappable-enable-if-array-overload.t:32:31
+    template enable_if_t
+    bind #1 = swappable_v<T> source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/general/300-recursive-swappable-enable-if-array-overload.t:37:5
+    template void_t
+    bind #1 = decltype(swap(declval<T>(), declval<U>())) source=explicit
+  variable-use at pa22/tests/general/300-recursive-swappable-enable-if-array-overload.t:40:15
+    template swappable_with_v
+    selected partial
+    bind #1 = int & source=deduced
+    bind #2 = int & source=deduced
+    bind #3 = void source=defaulted
+    specialize #1 = int & source=deduced
+    specialize #2 = int & source=deduced
+template-closure-events
+  variable-instantiation
+    entity swappable_with_v

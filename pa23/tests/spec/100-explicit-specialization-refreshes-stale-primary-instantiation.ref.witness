@@ -1,9 +1,0 @@
-translation-unit
-  class-use at pa23/tests/spec/100-explicit-specialization-refreshes-stale-primary-instantiation.t:12:9
-    template char_traits
-    selected explicit
-    bind #1 = char16_t source=explicit
-  class-use at pa23/tests/spec/100-explicit-specialization-refreshes-stale-primary-instantiation.t:21:12
-    template char_traits
-    selected explicit
-    bind #1 = char16_t source=explicit

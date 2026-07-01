@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.2 [temp.names], 5.4 [expr.cast], 7 [dcl.dcl]
 
 namespace meta {

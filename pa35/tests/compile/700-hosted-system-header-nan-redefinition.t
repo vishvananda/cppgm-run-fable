@@ -9,8 +9,4 @@ float nan_value()
 {
   return NAN;
 }
-
-int main()
-{
-  return 0;
-}
+static_assert(sizeof(&nan_value) > 0, "NAN macro body anchor");

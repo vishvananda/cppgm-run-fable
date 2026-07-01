@@ -108,7 +108,7 @@ function @vector_detail__store_2__long_int___store__ov4__base_entry(%this : ptr,
     store i64 %t3, %t5
     return void
 }
-function @vector_detail__each_elem__each_elem(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN13vector_detail9each_elemC1Ev] {
+function @vector_detail__each_elem__each_elem(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN13vector_detail9each_elemC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

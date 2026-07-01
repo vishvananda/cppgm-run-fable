@@ -1,0 +1,17 @@
+translation-unit
+  class-use at pa21/tests/spec/300-out-of-class-member-template-owner-param-rename.t:26:3
+    template deque_like
+    selected primary
+    bind #1 = int source=explicit
+    bind #2 = char source=explicit
+  function-call at pa21/tests/spec/300-out-of-class-member-template-owner-param-rename.t:27:13
+    callee deque_like<int, char>::h
+    selected instantiation
+    bind #1 = int * source=deduced
+template-closure-events
+  ensure-definition
+    entity deque_like<int, char>::h
+  function-instantiation
+    entity deque_like<int, char>::h
+  require-definition
+    entity deque_like<int, char>::h

@@ -1,22 +1,22 @@
 struct S {
   int *p;
 
-  S() : p(0) {}
-  S(const S &o) : p(o.p) {}
+  S() noexcept : p(0) {}
+  S(const S &o) noexcept : p(o.p) {}
 
-  S &operator=(const S &o) {
+  S &operator=(const S &o) noexcept {
     p = o.p;
     return *this;
   }
 
-  ~S() {}
+  ~S() noexcept {}
 
-  operator bool() const {
+  operator bool() const noexcept {
     return p != 0;
   }
 };
 
-bool f(S pattern, S actual) {
+bool f(S pattern, S actual) noexcept {
   S pattern_cv_inner;
   S actual_cv_inner;
   S pattern_base = pattern;

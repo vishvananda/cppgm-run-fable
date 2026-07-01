@@ -1,9 +1,0 @@
-function @main() -> i64 {
-  block ^entry:
-    %t1 = call i64 @N__make()
-    return i64 %t1
-}
-function @N__make() -> i64 {
-  block ^entry:
-    return i64 0
-}

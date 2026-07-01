@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.3.2 [temp.arg.nontype], 9.4.2 [class.static.data]
 
 typedef unsigned long size_t;

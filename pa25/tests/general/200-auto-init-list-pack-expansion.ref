@@ -73,14 +73,14 @@ function @touch__ov2(%__param0 : obj<1x1>) -> i32 [binding=weak, object=_Z5touch
     store i32 %t5, @total
     return i32 0
 }
-function @identity_char___identity(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8identityIcEC1Ev] {
+function @identity_char___identity(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8identityIcEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:
     store ptr %this, $this
     return void
 }
-function @identity_int___identity(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8identityIiEC1Ev] {
+function @identity_int___identity(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN8identityIiEC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

@@ -1,0 +1,13 @@
+translation-unit
+  function-call at pa22/tests/spec/100-function-template-array-bound-shared-deduction.t:14:10
+    callee same_extent
+    selected instantiation
+    bind #1 = int source=deduced
+    bind #2 = 4 source=deduced
+template-closure-events
+  ensure-definition
+    entity same_extent
+  function-instantiation
+    entity same_extent
+  require-definition
+    entity same_extent

@@ -1,0 +1,19 @@
+translation-unit
+  class-use at pa21/tests/spec/100-function-type-top-level-cv-partial-specialization.t:16:15
+    template is_const_match
+    selected partial
+    bind #1 = const int source=explicit
+    specialize #1 = int source=deduced
+  class-use at pa21/tests/spec/100-function-type-top-level-cv-partial-specialization.t:17:15
+    template is_const_match
+    selected primary
+    bind #1 = const int () source=explicit
+  class-use at pa21/tests/spec/100-function-type-top-level-cv-partial-specialization.t:21:10
+    template is_const_match
+    selected primary
+    bind #1 = const int () source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_const_match<const int ()>::value
+  variable-instantiation
+    entity is_const_match<const int>::value

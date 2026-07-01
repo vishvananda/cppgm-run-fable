@@ -1,0 +1,9 @@
+ERROR: ambiguous overload for call pick [matches pick:function of (pointer to const volatile int) returning int [candidate at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:5:1] ranks=0 params={pointer to const volatile int} args={pointer to const volatile int}; pick:function of (pointer to const volatile int) returning int [candidate at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:11:1] ranks=0 params={pointer to const volatile int} args={pointer to const volatile int}] [function main] [is_method no] [body_parent_scope <here>] [body_parent_bindings ] [body_function_scope <here>] [body_function_bindings {values:value=pointer to const volatile int}]
+Diagnostic context:
+analyze_function_binding_output [main]
+  analyze_statement [return-statement] at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:20:3
+    analyze_expression_for_target [ -> int] at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:20:10
+      semantic_expression::analyze_expression_for_target [ -> int] at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:20:10
+        analyze_expression [] at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:20:10
+          semantic_expression::analyze_expression [] at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:20:10
+            analyze_call_expression [] at tests/general/200-ambiguous-cv-pointer-partial-ordering-bad.t:20:10

@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: default template-arguments across redeclarations
 
 template<typename T = int>

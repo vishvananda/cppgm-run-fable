@@ -1,0 +1,66 @@
+global @__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45 [binding=weak, object=@__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45] = {
+  zero 1
+}
+global @__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45__guard : i64 [binding=internal] = zero
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $operation : obj<1x1>
+  slot $starter : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $operation
+    %t2 = addr $starter
+    %t3 = addr $operation
+    %t4 = addr $starter
+    call void @op_bind_like_void_____int____error_code_const_____int______int___timer__void_error_code____start(%t3, %t4)
+    return i32 0
+}
+function @op_bind_like_void_____int____error_code_const_____int______int___timer__void_error_code____start(%this : ptr, %__param1 : ptr [pass=reference]) -> void [binding=weak, object=_ZN2opI9bind_likeIPFvPiRK10error_codeERS1_iE5timerJFvS2_EEE5startI4initJEEEvRT_DpOT0_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+  slot $s : obj<1x1>
+  slot $p : ptr
+  slot $refarg__1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    %t1 = addr $s
+    %t2 = addr $s
+    %t3 = load ptr $this
+    store ptr %t3, $refarg__1
+    %t4 = addr $refarg__1
+    %t5 = call ptr @slot__emplace(%t2, %t4)
+    store ptr %t5, $p
+    %t6 = load ptr $p
+    return void
+}
+function @slot__emplace(%this : ptr, %__param1 : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN4slot7emplaceIN2opI9bind_likeIPFvPiRK10error_codeERS3_iE5timerJFvS4_EEE5proxyEJPSD_EEERT_DpOT0_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    %t1 = load i64 @__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45__guard
+    %t2 = cmp ne i64 %t1, 0
+    branch %t2, ^local_static_ready_1, ^local_static_init_2
+
+  block ^local_static_init_2:
+    %t3 = addr @__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45
+    call void @op_bind_like_void_____int____error_code_const_____int______int___timer__void_error_code____proxy__proxy(%t3)
+    store i64 1, @__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45__guard
+    jump ^local_static_ready_1
+
+  block ^local_static_ready_1:
+    %t4 = addr @__local_static__function_symbol_5f5a4e34736c6f7437656d706c616365494e326f70493962696e645f6c696b65495046765069524b31306572726f725f636f6465455253335f69453574696d65724a467653345f4545453570726f7879454a5053445f45454552545f44704f54305f__h__tokens44_45
+    return ptr %t4
+}
+function @op_bind_like_void_____int____error_code_const_____int______int___timer__void_error_code____proxy__proxy(%this : ptr) -> void [binding=weak, object=_ZN2opI9bind_likeIPFvPiRK10error_codeERS1_iE5timerJFvS2_EEE5proxyC1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+alias object _ZN2opI9bind_likeIPFvPiRK10error_codeERS1_iE5timerJFvS2_EEE5proxyC2Ev = @op_bind_like_void_____int____error_code_const_____int______int___timer__void_error_code____proxy__proxy

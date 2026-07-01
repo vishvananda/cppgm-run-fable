@@ -1,0 +1,48 @@
+function @S__g(%this : ptr) -> void [binding=strong, object=_ZN1S1gEv] {
+  slot $this : ptr
+  slot $arg__1 : obj<1x1>
+
+  block ^entry:
+    store ptr %this, $this
+    %t1 = load ptr $this
+    %t2 = index i8 [projection=field] %t1, 0
+    %t3 = addr $arg__1
+    call void @S__G__local_7740329126509537146__G(%t3)
+    %t4 = call ptr @function_void_int____operator___ov3(%t2, %t3)
+    return void
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $s : obj<1x1>
+
+  block ^entry:
+    %t1 = addr $s
+    %t2 = addr $s
+    call void @S__g(%t2)
+    return i32 0
+}
+function @function_void_int____operator___ov3(%this : ptr, %__param1 : ptr [pass=reference]) -> ptr [binding=weak, object=_ZN8functionIFviEEaSIZN1S1gEvE1GvEERS1_OT_] {
+  slot $this : ptr
+  slot $__param1 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    %t1 = load ptr $this
+    return ptr %t1
+}
+function @function_void_int____function(%this : ptr) -> void [binding=weak, object=_ZN8functionIFviEEC1Ev] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+function @S__G__local_7740329126509537146__G(%this : ptr) -> void [unwind=no, binding=weak, object=_ZZN1S1gEvEN1GC1Ev, trivial_lifecycle=yes] {
+  slot $this : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    return void
+}
+alias object _ZN8functionIFviEEC2Ev = @function_void_int____function
+alias object _ZZN1S1gEvEN1GC2Ev = @S__G__local_7740329126509537146__G

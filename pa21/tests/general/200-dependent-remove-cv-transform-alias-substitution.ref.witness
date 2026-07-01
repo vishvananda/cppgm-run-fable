@@ -1,0 +1,32 @@
+translation-unit
+  alias-use at pa21/tests/general/200-dependent-remove-cv-transform-alias-substitution.t:34:38
+    template remove_cv_t
+    bind #1 = T source=explicit
+  alias-use at pa21/tests/general/200-dependent-remove-cv-transform-alias-substitution.t:43:53
+    template remove_cv_t
+    bind #1 = T source=explicit
+  class-use at pa21/tests/general/200-dependent-remove-cv-transform-alias-substitution.t:45:15
+    template is_same
+    selected partial
+    bind #1 = char source=explicit
+    bind #2 = char source=explicit
+    specialize #1 = char source=deduced
+  class-use at pa21/tests/general/200-dependent-remove-cv-transform-alias-substitution.t:45:32
+    template iterator_traits
+    selected partial
+    bind #1 = const char * source=explicit
+    specialize #1 = const char source=deduced
+  class-use at pa21/tests/general/200-dependent-remove-cv-transform-alias-substitution.t:47:15
+    template is_same
+    selected partial
+    bind #1 = unsigned long source=explicit
+    bind #2 = unsigned long source=explicit
+    specialize #1 = unsigned long source=deduced
+  alias-use at pa21/tests/general/200-dependent-remove-cv-transform-alias-substitution.t:47:23
+    template make_unsigned_t
+    bind #1 = const long source=explicit
+template-closure-events
+  variable-instantiation
+    entity is_same<char, char>::value
+  variable-instantiation
+    entity is_same<unsigned long, unsigned long>::value

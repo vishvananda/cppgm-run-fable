@@ -1,0 +1,35 @@
+translation-unit
+  alias-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-body.t:53:22
+    template enable_if_t
+    bind #1 = is_input<It>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-body.t:56:22
+    template enable_if_t
+    bind #1 = is_bidi<It>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-body.t:61:20
+    template enable_if_t
+    bind #1 = is_input<It>::value source=explicit
+    bind #2 = int source=explicit
+  alias-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-body.t:68:20
+    template enable_if_t
+    bind #1 = is_bidi<It>::value source=explicit
+    bind #2 = int source=explicit
+  class-use at pa22/tests/spec/300-out-of-class-sfinae-member-template-body.t:76:3
+    template container
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa22/tests/spec/300-out-of-class-sfinae-member-template-body.t:79:12
+    callee container<int>::insert
+    selected instantiation
+    bind #1 = bidi_it source=deduced
+    bind #2 = 0 source=defaulted
+template-closure-events
+  ensure-definition
+    entity container<int>::insert
+  function-instantiation
+    entity container<int>::insert
+  require-definition
+    entity container<int>::insert
+  variable-instantiation
+    entity is_input<bidi_it>::value

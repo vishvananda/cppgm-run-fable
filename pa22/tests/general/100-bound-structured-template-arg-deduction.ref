@@ -1,0 +1,77 @@
+global @value : i32 [binding=strong, object=_Z5value] = 9
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $first : obj<8x8>
+  slot $last : obj<8x8>
+  slot $argobj__1 : obj<8x8>
+  slot $argobj__2 : obj<8x8>
+
+  block ^entry:
+    %t1 = addr $first
+    %t2 = addr @value
+    %t3 = addr $first
+    %t4 = index i8 [projection=field] %t3, 0
+    store ptr %t2, %t4
+    %t5 = addr $last
+    %t6 = addr @value
+    %t7 = addr $last
+    %t8 = index i8 [projection=field] %t7, 0
+    store ptr %t6, %t8
+    %t9 = addr $argobj__1
+    %t10 = addr $first
+    copyobj 8x8 %t10, %t9
+    %t11 = addr $argobj__2
+    %t12 = addr $last
+    copyobj 8x8 %t12, %t11
+    %t13 = call i32 @dispatch($argobj__1, $argobj__2)
+    %t14 = binary sub i32 %t13, 9
+    return i32 %t14
+}
+function @dispatch(%first : obj<8x8>, %last : obj<8x8>) -> i32 [binding=weak, object=_Z8dispatchI16reverse_iteratorIPiES2_EiT_T0_] {
+  slot $first : obj<8x8>
+  slot $last : obj<8x8>
+  slot $argobj__1 : obj<8x8>
+  slot $argobj__2 : obj<8x8>
+
+  block ^entry:
+    %t1 = addr $first
+    copyobj 8x8 %first, %t1
+    %t2 = addr $last
+    copyobj 8x8 %last, %t2
+    %t3 = addr $argobj__1
+    %t4 = addr $first
+    copyobj 8x8 %t4, %t3
+    %t5 = addr $argobj__2
+    %t6 = addr $last
+    copyobj 8x8 %t6, %t5
+    %t7 = call ptr @unwrap_range($argobj__1, $argobj__2)
+    %t8 = load i32 %t7
+    return i32 %t8
+}
+function @unwrap_range(%first : obj<8x8>, %last : obj<8x8>) -> ptr [binding=weak, object=_Z12unwrap_rangeI16reverse_iteratorIPiES1_ET0_T_S4_] {
+  slot $first : obj<8x8>
+  slot $last : obj<8x8>
+  slot $argobj__1 : obj<8x8>
+
+  block ^entry:
+    %t1 = addr $first
+    copyobj 8x8 %first, %t1
+    %t2 = addr $last
+    copyobj 8x8 %last, %t2
+    %t3 = addr $argobj__1
+    %t4 = addr $first
+    copyobj 8x8 %t4, %t3
+    %t5 = call ptr @unwrap_iter($argobj__1)
+    return ptr %t5
+}
+function @unwrap_iter(%it : obj<8x8>) -> ptr [binding=weak, object=_Z11unwrap_iterIPiET_16reverse_iteratorIS1_E] {
+  slot $it : obj<8x8>
+
+  block ^entry:
+    %t1 = addr $it
+    copyobj 8x8 %it, %t1
+    %t2 = addr $it
+    %t3 = index i8 [projection=field] %t2, 0
+    %t4 = load ptr %t3
+    return ptr %t4
+}

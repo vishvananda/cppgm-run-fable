@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.8.2.2 [temp.deduct.funcaddr]
 
 int square(int x)

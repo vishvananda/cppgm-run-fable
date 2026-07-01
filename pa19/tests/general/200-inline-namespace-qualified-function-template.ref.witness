@@ -1,0 +1,16 @@
+translation-unit
+  class-use at pa19/tests/general/200-inline-namespace-qualified-function-template.t:30:14
+    template boost::asio::execution::box
+    selected primary
+    bind #1 = int source=explicit
+  function-call at pa19/tests/general/200-inline-namespace-qualified-function-template.t:31:10
+    callee boost::asio::execution::pick
+    selected instantiation
+    bind #1 = int source=deduced
+template-closure-events
+  ensure-definition
+    entity boost::asio::execution::pick
+  function-instantiation
+    entity boost::asio::execution::pick
+  require-definition
+    entity boost::asio::execution::pick

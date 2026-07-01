@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.7.3 [temp.expl.spec], 14.8.1 [temp.arg.explicit]
 
 template<class T>

@@ -233,7 +233,7 @@ function @lib__unwrap_iter_impl_int_____unwrap(%i : ptr) -> ptr [binding=weak, o
     %t1 = load ptr $i
     return ptr %t1
 }
-function @lib__copy_impl__copy_impl(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3lib9copy_implC1Ev] {
+function @lib__copy_impl__copy_impl(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN3lib9copy_implC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

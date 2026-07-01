@@ -1,0 +1,17 @@
+translation-unit
+  function-call at pa23/tests/general/200-forwarding-pack-cast-trailing-return.t:52:7
+    callee declval
+    selected instantiation
+    bind #1 = initiation source=explicit
+  function-call at pa23/tests/general/200-forwarding-pack-cast-trailing-return.t:57:17
+    callee async_wait
+    selected instantiation
+    bind #1 = wrapped_token<wrapped_token<handler>> source=deduced
+  function-call at pa23/tests/general/200-forwarding-pack-cast-trailing-return.t:57:28
+    callee wrap
+    selected instantiation
+    bind #1 = wrapped_token<handler> source=deduced
+  function-call at pa23/tests/general/200-forwarding-pack-cast-trailing-return.t:57:33
+    callee wrap
+    selected instantiation
+    bind #1 = handler source=deduced

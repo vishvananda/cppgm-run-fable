@@ -33,10 +33,16 @@ Inside an assignment directory:
 make
 make test
 make check TEST=tests/path/to/case.t
+make check TEST='tests/path/to/100-*.t'
+make check TEST='tests/path/to/a.t tests/path/to/b.t'
 ```
 
-Use local targets for quick iteration, then return to the root through target
-before considering the assignment complete.
+`TEST=` accepts one checked-in test file, a quoted shell glob, or a quoted
+space-separated list of files and globs. Later assignments with multiple test
+kinds can route mixed entries to the right local runner, for example a
+preprocessor case plus a compile case. Use local targets for quick iteration,
+then return to the root through target before considering the assignment
+complete.
 
 ## Compiler Selection
 

@@ -1,1 +1,0 @@
-ERROR: tests/spec/200-bad-undefined-block-target.t:1: function @main references undefined block target ^missing

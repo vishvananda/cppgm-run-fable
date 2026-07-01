@@ -2,7 +2,8 @@
 
 ### Overview
 
-PA38 adds machine-backend optimization levels to `lowir2native`.
+PA38 adds machine-backend optimization levels to `lowir2native` and to the
+shared native backend used by later `cppgm++` object and link-driver paths.
 
 PA37 optimizes LowIR before backend lowering. PA38 starts after that boundary:
 LowIR has already been translated into machine IR, and the backend must improve
@@ -13,6 +14,8 @@ The questions for this assignment are:
 - can `lowir2native -O1` perform local machine-IR cleanup?
 - can `lowir2native -O2` perform whole-function machine-IR cleanup?
 - can both levels preserve debug metadata and generated program behavior?
+- can the optimized machine-IR path stay reusable by `cppgm++` rather than
+  becoming a standalone `lowir2native` shortcut?
 
 ### Prerequisites
 
@@ -33,9 +36,11 @@ The starter kit supplies:
 - `pa38/lowir2native.cpp`, linked to the editable `dev/lowir2native.cpp`
 - a `dev/lowir2native.cpp` scaffold based on `dev/lowir2native-scaffold.cpp`
 - shared machine-IR and native backend support under `dev/src/`
+- optional typed machine-IR model scaffolding in `dev/src/mir_model.h`, with
+  shared register support in `dev/src/x86_register_model.h`
 - test directories under `pa38/tests/`
 - harness scripts under `pa38/scripts/`
-- checked-in machine-IR and generated-program oracle sidecars
+- checked-in structural machine-IR and generated-program oracle sidecars
 
 The expected implementation work is in `dev/lowir2native.cpp` and the shared
 machine-IR/native backend modules under `dev/src/`, especially machine-IR
@@ -68,6 +73,11 @@ contract is independent of host-specific elapsed time.
 `-O0` remains the PA28 baseline. PA38 must preserve that earlier behavior while
 adding the explicit `-O1` and `-O2` backend optimization levels.
 
+When `cppgm++` later emits native objects or executables at an optimization
+level, it should use this same backend optimization pipeline after PA37 LowIR
+optimization has produced the LowIR program to lower. Do not implement PA38 as
+a display-only `lowir2native` transform that the compiler driver cannot reuse.
+
 ### Output Format
 
 With `--dump-machine-ir <mirfile>`, `lowir2native` writes the optimized machine
@@ -77,9 +87,21 @@ With `-o <program>`, `lowir2native` writes a native executable to `<program>`.
 When both options are present, both outputs must be produced from the same
 optimized machine-IR program.
 
-The primary backend-shape oracle is the machine-IR dump. The generated native
-program's exit status and standard output are behavior-preservation oracles
-layered on top of that structural check.
+`--dump-machine-ir` is the serialized view of the machine-IR program that the
+native backend consumes. The object/native path may keep the MIR in memory, but
+it should not use a different hidden representation with extra backend facts
+that the MIR dump cannot express.
+
+The same rule applies when the machine backend is reached through `cppgm++`:
+optimization, object writing, and executable writing should consume the same
+machine-IR facts that `--dump-machine-ir` can serialize.
+
+The raw `x.ref.mir` file is kept as the debugging-oriented dump produced by
+`--dump-machine-ir`. The primary backend-shape oracle is the structural
+machine-IR sidecar `x.ref.cmir`, compared against a canonicalized form of the
+generated `x.my.mir` dump. The generated native program's exit status and
+standard output are behavior-preservation oracles layered on top of that
+structural check.
 
 ### Error Handling
 
@@ -177,13 +199,14 @@ records implementation exit status, runs the generated program when the build
 succeeds, and compares:
 
 - implementation exit status
-- optimized machine-IR dump
+- optimized raw machine-IR dump, with the checked-in `x.ref.mir` retained for
+  debugging and `x.ref.cmir` used as the structural machine-IR oracle
 - generated-program exit status
 - generated-program standard output, when relevant
 
 Failed reference builds are judged by implementation exit status. Successful
-reference builds are judged by the test directory's structural machine-IR
-validation and generated-program behavior.
+reference builds are judged by structural machine-IR validation and
+generated-program behavior.
 
 ### Out Of Scope
 

@@ -1,0 +1,16 @@
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $value : i32
+
+  block ^entry:
+    store i32 0, $value
+    %t1 = addr $value
+    %t2 = call i32 @base_int___f__ov2(%t1)
+    return i32 %t2
+}
+function @base_int___f__ov2(%__param0 : ptr) -> i32 [binding=weak, object=_ZN4baseIiE1fIiEEiPT_] {
+  slot $__param0 : ptr
+
+  block ^entry:
+    store ptr %__param0, $__param0
+    return i32 2
+}

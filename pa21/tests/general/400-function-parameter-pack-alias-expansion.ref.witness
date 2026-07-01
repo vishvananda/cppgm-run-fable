@@ -1,0 +1,28 @@
+translation-unit
+  alias-use at pa21/tests/general/400-function-parameter-pack-alias-expansion.t:6:16
+    template Wrap
+    bind #1 = Args source=explicit
+  alias-use at pa21/tests/general/400-function-parameter-pack-alias-expansion.t:10:21
+    template Wrap
+    bind #1 = Args source=explicit
+  class-use at pa21/tests/general/400-function-parameter-pack-alias-expansion.t:15:10
+    template Box
+    selected primary
+    bind #1 = <> source=deduced
+  class-use at pa21/tests/general/400-function-parameter-pack-alias-expansion.t:15:29
+    template Box
+    selected primary
+    bind #1 = <int, float> source=explicit
+template-closure-events
+  ensure-definition
+    entity Box<>::f
+  ensure-definition
+    entity Box<int, float>::f
+  function-instantiation
+    entity Box<>::f
+  function-instantiation
+    entity Box<int, float>::f
+  require-definition
+    entity Box<>::f
+  require-definition
+    entity Box<int, float>::f

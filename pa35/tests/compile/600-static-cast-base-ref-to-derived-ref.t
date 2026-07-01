@@ -15,9 +15,8 @@ std::size_t Base::hash() const
   return static_cast<Derived const&>(*this).value;
 }
 
-int main()
+std::size_t static_cast_base_anchor(Derived & d)
 {
-  Derived d{};
-  d.value = 7;
-  return d.hash() == 7 ? 0 : 1;
+  return d.hash();
 }
+static_assert(sizeof(&static_cast_base_anchor) > 0, "base-to-derived static_cast body anchor");

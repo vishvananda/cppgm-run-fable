@@ -40,7 +40,7 @@ function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
     %__o1inl0__t14 = binary add i32 %__o1inl0__t9, %__o1inl0__t13
     return i32 %__o1inl0__t14
 }
-function @S__S(%this : ptr) -> void [binding=weak, object=_ZN1SC1Ev] {
+function @S__S(%this : ptr) -> void [binding=weak, object=_ZN1SC1Ev, trivial_lifecycle=yes] {
   block ^entry:
     return void
 }

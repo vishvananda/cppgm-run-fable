@@ -8,4 +8,9 @@ using namespace std;
 typedef map<string, shared_ptr<int> > Table;
 bool missing(Table & table, const string & key)
 { Table::const_iterator found = table.find(key); return found == table.end(); }
-int main() { Table table; return missing(table, "x") ? 0 : 1; }
+bool map_iterator_lookup_anchor()
+{
+  Table table;
+  return missing(table, "x");
+}
+static_assert(sizeof(&map_iterator_lookup_anchor) > 0, "map iterator lookup body anchor");

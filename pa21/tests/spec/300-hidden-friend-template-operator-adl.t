@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // N3485 focus: 14.5.4 [temp.friend], 14.6.4 [temp.dep.res]
 
 struct sink

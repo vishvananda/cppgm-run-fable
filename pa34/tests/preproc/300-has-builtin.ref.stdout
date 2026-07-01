@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_IDENTIFIER:builtin_off at token 0 at tests/preproc/300-has-builtin.t:1:1

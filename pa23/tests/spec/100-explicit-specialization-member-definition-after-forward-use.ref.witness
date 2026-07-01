@@ -1,9 +1,0 @@
-translation-unit
-  class-use at pa23/tests/spec/100-explicit-specialization-member-definition-after-forward-use.t:11:1
-    template s
-    selected explicit
-    bind #1 = char source=explicit
-  class-use at pa23/tests/spec/100-explicit-specialization-member-definition-after-forward-use.t:23:3
-    template s
-    selected explicit
-    bind #1 = char source=explicit

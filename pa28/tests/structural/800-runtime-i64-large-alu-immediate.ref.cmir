@@ -1,4 +1,4 @@
-machine_ir x86_64 macos
+machine_ir x86_64 <host-target>
 
 startup
     call @main

@@ -1,9 +1,0 @@
-global @__rtti_int : i64 = zero
-
-function @main() -> i64 {
-  block ^entry:
-    %t1 = addr @__rtti_int
-    %t2 = addr @__rtti_int
-    %t3 = cmp eq ptr %t1, %t2
-    return i64 %t3
-}

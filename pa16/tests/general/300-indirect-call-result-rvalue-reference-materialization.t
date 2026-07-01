@@ -33,4 +33,4 @@ int main()
   binder_base b(s);
   return b.executor_.value == 13 ? 0 : 1;
 }
-// VALIDATION: run-pass
+// VALIDATION: compile-pass

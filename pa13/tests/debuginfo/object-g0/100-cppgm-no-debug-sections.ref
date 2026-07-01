@@ -1,7 +1,5 @@
-object:	file format Mach-O 64-bit x86-64
-
-.debug_info contents:
-
-.debug_loc contents:
-
-.debug_line contents:
+dwarf-facts 1
+object native
+debug_info absent
+debug_line absent
+debug_loc absent

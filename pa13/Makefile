@@ -18,6 +18,7 @@ RDEPDIR = $(OBJ)/release/.d
 DDEPDIR = $(OBJ)/debug/.d
 COURSE_TEST_ROOT = $(wildcard course/pa13)
 LOCAL_TEST_ROOT = tests/spec
+REF_TEST_ROOT = $(LOCAL_TEST_ROOT)
 DEBUGINFO_TEST_ROOT = tests/debuginfo
 DEBUGINFO_SOURCE_G0_TEST_ROOT = $(DEBUGINFO_TEST_ROOT)/source-g0
 DEBUGINFO_MACHINE_TEST_ROOT = $(DEBUGINFO_TEST_ROOT)/machine
@@ -66,7 +67,7 @@ test: $(TEST_DEPS)
 endif
 
 ref-test:
-	@scripts/run_all_tests.pl $(REF_TEST_APP) ref $(LOCAL_TEST_ROOT)
+	@$(REF_TEST_RUN)
 
 ref-test-debuginfo:
 	@CPPGM_LOWIROPT_APP='$(DEBUGINFO_LOWIROPT_REF_APP)' scripts/run_all_tests.pl scripts/lowiropt-o0.sh ref $(DEBUGINFO_TEST_ROOT)/o0
@@ -102,32 +103,34 @@ debuginfo-lowir2native-target:
 	@if [ "$(CPPGM_SKIP_DEV_REBUILD)" = "1" ] && [ -x ../dev/lowir2native ]; then true; else $(MAKE) -C ../dev lowir2native CXX=$(CXX) CPPGM_HOST_CXX=$(CPPGM_HOST_CXX); fi
 
 test-debuginfo: debuginfo-lowiropt-target debuginfo-cppgm-target debuginfo-lowir2native-target
+	@rm -f .test_failed
 	@scripts/run_all_tests.pl scripts/lowiropt-o0.sh my $(DEBUGINFO_TEST_ROOT)/o0
-	@scripts/compare_results.pl ref my $(DEBUGINFO_TEST_ROOT)/o0
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_TEST_ROOT)/o0
 	@scripts/run_all_tests.pl scripts/cppgm-emit-lowir-g0.sh my $(DEBUGINFO_SOURCE_G0_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_SOURCE_G0_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_SOURCE_G0_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-emit-lowir-o0.sh my $(DEBUGINFO_TEST_ROOT)/source
-	@scripts/compare_results.pl ref my $(DEBUGINFO_TEST_ROOT)/source
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_TEST_ROOT)/source
 	@scripts/run_all_tests.pl scripts/lowir2native-dump-machine-ir.sh my $(DEBUGINFO_MACHINE_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_MACHINE_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_MACHINE_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-dwarfdump-line-g0.sh my $(DEBUGINFO_OBJECT_G0_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_G0_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_G0_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-dwarfdump-line-o0.sh my $(DEBUGINFO_OBJECT_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-dwarfdump-line-o1.sh my $(DEBUGINFO_OBJECT_O1_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_O1_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_O1_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-dwarfdump-line-o2.sh my $(DEBUGINFO_OBJECT_O2_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_O2_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_OBJECT_O2_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-lldb-line-g0.sh my $(DEBUGINFO_EXECUTABLE_G0_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_G0_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_G0_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-lldb-multi-o0.sh my $(DEBUGINFO_EXECUTABLE_MULTI_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_MULTI_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_MULTI_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-lldb-line-o0.sh my $(DEBUGINFO_EXECUTABLE_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-lldb-line-o1.sh my $(DEBUGINFO_EXECUTABLE_O1_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_O1_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_O1_TEST_ROOT)
 	@scripts/run_all_tests.pl scripts/cppgm-lldb-line-o2.sh my $(DEBUGINFO_EXECUTABLE_O2_TEST_ROOT)
-	@scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_O2_TEST_ROOT)
+	@KEEP_GOING=1 scripts/compare_results.pl ref my $(DEBUGINFO_EXECUTABLE_O2_TEST_ROOT)
+	@test ! -f .test_failed
 
 clean:
 	-rm -f $(TARGET) $(TARGET)-debug $(OBJ)/release/*.o $(OBJ)/debug/*.o

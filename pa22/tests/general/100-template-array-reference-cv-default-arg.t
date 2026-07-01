@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 
 struct array_reference_cv_stream
 {
@@ -35,16 +35,16 @@ namespace array_reference_cv_detail
 class array_reference_cv_lazy
 {
 public:
-  virtual ~array_reference_cv_lazy()
-  {
-  }
+  // Keep this PA22 reducer non-polymorphic; the full virtual cleanup case is in PA24.
 
-  virtual array_reference_cv_stream& operator()(array_reference_cv_stream& out) const
+
+
+  array_reference_cv_stream& operator()(array_reference_cv_stream& out) const
   {
     return out;
   }
 
-protected:
+public:
   explicit array_reference_cv_lazy(bool = true)
   {
   }
@@ -62,7 +62,7 @@ public:
   {
   }
 
-  array_reference_cv_stream& operator()(array_reference_cv_stream& out) const override
+  array_reference_cv_stream& operator()(array_reference_cv_stream& out) const
   {
     return prev_(out) << array_reference_cv_detail::print_helper(value_);
   }
@@ -86,5 +86,7 @@ void force(array_reference_cv_lazy const& lazy, array_reference_cv_stream& out)
 
 int main()
 {
+  array_reference_cv_lazy lazy(false);
+  (void)lazy;
   return 0;
 }

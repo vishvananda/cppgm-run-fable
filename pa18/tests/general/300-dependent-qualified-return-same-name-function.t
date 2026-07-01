@@ -1,4 +1,4 @@
-// VALIDATION: run-pass
+// VALIDATION: compile-pass
 // Boost.Fusion reduction: a dependent qualified member return type keeps the
 // class-template owner metadata even when an unrelated ordinary function has
 // the same unqualified name as the class template.

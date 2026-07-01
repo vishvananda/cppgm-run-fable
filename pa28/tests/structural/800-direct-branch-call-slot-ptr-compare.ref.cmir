@@ -1,4 +1,4 @@
-machine_ir x86_64 macos
+machine_ir x86_64 <host-target>
 
 startup
     call @main
@@ -22,36 +22,35 @@ function @clobber
   frame
     stack_size 64
     scratch_bytes 0
-    param-slot %a -> [rbp-8] : i64
-    param-slot %b -> [rbp-16] : i64
-    param-slot %c -> [rbp-24] : i64
-    param-slot %d -> [rbp-32] : i64
-    param-slot %e -> [rbp-40] : i64
-    param-slot %f -> [rbp-48] : i64
+    param-slot %a -> [rbp-<off0>] : i64
+    param-slot %b -> [rbp-<off1>] : i64
+    param-slot %c -> [rbp-<off2>] : i64
+    param-slot %d -> [rbp-<off3>] : i64
+    param-slot %e -> [rbp-<off4>] : i64
+    param-slot %f -> [rbp-<off5>] : i64
 
   block ^entry
-    store.i64 [rbp-8], rdi
-    store.i64 [rbp-16], rsi
-    store.i64 [rbp-24], rdx
-    store.i64 [rbp-32], rcx
-    store.i64 [rbp-40], r8
-    store.i64 [rbp-48], r9
+    store.i64 [rbp-<off0>], rdi
+    store.i64 [rbp-<off1>], rsi
+    store.i64 [rbp-<off2>], rdx
+    store.i64 [rbp-<off3>], rcx
+    store.i64 [rbp-<off4>], r8
+    store.i64 [rbp-<off5>], r9
     ret
 
 function @main
   abi
     return i64 -> rax
   frame
-    stack_size 32
+    stack_size 16
     scratch_bytes 0
-    preserve rbx
-    slot $first -> [rbp-8] : ptr
-    slot $last -> [rbp-16] : ptr
+    slot $first -> [rbp-<off0>] : ptr
+    slot $last -> [rbp-<off1>] : ptr
 
   block ^entry
     mov r8, @cells
-    store.ptr [rbp-8], r8
-    store.ptr [rbp-16], r8
+    store.ptr [rbp-<off0>], r8
+    store.ptr [rbp-<off1>], r8
     mov rdi, 10
     mov rsi, 20
     mov rdx, 30
@@ -59,8 +58,8 @@ function @main
     mov r8, 50
     mov r9, 60
     call @clobber
-    load.ptr rax, [rbp-8]
-    cmp.ptr rax, [rbp-16]
+    load.ptr rax, [rbp-<off0>]
+    cmp.ptr rax, [rbp-<off1>]
     je ^done
     jmp ^body
 

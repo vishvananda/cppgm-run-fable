@@ -1,1 +1,0 @@
-ERROR: expected declaration near TT_IDENTIFIER:have_flt_min at token 0 at tests/preproc/400-host-float-limit-macros.t:1:1

@@ -36,9 +36,9 @@ public:
 struct fat_executor {};
 static_assert(std::is_constructible<boost::asio::any_completion_executor, fat_executor>::value,
               "SFINAE constructor accepts fat_executor");
-int main()
+void imported_base_constructor_anchor()
 {
   boost::asio::any_completion_executor ex = fat_executor();
   (void)ex;
-  return 0;
 }
+static_assert(sizeof(&imported_base_constructor_anchor) > 0, "SFINAE constructor body anchor");

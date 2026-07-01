@@ -11,9 +11,8 @@ function @f
     param %x -> rsi : i64
     return i64 -> rax
   frame
-    stack_size 32
+    stack_size 0
     scratch_bytes 0
-    preserve <gpr0> <gpr1>
 
   block ^entry
     mov r8, rdi

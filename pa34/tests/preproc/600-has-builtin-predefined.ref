@@ -1,0 +1,4 @@
+preproc 1
+sof tests/preproc/600-has-builtin-predefined.t
+identifier good
+eof

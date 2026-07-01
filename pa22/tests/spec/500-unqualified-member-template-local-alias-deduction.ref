@@ -1,0 +1,56 @@
+declare function @get_compiler() -> ptr [binding=strong, object=_Z12get_compilerv]
+declare function @get_flag() -> ptr [binding=strong, object=_Z8get_flagv]
+declare function @get_matcher() -> ptr [binding=weak, object=_Z11get_matcherIiLb1EEPN6detail7matcherIT_XT0_EEEv]
+declare function @get_state() -> ptr [binding=strong, object=_Z9get_statev]
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $cond__1 : i32
+
+  block ^entry:
+    %t1 = call ptr @get_compiler()
+    %t2 = call ptr @get_flag()
+    %t3 = call u8 @compiler_int___bracket(%t1, %t2)
+    branch %t3, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t4 = load i32 $cond__1
+    return i32 %t4
+}
+function @compiler_int___bracket(%this : ptr, %__param1 : ptr [pass=reference]) -> u8 [binding=weak, object=_ZN8compilerIiE7bracketILb1EEEbR4flagIXT_EE] {
+  slot $this : ptr
+  slot $__param1 : ptr
+  slot $s : ptr
+  slot $m : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    %t1 = call ptr @get_state()
+    store ptr %t1, $s
+    %t2 = call ptr @get_matcher()
+    store ptr %t2, $m
+    %t3 = load ptr $this
+    %t4 = load ptr $s
+    %t5 = load ptr $m
+    %t6 = call u8 @compiler_int___term(%t3, %t4, %t5)
+    return u8 %t6
+}
+function @compiler_int___term(%this : ptr, %__param1 : ptr [pass=reference], %__param2 : ptr [pass=reference]) -> u8 [binding=weak, object=_ZN8compilerIiE4termILb1EEEbR5stateRN6detail7matcherIiXT_EEE] {
+  slot $this : ptr
+  slot $__param1 : ptr
+  slot $__param2 : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store ptr %__param1, $__param1
+    store ptr %__param2, $__param2
+    return u8 1
+}

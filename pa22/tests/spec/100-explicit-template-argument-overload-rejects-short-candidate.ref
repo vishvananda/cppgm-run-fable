@@ -49,7 +49,7 @@ function @holder_int___pick(%this : ptr, %__param1 : i32) -> obj<1x1> [binding=w
     call void @three__three(%t1)
     return obj<1x1> $retobj__1
 }
-function @three__three(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5threeC1Ev] {
+function @three__three(%this : ptr) -> void [unwind=no, binding=weak, object=_ZN5threeC1Ev, trivial_lifecycle=yes] {
   slot $this : ptr
 
   block ^entry:

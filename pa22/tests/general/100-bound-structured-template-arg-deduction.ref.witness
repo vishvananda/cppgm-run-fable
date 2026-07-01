@@ -1,0 +1,29 @@
+translation-unit
+  class-use at pa22/tests/general/100-bound-structured-template-arg-deduction.t:27:3
+    template reverse_iterator
+    selected primary
+    bind #1 = int * source=explicit
+  class-use at pa22/tests/general/100-bound-structured-template-arg-deduction.t:28:3
+    template reverse_iterator
+    selected primary
+    bind #1 = int * source=explicit
+  function-call at pa22/tests/general/100-bound-structured-template-arg-deduction.t:29:10
+    callee dispatch
+    selected instantiation
+    bind #1 = reverse_iterator<int *> source=deduced
+    bind #2 = reverse_iterator<int *> source=deduced
+template-closure-events
+  ensure-definition
+    entity dispatch
+  function-instantiation
+    entity dispatch
+  function-instantiation
+    entity unwrap_iter
+  function-instantiation
+    entity unwrap_range
+  require-definition
+    entity dispatch
+  require-definition
+    entity unwrap_iter
+  require-definition
+    entity unwrap_range
