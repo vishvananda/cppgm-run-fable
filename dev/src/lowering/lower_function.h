@@ -158,9 +158,6 @@ private:
 	                              const string& dest);
 	// One by_address call argument object (slot kind "arg").
 	string MaterializeClassArg(const SemNode& node, const TypePtr& bare);
-	// A lowering-owned destructor action for a materialized class
-	// call result.
-	const SemNode* MakeResultCleanup(const TypePtr& bare);
 	// --- PA16 allocation expressions (lower_new.cpp) ---
 	LowerValue LowerNewArray(const SemNode& node);
 	LowerValue LowerNewInit(const SemNode& node);
@@ -219,8 +216,10 @@ private:
 	void LowerTrivialCopyAction(const SemNode& action,
 	                            const string& this_text);
 	// A class temporary: a fresh object slot plus its constructor run;
-	// returns the address temp ("%tN").
-	string MaterializeTemporary(const SemNode& action, const char* kind);
+	// returns the address temp ("%tN"). `register_cleanup` is false
+	// for by-value argument objects, which the callee destroys.
+	string MaterializeTemporary(const SemNode& action, const char* kind,
+	                            bool register_cleanup);
 	string ClassArrayElement(const string& base, const LowerValue& index,
 	                         const TypePtr& element);
 
@@ -238,7 +237,8 @@ private:
 	void LowerConstructorAction(const SemNode& node);
 	void BeginFullExpression(const SemNode& root);
 	void EndFullExpression();
-	bool TreeHasTempCleanups(const SemNode& node) const;
+	bool ScanArmsCleanups(const SemNode& node, bool& live,
+	                      bool skip_own_cleanup) const;
 	void EmitTempCleanups(size_t from);
 	void OpenEhRegion();
 	void PushCleanupScope();
@@ -299,13 +299,12 @@ private:
 	bool in_lifetime_action_;
 	// --- full-expression temporary state ---
 	vector<TempCleanup> temp_cleanups_;
-	// Nodes the lowering itself owns (call-result cleanups).
-	vector<SemNodePtr> owned_nodes_;
 	vector<size_t> fe_marks_;
 	vector<char> fe_armed_;
-	// The open full expression constructs destructible temporaries:
-	// may-unwind calls run under dispatch regions even before the
-	// first cleanup registers.
+	// The open full expression runs a call while a caller-owned
+	// destructible temporary is live: its may-unwind calls run under
+	// dispatch regions (including calls before the first cleanup
+	// registers).
 	bool eh_armed_;
 	bool in_cleanup_emission_;
 	int ctor_depth_;  // open LowerConstructorCall frames

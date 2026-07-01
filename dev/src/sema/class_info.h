@@ -126,7 +126,8 @@ struct ClassInfo
 		  specials_declared(false), copy_assign_index(-1),
 		  move_assign_index(-1), copy_assign_deleted(false),
 		  copy_assign_built(false), move_assign_built(false),
-		  copy_assign_unwind_no(false), move_assign_unwind_no(false)
+		  copy_assign_unwind_no(false), move_assign_unwind_no(false),
+		  facts_version(0), facts_valid(0), facts_value(0)
 	{}
 
 	const NamedTypeInfo* entity;
@@ -182,6 +183,14 @@ struct ClassInfo
 	bool move_assign_built;
 	bool copy_assign_unwind_no;
 	bool move_assign_unwind_no;
+	// Lazily memoized recursive class facts (triviality and
+	// construction/destruction queries). Out-of-class special-member
+	// definitions can change the underlying facts after class
+	// completion; each such mutation bumps the global facts version
+	// (InvalidateClassFacts) and stale memos recompute on next query.
+	mutable unsigned long long facts_version;
+	mutable unsigned facts_valid;
+	mutable unsigned facts_value;
 };
 
 // The per-translation-unit class record arena, owned by the SemUnit.
@@ -213,6 +222,8 @@ public:
 	const ClassInfo* MemberClass(const TypePtr& type) const;
 
 private:
+	bool ComputeDefaultConstructionEffects(const ClassInfo& info) const;
+
 	map<const NamedTypeInfo*, unique_ptr<ClassInfo>> infos_;
 };
 
@@ -253,7 +264,14 @@ ECtorKind ClassifyCtorKind(const NamedTypeInfo* entity,
 
 // --- PA16 triviality facts (9p6, 12.8) --------------------------------
 // All traverse the base/member subobject tree through the entities'
-// class_record links, so they need completed classes only.
+// class_record links, so they need completed classes only. Results are
+// memoized per class (ClassInfo::facts_*); a post-completion mutation
+// of the underlying facts must call InvalidateClassFacts.
+
+// Invalidates every memoized class fact. Called when an out-of-class
+// special-member definition changes a completed class's facts
+// (BindQualifiedSpecialMember).
+void InvalidateClassFacts();
 
 // The class record of a (possibly array-of-class) subobject type, or
 // null (link-based; no registry needed).

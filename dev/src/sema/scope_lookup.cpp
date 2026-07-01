@@ -136,19 +136,35 @@ bool SameFoundEntity(const ScopeBinding& a, const ScopeBinding& b)
 }
 
 // Merges one more found declaration into the result; bindings naming
-// distinct entities make the lookup ambiguous.
-void MergeFound(const ScopeBinding* candidate, const ScopeBinding*& result)
+// distinct entities make the lookup ambiguous. Function bindings
+// collect apart: same-level function declarations form one overload
+// set instead of an ambiguity (7.3.4p6).
+void MergeFound(const ScopeBinding* candidate, const ScopeBinding*& result,
+                vector<const ScopeBinding*>& functions)
 {
+	if (candidate->kind == SB_FUNCTION)
+	{
+		// The same declaration reached through several import paths
+		// shares its type node (using-declarations copy the binding).
+		for (size_t i = 0; i < functions.size(); i++)
+			if (functions[i] == candidate ||
+			    functions[i]->type == candidate->type)
+				return;
+		functions.push_back(candidate);
+		return;
+	}
 	if (!result)
 		result = candidate;
 	else if (result != candidate && !SameFoundEntity(*result, *candidate))
-		throw runtime_error("ambiguous name lookup of " + candidate->name);
+		throw AmbiguousLookupError("ambiguous name lookup of " +
+		                           candidate->name);
 }
 
 }  // namespace
 
 const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
-                                      EScopeLookupFilter filter)
+                                      EScopeLookupFilter filter,
+                                      vector<const ScopeBinding*>* fn_set)
 {
 	vector<ActiveDirective> closure = DirectiveClosure(from);
 	for (const Scope* scope = from; scope; scope = scope->parent)
@@ -165,11 +181,12 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 			continue;
 		}
 		// 7.3.4p2/p6: directive-imported names appear beside the
-		// namespace's own declarations; distinct entities found at
-		// the same level make the name ambiguous.
+		// namespace's own declarations; distinct non-function entities
+		// found at the same level make the name ambiguous.
 		const ScopeBinding* found = 0;
+		vector<const ScopeBinding*> functions;
 		if (own)
-			MergeFound(own, found);
+			MergeFound(own, found, functions);
 		for (size_t i = 0; i < closure.size(); i++)
 		{
 			if (closure[i].anchor != scope)
@@ -177,7 +194,19 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 			const ScopeBinding* member =
 				FindOwnBinding(*closure[i].nominated, name);
 			if (member && BindingPassesFilter(*member, filter))
-				MergeFound(member, found);
+				MergeFound(member, found, functions);
+		}
+		if (found && !functions.empty())
+			throw AmbiguousLookupError("ambiguous name lookup of " +
+			                           name);
+		if (!functions.empty())
+		{
+			if (functions.size() > 1 && !fn_set)
+				throw AmbiguousLookupError("ambiguous name lookup of " +
+				                           name);
+			if (fn_set)
+				*fn_set = functions;
+			return functions[0];
 		}
 		if (found)
 			return found;
@@ -201,14 +230,20 @@ const ScopeBinding* QualifiedNamespaceSearch(const Scope& scope,
 	if (own && BindingPassesFilter(*own, filter))
 		return own;
 	const ScopeBinding* found = 0;
+	vector<const ScopeBinding*> functions;
 	for (size_t i = 0; i < scope.using_directives.size(); i++)
 	{
 		const ScopeBinding* member = QualifiedNamespaceSearch(
 			*scope.using_directives[i], name, filter, visited);
 		if (member)
-			MergeFound(member, found);
+			MergeFound(member, found, functions);
 	}
-	return found;
+	// Qualified lookup resolves to one binding: distinct functions
+	// reached through several nominated namespaces stay ambiguous
+	// here (no caller resolves a merged set through this path).
+	if (functions.size() > 1 || (found && !functions.empty()))
+		throw AmbiguousLookupError("ambiguous name lookup of " + name);
+	return functions.empty() ? found : functions[0];
 }
 
 }  // namespace

@@ -10,7 +10,51 @@ unsigned long long RoundUpBits(unsigned long long value,
 	return (value + alignment - 1) / alignment * alignment;
 }
 
+// One bit per memoized recursive class fact (ClassInfo::facts_*).
+enum EClassFact
+{
+	CF_NEEDS_DESTRUCTION,
+	CF_NEEDS_CONSTRUCTION,
+	CF_DESTRUCTION_EFFECTS,
+	CF_DEFAULT_CTOR_EFFECTS,
+	CF_TRIVIAL_DTOR,
+	CF_TRIVIAL_COPY_CTOR,
+	CF_TRIVIAL_MOVE_CTOR,
+	CF_TRIVIAL_COPY_ASSIGN,
+	CF_TRIVIAL_MOVE_ASSIGN
+};
+
+unsigned long long g_class_facts_version = 1;
+
+bool FactCached(const ClassInfo& info, unsigned fact, bool& value)
+{
+	if (info.facts_version != g_class_facts_version)
+	{
+		info.facts_version = g_class_facts_version;
+		info.facts_valid = 0;
+	}
+	if (!(info.facts_valid & (1u << fact)))
+		return false;
+	value = (info.facts_value >> fact) & 1u;
+	return true;
+}
+
+bool FactStore(const ClassInfo& info, unsigned fact, bool value)
+{
+	info.facts_valid |= 1u << fact;
+	if (value)
+		info.facts_value |= 1u << fact;
+	else
+		info.facts_value &= ~(1u << fact);
+	return value;
+}
+
 }  // namespace
+
+void InvalidateClassFacts()
+{
+	g_class_facts_version++;
+}
 
 ClassInfo& ClassRegistry::Create(const NamedTypeInfo* entity)
 {
@@ -49,34 +93,35 @@ const ClassInfo* ClassRegistry::MemberClass(const TypePtr& type) const
 
 bool ClassRegistry::NeedsDestruction(const ClassInfo& info) const
 {
-	if (info.has_user_dtor)
-		return true;
-	if (info.base && NeedsDestruction(*info.base))
-		return true;
-	for (size_t i = 0; i < info.fields.size(); i++)
+	bool value;
+	if (FactCached(info, CF_NEEDS_DESTRUCTION, value))
+		return value;
+	value = info.has_user_dtor;
+	if (!value && info.base)
+		value = NeedsDestruction(*info.base);
+	for (size_t i = 0; !value && i < info.fields.size(); i++)
 	{
 		const ClassInfo* member = MemberClass(info.fields[i].type);
-		if (member && NeedsDestruction(*member))
-			return true;
+		value = member && NeedsDestruction(*member);
 	}
-	return false;
+	return FactStore(info, CF_NEEDS_DESTRUCTION, value);
 }
 
 bool ClassRegistry::NeedsConstruction(const ClassInfo& info) const
 {
-	if (info.has_user_ctor)
-		return true;
-	if (info.base && NeedsConstruction(*info.base))
-		return true;
-	for (size_t i = 0; i < info.fields.size(); i++)
+	bool value;
+	if (FactCached(info, CF_NEEDS_CONSTRUCTION, value))
+		return value;
+	value = info.has_user_ctor;
+	if (!value && info.base)
+		value = NeedsConstruction(*info.base);
+	for (size_t i = 0; !value && i < info.fields.size(); i++)
 	{
-		if (info.fields[i].default_init)
-			return true;
 		const ClassInfo* member = MemberClass(info.fields[i].type);
-		if (member && NeedsConstruction(*member))
-			return true;
+		value = info.fields[i].default_init ||
+			(member && NeedsConstruction(*member));
 	}
-	return false;
+	return FactStore(info, CF_NEEDS_CONSTRUCTION, value);
 }
 
 // An analyzed special-member definition with no statements (and, for
@@ -88,22 +133,33 @@ static bool EmptyMemberBody(const AstStmt* body)
 
 bool ClassRegistry::DestructionHasEffects(const ClassInfo& info) const
 {
-	if (info.has_user_dtor &&
-	    (!info.dtor_definition ||
-	     !EmptyMemberBody(info.dtor_definition->body.get())))
-		return true;
-	if (info.base && DestructionHasEffects(*info.base))
-		return true;
-	for (size_t i = 0; i < info.fields.size(); i++)
+	bool value;
+	if (FactCached(info, CF_DESTRUCTION_EFFECTS, value))
+		return value;
+	value = info.has_user_dtor &&
+		(!info.dtor_definition ||
+		 !EmptyMemberBody(info.dtor_definition->body.get()));
+	if (!value && info.base)
+		value = DestructionHasEffects(*info.base);
+	for (size_t i = 0; !value && i < info.fields.size(); i++)
 	{
 		const ClassInfo* member = MemberClass(info.fields[i].type);
-		if (member && DestructionHasEffects(*member))
-			return true;
+		value = member && DestructionHasEffects(*member);
 	}
-	return false;
+	return FactStore(info, CF_DESTRUCTION_EFFECTS, value);
 }
 
 bool ClassRegistry::DefaultConstructionHasEffects(const ClassInfo& info) const
+{
+	bool value;
+	if (FactCached(info, CF_DEFAULT_CTOR_EFFECTS, value))
+		return value;
+	return FactStore(info, CF_DEFAULT_CTOR_EFFECTS,
+	                 ComputeDefaultConstructionEffects(info));
+}
+
+bool ClassRegistry::ComputeDefaultConstructionEffects(
+	const ClassInfo& info) const
 {
 	if (info.has_user_ctor)
 	{
@@ -339,37 +395,52 @@ bool SubobjectsSatisfy(const ClassInfo& info)
 
 bool ClassHasTrivialDtor(const ClassInfo& info)
 {
-	if (info.has_user_dtor || info.dtor_deleted)
-		return false;
-	return SubobjectsSatisfy<ClassHasTrivialDtor>(info);
+	bool value;
+	if (FactCached(info, CF_TRIVIAL_DTOR, value))
+		return value;
+	value = !info.has_user_dtor && !info.dtor_deleted &&
+		SubobjectsSatisfy<ClassHasTrivialDtor>(info);
+	return FactStore(info, CF_TRIVIAL_DTOR, value);
 }
 
 bool ClassHasTrivialCopyCtor(const ClassInfo& info)
 {
-	if (UserProvidedCtor(info, CK_COPY))
-		return false;
-	return SubobjectsSatisfy<ClassHasTrivialCopyCtor>(info);
+	bool value;
+	if (FactCached(info, CF_TRIVIAL_COPY_CTOR, value))
+		return value;
+	value = !UserProvidedCtor(info, CK_COPY) &&
+		SubobjectsSatisfy<ClassHasTrivialCopyCtor>(info);
+	return FactStore(info, CF_TRIVIAL_COPY_CTOR, value);
 }
 
 bool ClassHasTrivialMoveCtor(const ClassInfo& info)
 {
-	if (UserProvidedCtor(info, CK_MOVE))
-		return false;
-	return SubobjectsSatisfy<ClassHasTrivialMoveCtor>(info);
+	bool value;
+	if (FactCached(info, CF_TRIVIAL_MOVE_CTOR, value))
+		return value;
+	value = !UserProvidedCtor(info, CK_MOVE) &&
+		SubobjectsSatisfy<ClassHasTrivialMoveCtor>(info);
+	return FactStore(info, CF_TRIVIAL_MOVE_CTOR, value);
 }
 
 bool ClassHasTrivialCopyAssign(const ClassInfo& info)
 {
-	if (info.has_user_copy_assign)
-		return false;
-	return SubobjectsSatisfy<ClassHasTrivialCopyAssign>(info);
+	bool value;
+	if (FactCached(info, CF_TRIVIAL_COPY_ASSIGN, value))
+		return value;
+	value = !info.has_user_copy_assign &&
+		SubobjectsSatisfy<ClassHasTrivialCopyAssign>(info);
+	return FactStore(info, CF_TRIVIAL_COPY_ASSIGN, value);
 }
 
 bool ClassHasTrivialMoveAssign(const ClassInfo& info)
 {
-	if (info.has_user_move_assign)
-		return false;
-	return SubobjectsSatisfy<ClassHasTrivialMoveAssign>(info);
+	bool value;
+	if (FactCached(info, CF_TRIVIAL_MOVE_ASSIGN, value))
+		return value;
+	value = !info.has_user_move_assign &&
+		SubobjectsSatisfy<ClassHasTrivialMoveAssign>(info);
+	return FactStore(info, CF_TRIVIAL_MOVE_ASSIGN, value);
 }
 
 bool ClassTriviallyCopyable(const ClassInfo& info)

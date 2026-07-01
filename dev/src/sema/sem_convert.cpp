@@ -83,15 +83,25 @@ ImplicitConversion ClassifyFunctionSet(const ConversionSource& source,
 	return result;
 }
 
+// `allow_user` controls whether user-defined conversions (converting
+// constructors, conversion functions) participate. A user conversion's
+// own nested classifications run with it false — 13.3.3.1.2p1 permits
+// one user conversion per sequence — which also bounds the recursion
+// over mutually convertible classes.
 ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
-                                            const TypePtr& dest);
+                                            const TypePtr& dest,
+                                            bool allow_user);
 ImplicitConversion ClassifySourceConversionFunction(
 	const ConversionSource& source, const TypePtr& dest, bool contextual);
+ImplicitConversion ClassifyConversionImpl(const ConversionSource& source,
+                                          const TypePtr& dest,
+                                          bool contextual, bool allow_user);
 
 // 4.5/4.6/4.7-4.12 over non-reference destinations. The destination is
 // taken as an object value: its own top-level cv is ignored.
 ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
-                                           const TypePtr& dest_in)
+                                           const TypePtr& dest_in,
+                                           bool allow_user)
 {
 	ImplicitConversion result;
 	TypePtr dest = RemoveTopCv(dest_in);
@@ -210,7 +220,7 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 	// 13.3.3.1.2/12.3.1: a class destination accepts sources its
 	// non-explicit converting constructors take through one standard
 	// conversion (the PA15 user-defined-conversion subset).
-	if (dest->kind == TK_CLASS && dest->named->class_record &&
+	if (allow_user && dest->kind == TK_CLASS && dest->named->class_record &&
 	    !(from->kind == TK_CLASS &&
 	      BaseClassDistance(from->named, dest->named) >= 0))
 	{
@@ -223,10 +233,11 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 			    ctor.type->parameters.size() != 1)
 				continue;
 			const TypePtr& param = ctor.type->parameters[0];
-			// One standard conversion reaches the parameter; chained
-			// user conversions stay excluded below.
-			ImplicitConversion inner = ClassifyConversion(source, param);
-			if (!inner.viable || inner.rank == CR_USER)
+			// One *standard* conversion reaches the parameter: the
+			// nested classification runs without user conversions.
+			ImplicitConversion inner =
+				ClassifyConversionImpl(source, param, false, false);
+			if (!inner.viable)
 				continue;
 			result.viable = true;
 			result.rank = CR_USER;
@@ -239,7 +250,8 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 }
 
 ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
-                                            const TypePtr& dest)
+                                            const TypePtr& dest,
+                                            bool allow_user)
 {
 	ImplicitConversion result;
 	const TypePtr& referee = dest->target;
@@ -312,7 +324,7 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	// 8.5.3p5: a conversion function of the source class yielding a
 	// compatible referee binds directly and is preferred over a
 	// constructor-built temporary.
-	if (RemoveTopCv(source.type)->kind == TK_CLASS)
+	if (allow_user && RemoveTopCv(source.type)->kind == TK_CLASS)
 	{
 		ImplicitConversion via_fn =
 			ClassifySourceConversionFunction(source, dest, false);
@@ -325,7 +337,7 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 		}
 	}
 	ImplicitConversion value =
-		ClassifyValueConversion(source, RemoveTopCv(referee));
+		ClassifyValueConversion(source, RemoveTopCv(referee), allow_user);
 	if (!value.viable)
 		return result;
 	result.viable = true;
@@ -536,6 +548,11 @@ ImplicitConversion ClassifySourceConversionFunction(
 		return result;
 	bool dest_bool = !IsReferenceType(dest) && IsBoolType(RemoveTopCv(dest));
 	ImplicitConversion best_object;
+	// 13.3.3.1p10: two conversion functions no better than each other
+	// make the user-defined sequence ambiguous; the source then has no
+	// viable conversion to `dest` (a strictly better later candidate
+	// clears the tie).
+	bool tie = false;
 	for (const ClassInfo* link = from->named->class_record; link;
 	     link = link->base)
 	{
@@ -552,17 +569,19 @@ ImplicitConversion ClassifySourceConversionFunction(
 				object_class, conv.type->is_const,
 				conv.type->is_volatile);
 			ImplicitConversion object = ClassifyReferenceBinding(
-				source, MakeReferenceType(object_class, false, true));
+				source, MakeReferenceType(object_class, false, true),
+				false);
 			if (!object.viable)
 				continue;
-			// One standard conversion from the result to `dest`.
+			// One *standard* conversion from the result to `dest`.
 			ConversionSource inner;
 			inner.type = IsReferenceType(conv.result)
 				? conv.result->target : RemoveTopCv(conv.result);
 			inner.category = conv.result->kind == TK_LVALUE_REFERENCE
 				? VC_LVALUE : VC_PRVALUE;
-			ImplicitConversion second = ClassifyConversion(inner, dest);
-			if (!second.viable || second.rank == CR_USER)
+			ImplicitConversion second =
+				ClassifyConversionImpl(inner, dest, false, false);
+			if (!second.viable)
 				continue;
 			bool better = false;
 			if (!result.viable)
@@ -576,9 +595,13 @@ ImplicitConversion ClassifySourceConversionFunction(
 				else if (object_order == 0 &&
 				         second.rank < result.second_rank)
 					better = true;
+				else if (object_order == 0 &&
+				         second.rank == result.second_rank)
+					tie = true;
 			}
 			if (!better)
 				continue;
+			tie = false;
 			result.viable = true;
 			result.rank = CR_USER;
 			result.conv_class = link->entity;
@@ -588,6 +611,28 @@ ImplicitConversion ClassifySourceConversionFunction(
 			best_object = object;
 		}
 	}
+	if (tie)
+		return ImplicitConversion();  // ambiguous: no viable sequence
+	return result;
+}
+
+}  // namespace
+
+namespace {
+
+ImplicitConversion ClassifyConversionImpl(const ConversionSource& source,
+                                          const TypePtr& dest,
+                                          bool contextual, bool allow_user)
+{
+	ImplicitConversion result = IsReferenceType(dest)
+		? ClassifyReferenceBinding(source, dest, allow_user)
+		: ClassifyValueConversion(source, dest, allow_user);
+	if (result.viable)
+		return result;
+	if (allow_user && source.type &&
+	    RemoveTopCv(source.type)->kind == TK_CLASS &&
+	    !source.function_set)
+		return ClassifySourceConversionFunction(source, dest, contextual);
 	return result;
 }
 
@@ -596,22 +641,14 @@ ImplicitConversion ClassifySourceConversionFunction(
 ImplicitConversion ClassifyConversion(const ConversionSource& source,
                                       const TypePtr& dest)
 {
-	return ClassifyConversionEx(source, dest, false);
+	return ClassifyConversionImpl(source, dest, false, true);
 }
 
 ImplicitConversion ClassifyConversionEx(const ConversionSource& source,
                                         const TypePtr& dest,
                                         bool contextual)
 {
-	ImplicitConversion result = IsReferenceType(dest)
-		? ClassifyReferenceBinding(source, dest)
-		: ClassifyValueConversion(source, dest);
-	if (result.viable)
-		return result;
-	if (source.type && RemoveTopCv(source.type)->kind == TK_CLASS &&
-	    !source.function_set)
-		return ClassifySourceConversionFunction(source, dest, contextual);
-	return result;
+	return ClassifyConversionImpl(source, dest, contextual, true);
 }
 
 size_t SelectBestOverload(const vector<TypePtr>& candidates,
@@ -652,7 +689,7 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
 			viable.push_back(candidate);
 	}
 	if (viable.empty())
-		throw runtime_error("no matching function for call");
+		throw NoViableOverloadError("no matching function for call");
 	size_t best = 0;
 	for (size_t i = 1; i < viable.size(); i++)
 		if (BetterCandidate(viable[i], viable[best], args))

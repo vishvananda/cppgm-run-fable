@@ -206,6 +206,12 @@ struct SemNode
 	// SN_FUNCTION_DEFINITION: a compiler-synthesized special-member
 	// body (implicit/defaulted); emitted only when directly called.
 	bool synthesized;
+	// SN_CALL_EXPRESSION / SN_CONDITIONAL_EXPRESSION with needs_dtor:
+	// the resolved destructor action for the materialized result
+	// temporary (12.2), pinned by the binder so the lowering never
+	// re-derives the callee. Kept out of `children` so argument
+	// lowering and may-throw analysis see only the call's operands.
+	SemNodePtr result_dtor;
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);

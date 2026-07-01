@@ -1,10 +1,21 @@
 #pragma once
 
+#include <stdexcept>
 #include <string>
 
 using std::string;
 
 #include "sema/scope.h"
+
+// A lookup that reached distinct entities through using-directives
+// (3.4.1p2 / 7.3.4p6): a diagnosable error that call recovery paths
+// (builtin fallback, ADL retry) must not mask as name-not-found.
+struct AmbiguousLookupError : std::runtime_error
+{
+	explicit AmbiguousLookupError(const string& what)
+		: std::runtime_error(what)
+	{}
+};
 
 // PA11 name lookup over the scope model (3.4). Results point into the
 // model's bindings; because the model is built by one forward pass,
@@ -29,8 +40,15 @@ enum EScopeLookupFilter
 // closed) whose anchor - the nearest namespace enclosing both the
 // directive and the nominated namespace - is that scope. A scope's own
 // binding wins over directive-contributed ones.
+//
+// 7.3.4p6: several same-level *function* bindings are not ambiguous -
+// their declarations form one overload set. With `fn_set` given the
+// set's bindings are collected there (own binding first) and the first
+// is returned; without it, a multi-binding function result throws so
+// callers that cannot resolve overload sets never pick one silently.
 const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
-                                      EScopeLookupFilter filter);
+                                      EScopeLookupFilter filter,
+                                      vector<const ScopeBinding*>* fn_set = 0);
 
 // 3.4.3.2 for namespace scopes: searches `scope` itself, then (only if
 // that finds nothing) the namespaces nominated by its using-directives,

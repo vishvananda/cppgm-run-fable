@@ -430,8 +430,10 @@ void LowerProgram::DemandElidedCtor(const SemNode& callee)
 			                callee.type);
 	// The elided call itself emits nothing; a synthesized body it
 	// selected is implicitly defined, so the user-provided members
-	// that body odr-uses must still appear.
-	if (info.definition && info.definition->synthesized)
+	// that body odr-uses must still appear. Demand state is monotonic,
+	// so each synthesized tree walks at most once.
+	if (info.definition && info.definition->synthesized &&
+	    demanded_trees_.insert(info.definition).second)
 		DemandTreeCallees(*info.definition);
 }
 
@@ -461,10 +463,11 @@ void LowerProgram::DemandTreeCallees(const SemNode& node)
 					                child.entity_name, child.type);
 			if (info.definition)
 			{
-				if (info.definition->synthesized)
-					DemandTreeCallees(*info.definition);
-				else
+				if (!info.definition->synthesized)
 					DemandFunction(info);
+				else if (demanded_trees_.insert(
+				             info.definition).second)
+					DemandTreeCallees(*info.definition);
 			}
 		}
 		DemandTreeCallees(child);

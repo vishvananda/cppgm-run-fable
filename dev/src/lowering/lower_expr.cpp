@@ -329,7 +329,7 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 		// A constructed temporary used as a value: its address temp.
 		LowerValue value;
 		value.type = RemoveTopCv(node.type);
-		value.text = MaterializeTemporary(node, "tmpobj");
+		value.text = MaterializeTemporary(node, "tmpobj", true);
 		return value;
 	}
 	case SN_CAST_EXPRESSION:
@@ -857,7 +857,7 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	case SN_MEMBER_EXPRESSION:
 		return MemberAddress(node);
 	case SN_CONSTRUCTOR_ACTION:
-		return MaterializeTemporary(node, "tmpobj");
+		return MaterializeTemporary(node, "tmpobj", true);
 	case SN_UNARY_EXPRESSION:
 		if (node.op == OP_STAR)
 			return LowerPointerOperand(*node.children[0]);
@@ -953,7 +953,8 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		    program_.CalleeMayUnwind(*node.children[0]->children[0]))
 			OpenEhRegion();
 		string address =
-			MaterializeTemporary(node, exact ? "arg" : "tmpobj");
+			MaterializeTemporary(node, exact ? "arg" : "tmpobj",
+			                     true);
 		if (!exact && made->kind == TK_CLASS)
 		{
 			address = AdjustToBase(
@@ -1066,7 +1067,9 @@ string FunctionLowerer::MaterializeClassArg(const SemNode& node,
                                             const TypePtr& bare)
 {
 	if (node.kind == SN_CONSTRUCTOR_ACTION)
-		return MaterializeTemporary(node, "arg");
+		// The callee destroys its by-value parameter object;
+		// no caller-side cleanup registers.
+		return MaterializeTemporary(node, "arg", false);
 	string slot = AddMatSlot("arg", LowerSlotType(bare));
 	string address = NewTemp();
 	Emit(address + " = addr $" + slot);
@@ -1213,7 +1216,7 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 			LowerValueExpr(node);
 			return;
 		}
-		MaterializeTemporary(node, "tmpobj");
+		MaterializeTemporary(node, "tmpobj", true);
 		return;
 	case SN_ID_EXPRESSION:
 	case SN_MEMBER_EXPRESSION:

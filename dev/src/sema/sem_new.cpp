@@ -337,11 +337,9 @@ SemValue SemExprAnalyzer::AnalyzeDelete(const AstExpr& expr)
 		if (array_form)
 			value.node->member_offset = 8;
 		if (host_.Classes().NeedsDestruction(*cls))
-		{
-			SemNodePtr dtor = host_.MakeTemporaryDtor(*cls);
-			if (host_.Classes().DestructionHasEffects(*cls))
-				value.node->children.push_back(std::move(dtor));
-		}
+			// 5.3.5p6: the deleted object's destructor runs even when
+			// the chain is effect-free.
+			value.node->children.push_back(host_.MakeTemporaryDtor(*cls));
 	}
 	return value;
 }

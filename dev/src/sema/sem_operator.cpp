@@ -191,9 +191,9 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 // candidates argument-dependent lookup finds in the arguments'
 // associated namespaces (hidden friends included; using-declaration
 // imports into an associated namespace are not its own declarations).
-SemValue SemExprAnalyzer::AnalyzeAdlCall(const AstExpr& expr,
-                                         const string& name,
-                                         const ScopeBinding* visible)
+SemValue SemExprAnalyzer::AnalyzeAdlCall(
+	const AstExpr& expr, const string& name,
+	const vector<const ScopeBinding*>& visible)
 {
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
@@ -204,8 +204,9 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(const AstExpr& expr,
 	}
 	set<const void*> seen;
 	vector<OperatorCandidate> candidates;
-	if (visible)
-		AppendBindingOverloads(*visible, false, false, candidates, seen);
+	for (size_t i = 0; i < visible.size(); i++)
+		AppendBindingOverloads(*visible[i], false, false, candidates,
+		                       seen);
 	vector<const Scope*> namespaces;
 	for (size_t i = 0; i < args.size(); i++)
 		CollectAssociatedNamespaces(host_.Model(), args[i].type,
@@ -357,7 +358,8 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	size_t builtin_pos = AppendBuiltinCandidate(
 		spelling, operands, member_only, ranking, viable_arity);
 	// Arity filter happens inside SelectBestOverload; a fully
-	// non-viable set falls back to the built-in operator.
+	// non-viable set falls back to the built-in operator. An ambiguous
+	// joint ranking is ill-formed (13.3.1.2p3) and propagates.
 	vector<ImplicitConversion> conversions;
 	size_t winner;
 	try
@@ -365,7 +367,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 		winner = SelectBestOverload(ranking, sources, conversions,
 		                            &viable_arity);
 	}
-	catch (const std::exception&)
+	catch (const NoViableOverloadError&)
 	{
 		return false;
 	}

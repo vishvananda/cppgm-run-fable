@@ -1,11 +1,23 @@
 #pragma once
 
+#include <stdexcept>
 #include <vector>
 
 using std::vector;
 
 #include "sema/sem_node.h"
 #include "sema/type.h"
+
+// Overload resolution found no viable candidate (13.3.2). Typed so
+// recovery paths (the built-in operator form, ADL retry) fall back
+// only on genuine no-match — an ambiguous best (13.3.3p2) or a
+// selected-but-unusable candidate still propagates as an error.
+struct NoViableOverloadError : std::runtime_error
+{
+	explicit NoViableOverloadError(const string& what)
+		: std::runtime_error(what)
+	{}
+};
 
 // The PA12 standard-conversion subset (clause 4 plus the basic 8.5.3
 // reference bindings) and its 13.3 ranking. The classification works

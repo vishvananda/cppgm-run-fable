@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "ast/ast_text.h"
+#include "sema/scope_lookup.h"
 
 using std::runtime_error;
 
@@ -383,13 +384,16 @@ SemValue SemExprAnalyzer::CallResult(const TypePtr& function_type)
 	value.node = MakeSemNode(SN_CALL_EXPRESSION);
 	value.node->type = result;
 	// 12.2: a class-valued result is a destructible temporary at its
-	// materialization point.
+	// materialization point (destroyed even when the chain is
+	// effect-free); the resolved destructor pins on the node.
 	if (!IsReferenceType(result) && RemoveTopCv(result)->kind == TK_CLASS)
 		if (const ClassInfo* cls =
 		        host_.Classes().Find(RemoveTopCv(result)->named))
-			if (host_.Classes().NeedsDestruction(*cls) &&
-			    host_.Classes().DestructionHasEffects(*cls))
+			if (host_.Classes().NeedsDestruction(*cls))
+			{
 				value.node->needs_dtor = true;
+				value.node->result_dtor = host_.MakeTemporaryDtor(*cls);
+			}
 	if (result->kind == TK_LVALUE_REFERENCE)
 	{
 		value.category = VC_LVALUE;
@@ -675,6 +679,21 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 		{
 			binding = host_.ResolveValue(callee->name, member_class);
 		}
+		catch (const AmbiguousLookupError&)
+		{
+			// 7.3.4p6: same-level function declarations form one
+			// overload set rather than an ambiguity; any other
+			// ambiguous lookup is ill-formed regardless of what a
+			// builtin or ADL retry could supply (3.4.1p2).
+			if (!plain || paren_callee)
+				throw;
+			vector<const ScopeBinding*> fn_set;
+			UnqualifiedLookup(host_.CurrentScope(),
+			                  callee->name.parts[0].identifier,
+			                  SLF_ANY, &fn_set);
+			return AnalyzeAdlCall(
+				expr, callee->name.parts[0].identifier, fn_set);
+		}
 		catch (const std::exception&)
 		{
 			if (plain &&
@@ -687,7 +706,8 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 				// Only argument-dependent lookup can name the callee
 				// (hidden friends, associated namespaces).
 				return AnalyzeAdlCall(
-					expr, callee->name.parts[0].identifier, 0);
+					expr, callee->name.parts[0].identifier,
+					vector<const ScopeBinding*>());
 			if (!binding)
 				throw;
 		}
@@ -696,7 +716,8 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 			if (plain && !paren_callee && binding->home &&
 			    binding->home->kind == SCOPE_NAMESPACE)
 				return AnalyzeAdlCall(
-					expr, callee->name.parts[0].identifier, binding);
+					expr, callee->name.parts[0].identifier,
+					vector<const ScopeBinding*>(1, binding));
 			return AnalyzeNamedCall(expr, *binding, member_class);
 		}
 	}
@@ -1159,7 +1180,7 @@ SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 		// 5.17p9: a braced-init-list right operand list-initializes
 		// a temporary of the left operand's class type.
 		rhs = MakeTemporaryObject(RemoveTopCv(lhs.type),
-		                          right.arguments);
+		                          right.arguments, true);
 	else
 		rhs = Analyze(right);
 	if (lhs.type->kind == TK_CLASS || lhs.type->kind == TK_ENUM)
@@ -1333,7 +1354,10 @@ SemValue SemExprAnalyzer::AnalyzeConditional(const AstExpr& expr)
 		const ClassInfo* cls =
 			host_.Classes().Find(RemoveTopCv(type)->named);
 		if (cls && host_.Classes().NeedsDestruction(*cls))
+		{
 			value.node->needs_dtor = true;
+			value.node->result_dtor = host_.MakeTemporaryDtor(*cls);
+		}
 	}
 	value.node->children.push_back(std::move(cond.node));
 	value.node->children.push_back(std::move(a.node));

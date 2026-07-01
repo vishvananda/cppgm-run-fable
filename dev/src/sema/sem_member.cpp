@@ -60,6 +60,9 @@ SemValue SemExprAnalyzer::MakeExplicitDestructorCall(SemValue object,
                                                      const ClassInfo& cls,
                                                      bool arrow)
 {
+	// Resolve through the binder first: deleted/access checks run and
+	// an implicit destructor synthesizes its demand-emitted body.
+	host_.MakeTemporaryDtor(cls);
 	SemValue value;
 	value.type = MakeFundamentalType(FT_VOID);
 	value.category = VC_PRVALUE;
@@ -380,9 +383,12 @@ SemValue SemExprAnalyzer::AnalyzeImplicitMember(const ScopeBinding& binding,
 
 // A class temporary constructed from a functional cast: `T(args)` over
 // the class subset materializes a temporary object and runs the
-// selected constructor.
+// selected constructor. `braced_assign` marks the braced-init-list
+// assignment RHS, the one temporary whose effect-free destruction the
+// reference output elides.
 SemValue SemExprAnalyzer::MakeTemporaryObject(
-	const TypePtr& class_type, const vector<AstExprPtr>& arguments)
+	const TypePtr& class_type, const vector<AstExprPtr>& arguments,
+	bool braced_assign)
 {
 	const ClassInfo* cls = host_.Classes().Find(class_type->named);
 	if (!cls || !class_type->named->complete)
@@ -413,12 +419,19 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	action->trivial_init = false;
 	action->type = RemoveTopCv(class_type);
 	action->category = VC_PRVALUE;
-	if (host_.Classes().DestructionHasEffects(*cls))
+	if (host_.Classes().NeedsDestruction(*cls))
 	{
 		// 12.2: the temporary is destroyed at the end of the enclosing
-		// full expression (an effect-free chain emits no cleanup).
-		action->needs_dtor = true;
-		action->children.push_back(host_.MakeTemporaryDtor(*cls));
+		// full expression, even when the chain is effect-free; only
+		// the braced-assignment RHS elides an effect-free cleanup
+		// (the resolved destructor is still access-checked).
+		if (!braced_assign || host_.Classes().DestructionHasEffects(*cls))
+		{
+			action->needs_dtor = true;
+			action->children.push_back(host_.MakeTemporaryDtor(*cls));
+		}
+		else
+			host_.MakeTemporaryDtor(*cls);
 	}
 	SemValue value;
 	value.type = RemoveTopCv(class_type);

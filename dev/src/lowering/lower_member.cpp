@@ -139,9 +139,13 @@ LowerValue FunctionLowerer::LowerBitFieldAssignment(const SemNode& node)
 {
 	const SemNode& lhs = *node.children[0];
 	const SemNode& rhs = *node.children[1];
+	// Constructor member-initializer stores stamp the bit facts on the
+	// assignment node (with bf_plain_store); ordinary assignments
+	// carry them on the member lvalue.
+	const SemNode& bits = node.is_bit_field ? node : lhs;
 	TypePtr unit = RemoveTopCv(lhs.type);
 	string unit_text = LowerValueType(unit);
-	unsigned long long mask = BitMask(node.bit_width);
+	unsigned long long mask = BitMask(bits.bit_width);
 	string value = LowerValueAs(rhs, unit, LCC_OPERAND);
 	LowerValue result;
 	result.type = unit;
@@ -153,11 +157,11 @@ LowerValue FunctionLowerer::LowerBitFieldAssignment(const SemNode& node)
 		Emit(masked + " = binary and " + unit_text + " " +
 		     MaskText(mask, unit) + ", " + value);
 		string shifted = masked;
-		if (node.bit_offset)
+		if (bits.bit_offset)
 		{
 			shifted = NewTemp();
 			Emit(shifted + " = binary shl " + unit_text + " " + masked +
-			     ", " + to_string(node.bit_offset));
+			     ", " + to_string(bits.bit_offset));
 		}
 		string address = MemberAddress(lhs);
 		Emit("store " + unit_text + " " + shifted + ", " + address);
@@ -169,16 +173,16 @@ LowerValue FunctionLowerer::LowerBitFieldAssignment(const SemNode& node)
 	Emit(loaded + " = load " + unit_text + " " + read_address);
 	string cleared = NewTemp();
 	Emit(cleared + " = binary and " + unit_text + " " + loaded + ", " +
-	     MaskText(~(mask << node.bit_offset), unit));
+	     MaskText(~(mask << bits.bit_offset), unit));
 	string masked = NewTemp();
 	Emit(masked + " = binary and " + unit_text + " " +
 	     MaskText(mask, unit) + ", " + value);
 	string shifted = masked;
-	if (node.bit_offset)
+	if (bits.bit_offset)
 	{
 		shifted = NewTemp();
 		Emit(shifted + " = binary shl " + unit_text + " " + masked +
-		     ", " + to_string(node.bit_offset));
+		     ", " + to_string(bits.bit_offset));
 	}
 	string merged = NewTemp();
 	Emit(merged + " = binary or " + unit_text + " " + cleared + ", " +
@@ -389,43 +393,19 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 	if (call.needs_dtor && dest.empty())
 	{
 		// The materialized result is a destructible temporary of the
-		// enclosing full expression.
+		// enclosing full expression; the binder pinned its resolved
+		// destructor action on the node.
+		if (!call.result_dtor)
+			throw runtime_error("class result temporary without a "
+			                    "resolved destructor");
 		if (eh_open_)
 			CloseEhRegion();
 		TempCleanup cleanup;
 		cleanup.address = address;
-		cleanup.action = MakeResultCleanup(RemoveTopCv(bare));
+		cleanup.action = call.result_dtor.get();
 		temp_cleanups_.push_back(cleanup);
 	}
 	return address;
-}
-
-// A lowering-owned destructor action for a materialized class call
-// result (the callee facts mirror MakeDestructorCall's).
-const SemNode* FunctionLowerer::MakeResultCleanup(const TypePtr& bare)
-{
-	const ClassInfo* cls = bare->named->class_record;
-	const string& base_name = cls->members->name;
-	SemNodePtr action = MakeSemNode(SN_DESTRUCTOR_ACTION);
-	action->special = SF_DESTRUCTOR;
-	SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
-	call->type = MakeFundamentalType(FT_VOID);
-	call->category = VC_PRVALUE;
-	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	callee->name = base_name + "::~" + base_name;
-	TypePtr class_type = MakeNamedType(TK_CLASS, bare->named);
-	vector<TypePtr> params;
-	params.push_back(MakePointerType(class_type, false, false));
-	callee->type = MakeFunctionType(MakeFundamentalType(FT_VOID), params,
-	                                false);
-	callee->entity_scope = cls->members;
-	callee->entity_name = "~" + base_name;
-	callee->is_method = true;
-	callee->special = SF_DESTRUCTOR;
-	call->children.push_back(std::move(callee));
-	action->children.push_back(std::move(call));
-	owned_nodes_.push_back(std::move(action));
-	return owned_nodes_.back().get();
 }
 
 // A trivial copy/move construction: the source object's bytes copy
@@ -464,7 +444,8 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 }
 
 string FunctionLowerer::MaterializeTemporary(const SemNode& action,
-                                             const char* kind)
+                                             const char* kind,
+                                             bool register_cleanup)
 {
 	TypePtr type = RemoveTopCv(action.type);
 	string slot = AddMatSlot(kind, LowerSlotType(type));
@@ -474,7 +455,7 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 		LowerTrivialCopyAction(action, address);
 	else
 		LowerConstructorCall(action, address);
-	if (action.needs_dtor)
+	if (action.needs_dtor && register_cleanup)
 	{
 		const SemNode* dtor = 0;
 		for (size_t i = 0; i < action.children.size(); i++)
@@ -720,15 +701,74 @@ void FunctionLowerer::OpenEhRegion()
 
 // --- full-expression temporaries ---------------------------------------------
 
-bool FunctionLowerer::TreeHasTempCleanups(const SemNode& node) const
+// Evaluation-order scan deciding whether the full expression arms
+// unwind dispatch: true when some call executes while a caller-owned
+// destructible temporary is live. Callee-owned by-value argument
+// objects never register a caller cleanup, and a result temporary
+// registers only after its producing call, so neither arms alone;
+// `skip_own_cleanup` marks a by-value argument position.
+bool FunctionLowerer::ScanArmsCleanups(const SemNode& node, bool& live,
+                                       bool skip_own_cleanup) const
 {
-	if (node.needs_dtor &&
-	    (node.kind == SN_CONSTRUCTOR_ACTION ||
-	     node.kind == SN_CALL_EXPRESSION))
-		return true;
-	for (size_t i = 0; i < node.children.size(); i++)
-		if (TreeHasTempCleanups(*node.children[i]))
+	if (node.kind == SN_DESTRUCTOR_ACTION)
+		return false;  // lowers at cleanup time, not in sequence
+	if (node.kind == SN_CONSTRUCTOR_ACTION && !node.children.empty())
+	{
+		// Constructor arguments evaluate before the construction runs.
+		const SemNode& call = *node.children[0];
+		for (size_t i = 1; i < call.children.size(); i++)
+			if (ScanArmsCleanups(*call.children[i], live, false))
+				return true;
+		bool emits_call = !node.trivial_copy && !node.trivial_init &&
+			!node.elided;
+		if (emits_call && live)
 			return true;
+		if (node.needs_dtor && !skip_own_cleanup)
+			live = true;
+		return false;
+	}
+	if (node.kind == SN_CALL_EXPRESSION && !node.children.empty())
+	{
+		const SemNode& callee = *node.children[0];
+		TypePtr fn_type;
+		if (callee.kind == SN_CALLEE)
+			fn_type = callee.type;
+		else
+		{
+			TypePtr through = RemoveTopCv(StripRef(callee.type));
+			fn_type = through->kind == TK_POINTER ? through->target
+			                                      : through;
+		}
+		if (ScanArmsCleanups(callee, live, false))
+			return true;
+		for (size_t i = 1; i < node.children.size(); i++)
+		{
+			TypePtr param;
+			if (fn_type && fn_type->kind == TK_FUNCTION &&
+			    i - 1 < fn_type->parameters.size())
+				param = fn_type->parameters[i - 1];
+			bool callee_owned = param && !IsReferenceType(param) &&
+				RemoveTopCv(param)->kind == TK_CLASS;
+			if (ScanArmsCleanups(*node.children[i], live, callee_owned))
+				return true;
+		}
+		if (live)
+			return true;
+		if (node.needs_dtor && !skip_own_cleanup)
+			live = true;
+		return false;
+	}
+	bool call_event = node.kind == SN_NEW_INIT ||
+		node.kind == SN_NEW_ARRAY || node.kind == SN_DELETE_EXPRESSION ||
+		node.kind == SN_DELETE_ARRAY;
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (ScanArmsCleanups(*node.children[i], live, false))
+			return true;
+	if (call_event && live)
+		return true;
+	if (node.kind == SN_CONDITIONAL_EXPRESSION && node.needs_dtor &&
+	    !skip_own_cleanup)
+		live = true;
 	return false;
 }
 
@@ -736,7 +776,8 @@ void FunctionLowerer::BeginFullExpression(const SemNode& root)
 {
 	fe_marks_.push_back(temp_cleanups_.size());
 	fe_armed_.push_back(eh_armed_);
-	if (TreeHasTempCleanups(root))
+	bool live = !temp_cleanups_.empty();
+	if (ScanArmsCleanups(root, live, false))
 		eh_armed_ = true;
 }
 

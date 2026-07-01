@@ -374,15 +374,13 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 {
 	alignment = 1;
 	first_suffix = 0;
-	// The assign forms share the constructor-form prefix shape; the
-	// caller passes the matching triviality through `is_move` plus the
-	// transfer kind recorded on each member below.
+	// The prefix spans subobjects whose transfer of *this* form is
+	// trivial: constructor forms check copy/move constructors, assign
+	// forms check copy/move assignments (12.8p25/p28).
 	unsigned long long end = 0;
 	if (cls.base)
 	{
-		bool trivial = is_move ? ClassHasTrivialMoveCtor(*cls.base)
-		                       : ClassHasTrivialCopyCtor(*cls.base);
-		if (!trivial)
+		if (!TransferTrivial(*cls.base, is_move, assign_form))
 			return 0;
 		if (!cls.base->is_empty)
 		{
@@ -399,7 +397,7 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 		if (field.name.empty() && field.bit_width == 0)
 			continue;  // zero-width alignment row
 		const ClassInfo* member = SubobjectClass(field.type);
-		if (member && !TransferTrivial(*member, is_move, false))
+		if (member && !TransferTrivial(*member, is_move, assign_form))
 		{
 			first_suffix = i;
 			return field.offset;
@@ -781,6 +779,9 @@ void SemBinder::RecomputeUserCtorFact(ClassInfo& cls)
 		if (!ctor.implicit && !ctor.defaulted && !ctor.deleted)
 			cls.has_user_ctor = true;
 	}
+	// The caller flipped defaulted/defaulted_outside facts on a
+	// completed class; drop every memoized fact derived from them.
+	InvalidateClassFacts();
 }
 
 int SemBinder::ResolveClassCtorHost(const ClassInfo& cls,

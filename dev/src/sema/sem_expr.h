@@ -194,9 +194,11 @@ private:
 	                          const NamedTypeInfo* member_class);
 	SemValue AnalyzeIndirectCall(const AstExpr& expr);
 	// PA16: an unqualified call with argument-dependent lookup
-	// (sem_operator.cpp); `visible` is the ordinary-lookup binding.
+	// (sem_operator.cpp); `visible` holds the ordinary-lookup function
+	// bindings (several when same-level using-directive imports merge
+	// into one overload set, 7.3.4p6).
 	SemValue AnalyzeAdlCall(const AstExpr& expr, const string& name,
-	                        const ScopeBinding* visible);
+	                        const vector<const ScopeBinding*>& visible);
 	SemValue AnalyzeBuiltinConstantP(const AstExpr& expr);
 	SemValue AnalyzeUnary(const AstExpr& expr);
 	SemValue AnalyzeAddressOf(const AstExpr& expr);
@@ -239,7 +241,8 @@ private:
 	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,
 	                                  const string& written);
 	SemValue MakeTemporaryObject(const TypePtr& class_type,
-	                             const vector<AstExprPtr>& arguments);
+	                             const vector<AstExprPtr>& arguments,
+	                             bool braced_assign);
 	// --- PA16 allocation expressions (sem_new.cpp) ---
 	SemValue AnalyzeNew(const AstExpr& expr);
 	SemValue AnalyzeNewArray(const AstExpr& expr, size_t bound_item);

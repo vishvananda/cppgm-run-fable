@@ -64,11 +64,17 @@ Move selection: rvalue sources (xvalues/prvalues) bind `C&&` candidates
 first via the existing reference-binding ranking; `return local;` tries
 the move ctor first per 12.8p32, falling back to copy.
 
-### LowIR ABI (lowering/lower_value.cpp + lower_function/expr/member)
+### LowIR ABI (lowering/lower_types + lower_function/expr/member)
 
-Boundary classification, derived from typed ClassInfo facts only:
-- direct form (`obj<SxA>` parameter / return) iff the class is
-  trivially copyable, not a union, and sizeof ≤ 16;
+Boundary classification, derived from typed ClassInfo facts only (the
+classifier landed in `lower_types.cpp` — `LowerAbiParameter` /
+`LowerAbiReturn` over `class_info`'s `ClassParamDirect` /
+`ClassReturnDirect` — rather than the separate `lower_value.cpp` this
+plan originally named; value-transfer lowering lives in
+`lower_expr/lower_member/lower_convert`):
+- direct parameter form (`obj<SxA>`) iff the class has a trivial move
+  constructor and trivial destructor, is not a union, and sizeof ≤ 16;
+  direct returns additionally require a trivial copy constructor;
 - otherwise indirect: parameters `ptr [pass=by_address]`, returns
   through a leading `%ret : ptr [pass=indirect_result]` with `-> void`.
 
@@ -91,8 +97,9 @@ same classifier on the function type.
   class-valued return statement is lowered directly in `%ret`
   (return-slot reuse); its scope cleanup is dropped with ownership.
 - Destructor-protected temporaries reuse the PA15 full-expression
-  cleanup machinery; materialized argument objects register their
-  cleanups exactly like other temporaries.
+  cleanup machinery; materialized by-value argument objects are the
+  exception — the callee destroys its parameters, so the caller
+  registers no cleanup for them.
 
 ### Remaining features
 
@@ -125,8 +132,10 @@ same classifier on the function type.
 - lowering owns slot naming, ABI shapes, copyobj emission, and
   return-slot reuse; it never re-derives semantics from names.
 - New files keep audit limits: `sema/sem_special.cpp` (synthesis),
-  `lowering/lower_value.cpp` (class ABI + value transfer lowering),
-  both registered in `dev/frontend_source_sets.mk`.
+  `sema/sem_new.cpp`, `sema/sem_cast.cpp`, `lowering/lower_new.cpp`,
+  and `lowering/lower_convert.cpp`, all registered in
+  `dev/frontend_source_sets.mk` (the class ABI lives in the existing
+  `lowering/lower_types.cpp` instead of a separate `lower_value.cpp`).
 
 ## Validation
 
@@ -169,3 +178,85 @@ original plan:
 - File layout after the audit split: `sema/sem_cast.cpp` (explicit
   conversions, sizeof/alignof) and `lowering/lower_convert.cpp` (value
   conversion emission) joined the source sets.
+
+## Architecture Review
+
+As built, the implementation matches the planned ownership split, with
+one file-layout deviation reconciled above (no `lower_value.cpp`; the
+ABI classifier joined `lower_types.cpp`, value transfers lower in
+`lower_expr/lower_member/lower_convert`):
+
+- **One ABI classifier.** `LowerAbiParameter`/`LowerAbiReturn`
+  (`lower_types.cpp`) over `ClassParamDirect`/`ClassReturnDirect`
+  (`class_info.cpp`) is the only direct/by_address/indirect_result
+  decision point. Function definitions, `declare` rendering, direct
+  call sites, indirect-call `as (...)` signatures, and result
+  materialization all consult it, so call sites and definitions agree
+  by construction.
+- **Sema owns resolution and the action tree.** Copy/move selection,
+  deleted/explicit/access checks, special-member declaration
+  (`DeclareImplicitSpecialMembers` at CompleteClass) and demand
+  synthesis (`sem_special.cpp`) all live in sema; value transfers are
+  `SN_CONSTRUCTOR_ACTION` wrappers with typed flags (`synth_copy`,
+  `trivial_copy`, `ctor_addressed`, `needs_dtor`), and — post-audit —
+  call/conditional result temporaries pin their resolved destructor
+  action in `SemNode::result_dtor` instead of lowering fabricating the
+  callee.
+- **Lowering owns slots, ABI shapes, copyobj, and return-slot reuse.**
+  `ScanReturnSlotReuse` is a conservative every-return analysis;
+  demand-driven emission keys off typed `(scope, name, signature,
+  special)` entries; the callee-owned by-value parameter convention is
+  implemented at the ABI boundary (callee destroys; the caller
+  registers no cleanup for argument objects).
+- **Triviality facts** are free functions over ClassInfo links,
+  memoized post-audit, consumed by both the sema transfer logic
+  (`TransferTrivial`, per-axis for ctor vs assign forms) and the ABI
+  classifier; lowering reads only the SemNode flags sema sets.
+- **Deliberate presentation-keyed exceptions** (PA15 precedent):
+  Itanium mangling parses operator spellings; conversion-function
+  member bindings are keyed by the canonical rendered
+  `operator <type>` name; lowering-internal `pass=`/variant-code
+  strings are produced and consumed inside lowering with total
+  mappings.
+
+## Final Architecture Review
+
+Post-audit state (see `audit.md` for findings, probes, and the change
+list):
+
+- **Correctness vs the reference oracle.** The audit fixed wrong-code
+  and accept-invalid divergences found by probing against
+  `pa16/cppgm++-ref`: synthesized assignment now uses the assignment
+  triviality axis for its storage prefix; call-result and explicit
+  destructor paths run synthesis and access checks through the binder;
+  by-value argument objects are destroyed exactly once (callee-owned);
+  effect-free destructor elision is confined to named locals and the
+  braced-assignment RHS (temporaries and `delete` destroy whenever the
+  class needs destruction); ambiguous operator overloads and ambiguous
+  conversion-function sequences are rejected; same-level own +
+  using-directive-imported functions resolve as one overload set;
+  ordinary bit-field stores emit real masks.
+- **Termination and complexity.** User-conversion classification is
+  structurally bounded (nested classifications run standard-only per
+  13.3.3.1.2p1), so mutually convertible classes terminate. The nine
+  recursive class facts memoize per ClassInfo under a facts version
+  bumped by the only post-completion mutators (out-of-class
+  special-member binding), making per-expression triviality/destruction
+  queries O(1) steady-state. `DemandTreeCallees` walks each synthesized
+  definition once. Unwind-dispatch arming is an evaluation-order scan
+  that matches the reference contract (arm only when a call runs under
+  a live caller-owned temporary).
+- **Remaining accepted shapes** (reviewed, not defects): the
+  demand-sweep rescan floor; per-call-site function-reference string
+  keys (linear, pre-PA16 convention); compile-time unrolling of
+  fixed-bound class-array construction (ref-pinned output shape);
+  body-derived `unwind=no` facts and EH-runtime declares, both pinned
+  our way by the checked-in refs where the older ref binary differs.
+- **Extension points for PA17.** Virtual dispatch can add vptr fields
+  in `class_info` layout, vtable emission beside the existing global
+  rendering, and virtual-call lowering keyed by new typed SemNode facts
+  without touching the ABI classifier, the demand machinery, or the
+  cleanup model. File-size headroom is the one watch item: a few
+  functions sit within ~5-10 lines of the audit's 120-line cap and
+  `sem_expr.cpp`/`sem_class.cpp` within ~100 lines of the file cap, so
+  PA17 work in those areas should split early.

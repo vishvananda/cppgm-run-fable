@@ -440,6 +440,7 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 			// 8.4.3: defaulted outside the class behaves implicitly
 			// but emits as a source-owned strong definition.
 			cls->has_user_dtor = false;
+			InvalidateClassFacts();
 			EnsureImplicitDtor(*cls, true);
 			return;
 		}
@@ -455,6 +456,7 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		body.out_of_class = true;
 		cls->dtor_definition = &decl;
 		cls->has_user_dtor = true;
+		InvalidateClassFacts();
 		AnalyzeDeferredBody(body);
 		return;
 	}
@@ -494,6 +496,7 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		return;
 	}
 	cls->ctors[index].definition = &decl;
+	InvalidateClassFacts();
 	DeferredBody body;
 	body.decl = &decl;
 	body.composed = composed;
@@ -1217,8 +1220,8 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 	if (cls.ctors.empty())
 	{
 		if (!args.empty())
-			throw runtime_error(string("no matching constructor for ") +
-			                    what);
+			throw NoViableOverloadError(
+				string("no matching constructor for ") + what);
 		return -1;
 	}
 	vector<TypePtr> candidates;

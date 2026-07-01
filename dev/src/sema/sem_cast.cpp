@@ -184,7 +184,7 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 {
 	if (RemoveTopCv(dest)->kind == TK_CLASS)
 		// T(args) over a class: a constructed temporary object.
-		return MakeTemporaryObject(RemoveTopCv(dest), arguments);
+		return MakeTemporaryObject(RemoveTopCv(dest), arguments, false);
 	if (arguments.size() == 1)
 		return AnalyzeCastTo(dest, *arguments[0], false, OP_LPAREN, "");
 	if (!arguments.empty())

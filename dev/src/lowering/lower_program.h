@@ -177,4 +177,7 @@ private:
 	// sweep last passed it (rescans restart there, not from zero).
 	size_t lower_floor_;
 	vector<SemNodePtr> helper_defs_;  // synthesized init/fini trees
+	// Synthesized definitions whose callees were already demand-walked
+	// (DemandTreeCallees); demand is monotonic, so once is enough.
+	set<const SemNode*> demanded_trees_;
 };
