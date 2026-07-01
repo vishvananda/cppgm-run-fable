@@ -148,6 +148,9 @@ private:
 	TypePtr MethodAdjustedType(const ClassInfo& cls, const TypePtr& member);
 	SemNodePtr BuildFunctionNode(const DeferredBody& body,
 	                             ESpecialFunction special);
+	// The callee destroys its by-value class parameters at scope exit;
+	// the action attaches as a child of the parameter node.
+	void AttachParameterDtor(SemNode& parameter);
 	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);
 	void AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item);
 	void AppendMemberInit(const ClassInfo& cls, const ClassField& field,

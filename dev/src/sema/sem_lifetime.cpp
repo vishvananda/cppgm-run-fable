@@ -814,6 +814,13 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		       action->children.back()->kind == SN_DESTRUCTOR_ACTION)
 			action->children.pop_back();
 		SemNode& call = *action->children[0];
+		// The explicit-temporary marking does not survive elision into
+		// a namespace-scope object: with no observable construction
+		// work the reference emits no dynamic initializer for it.
+		if (binding.owner && binding.owner->kind == SCOPE_NAMESPACE &&
+		    call.children.size() == 1 && !cls.has_user_ctor &&
+		    !unit_.classes.NeedsConstruction(cls))
+			action->trivial_init = true;
 		call.children.insert(
 			call.children.begin() + 1,
 			AddressOfNode(VariableObjectExpr(binding)));

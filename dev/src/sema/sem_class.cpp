@@ -757,9 +757,29 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 		parameter->type = body.composed.parameters[i].type;
 		parameter->entity_scope = body.fn_scope;
 		parameter->entity_name = parameter->name;
+		AttachParameterDtor(*parameter);
 		item->children.push_back(std::move(parameter));
 	}
 	return item;
+}
+
+void SemBinder::AttachParameterDtor(SemNode& parameter)
+{
+	TypePtr bare = RemoveTopCv(parameter.type);
+	if (bare->kind != TK_CLASS || IsReferenceType(parameter.type))
+		return;
+	const ClassInfo* cls = unit_.classes.Find(bare->named);
+	if (!cls || !unit_.classes.NeedsDestruction(*cls))
+		return;
+	SemNodePtr object = MakeSemNode(SN_ID_EXPRESSION);
+	object->name = parameter.name;
+	object->type = parameter.type;
+	object->category = VC_LVALUE;
+	object->entity_scope = parameter.entity_scope;
+	object->entity_name = parameter.name;
+	parameter.children.push_back(
+		MakeDestructorCall(*cls, false,
+		                   AddressOfNode(std::move(object))));
 }
 
 void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)

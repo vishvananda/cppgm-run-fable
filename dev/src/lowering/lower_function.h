@@ -193,6 +193,9 @@ private:
 	// projection regardless of derivation depth (every base sits at
 	// offset zero without multiple inheritance).
 	string AdjustToBase(const string& address, int hops);
+	// Registers a by-value class parameter's attached destructor
+	// actions as function-scope cleanups (the callee owns them).
+	void RegisterParameterCleanup(const SemNode& parameter);
 	LowerValue LowerMemberValue(const SemNode& node);
 	LowerValue LowerBitFieldValue(const SemNode& node);
 	LowerValue LowerBitFieldAssignment(const SemNode& node);

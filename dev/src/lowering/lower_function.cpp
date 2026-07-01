@@ -132,19 +132,19 @@ void FunctionLowerer::EmitParameterStores()
 			string slot = AddSlot(scope, params_[i].low_name,
 			                      LowerSlotType(bare));
 			if (params_[i].pass == "by_address")
-			{
 				address_aliases_[std::make_pair(
 					(const void*)scope, child.name)] =
 					"%" + params_[i].low_name;
-				continue;
+			else if (!bare->named->class_record ||
+			         !bare->named->class_record->is_empty)
+			{
+				// An empty object has no bytes to copy.
+				string address = NewTemp();
+				Emit(address + " = addr $" + slot);
+				Emit("copyobj " + LowerObjSpan(bare) + " %" +
+				     params_[i].low_name + ", " + address);
 			}
-			if (bare->named->class_record &&
-			    bare->named->class_record->is_empty)
-				continue;  // an empty object has no bytes to copy
-			string address = NewTemp();
-			Emit(address + " = addr $" + slot);
-			Emit("copyobj " + LowerObjSpan(bare) + " %" +
-			     params_[i].low_name + ", " + address);
+			RegisterParameterCleanup(child);
 			continue;
 		}
 		string slot = AddSlot(scope, params_[i].low_name,
@@ -152,6 +152,18 @@ void FunctionLowerer::EmitParameterStores()
 		Emit("store " + params_[i].type_text + " %" +
 		     params_[i].low_name + ", $" + slot);
 	}
+}
+
+// The callee owns its by-value class parameters: their attached
+// destructor actions register as function-scope cleanups.
+void FunctionLowerer::RegisterParameterCleanup(const SemNode& parameter)
+{
+	vector<const SemNode*> actions;
+	for (size_t i = 0; i < parameter.children.size(); i++)
+		if (parameter.children[i]->kind == SN_DESTRUCTOR_ACTION)
+			actions.push_back(parameter.children[i].get());
+	if (!actions.empty())
+		RegisterCleanup(actions);
 }
 
 // --- block / slot / temp state -----------------------------------------

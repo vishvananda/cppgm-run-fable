@@ -574,6 +574,7 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 		parameter->type = composed.parameters[i].type;
 		parameter->entity_scope = current_;
 		parameter->entity_name = composed.parameters[i].name;
+		AttachParameterDtor(*parameter);
 		item->children.push_back(std::move(parameter));
 	}
 	parents_.push_back(item);
