@@ -473,8 +473,6 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 			cleanup.address = address;
 			cleanup.action = dtor;
 			temp_cleanups_.push_back(cleanup);
-			if (eh_armed_ && ctor_depth_ > 0)
-				OpenEhRegion();
 		}
 	}
 	return address;
