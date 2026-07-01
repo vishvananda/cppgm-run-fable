@@ -915,6 +915,9 @@ void FunctionLowerer::LowerSwitch(const SemNode& node)
 	LowerStatement(*node.children[1]);
 	break_stack_.pop_back();
 	break_cleanup_.pop_back();
+	// The end block stays even when every arm returns (the canonical
+	// switch shape keeps it for the implicit function epilogue).
+	ReferenceLabel(end_label);
 	CloseInto(end_label);
 }
 

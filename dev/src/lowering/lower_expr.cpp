@@ -780,13 +780,12 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 	    (node.member_ref || lhs.kind == SN_MEMBER_EXPRESSION))
 		return LowerMemberAssignment(node);
 	TypePtr type = NodeType(lhs);
-	string storage = DirectStorage(lhs);
-	if (storage.empty())
-		storage = LowerAddressExpr(lhs);
 	if (node.op != OP_ASS)
 	{
 		LowerValue target;
-		target.text = storage;
+		target.text = DirectStorage(lhs);
+		if (target.text.empty())
+			target.text = LowerAddressExpr(lhs);
 		target.type = type;
 		// A member lvalue recomputes its store address after the value
 		// (the canonical reference order).
@@ -794,7 +793,12 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 			node, target,
 			lhs.kind == SN_MEMBER_EXPRESSION ? &lhs : 0);
 	}
+	// 5.17 in the canonical reference order: the value computes before
+	// the store address.
 	string value = LowerValueAs(rhs, type, LCC_OPERAND);
+	string storage = DirectStorage(lhs);
+	if (storage.empty())
+		storage = LowerAddressExpr(lhs);
 	Emit("store " + LowerValueType(type) + " " + value + ", " +
 	     storage);
 	LowerValue result;
@@ -1251,6 +1255,15 @@ LowerValue FunctionLowerer::ConvertToBool(LowerValue value,
 	if (LowerFloatType(source))
 		Emit(temp + " = cmp ne " + LowerValueType(source) + " " +
 		     value.text + ", " + LowerFloatZero(source));
+	else if (source->kind == TK_POINTER)
+	{
+		// A pointer compares in its own value space; the bool value
+		// then materializes in the bool representation.
+		Emit(temp + " = cmp ne ptr " + value.text + ", 0");
+		string as_bool = NewTemp();
+		Emit(as_bool + " = copy u8 " + temp);
+		temp = as_bool;
+	}
 	else
 		Emit(temp + " = cmp ne i64 " + value.text + ", 0");
 	value.text = temp;
@@ -1346,12 +1359,6 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 				value.text,
 				BaseClassDistance(source->target->named,
 				                  target->target->named));
-		}
-		if (context == LCC_CAST && !value.imm_null)
-		{
-			string temp = NewTemp();
-			Emit(temp + " = copy ptr " + value.text);
-			value.text = temp;
 		}
 		value.type = target;
 		return value;
