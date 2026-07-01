@@ -1017,7 +1017,22 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		  BaseClassDistance(source->named, bare->named) >= 0));
 	if (binds_directly)
 	{
-		string address = LowerAddressExpr(node);
+		// A reference-cast class call result has no address of its
+		// own; the xvalue materializes its temporary (5.2.9p4).
+		// Reference-returning calls keep their direct address.
+		bool value_call = false;
+		if (node.kind == SN_CALL_EXPRESSION &&
+		    source->kind == TK_CLASS && !node.children.empty())
+		{
+			TypePtr through = NodeType(*node.children[0]);
+			if (through->kind == TK_POINTER)
+				through = through->target;
+			if (through->kind == TK_FUNCTION)
+				value_call = !IsReferenceType(through->target);
+		}
+		string address = value_call
+			? MaterializeClassResult(node, "refcall", "")
+			: LowerAddressExpr(node);
 		if (source->kind == TK_CLASS && bare->kind == TK_CLASS)
 		{
 			address = AdjustToBase(

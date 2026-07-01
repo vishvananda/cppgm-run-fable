@@ -122,6 +122,9 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	binding.fn_inline_def.resize(count, false);
 	binding.fn_adl_only.resize(count, false);
 	binding.fn_unwind_no.resize(count, false);
+	binding.fn_owner.resize(count, 0);
+	if (binding.home)
+		binding.fn_owner[index] = binding.home;
 	if (deleted)
 		binding.fn_deleted[index] = true;
 	if (index >= old_count)
@@ -574,8 +577,12 @@ void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
 		own.fn_inline_def.resize(count, false);
 		own.fn_adl_only.resize(count, false);
 		own.fn_unwind_no.resize(count, false);
+		own.fn_owner.resize(count, 0);
 		size_t at = count - 1;
 		own.fn_access[at] = current_access_;
+		own.fn_owner[at] =
+			i < imported.fn_owner.size() && imported.fn_owner[i]
+				? imported.fn_owner[i] : imported.owner;
 		if (i < imported.fn_defaults.size())
 			own.fn_defaults[at] = imported.fn_defaults[i];
 		if (i < imported.fn_deleted.size())

@@ -118,6 +118,10 @@ struct ScopeBinding
 	// PA16: explicitly-defaulted special member functions (8.4.2); the
 	// binder synthesizes their definitions like the implicit ones.
 	vector<bool> fn_defaulted;
+	// PA16: per-overload declaring scope. A using-declaration merges
+	// imported overloads into the target's set; each entry keeps the
+	// scope that really declared it (null falls back to `owner`).
+	vector<const Scope*> fn_owner;
 };
 
 struct Scope

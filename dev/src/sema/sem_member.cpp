@@ -604,12 +604,17 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		? binding.fn_access[winner] : MA_PUBLIC;
 	host_.CheckMemberAccess(binding.home, access, binding.name,
 	                        object_entity);
+	// A using-declaration merges overloads from another class; the
+	// winner keeps its real declaring scope for identity/addressing.
+	const Scope* owner_scope = binding.owner;
+	if (winner < binding.fn_owner.size() && binding.fn_owner[winner])
+		owner_scope = binding.fn_owner[winner];
 	// PA16: a qualified or explicit call can select an implicitly
 	// declared assignment operator; synthesize it on first selection.
 	if (binding.name == "operator =")
-		if (const NamedTypeInfo* owner_entity =
-		        host_.Model().ScopeEntity(binding.owner))
-			host_.EnsureAssignSpecial(owner_entity, winner);
+		if (const NamedTypeInfo* assign_entity =
+		        host_.Model().ScopeEntity(owner_scope))
+			host_.EnsureAssignSpecial(assign_entity, winner);
 	bool is_static = winner < binding.fn_static.size() &&
 		binding.fn_static[winner];
 	const TypePtr& fn = declared[winner];
@@ -625,13 +630,15 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	}
 
 	SemValue value = CallResult(fn);
+	const NamedTypeInfo* winner_entity =
+		host_.Model().ScopeEntity(owner_scope);
 	const NamedTypeInfo* callee_class =
-		owner_entity ? owner_entity : object_entity;
+		winner_entity ? winner_entity : object_entity;
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
+	callee->name = CanonicalQualifiedName(owner_scope, binding.name);
 	callee->type = is_static ? fn
 	                         : ThisAdjustedType(callee_class, fn);
-	callee->entity_scope = binding.owner;
+	callee->entity_scope = owner_scope;
 	callee->entity_name = binding.name;
 	callee->is_method = !is_static;
 	if (winner < binding.fn_unwind_no.size() &&
@@ -643,7 +650,7 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		// An inherited method receives the base subobject's address; a
 		// using-imported one belongs to the importing class for
 		// addressing (its base sits at offset zero either way).
-		int hops = binding.home != binding.owner
+		int hops = binding.home != owner_scope
 			? 0 : BaseClassDistance(object_entity, callee_class);
 		if (hops > 0)
 		{
