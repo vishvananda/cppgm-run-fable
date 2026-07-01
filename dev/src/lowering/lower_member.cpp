@@ -364,7 +364,9 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 		address = NewTemp();
 		Emit(address + " = addr $" + slot);
 	}
-	if (LowerClassReturnDirect(bare))
+	if (call.kind == SN_CONDITIONAL_EXPRESSION)
+		LowerClassInit(call, address);
+	else if (LowerClassReturnDirect(bare))
 	{
 		LowerValue result = LowerCall(call);
 		Emit("copyobj " + LowerObjSpan(bare) + " " + result.text + ", " +

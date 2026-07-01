@@ -519,12 +519,21 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		if (bare->kind == TK_CLASS && value.type && !value.function_set &&
 		    RemoveTopCv(value.type)->kind == TK_CLASS)
 		{
-			// A same-class prvalue (temporary, call result,
-			// conditional) constructs the destination in place
-			// (12.8p31); glvalues and derived sources copy/move.
+			// A same-class prvalue (temporary, call result) constructs
+			// the destination in place (12.8p31). A conditional does
+			// so only for a trivially copyable class (its arms lower
+			// as raw object copies); otherwise it materializes its own
+			// temporary and the destination copy/move-constructs.
 			bool in_place = value.node &&
 				value.category == VC_PRVALUE &&
 				RemoveTopCv(value.type)->named == bare->named;
+			if (in_place &&
+			    value.node->kind == SN_CONDITIONAL_EXPRESSION)
+			{
+				const ClassInfo* cls =
+					host_.Classes().Find(bare->named);
+				in_place = cls && ClassHasTrivialCopyCtor(*cls);
+			}
 			if (!in_place)
 				WrapClassValueInit(value, bare);
 		}
@@ -1303,6 +1312,15 @@ SemValue SemExprAnalyzer::AnalyzeConditional(const AstExpr& expr)
 	value.node = MakeSemNode(SN_CONDITIONAL_EXPRESSION);
 	value.node->type = type;
 	value.node->category = category;
+	if (category == VC_PRVALUE && RemoveTopCv(type)->kind == TK_CLASS)
+	{
+		// 12.2: a materialized class conditional result is a
+		// destructible temporary of the full expression.
+		const ClassInfo* cls =
+			host_.Classes().Find(RemoveTopCv(type)->named);
+		if (cls && host_.Classes().NeedsDestruction(*cls))
+			value.node->needs_dtor = true;
+	}
 	value.node->children.push_back(std::move(cond.node));
 	value.node->children.push_back(std::move(a.node));
 	value.node->children.push_back(std::move(b.node));

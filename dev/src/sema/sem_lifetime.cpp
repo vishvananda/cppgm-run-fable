@@ -508,6 +508,8 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 		if (braced->arguments.size() > completed->bound)
 			throw runtime_error("too many initializers for " +
 			                    binding.name);
+		bool shared_base = binding.home &&
+			binding.home->kind != SCOPE_NAMESPACE;
 		for (size_t i = 0; i < braced->arguments.size(); i++)
 		{
 			const AstExpr* element = braced->arguments[i].get();
@@ -533,11 +535,25 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 				       action->children.back()->kind ==
 				           SN_DESTRUCTOR_ACTION)
 					action->children.pop_back();
-				SemNode& call = *action->children[0];
-				call.children.insert(
-					call.children.begin() + 1,
-					AddressOfNode(SubscriptNode(
-						VariableObjectExpr(binding), i)));
+				// Braced local elements share the array base address
+				// and construct at their byte offset; namespace-scope
+				// elements keep the subscripted form used by the
+				// global-init helper.
+				if (shared_base)
+				{
+					action->has_value = true;
+					action->value = ConstValue(
+						FT_UNSIGNED_LONG_INT, i * cls.size);
+				}
+				else
+				{
+					SemNode& call = *action->children[0];
+					call.children.insert(
+						call.children.begin() + 1,
+						AddressOfNode(SubscriptNode(
+							VariableObjectExpr(binding), i)));
+					action->ctor_addressed = true;
+				}
 				item.children.push_back(std::move(action));
 				continue;
 			}
@@ -546,11 +562,19 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 			vector<SemNodePtr> arg_nodes;
 			for (size_t j = 0; j < values.size(); j++)
 				arg_nodes.push_back(std::move(values[j].node));
-			item.children.push_back(MakeConstructorCall(
+			SemNodePtr action = MakeConstructorCall(
 				cls, index, false,
-				AddressOfNode(SubscriptNode(
-					VariableObjectExpr(binding), i)),
-				std::move(arg_nodes)));
+				shared_base ? SemNodePtr()
+				            : AddressOfNode(SubscriptNode(
+				                  VariableObjectExpr(binding), i)),
+				std::move(arg_nodes));
+			if (shared_base)
+			{
+				action->has_value = true;
+				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+				                           i * cls.size);
+			}
+			item.children.push_back(std::move(action));
 		}
 		// 8.5.1p7: elements beyond the initializer list
 		// value-initialize.
@@ -563,11 +587,19 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 			vector<SemNodePtr> arg_nodes;
 			for (size_t j = 0; j < no_args.size(); j++)
 				arg_nodes.push_back(std::move(no_args[j].node));
-			item.children.push_back(MakeConstructorCall(
+			SemNodePtr action = MakeConstructorCall(
 				cls, index, false,
-				AddressOfNode(SubscriptNode(
-					VariableObjectExpr(binding), i)),
-				std::move(arg_nodes)));
+				shared_base ? SemNodePtr()
+				            : AddressOfNode(SubscriptNode(
+				                  VariableObjectExpr(binding), i)),
+				std::move(arg_nodes));
+			if (shared_base)
+			{
+				action->has_value = true;
+				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+				                           i * cls.size);
+			}
+			item.children.push_back(std::move(action));
 		}
 		return;
 	}
