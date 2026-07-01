@@ -407,6 +407,70 @@ void LowerProgram::RequireEhRuntime()
 	needs_eh_runtime_ = true;
 }
 
+void LowerProgram::DemandElidedCtor(const SemNode& callee)
+{
+	if (callee.kind != SN_CALLEE || !callee.entity_scope)
+		return;
+	const char* code = "";
+	switch (callee.special)
+	{
+	case SF_CONSTRUCTOR: code = "C1"; break;
+	case SF_CONSTRUCTOR_BASE: code = "C2"; break;
+	case SF_DESTRUCTOR: code = "D1"; break;
+	case SF_DESTRUCTOR_BASE: code = "D2"; break;
+	default:
+		break;
+	}
+	LowFunctionInfo& info =
+		callee.is_method || callee.special != SF_NONE
+			? MemberFunctionEntry(callee.entity_scope,
+			                      callee.entity_name, callee.type,
+			                      code)
+			: FunctionEntry(callee.entity_scope, callee.entity_name,
+			                callee.type);
+	// The elided call itself emits nothing; a synthesized body it
+	// selected is implicitly defined, so the user-provided members
+	// that body odr-uses must still appear.
+	if (info.definition && info.definition->synthesized)
+		DemandTreeCallees(*info.definition);
+}
+
+void LowerProgram::DemandTreeCallees(const SemNode& node)
+{
+	for (size_t i = 0; i < node.children.size(); i++)
+	{
+		const SemNode& child = *node.children[i];
+		if (child.kind == SN_CALLEE && child.entity_scope)
+		{
+			const char* code = "";
+			switch (child.special)
+			{
+			case SF_CONSTRUCTOR: code = "C1"; break;
+			case SF_CONSTRUCTOR_BASE: code = "C2"; break;
+			case SF_DESTRUCTOR: code = "D1"; break;
+			case SF_DESTRUCTOR_BASE: code = "D2"; break;
+			default:
+				break;
+			}
+			LowFunctionInfo& info =
+				child.is_method || child.special != SF_NONE
+					? MemberFunctionEntry(child.entity_scope,
+					                      child.entity_name,
+					                      child.type, code)
+					: FunctionEntry(child.entity_scope,
+					                child.entity_name, child.type);
+			if (info.definition)
+			{
+				if (info.definition->synthesized)
+					DemandTreeCallees(*info.definition);
+				else
+					DemandFunction(info);
+			}
+		}
+		DemandTreeCallees(child);
+	}
+}
+
 bool LowerProgram::CalleeMayUnwind(const SemNode& callee)
 {
 	if (callee.unwind_no)

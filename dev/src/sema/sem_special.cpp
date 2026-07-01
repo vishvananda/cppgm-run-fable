@@ -599,6 +599,7 @@ void SemBinder::EnsureSpecialCtor(const ClassInfo& cls_in, int index,
 	param_binding.type = parameter.type;
 	AddBinding(*fn_scope, param_binding);
 	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
+	item->synthesized = true;
 	SemNode* node = item.get();
 
 	Scope* saved_scope = current_;
@@ -685,6 +686,7 @@ void SemBinder::BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
 	param_binding.type = parameter.type;
 	AddBinding(*fn_scope, param_binding);
 	SemNodePtr item = BuildFunctionNode(body, SF_NONE);
+	item->synthesized = true;
 	SemNode* node = item.get();
 
 	Scope* saved_scope = current_;

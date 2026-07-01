@@ -25,7 +25,7 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  member_ref(false), is_method(false), special(SF_NONE),
 	  inline_def(false), needs_dtor(false), trivial_init(false),
 	  elided(false), bf_plain_store(false), synth_copy(false),
-	  trivial_copy(false), ctor_addressed(false)
+	  trivial_copy(false), ctor_addressed(false), synthesized(false)
 {
 }
 
@@ -219,6 +219,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.synth_copy = node.synth_copy;
 	out.trivial_copy = node.trivial_copy;
 	out.ctor_addressed = node.ctor_addressed;
+	out.synthesized = node.synthesized;
 	for (size_t i = 0; i < node.children.size(); i++)
 		out.children.push_back(CloneSemNode(*node.children[i]));
 	return copy;

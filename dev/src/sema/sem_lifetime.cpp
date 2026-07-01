@@ -370,6 +370,7 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in)
 		AddBinding(*fn_scope, param_binding);
 	}
 	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
+	item->synthesized = true;
 	SemNode* node = item.get();
 	Scope* saved_scope = current_;
 	MethodContext saved_method = method_;

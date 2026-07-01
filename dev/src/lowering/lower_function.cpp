@@ -682,6 +682,12 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 				named->entity_name == nrvo_name_;
 			if (!reused)
 				LowerClassInit(value, "%ret");
+			else if (value.kind == SN_CONSTRUCTOR_ACTION &&
+			         !value.children.empty() &&
+			         value.children[0]->kind == SN_CALL_EXPRESSION &&
+			         !value.children[0]->children.empty())
+				program_.DemandElidedCtor(
+					*value.children[0]->children[0]);
 			EndFullExpression();
 			EmitCleanupsFrom(0);
 			Terminate("return void");
@@ -803,9 +809,14 @@ void FunctionLowerer::LowerDo(const SemNode& node)
 void FunctionLowerer::LowerFor(const SemNode& node)
 {
 	size_t next = 0;
+	// 6.5.3: a for-init declaration's scope (and its object's
+	// lifetime) is the whole for statement.
+	bool init_scope = false;
 	if (next < node.children.size() &&
 	    node.children[next]->kind == SN_FOR_INIT)
 	{
+		init_scope = true;
+		PushCleanupScope();
 		LowerStatement(*node.children[next]->children[0]);
 		next++;
 	}
@@ -848,6 +859,8 @@ void FunctionLowerer::LowerFor(const SemNode& node)
 		Terminate("jump ^" + cond_label);
 	}
 	OpenBlock(end_label);
+	if (init_scope)
+		PopCleanupScope(true);
 }
 
 void FunctionLowerer::ScanSwitchLabels(const SemNode& node,

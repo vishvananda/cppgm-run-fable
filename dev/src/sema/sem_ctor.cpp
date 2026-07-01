@@ -655,6 +655,7 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 	body.out_of_class = out_of_class;
 	body.composed.type = ctor_type;
 	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
+	item->synthesized = true;
 	SemNode* node = item.get();
 
 	Scope* saved_scope = current_;
@@ -716,6 +717,7 @@ void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in,
 	body.composed.type = MakeFunctionType(MakeFundamentalType(FT_VOID),
 	                                      vector<TypePtr>(), false);
 	SemNodePtr item = BuildFunctionNode(body, SF_DESTRUCTOR);
+	item->synthesized = true;
 	SemNode* node = item.get();
 
 	Scope* saved_scope = current_;

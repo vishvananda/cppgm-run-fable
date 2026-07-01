@@ -121,9 +121,14 @@ public:
 	void RequireEhRuntime();
 	// Whether a direct callee may unwind (drives eh_try placement).
 	bool CalleeMayUnwind(const SemNode& callee);
+	// 3.2p3: a constructor selected for an elided copy/move is still
+	// odr-used; user-provided definitions reached through synthesized
+	// bodies must be emitted even though the call itself is dropped.
+	void DemandElidedCtor(const SemNode& callee);
 
 private:
 	void CollectItem(const SemNode& item);
+	void DemandTreeCallees(const SemNode& node);
 	void RegisterFunction(const SemNode& item, bool defined);
 	void RegisterDeferred(const SemNode& item);
 	LowGlobalInfo& GlobalEntry(const Scope* scope, const string& name);

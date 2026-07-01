@@ -203,6 +203,9 @@ struct SemNode
 	// object address (declared objects, members, placement results),
 	// not the first constructor argument.
 	bool ctor_addressed;
+	// SN_FUNCTION_DEFINITION: a compiler-synthesized special-member
+	// body (implicit/defaulted); emitted only when directly called.
+	bool synthesized;
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);
