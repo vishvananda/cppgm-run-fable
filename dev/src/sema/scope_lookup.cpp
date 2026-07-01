@@ -156,11 +156,20 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 		const ScopeBinding* own = scope->kind == SCOPE_CLASS
 			? ClassChainLookup(*scope, name, filter)
 			: FindOwnBinding(*scope, name);
-		if (own && BindingPassesFilter(*own, filter))
-			return own;
+		if (own && !BindingPassesFilter(*own, filter))
+			own = 0;
 		if (scope->kind != SCOPE_NAMESPACE)
+		{
+			if (own)
+				return own;
 			continue;
+		}
+		// 7.3.4p2/p6: directive-imported names appear beside the
+		// namespace's own declarations; distinct entities found at
+		// the same level make the name ambiguous.
 		const ScopeBinding* found = 0;
+		if (own)
+			MergeFound(own, found);
 		for (size_t i = 0; i < closure.size(); i++)
 		{
 			if (closure[i].anchor != scope)
