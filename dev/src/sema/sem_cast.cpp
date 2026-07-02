@@ -91,6 +91,29 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 				return value;
 			}
 		}
+		if (!value.function_set && !compatible && op != KW_CONST_CAST)
+		{
+			// 5.2.9p2: a cast to a (no less cv-qualified) base
+			// reference views the base-class subobject.
+			TypePtr from = RemoveTopCv(value.type);
+			TypePtr to = RemoveTopCv(referee);
+			int hops = from->kind == TK_CLASS && to->kind == TK_CLASS
+				? BaseClassDistance(from->named, to->named) : -1;
+			if (hops > 0)
+			{
+				SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+				adjusted->type = to;
+				adjusted->category = value.category == VC_PRVALUE
+					? VC_XVALUE : value.category;
+				adjusted->base_hops = hops;
+				adjusted->children.push_back(std::move(value.node));
+				value.node = std::move(adjusted);
+				value.type = to;
+				value.category = dest->kind == TK_RVALUE_REFERENCE
+					? VC_XVALUE : VC_LVALUE;
+				return value;
+			}
+		}
 		if (value.function_set || !compatible)
 			throw OutsideBoundary("reference cast form");
 		if (dest->kind == TK_LVALUE_REFERENCE &&

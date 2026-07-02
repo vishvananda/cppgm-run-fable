@@ -66,6 +66,22 @@ void SemBinder::CollectTemplateParams(const AstDecl& decl,
 	}
 }
 
+// Whether a declarator carries a parameter clause (declares a
+// function) at any nesting level.
+static bool DeclaratorHasParameterClause(const AstDeclarator& declarator)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator.items[i];
+		if (item.kind == DI_PARAMS)
+			return true;
+		if (item.kind == DI_NESTED && item.nested &&
+		    DeclaratorHasParameterClause(*item.nested))
+			return true;
+	}
+	return false;
+}
+
 void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 {
 	if (!decl.has_parameter_list || !decl.inner)
@@ -135,6 +151,14 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 			id = inner.declarators[0].declarator->IdName();
 		if (!id || id->parts.empty())
 			throw OutsideBoundary("template declarator form");
+		// PA18: variable templates (and their partial specializations)
+		// are outside the semantic scope; an uninstantiated
+		// declaration parses and is otherwise ignored. A qualified
+		// declarator is a class-template member definition instead.
+		if (inner.kind == DK_SIMPLE && id->parts.size() == 1 &&
+		    !DeclaratorHasParameterClause(
+		        *inner.declarators[0].declarator))
+			return;
 		if (id->parts.size() > 1)
 		{
 			RegisterTemplateMember(decl, *id);

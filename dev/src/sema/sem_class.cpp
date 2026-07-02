@@ -786,8 +786,38 @@ void SemBinder::FlushDeferredBodies()
 		vector<DeferredBody> batch;
 		batch.swap(deferred_bodies_);
 		for (size_t i = 0; i < batch.size(); i++)
-			AnalyzeDeferredBody(batch[i]);
+		{
+			if (!instantiating_)
+			{
+				AnalyzeDeferredBody(batch[i]);
+				continue;
+			}
+			// 14.7.1: an instantiated member body is ill-formed only
+			// if a use requires it. Bodies bind eagerly here, so an
+			// ill-formed one poisons its weak definition instead of
+			// the whole instantiation; a demand for it still fails.
+			try
+			{
+				AnalyzeDeferredBody(batch[i]);
+			}
+			catch (const std::exception& error)
+			{
+				AppendPoisonedBody(batch[i], error.what());
+			}
+		}
 	}
+}
+
+void SemBinder::AppendPoisonedBody(const DeferredBody& body,
+                                   const string& what)
+{
+	ESpecialFunction special = SF_NONE;
+	if (body.decl->kind == DK_SPECIAL_MEMBER_DEFINITION &&
+	    body.name.compare(0, 9, "operator ") != 0)
+		special = body.name[0] == '~' ? SF_DESTRUCTOR : SF_CONSTRUCTOR;
+	SemNodePtr item = BuildFunctionNode(body, special);
+	item->instantiation_error = what;
+	unit_.deferred.push_back(std::move(item));
 }
 
 // The this-adjusted printed type of a member function: pointer to cv

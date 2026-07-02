@@ -144,6 +144,9 @@ private:
 	                            const string& name);
 	void FlushDeferredBodies();
 	void AnalyzeDeferredBody(const DeferredBody& body);
+	// 14.7.1: an instantiated member whose body failed to bind keeps a
+	// poisoned weak definition; demanding it reports the stored error.
+	void AppendPoisonedBody(const DeferredBody& body, const string& what);
 	// Publishes a bound body's derived non-throwing fact so callers
 	// resolved afterwards skip unwind regions around calls to it.
 	void PublishBodyUnwindFact(const DeferredBody& body,

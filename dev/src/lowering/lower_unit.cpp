@@ -749,12 +749,16 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 	// PA17: an emitted base entry of a user-provided constructor or
 	// destructor of a class with a virtual destructor also prints the
 	// complete entry (which carries the base-entry alias), mirroring
-	// the reference comdat-style member emission.
+	// the reference comdat-style member emission. PA18: an
+	// instantiated specialization's members pair the same way.
 	if ((info.special_code == "C2" || info.special_code == "D2") &&
 	    info.defined && info.definition && !info.definition->synthesized)
 	{
 		const ClassInfo* cls = MethodClass(info.type);
-		if (cls && cls->is_polymorphic && cls->dtor_virtual)
+		bool comdat_pair = cls &&
+			((cls->is_polymorphic && cls->dtor_virtual) ||
+			 (cls->entity && cls->entity->spec_template));
+		if (comdat_pair)
 			DemandFunction(MemberFunctionEntry(
 				info.scope, info.name, info.type,
 				info.special_code == "C2" ? "C1" : "D1"));

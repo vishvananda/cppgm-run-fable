@@ -405,6 +405,63 @@ string MangleCvQualified(const TypePtr& type, Substitutions& subs,
 	return cv + inner;
 }
 
+// 5.1.7: the enclosing function scope of a local entity (null when
+// the entity is not function-local).
+const Scope* LocalEntityFunctionScope(const NamedTypeInfo& info)
+{
+	for (const Scope* scope = info.scope; scope && scope->parent;
+	     scope = scope->parent)
+	{
+		if (scope->kind == SCOPE_FUNCTION)
+			return scope;
+		if (scope->kind == SCOPE_NAMESPACE)
+			return 0;
+	}
+	return 0;
+}
+
+// 5.1.7: a function-local entity mangles as
+// `Z <function encoding> E <entity name>`.
+string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
+                       Substitutions& subs, string* key_out)
+{
+	string fn_object;
+	const Scope* declaring = fn_scope->parent;
+	const ScopeBinding* fn_binding =
+		declaring ? FindOwnBinding(*declaring, fn_scope->name) : 0;
+	if (fn_binding && declaring->kind == SCOPE_CLASS)
+		fn_object = MangleMemberFunctionObjectName(
+			declaring, fn_scope->name, fn_binding->type, "");
+	else if (fn_binding)
+		fn_object = MangleFunctionObjectName(declaring, fn_scope->name,
+		                                     fn_binding->type);
+	else
+		throw OutsideBoundary("local entity mangling context");
+	// The encoding is the object name without its _Z prefix.
+	string fn_encoding = fn_object.compare(0, 2, "_Z") == 0
+		? fn_object.substr(2) : fn_object;
+	// The classes between the function and the entity, then the leaf.
+	string names;
+	string name_key;
+	for (const Scope* scope = info.scope;
+	     scope && scope != fn_scope; scope = scope->parent)
+		if (scope->kind == SCOPE_CLASS && !scope->name.empty())
+		{
+			names = SourceName(scope->name) + names;
+			name_key = scope->name + "::" + name_key;
+		}
+	names += SourceName(info.name);
+	name_key += info.name;
+	string key = "Z:" + fn_encoding + ":" + name_key;
+	if (key_out)
+		*key_out = key;
+	string found = subs.Find(key);
+	if (!found.empty())
+		return found;
+	subs.Add(key);
+	return "Z" + fn_encoding + "E" + names;
+}
+
 string MangleType(const TypePtr& type, Substitutions& subs,
                   string* key_out)
 {
@@ -479,6 +536,10 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 	}
 	case TK_CLASS:
 	case TK_ENUM:
+		// 5.1.7: function-local entities take the Z...E local form.
+		if (const Scope* fn_scope = LocalEntityFunctionScope(*type->named))
+			return MangleLocalName(*type->named, fn_scope, subs,
+			                       key_out);
 		// Substitution keys stay name-based ("T:n::E") so the same
 		// entity declared in two translation units compresses alike;
 		// a substituted prefix compresses the nested spelling (NS_...).
@@ -567,15 +628,13 @@ string LowerScopeKey(const Scope* scope)
 	{
 		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
 			continue;
-		string part = scope->name;
-		if (part.empty())
-		{
-			char tagged[32];
-			snprintf(tagged, sizeof(tagged), "<anon:%p>",
-			         (const void*)scope);
-			part = tagged;
-		}
-		key = part + "::" + key;
+		// Identity keys carry the scope object: same-named entities in
+		// different contexts (local classes, their specializations)
+		// stay distinct. Keys are internal; names render elsewhere.
+		char tagged[48];
+		snprintf(tagged, sizeof(tagged), "%s#%p", scope->name.c_str(),
+		         (const void*)scope);
+		key = string(tagged) + "::" + key;
 	}
 	return key;
 }

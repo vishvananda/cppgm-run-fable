@@ -213,6 +213,10 @@ struct SemNode
 	// trivial implicit one; the lowering emits a raw `copyobj` of the
 	// whole object instead of demanding a helper definition.
 	bool trivial_copy;
+	// PA18: non-empty when this instantiated member body failed to
+	// analyze; the definition is ill-formed only if a use demands it
+	// (14.7.1), so the lowering throws this message on demand.
+	string instantiation_error;
 	// SN_CONSTRUCTOR_ACTION: the call's second child is the target
 	// object address (declared objects, members, placement results),
 	// not the first constructor argument.

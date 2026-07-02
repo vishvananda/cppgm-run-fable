@@ -344,8 +344,12 @@ AstStmtPtr AstParser::ParseJumpStatement()
 		AstStmtPtr stmt = MakeStmt(is_return ? SK_RETURN : SK_THROW);
 		if (!AtSimple(OP_SEMICOLON))
 		{
-			stmt->expr = is_return ? ParseExpression()
-			                       : ParseAssignmentExpression();
+			// 6.6.3p1: `return braced-init-list ;`.
+			if (is_return && AtSimple(OP_LBRACE))
+				stmt->expr = ParseBracedInitList();
+			else
+				stmt->expr = is_return ? ParseExpression()
+				                       : ParseAssignmentExpression();
 			if (!stmt->expr)
 			{
 				Restore(state);

@@ -760,8 +760,16 @@ void SemBinder::BindReturnStatement(const AstStmt& stmt)
 			throw runtime_error("non-void function returns no value");
 		return;
 	}
-	SemValue value = analyzer_.Analyze(*stmt.expr);
 	TypePtr bare = RemoveTopCv(current_return_);
+	SemValue value;
+	if (stmt.expr->kind == EK_BRACED &&
+	    !IsReferenceType(current_return_) && bare->kind == TK_CLASS)
+		// 6.6.3p3: a braced-init-list return copy-list-initializes
+		// the result object.
+		value = analyzer_.MakeTemporaryObject(bare, stmt.expr->arguments,
+		                                      false);
+	else
+		value = analyzer_.Analyze(*stmt.expr);
 	if (!IsReferenceType(current_return_) && bare->kind == TK_CLASS &&
 	    value.type && RemoveTopCv(value.type)->kind == TK_CLASS &&
 	    !value.function_set)

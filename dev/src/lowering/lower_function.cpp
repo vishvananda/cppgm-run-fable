@@ -39,6 +39,9 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
 
 string FunctionLowerer::Lower()
 {
+	if (!def_.instantiation_error.empty())
+		// 14.7.1: the demanded member's instantiation was ill-formed.
+		throw runtime_error(def_.instantiation_error);
 	string ret_text;
 	indirect_ret_ = LowerAbiReturn(return_type_, ret_text);
 	if (indirect_ret_)

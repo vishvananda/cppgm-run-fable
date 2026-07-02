@@ -210,6 +210,12 @@ public:
 	explicit SemExprAnalyzer(ISemExprHost& host);
 
 	SemValue Analyze(const AstExpr& expr);
+	// A constructed (or aggregate-initialized) temporary of a class
+	// type from an argument/braced-init list (5.2.3, 8.5.4); the
+	// binder's braced-return path builds through it too.
+	SemValue MakeTemporaryObject(const TypePtr& class_type,
+	                             const vector<AstExprPtr>& arguments,
+	                             bool braced_assign);
 
 	// 8.5 copy-initialization of a `dest`-typed object, parameter, or
 	// return value (references bind): validates the conversion, retypes
@@ -316,9 +322,7 @@ private:
 	                                 const ScopeBinding& binding);
 	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,
 	                                  const string& written);
-	SemValue MakeTemporaryObject(const TypePtr& class_type,
-	                             const vector<AstExprPtr>& arguments,
-	                             bool braced_assign);
+
 	// --- PA16 allocation expressions (sem_new.cpp) ---
 	SemValue AnalyzeNew(const AstExpr& expr);
 	SemValue AnalyzeNewArray(const AstExpr& expr, size_t bound_item);
