@@ -313,6 +313,23 @@ private:
 	// PA18 13.4p2: extends a target-directed function set with the
 	// specializations deduced from the destination type.
 	void AddTargetDeducedOverloads(SemValue& value, const TypePtr& dest);
+	// PA18 13.4: function-set arguments deduce against every ranked
+	// candidate's parameter types; refreshes `sources` when any grew.
+	void DeduceFunctionSetArguments(vector<SemValue>& args,
+	                                const vector<TypePtr>& candidates,
+	                                vector<ConversionSource>& sources);
+	void NamedCallMinArity(const ScopeBinding& binding,
+	                       const vector<TypePtr>& candidates,
+	                       const vector<const FunctionSpecialization*>& specs,
+	                       size_t ordinary, vector<size_t>& min_arity,
+	                       vector<bool>& is_template);
+	SemValue SynthesizeDefaultArgument(const ScopeBinding& chosen,
+	                                   size_t slot, size_t index,
+	                                   const TypePtr& param);
+	// 13.4: applies a target-selected overload to the value's node
+	// (deduced specializations re-target its identity).
+	void ApplySelectedOverload(SemValue& value,
+	                           const ImplicitConversion& conv);
 	static bool OperatorOperand(const SemValue& value);
 	bool TryBinaryOperator(const string& spelling, SemValue& lhs,
 	                       SemValue& rhs, SemValue& result);

@@ -216,6 +216,30 @@ void SemExprAnalyzer::AddTargetDeducedOverloads(SemValue& value,
 	}
 }
 
+void SemExprAnalyzer::DeduceFunctionSetArguments(
+	vector<SemValue>& args, const vector<TypePtr>& candidates,
+	vector<ConversionSource>& sources)
+{
+	bool augmented = false;
+	for (size_t c = 0; c < candidates.size(); c++)
+	{
+		const TypePtr& fn = candidates[c];
+		for (size_t i = 0;
+		     i < args.size() && i < fn->parameters.size(); i++)
+			if (args[i].function_set && !args[i].fn_templates.empty())
+			{
+				AddTargetDeducedOverloads(args[i], fn->parameters[i]);
+				augmented = true;
+			}
+	}
+	if (augmented)
+	{
+		sources.clear();
+		for (size_t i = 0; i < args.size(); i++)
+			sources.push_back(MakeConversionSource(args[i]));
+	}
+}
+
 // Collects the user-declared candidates of `operator <spelling>` for
 // the analyzed operand list.
 void SemExprAnalyzer::CollectOperatorCandidates(
@@ -308,26 +332,10 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	}
 	if (candidates.empty())
 		throw runtime_error("undeclared name " + name);
-	// PA18 13.4: overloaded/template arguments deduce against every
-	// candidate's parameter types before ranking.
-	bool augmented = false;
+	vector<TypePtr> declared;
 	for (size_t c = 0; c < candidates.size(); c++)
-	{
-		const TypePtr& fn = candidates[c].declared;
-		for (size_t i = 0;
-		     i < args.size() && i < fn->parameters.size(); i++)
-			if (args[i].function_set && !args[i].fn_templates.empty())
-			{
-				AddTargetDeducedOverloads(args[i], fn->parameters[i]);
-				augmented = true;
-			}
-	}
-	if (augmented)
-	{
-		sources.clear();
-		for (size_t i = 0; i < args.size(); i++)
-			sources.push_back(MakeConversionSource(args[i]));
-	}
+		declared.push_back(candidates[c].declared);
+	DeduceFunctionSetArguments(args, declared, sources);
 	vector<TypePtr> ranking;
 	vector<size_t> min_arity;
 	for (size_t c = 0; c < candidates.size(); c++)

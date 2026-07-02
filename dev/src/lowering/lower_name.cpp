@@ -382,31 +382,35 @@ string ManglePrefixComponents(const vector<NameComponent>& parts,
 // The substitution keys are structural (composed from the entity
 // identities, not the possibly substituted spellings), so the same
 // type always finds its earlier registration.
+// The cv-qualified head of a type encoding ("K"/"V"/"VK" plus the
+// unqualified encoding), itself a substitution candidate.
+string MangleCvQualified(const TypePtr& type, Substitutions& subs,
+                         string* key_out)
+{
+	Type bare = *type;
+	bare.is_const = false;
+	bare.is_volatile = false;
+	TypePtr unqualified(new Type(bare));
+	string inner_key;
+	string inner = MangleType(unqualified, subs, &inner_key);
+	string cv = string(type->is_volatile ? "V" : "") +
+		(type->is_const ? "K" : "");
+	string key = cv + "|" + inner_key;
+	if (key_out)
+		*key_out = key;
+	string found = subs.Find(key);
+	if (!found.empty())
+		return found;
+	subs.Add(key);
+	return cv + inner;
+}
+
 string MangleType(const TypePtr& type, Substitutions& subs,
                   string* key_out)
 {
-	bool is_const = type->is_const;
-	bool is_volatile = type->is_volatile;
-	if ((is_const || is_volatile) && type->kind != TK_FUNCTION)
-	{
-		Type bare = *type;
-		bare.is_const = false;
-		bare.is_volatile = false;
-		TypePtr unqualified(new Type(bare));
-		string inner_key;
-		string inner = MangleType(unqualified, subs, &inner_key);
-		string key = string(is_volatile ? "V" : "") +
-			(is_const ? "K" : "") + "|" + inner_key;
-		if (key_out)
-			*key_out = key;
-		string spelling = string(is_volatile ? "V" : "") +
-			(is_const ? "K" : "") + inner;
-		string found = subs.Find(key);
-		if (!found.empty())
-			return found;
-		subs.Add(key);
-		return spelling;
-	}
+	if ((type->is_const || type->is_volatile) &&
+	    type->kind != TK_FUNCTION)
+		return MangleCvQualified(type, subs, key_out);
 	switch (type->kind)
 	{
 	case TK_FUNDAMENTAL:
