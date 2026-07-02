@@ -287,11 +287,10 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 		break;
 	case TK_TEMPLATE_SPEC:
 	{
-		if (a->named != b->named ||
-		    a->parameters.size() != b->parameters.size())
+		if (a->named != b->named || a->targs.size() != b->targs.size())
 			return false;
-		for (size_t i = 0; i < a->parameters.size(); i++)
-			if (!TypeEquals(a->parameters[i], b->parameters[i]))
+		for (size_t i = 0; i < a->targs.size(); i++)
+			if (!TemplateArgEquals(a->targs[i], b->targs[i]))
 				return false;
 		return true;
 	}
@@ -302,13 +301,34 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 }
 
 TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
-                             const vector<TypePtr>& args)
+                             const vector<TemplateArg>& args)
 {
 	Type type;
 	type.kind = TK_TEMPLATE_SPEC;
 	type.named = anchor;
-	type.parameters = args;
+	type.targs = args;
 	return make_shared<Type>(type);
+}
+
+bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
+{
+	if (a.is_value != b.is_value)
+		return false;
+	if (!a.is_value)
+		return TypeEquals(a.type, b.type);
+	if (a.value_param != b.value_param ||
+	    bool(a.dependent_value) != bool(b.dependent_value))
+		return false;
+	if (a.dependent_value)
+		return a.dependent_value == b.dependent_value;
+	return TypeEquals(a.type, b.type) && a.value_bits == b.value_bits;
+}
+
+bool TemplateArgIsDependent(const TemplateArg& arg)
+{
+	if (arg.value_param >= 0 || arg.dependent_value)
+		return true;
+	return TypeIsDependent(arg.type);
 }
 
 bool TypeIsDependent(const TypePtr& type)
@@ -543,11 +563,20 @@ string DescribeType(const TypePtr& type)
 	case TK_TEMPLATE_SPEC:
 	{
 		string args;
-		for (size_t i = 0; i < type->parameters.size(); i++)
+		for (size_t i = 0; i < type->targs.size(); i++)
 		{
 			if (i > 0)
 				args += ", ";
-			args += DescribeType(type->parameters[i]);
+			if (!type->targs[i].is_value)
+				args += DescribeType(type->targs[i].type);
+			else if (type->targs[i].value_param >= 0)
+				args += "value-parameter #" +
+					to_string(type->targs[i].value_param);
+			else if (type->targs[i].dependent_value)
+				args += "dependent-value";
+			else
+				args += to_string(
+					(long long)type->targs[i].value_bits);
 		}
 		return cv + type->named->display + "<" + args + ">";
 	}

@@ -52,7 +52,7 @@ struct ClassSpecialization
 	{}
 
 	TemplateInfo* owner;
-	vector<TypePtr> args;
+	vector<TemplateArg> args;
 	string key;
 	NamedTypeInfo* entity;
 	Scope* param_scope;  // argument alias scope (parent of class scope)
@@ -75,7 +75,7 @@ struct FunctionSpecialization
 	{}
 
 	TemplateInfo* owner;
-	vector<TypePtr> args;
+	vector<TemplateArg> args;
 	string key;
 	string name;   // entity name: template-name + argument spellings
 	TypePtr type;  // concrete namespace-scope function type
@@ -172,7 +172,7 @@ enum { kTemplateInstantiationDepthLimit = 200 };
 // A stable canonical key for one template-argument list (never
 // printed; entity pointers keep it unique within the translation
 // unit).
-string TemplateArgumentKey(const vector<TypePtr>& args);
+string TemplateArgumentKey(const vector<TemplateArg>& args);
 
 // The flattened `text` with each template-parameter name replaced by
 // its positional marker (14.1: parameter identity is positional).
@@ -191,4 +191,4 @@ string CanonicalDeclaratorParams(const AstDeclarator& declarator,
 // The source-like spelling of one template-argument list, used for
 // specialization entity names ("Box<int>"): the lowering's sanitized
 // symbol names and scope paths derive from it.
-string TemplateArgumentSpelling(const vector<TypePtr>& args);
+string TemplateArgumentSpelling(const vector<TemplateArg>& args);

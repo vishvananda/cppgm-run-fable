@@ -285,17 +285,23 @@ private:
 	TemplateInfo* ResolveMemberOwnerTemplate(const AstName& id,
 	                                         size_t& tmpl_part);
 	// Resolves the argument list of one template-id part against
-	// `tmpl` (type-id arguments; defaults fill the tail).
-	vector<TypePtr> ResolveTemplateArgumentList(TemplateInfo& tmpl,
-	                                            const AstNamePart& part);
+	// `tmpl` (type-id and constant-value arguments; defaults fill the
+	// tail).
+	vector<TemplateArg> ResolveTemplateArgumentList(TemplateInfo& tmpl,
+	                                                const AstNamePart& part);
 	// A SCOPE_TEMPLATE_PARAMS scope under the template's declaring
-	// scope with each parameter name aliased to its argument type.
+	// scope with each parameter name aliased to its argument (type
+	// aliases and constant-value bindings).
 	Scope* MakeArgumentAliasScope(const TemplateInfo& tmpl,
-	                              const vector<TypePtr>& args);
+	                              const vector<TemplateArg>& args);
+	// One parameter-name alias in such a scope (type alias or
+	// objectless constant).
+	void BindParamAlias(Scope& scope, const TemplateParam& param,
+	                    const TemplateArg& arg);
 	// The specialization record for `args`, instantiating the class
 	// body on demand when the definition is available.
 	ClassSpecialization* EnsureClassSpecialization(
-		TemplateInfo& tmpl, const vector<TypePtr>& args);
+		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	void InstantiateClassSpecialization(TemplateInfo& tmpl,
 	                                    ClassSpecialization& spec);
 	// Instantiates the registered out-of-class member definitions that
@@ -336,7 +342,7 @@ private:
 	// composing the concrete signature on first use (and the body once
 	// the definition is available).
 	FunctionSpecialization* EnsureFunctionSpecialization(
-		TemplateInfo& tmpl, const vector<TypePtr>& args);
+		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	void InstantiateFunctionBody(TemplateInfo& tmpl,
 	                             FunctionSpecialization& spec);
 	void InstantiatePendingFunctions(TemplateInfo& tmpl);

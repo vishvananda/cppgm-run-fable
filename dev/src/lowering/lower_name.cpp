@@ -25,7 +25,7 @@ struct NameComponent
 	NameComponent() : args(0) {}
 
 	string name;
-	const vector<TypePtr>* args;
+	const vector<TemplateArg>* args;
 };
 
 NameComponent ScopeComponent(const Scope* scope)
@@ -242,6 +242,20 @@ string TypeKey(const TypePtr& type)
 // The structural keys of one component under prefix key `prev`: the
 // name key (a template's own name is a substitution candidate) and
 // the full key (with the argument keys for a specialization).
+// The structural key of one template argument (types recurse through
+// TypeKey; values key by declared type + bits; pattern slots by their
+// parameter index).
+string ArgKey(const TemplateArg& arg)
+{
+	if (!arg.is_value)
+		return TypeKey(arg.type);
+	if (arg.value_param >= 0)
+		return "vp" + to_string(arg.value_param);
+	if (arg.dependent_value)
+		return "vdep";
+	return "v" + TypeKey(arg.type) + ":" + to_string(arg.value_bits);
+}
+
 void ComponentKeys(const NameComponent& part, const string& prev,
                    string& name_key, string& full_key)
 {
@@ -251,9 +265,36 @@ void ComponentKeys(const NameComponent& part, const string& prev,
 	{
 		full_key += "<";
 		for (size_t i = 0; i < part.args->size(); i++)
-			full_key += TypeKey((*part.args)[i]) + ",";
+			full_key += ArgKey((*part.args)[i]) + ",";
 		full_key += ">";
 	}
+}
+
+// 5.1.6/5.1.7: one template argument. A concrete value spells the
+// literal form `L <type> <value> E` (negative values with `n`); a
+// pattern reference to the n-th template parameter spells T_/Tn_; a
+// dependent expression spells a fixed placeholder (`object=` names
+// are pairing hints only - the placeholder keeps mangling total and
+// repeatable without encoding the full expression grammar).
+string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
+{
+	if (!arg.is_value)
+		return MangleType(arg.type, subs);
+	if (arg.value_param >= 0)
+		return arg.value_param == 0
+			? string("T_") : "T" + to_string(arg.value_param - 1) + "_";
+	if (arg.dependent_value)
+		return "L_DEPE";
+	string code = MangleType(arg.type, subs);
+	string digits;
+	if (IsSignedIntegralFundamental(arg.value_type) &&
+	    (long long)arg.value_bits < 0)
+		// Unsigned negation: the magnitude of the most negative value
+		// stays representable.
+		digits = "n" + to_string(0ull - arg.value_bits);
+	else
+		digits = to_string(arg.value_bits);
+	return "L" + code + digits + "E";
 }
 
 // Appends one component's spelling. A specialization registers its
@@ -280,7 +321,7 @@ void AppendComponentSpelling(const NameComponent& part,
 	}
 	out += tname + "I";
 	for (size_t i = 0; i < part.args->size(); i++)
-		out += MangleType((*part.args)[i], subs);
+		out += MangleTemplateArg((*part.args)[i], subs);
 	out += "E";
 }
 
@@ -342,7 +383,7 @@ string MangleComponentList(const vector<NameComponent>& parts,
 		const NameComponent& leaf = parts.back();
 		body += "I";
 		for (size_t i = 0; i < leaf.args->size(); i++)
-			body += MangleType((*leaf.args)[i], subs);
+			body += MangleTemplateArg((*leaf.args)[i], subs);
 		body += "E";
 	}
 	else
@@ -555,7 +596,7 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 		// A dependent specialization pattern (`box<T>`): the anchor's
 		// components with this node's argument patterns on the leaf.
 		vector<NameComponent> parts = EntityComponents(*type->named);
-		parts.back().args = &type->parameters;
+		parts.back().args = &type->targs;
 		return MangleComponentList(parts, subs, key_out);
 	}
 	case TK_TYPE_PARAM:
@@ -646,6 +687,8 @@ static bool ScopeIsFunctionLocal(const Scope* scope)
 // program-wide. Local classes in different functions can share a
 // spelling (`Maker::Piece`), so specializations over them must not
 // key by name.
+static bool ArgSpellingIsGlobal(const TemplateArg& arg);
+
 static bool ArgSpellingIsGlobal(const TypePtr& type)
 {
 	if (!type)
@@ -683,6 +726,21 @@ static bool ArgSpellingIsGlobal(const TypePtr& type)
 	default:
 		return false;
 	}
+}
+
+// A concrete value argument spells its canonical decimal (globally
+// unique per parameter); an enum-typed value additionally requires the
+// enum's own name to be global.
+static bool ArgSpellingIsGlobal(const TemplateArg& arg)
+{
+	if (!arg.is_value)
+		return ArgSpellingIsGlobal(arg.type);
+	if (arg.value_param >= 0 || arg.dependent_value)
+		return false;
+	if (arg.type && (arg.type->kind == TK_CLASS ||
+	                 arg.type->kind == TK_ENUM))
+		return ArgSpellingIsGlobal(arg.type);
+	return true;
 }
 
 // Whether a scope component's name is a program-wide identity: named,
@@ -854,7 +912,7 @@ string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 		MangleTerminalName(tmpl.name, pattern->parameters.size());
 	string targs;
 	for (size_t i = 0; i < spec.args.size(); i++)
-		targs += MangleType(spec.args[i], subs);
+		targs += MangleTemplateArg(spec.args[i], subs);
 	string result = MangleType(pattern->target, subs);
 	string params = MangleBareParameters(pattern, subs);
 	string encoding = terminal + "I" + targs + "E";

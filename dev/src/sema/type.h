@@ -51,6 +51,37 @@ enum ETypeKind
 struct Scope;
 struct Type;
 typedef shared_ptr<const Type> TypePtr;
+struct AstExpr;
+
+// PA19: one template argument - a type, or an integral constant value
+// of a declared parameter type. The value stores its (possibly enum-
+// underlying) fundamental type and 64-bit two's-complement bits
+// directly (the binder-side ConstValue lives in sema/scope.h; this
+// header stays below it). Pattern (dependent) arguments appear only
+// inside template patterns: `value_param` names the enclosing
+// template's value parameter the argument forwards positionally
+// (`store<N, U>`), and `dependent_value` carries an argument
+// expression whose value is unknown until instantiation. Concrete
+// specialization identities never carry either.
+struct TemplateArg
+{
+	TemplateArg()
+		: is_value(false), value_type(FT_INT), value_bits(0),
+		  value_param(-1), dependent_value(0)
+	{}
+	explicit TemplateArg(const TypePtr& type_in)
+		: type(type_in), is_value(false), value_type(FT_INT),
+		  value_bits(0), value_param(-1), dependent_value(0)
+	{}
+
+	TypePtr type;  // the type argument; for values, the declared
+	               // parameter type (enum identity preserved)
+	bool is_value;
+	EFundamentalType value_type;
+	unsigned long long value_bits;
+	int value_param;
+	const AstExpr* dependent_value;
+};
 
 // One record per named-type entity, owned by the semantic model that
 // declared it and shared by every Type node naming it, so completing
@@ -100,7 +131,7 @@ struct NamedTypeInfo
 	// patterns: `param_index` is its zero-based position (-1
 	// otherwise).
 	const struct TemplateInfo* spec_template;
-	vector<TypePtr> spec_args;
+	vector<TemplateArg> spec_args;
 	bool is_template_anchor;
 	int param_index;
 };
@@ -139,6 +170,9 @@ struct Type
 	// the node's is_const/is_volatile and print after the parameter list.
 	const NamedTypeInfo* named;    // TK_CLASS / TK_ENUM / TK_TYPE_PARAM /
 	                               // TK_MEMBER_POINTER (the class)
+	// TK_TEMPLATE_SPEC: the argument pattern list (types and values);
+	// `parameters` stays function-only.
+	vector<TemplateArg> targs;
 };
 
 // --- classification of fundamental types (3.9.1) ---
@@ -215,7 +249,14 @@ TypePtr MergeRedeclaredType(const TypePtr& existing,
 // PA18: a dependent specialization pattern type over the template
 // anchored by `anchor` with the given argument pattern.
 TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
-                             const vector<TypePtr>& args);
+                             const vector<TemplateArg>& args);
+
+// PA19 template-argument helpers: structural equality (14.4: same
+// type, or same declared type and value) and dependence (type
+// dependence, a value-parameter slot, or an uninstantiated value
+// expression).
+bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b);
+bool TemplateArgIsDependent(const TemplateArg& arg);
 
 // PA18: whether any component of `type` is (or contains) a template
 // parameter or dependent specialization pattern.

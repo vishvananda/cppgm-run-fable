@@ -99,10 +99,12 @@ void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
 			if (ns)
 				out.push_back(ns);
 			// 3.4.2p2: a class-template specialization associates the
-			// namespaces of its template arguments too.
+			// namespaces of its type template arguments (value
+			// arguments contribute nothing).
 			for (size_t i = 0; i < entity->spec_args.size(); i++)
-				CollectAssociatedNamespaces(model, entity->spec_args[i],
-				                            out);
+				if (!entity->spec_args[i].is_value)
+					CollectAssociatedNamespaces(
+						model, entity->spec_args[i].type, out);
 		}
 		return;
 	case TK_ENUM:

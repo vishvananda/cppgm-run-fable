@@ -409,10 +409,10 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 
 // --- template-id resolution ------------------------------------------------
 
-vector<TypePtr> SemBinder::ResolveTemplateArgumentList(
+vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 	TemplateInfo& tmpl, const AstNamePart& part)
 {
-	vector<TypePtr> args;
+	vector<TemplateArg> args;
 	for (size_t i = 0; i < part.arguments.size(); i++)
 	{
 		const AstTemplateArgument& argument = part.arguments[i];
@@ -420,7 +420,8 @@ vector<TypePtr> SemBinder::ResolveTemplateArgumentList(
 			throw OutsideBoundary("pack-expansion template argument");
 		if (!argument.is_type || !argument.type)
 			throw OutsideBoundary("non-type template argument");
-		args.push_back(builder_.ResolveTypeId(*argument.type));
+		args.push_back(
+			TemplateArg(builder_.ResolveTypeId(*argument.type)));
 	}
 	if (args.size() > tmpl.params.size())
 		throw runtime_error("too many template arguments for " +
@@ -432,15 +433,7 @@ vector<TypePtr> SemBinder::ResolveTemplateArgumentList(
 		Scope* partial = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 		                                    tmpl.declaring);
 		for (size_t i = 0; i < args.size(); i++)
-		{
-			if (tmpl.params[i].name.empty())
-				continue;
-			ScopeBinding alias;
-			alias.kind = SB_TYPE_ALIAS;
-			alias.name = tmpl.params[i].name;
-			alias.type = args[i];
-			AddBinding(*partial, alias);
-		}
+			BindParamAlias(*partial, tmpl.params[i], args[i]);
 		for (size_t k = args.size(); k < tmpl.params.size(); k++)
 		{
 			if (!tmpl.params[k].default_type)
@@ -460,18 +453,38 @@ vector<TypePtr> SemBinder::ResolveTemplateArgumentList(
 				throw;
 			}
 			current_ = saved;
-			args.push_back(resolved);
-			if (!tmpl.params[k].name.empty())
-			{
-				ScopeBinding alias;
-				alias.kind = SB_TYPE_ALIAS;
-				alias.name = tmpl.params[k].name;
-				alias.type = resolved;
-				AddBinding(*partial, alias);
-			}
+			args.push_back(TemplateArg(resolved));
+			BindParamAlias(*partial, tmpl.params[k], args.back());
 		}
 	}
 	return args;
+}
+
+// Binds one parameter name to its argument in an alias scope: type
+// arguments as type aliases, value arguments as objectless constant
+// variables (reads fold; LookupConstant sees the value).
+void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
+                               const TemplateArg& arg)
+{
+	if (param.name.empty())
+		return;
+	ScopeBinding alias;
+	if (!arg.is_value)
+	{
+		alias.kind = SB_TYPE_ALIAS;
+		alias.name = param.name;
+		alias.type = arg.type;
+	}
+	else
+	{
+		alias.kind = SB_VARIABLE;
+		alias.name = param.name;
+		alias.type = MakeCvQualifiedType(arg.type, true, false);
+		alias.has_value = true;
+		alias.value = ConstValue(arg.value_type, arg.value_bits);
+		alias.no_object = true;
+	}
+	AddBinding(scope, alias);
 }
 
 const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
@@ -496,10 +509,10 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		throw runtime_error(part.identifier +
 		                    " does not name a template");
 	TemplateInfo& tmpl = *named_template;
-	vector<TypePtr> args = ResolveTemplateArgumentList(tmpl, part);
+	vector<TemplateArg> args = ResolveTemplateArgumentList(tmpl, part);
 	bool dependent = false;
 	for (size_t i = 0; i < args.size(); i++)
-		if (TypeIsDependent(args[i]))
+		if (TemplateArgIsDependent(args[i]))
 			dependent = true;
 	if (dependent)
 	{
@@ -525,25 +538,17 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 // --- class instantiation ----------------------------------------------------
 
 Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
-                                         const vector<TypePtr>& args)
+                                         const vector<TemplateArg>& args)
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                  tmpl.declaring);
 	for (size_t i = 0; i < args.size() && i < tmpl.params.size(); i++)
-	{
-		if (tmpl.params[i].name.empty())
-			continue;
-		ScopeBinding alias;
-		alias.kind = SB_TYPE_ALIAS;
-		alias.name = tmpl.params[i].name;
-		alias.type = args[i];
-		AddBinding(*scope, alias);
-	}
+		BindParamAlias(*scope, tmpl.params[i], args[i]);
 	return scope;
 }
 
 ClassSpecialization* SemBinder::EnsureClassSpecialization(
-	TemplateInfo& tmpl, const vector<TypePtr>& args)
+	TemplateInfo& tmpl, const vector<TemplateArg>& args)
 {
 	string key = TemplateArgumentKey(args);
 	unique_ptr<ClassSpecialization>& slot = tmpl.class_specs[key];

@@ -39,10 +39,44 @@ TypePtr StripPatternCv(const TypePtr& pattern, const TypePtr& deduced)
 	return TypePtr(new Type(stripped));
 }
 
+// Whether a deduction slot has been bound (a type or a value).
+bool ArgBound(const TemplateArg& arg)
+{
+	return arg.is_value || bool(arg.type);
+}
+
+bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
+                    vector<TemplateArg>& bound);
+
+// Unification of one template-argument slot of a specialization
+// pattern against the corresponding concrete argument. Value slots
+// bind through the pattern's value-parameter reference or compare by
+// value; type slots recurse.
+bool DeduceFromArg(const TemplateArg& pattern, const TemplateArg& arg,
+                   vector<TemplateArg>& bound)
+{
+	if (!pattern.is_value && !arg.is_value)
+		return DeduceFromType(pattern.type, arg.type, bound);
+	if (!pattern.is_value || !arg.is_value)
+		return false;
+	if (pattern.value_param >= 0)
+	{
+		if ((size_t)pattern.value_param >= bound.size())
+			return false;
+		TemplateArg& slot = bound[pattern.value_param];
+		if (ArgBound(slot))
+			return TemplateArgEquals(slot, arg);
+		slot = arg;
+		return true;
+	}
+	// A concrete value in the pattern must match exactly.
+	return TemplateArgEquals(pattern, arg);
+}
+
 // 14.8.2.5: structural unification of one parameter pattern against
 // one argument type. `bound` has one slot per template parameter.
 bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
-                    vector<TypePtr>& bound)
+                    vector<TemplateArg>& bound)
 {
 	if (!pattern || !arg)
 		return false;
@@ -52,9 +86,10 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		if (index < 0 || (size_t)index >= bound.size())
 			return false;
 		TypePtr deduced = StripPatternCv(pattern, arg);
-		if (bound[index])
-			return TypeEquals(bound[index], deduced);
-		bound[index] = deduced;
+		if (ArgBound(bound[index]))
+			return bound[index].type &&
+				TypeEquals(bound[index].type, deduced);
+		bound[index] = TemplateArg(deduced);
 		return true;
 	}
 	if (pattern->kind != arg->kind)
@@ -114,11 +149,11 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		{
 			if (arg->named->spec_template !=
 			        pattern->named->spec_template ||
-			    arg->parameters.size() != pattern->parameters.size())
+			    arg->targs.size() != pattern->targs.size())
 				return false;
-			for (size_t i = 0; i < pattern->parameters.size(); i++)
-				if (!DeduceFromType(pattern->parameters[i],
-				                    arg->parameters[i], bound))
+			for (size_t i = 0; i < pattern->targs.size(); i++)
+				if (!DeduceFromArg(pattern->targs[i], arg->targs[i],
+				                   bound))
 					return false;
 			return true;
 		}
@@ -129,12 +164,11 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		while (entity &&
 		       entity->spec_template != pattern->named->spec_template)
 			entity = entity->base_entity;
-		if (!entity ||
-		    entity->spec_args.size() != pattern->parameters.size())
+		if (!entity || entity->spec_args.size() != pattern->targs.size())
 			return false;
-		for (size_t i = 0; i < pattern->parameters.size(); i++)
-			if (!DeduceFromType(pattern->parameters[i],
-			                    entity->spec_args[i], bound))
+		for (size_t i = 0; i < pattern->targs.size(); i++)
+			if (!DeduceFromArg(pattern->targs[i], entity->spec_args[i],
+			                   bound))
 				return false;
 		return true;
 	}
@@ -194,11 +228,13 @@ TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
 	case TK_TEMPLATE_SPEC:
 	{
 		Type copy = *pattern;
-		for (size_t i = 0; i < copy.parameters.size(); i++)
+		for (size_t i = 0; i < copy.targs.size(); i++)
 		{
-			copy.parameters[i] = SubstituteOrderingTypes(
-				copy.parameters[i], uniques);
-			if (!copy.parameters[i])
+			if (copy.targs[i].is_value)
+				continue;  // value slots compare by identity
+			copy.targs[i].type = SubstituteOrderingTypes(
+				copy.targs[i].type, uniques);
+			if (!copy.targs[i].type)
 				return TypePtr();
 		}
 		return TypePtr(new Type(copy));
@@ -268,7 +304,7 @@ bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
 	vector<TypePtr> uniques;
 	for (size_t i = 0; i < a.params.size(); i++)
 		uniques.push_back(OrderingUniqueType(i));
-	vector<TypePtr> bound(b.params.size());
+	vector<TemplateArg> bound(b.params.size());
 	for (size_t i = 0; i < argc; i++)
 	{
 		TypePtr transformed = SubstituteOrderingTypes(
@@ -442,7 +478,7 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	EnsureFunctionPattern(tmpl);
 	if (tmpl.param_patterns.size() < args.size())
 		return 0;
-	vector<TypePtr> bound(tmpl.params.size());
+	vector<TemplateArg> bound(tmpl.params.size());
 	// 14.8.1: explicit template arguments bind the leading parameters.
 	if (explicit_part)
 	{
@@ -456,13 +492,14 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 				return 0;
 			try
 			{
-				bound[i] = builder_.ResolveTypeId(*argument.type);
+				bound[i] = TemplateArg(
+					builder_.ResolveTypeId(*argument.type));
 			}
 			catch (const std::exception&)
 			{
 				return 0;
 			}
-			if (bound[i] && TypeIsDependent(bound[i]))
+			if (TemplateArgIsDependent(bound[i]))
 				return 0;
 		}
 	}
@@ -491,10 +528,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 					return 0;
 				TypePtr as_ref =
 					MakeReferenceType(arg_type, false, true);
-				if (bound[index] &&
-				    !TypeEquals(bound[index], as_ref))
+				if (ArgBound(bound[index]) &&
+				    !(bound[index].type &&
+				      TypeEquals(bound[index].type, as_ref)))
 					return 0;
-				bound[index] = as_ref;
+				bound[index] = TemplateArg(as_ref);
 				continue;
 			}
 			if (!DeduceFromType(referee, arg_type, bound))
@@ -509,7 +547,7 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	// remaining hole is a deduction failure.
 	for (size_t i = 0; i < bound.size(); i++)
 	{
-		if (bound[i])
+		if (ArgBound(bound[i]))
 			continue;
 		if (!tmpl.params[i].default_type)
 			return 0;
@@ -518,8 +556,8 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		current_ = partial;
 		try
 		{
-			bound[i] = builder_.ResolveTypeId(
-				*tmpl.params[i].default_type);
+			bound[i] = TemplateArg(builder_.ResolveTypeId(
+				*tmpl.params[i].default_type));
 		}
 		catch (const std::exception&)
 		{
@@ -536,7 +574,7 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 // --- specialization -----------------------------------------------------------
 
 FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
-	TemplateInfo& tmpl, const vector<TypePtr>& args)
+	TemplateInfo& tmpl, const vector<TemplateArg>& args)
 {
 	if (args.size() != tmpl.params.size())
 		throw runtime_error("wrong template argument count for " +
@@ -744,7 +782,7 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 	for (size_t t = 0; t < binding.fn_templates.size(); t++)
 	{
 		TemplateInfo& tmpl = *binding.fn_templates[t];
-		vector<TypePtr> args;
+		vector<TemplateArg> args;
 		try
 		{
 			args = ResolveTemplateArgumentList(tmpl, part);
@@ -755,7 +793,8 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 		}
 		bool dependent = false;
 		for (size_t i = 0; i < args.size(); i++)
-			if (!args[i] || TypeIsDependent(args[i]))
+			if ((!args[i].is_value && !args[i].type) ||
+			    TemplateArgIsDependent(args[i]))
 				dependent = true;
 		if (dependent)
 			continue;
@@ -818,12 +857,12 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner)
 		EnsureFunctionPattern(tmpl);
 		if (!tmpl.pattern)
 			continue;
-		vector<TypePtr> bound(tmpl.params.size());
+		vector<TemplateArg> bound(tmpl.params.size());
 		if (!DeduceFromType(tmpl.pattern, composed.type, bound))
 			continue;
 		bool complete = true;
 		for (size_t i = 0; i < bound.size(); i++)
-			if (!bound[i])
+			if (!ArgBound(bound[i]))
 				complete = false;
 		if (!complete)
 			continue;
@@ -869,11 +908,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
 	EnsureFunctionPattern(tmpl);
 	if (!tmpl.pattern || !target || target->kind != TK_FUNCTION)
 		return 0;
-	vector<TypePtr> bound(tmpl.params.size());
+	vector<TemplateArg> bound(tmpl.params.size());
 	if (!DeduceFromType(tmpl.pattern, target, bound))
 		return 0;
 	for (size_t i = 0; i < bound.size(); i++)
-		if (!bound[i])
+		if (!ArgBound(bound[i]))
 			return 0;
 	// Substitution failure is a hard error (no SFINAE dropping).
 	return EnsureFunctionSpecialization(tmpl, bound);

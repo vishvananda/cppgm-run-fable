@@ -181,26 +181,76 @@ string ArgSpelling(const TypePtr& type)
 
 }  // namespace
 
-string TemplateArgumentKey(const vector<TypePtr>& args)
+// One argument's key: types render structurally; concrete values key
+// by declared type + bits (14.4: type-and-value identity); pattern
+// slots key by their parameter index / expression identity.
+static void AppendArgKey(const TemplateArg& arg, string& out)
+{
+	if (!arg.is_value)
+	{
+		AppendKey(arg.type, out);
+		return;
+	}
+	if (arg.value_param >= 0)
+	{
+		out += "vp" + to_string(arg.value_param);
+		return;
+	}
+	if (arg.dependent_value)
+	{
+		char buffer[32];
+		snprintf(buffer, sizeof(buffer), "ve%p",
+		         (const void*)arg.dependent_value);
+		out += buffer;
+		return;
+	}
+	out += "v";
+	AppendKey(arg.type, out);
+	out += ":" + to_string(arg.value_bits);
+}
+
+string TemplateArgumentKey(const vector<TemplateArg>& args)
 {
 	string key;
 	for (size_t i = 0; i < args.size(); i++)
 	{
 		if (i > 0)
 			key += ";";
-		AppendKey(args[i], key);
+		AppendArgKey(args[i], key);
 	}
 	return key;
 }
 
-string TemplateArgumentSpelling(const vector<TypePtr>& args)
+// The source-like spelling of one concrete value: bool parameters
+// spell true/false, signed types the signed decimal, everything else
+// the unsigned decimal. Distinct values of one parameter cannot
+// collide.
+static string ValueSpelling(const TemplateArg& arg)
+{
+	if (arg.type && arg.type->kind == TK_FUNDAMENTAL &&
+	    arg.type->fundamental == FT_BOOL)
+		return arg.value_bits ? "true" : "false";
+	if (IsSignedIntegralFundamental(arg.value_type))
+		return to_string((long long)arg.value_bits);
+	return to_string(arg.value_bits);
+}
+
+string TemplateArgumentSpelling(const vector<TemplateArg>& args)
 {
 	string text = "<";
 	for (size_t i = 0; i < args.size(); i++)
 	{
 		if (i > 0)
 			text += ", ";
-		text += ArgSpelling(args[i]);
+		const TemplateArg& arg = args[i];
+		if (!arg.is_value)
+			text += ArgSpelling(arg.type);
+		else if (arg.value_param >= 0)
+			text += "#v" + to_string(arg.value_param);
+		else if (arg.dependent_value)
+			text += "#expr";
+		else
+			text += ValueSpelling(arg);
 	}
 	text += ">";
 	return text;

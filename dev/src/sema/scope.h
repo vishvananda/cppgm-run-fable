@@ -63,7 +63,6 @@ struct ConstValue
 };
 
 struct Scope;
-struct AstExpr;
 
 // PA15 member access control (clause 11). Bindings outside class
 // scopes stay MA_PUBLIC.
@@ -80,15 +79,20 @@ struct FunctionSpecialization;
 struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
-	                 owner(0), home(0), c_linkage(false),
-	                 access(MA_PUBLIC), is_mutable(false),
-	                 is_thread_local(false), templ(0), fn_self_spec(0) {}
+	                 no_object(false), owner(0), home(0),
+	                 c_linkage(false), access(MA_PUBLIC),
+	                 is_mutable(false), is_thread_local(false),
+	                 templ(0), fn_self_spec(0) {}
 
 	EScopeBindingKind kind;
 	string name;
 	TypePtr type;    // entity / alias target type (null for namespaces)
 	Scope* target;   // SB_NAMESPACE / SB_NAMESPACE_ALIAS
 	bool has_value;  // SB_ENUMERATOR and constant SB_VARIABLE
+	// PA19: a constant binding with no object behind it (a non-type
+	// template parameter): every use folds to `value`; odr-use
+	// (address, reference binding) is ill-formed.
+	bool no_object;
 	ConstValue value;
 	// The scope the binding was declared in (stamped by AddBinding; a
 	// using-declaration import keeps the original owner). Powers the
