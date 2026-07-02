@@ -398,6 +398,11 @@ bool SemBinder::ExpandPackExpression(const AstExpr& pattern,
 	CollectFromExpr(pattern, current_, mentions);
 	if (mentions.packs.empty())
 		return false;
+	// Abstract pattern bindings carry no elements; expanding them
+	// here would silently produce zero values instead of deferring.
+	if (PacksAreAbstract(mentions))
+		throw runtime_error("pack expansion in a non-instantiated "
+		                    "template context");
 	size_t length = PackExpansionLength(mentions.packs);
 	for (size_t k = 0; k < length; k++)
 	{

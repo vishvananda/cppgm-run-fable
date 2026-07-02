@@ -73,31 +73,58 @@ vector<TemplateArg> SemBinder::ComposePartialPattern(
 	return pattern;
 }
 
-// The first declared partial specialization whose pattern deduces
-// from the concrete arguments (the checked fixtures need exact-match
-// selection over the primary, not full 14.5.5.1 ordering). Returns -1
-// when none matches.
+// The partial specialization whose pattern deduces from the concrete
+// arguments; among several matches the most specialized wins
+// (14.5.4.1 via the 14.5.5.2 ordering subset), and a tie is an
+// ambiguity error. Returns -1 when none matches.
 int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
                                           const vector<TemplateArg>& args,
                                           vector<TemplateArg>& bound)
 {
+	vector<size_t> matches;
 	for (size_t p = 0; p < tmpl.partials.size(); p++)
 	{
 		const PartialSpecialization& partial = tmpl.partials[p];
 		if (partial.pattern.size() > args.size())
 			continue;
-		bound.assign(partial.params.size(), TemplateArg());
-		if (DeduceTemplateArgs(partial.pattern, args, bound))
-		{
-			bool complete = true;
-			for (size_t i = 0; i < bound.size(); i++)
-				if (!bound[i].is_value && !bound[i].type)
-					complete = false;
-			if (complete)
-				return (int)p;
-		}
+		vector<TemplateArg> candidate(partial.params.size());
+		if (!DeduceTemplateArgs(partial.pattern, args, candidate))
+			continue;
+		bool complete = true;
+		for (size_t i = 0; i < candidate.size(); i++)
+			if (!candidate[i].is_value && !candidate[i].type)
+				complete = false;
+		if (complete)
+			matches.push_back(p);
 	}
-	return -1;
+	if (matches.empty())
+		return -1;
+	size_t best = matches[0];
+	for (size_t m = 1; m < matches.size(); m++)
+	{
+		const PartialSpecialization& challenger = tmpl.partials[matches[m]];
+		const PartialSpecialization& champion = tmpl.partials[best];
+		bool challenger_wins =
+			PartialAtLeastAsSpecialized(challenger, champion) &&
+			!PartialAtLeastAsSpecialized(champion, challenger);
+		if (challenger_wins)
+			best = matches[m];
+	}
+	// The winner must beat every other match, not just its neighbors.
+	for (size_t m = 0; m < matches.size(); m++)
+	{
+		if (matches[m] == best)
+			continue;
+		if (!PartialAtLeastAsSpecialized(tmpl.partials[best],
+		                                 tmpl.partials[matches[m]]) ||
+		    PartialAtLeastAsSpecialized(tmpl.partials[matches[m]],
+		                                tmpl.partials[best]))
+			throw runtime_error("ambiguous partial specializations of " +
+			                    tmpl.name);
+	}
+	bound.assign(tmpl.partials[best].params.size(), TemplateArg());
+	DeduceTemplateArgs(tmpl.partials[best].pattern, args, bound);
+	return (int)best;
 }
 
 // --- explicit specialization entry -------------------------------------------

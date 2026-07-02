@@ -513,6 +513,39 @@ bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
 	return true;
 }
 
+// 14.5.5.2 (subset): `a` is at least as specialized as `b` when `b`'s
+// argument pattern deduces from `a`'s pattern with `a`'s type
+// placeholders replaced by synthesized unique types. Value slots keep
+// their slot identity: a concrete value in `b` never deduces from a
+// slot in `a` (so `X<7>` beats `X<N>`), and repeated-slot consistency
+// falls out of slot-index equality. Shapes outside the ordering
+// subset are conservatively not-at-least-as-specialized.
+bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
+                                            const PartialSpecialization& b)
+{
+	if (a.pattern.size() != b.pattern.size())
+		return false;
+	vector<TypePtr> uniques;
+	for (size_t i = 0; i < a.params.size(); i++)
+		uniques.push_back(OrderingUniqueType(i));
+	vector<TemplateArg> transformed;
+	for (size_t i = 0; i < a.pattern.size(); i++)
+	{
+		TemplateArg arg = a.pattern[i];
+		if (arg.pack_pattern)
+			return false;
+		if (!arg.is_value)
+		{
+			arg.type = SubstituteOrderingTypes(arg.type, uniques);
+			if (!arg.type)
+				return false;
+		}
+		transformed.push_back(arg);
+	}
+	vector<TemplateArg> bound(b.params.size());
+	return DeduceTemplateArgs(b.pattern, transformed, bound);
+}
+
 // --- deduction ---------------------------------------------------------------
 
 // The flattened concrete argument list of a deduction result: the

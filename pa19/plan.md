@@ -326,6 +326,77 @@ the fixtures never odr-use one as an object.
       `make test-report-through-pa19`: 1487/1487; file audit passes
       (2 pre-existing declaration-weight warnings).
 
+## Architecture Review
+
+Post-implementation review of what was actually built (see
+`pa19/audit.md` for the full audit):
+
+- **TemplateArg as the single argument model** landed as designed:
+  every carrier (`ClassSpecialization::args`,
+  `FunctionSpecialization::args`, `NamedTypeInfo::spec_args`,
+  deduction `bound` vectors, `Type::targs` on TK_TEMPLATE_SPEC)
+  migrated in stage 1 with no behavior change. Identity is the
+  canonical `TemplateArgumentKey` (typed, never printed); the display
+  spelling is a separate derivation used only for entity names. No
+  stringly identity anywhere.
+- **Pattern slots** (`value_param`, `dependent_value`,
+  `pack_pattern`) appear only in pattern contexts (dependent uses,
+  partial-spec patterns, TK_TEMPLATE_SPEC types); concrete
+  specialization identities never carry them, enforced by the
+  dependence checks at every `Ensure*Specialization` entry.
+- **Pack expansion** is one engine (`sem_pack.cpp`): collect pack
+  mentions, compute the lockstep length, re-bind each mentioned pack
+  name to its k-th element in a transient scope, re-run ordinary
+  resolution. All five expansion sites (template-argument lists, base
+  clauses, parameter clauses, call/braced argument lists, functional
+  casts) share it. Function parameter packs ride the same binding
+  (`pack_args` + `pack_param_names`).
+- **Ownership boundaries** match the plan: `template_args.cpp` owns
+  parameter/argument resolution, `sem_pack.cpp` owns expansion,
+  `sem_spec.cpp` owns explicit/partial specialization and variable
+  templates; `sem_template.cpp` remains the instantiation driver and
+  lost its superseded type-only resolution. The lowering consumes
+  typed facts (folded constants, value spellings, LiNE mangling)
+  without re-deriving anything.
+- **Deviation from the plan, fixed during audit**: the plan promised
+  "most specialized wins among matches"; the implementation shipped
+  first-declared-match. The audit replaced it with a real 14.5.5.2
+  ordering subset (`PartialAtLeastAsSpecialized`) plus an ambiguity
+  error, pinned by a new course test.
+
+## Final Architecture Review
+
+- Constant facts have one owner each: `ScopeBinding.has_value +
+  value` for foldable bindings (parameters, members, variable
+  templates), `TemplateArg.value_*` for argument identity,
+  `SemNode.value` for lowered literals. Reads fold in rvalue contexts
+  at the analyzer seam (`FoldObjectlessConstant`,
+  `AnalyzeStaticMemberValue`); the lowering only renders.
+- Demand-driven instantiation is uniform: class bodies on
+  completeness demand, function bodies on odr-use, static data
+  members on non-folding reference or object definition
+  (`OnStaticMemberReferenced` / `DemandSpecializationStatics`),
+  variable templates per key on first use with caching. No eager
+  full-suite walks; `InstantiateReadyMembers` remains the PA18
+  guarded scan.
+- Error discipline: every unsupported form and every failed
+  resolution throws; `EXIT_FAILURE` propagates from one seam in the
+  driver. Deferral (dependent static_assert conditions, dependent
+  value arguments) is decided by dependence analysis, not by
+  swallowing errors — the abstract-context checks
+  (`InAbstractTemplateContext`, `PacksAreAbstract`) gate every "defer
+  instead of fail" path, including the audit-added guard in
+  `ExpandPackExpression`.
+- Performance shape: argument resolution, alias-scope construction,
+  and expansion are linear in the argument/element counts; per-key
+  maps (`class_specs`, `fn_specs`, `var_specs`) memoize all repeated
+  work; partial-spec ordering runs only among actual matches on first
+  instantiation of a key. Through-pa19 (1488 tests) completes with no
+  timeout adjustments.
+- Exit state: `make test-report-through-pa19` 1488/1488; file audit
+  passes with only the two pre-existing declaration-weight warnings;
+  harness and fixtures untouched.
+
 ### Fixture-derived notes
 
 - `100-dependent-static-constant-member-comparison`: reads of
