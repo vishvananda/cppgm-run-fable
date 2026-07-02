@@ -152,6 +152,25 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 	case EK_SIZEOF_TYPE:
 	case EK_TYPE_TRAIT:
 		return AnalyzeSizeof(expr);
+	case EK_SIZEOF_PACK:
+	{
+		// 5.3.3p5: the number of elements of the named pack; the value
+		// materializes through a `const` instruction (the reference
+		// shape).
+		SemValue value;
+		value.type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
+		value.category = VC_PRVALUE;
+		value.node = MakeSemNode(SN_LITERAL);
+		value.node->type = value.type;
+		value.node->category = VC_PRVALUE;
+		value.node->has_value = true;
+		value.node->value = ConstValue(
+			FT_UNSIGNED_LONG_INT,
+			host_.PackSize(expr.name.parts[0].identifier));
+		value.node->token = RenderConstValue(value.node->value);
+		value.node->materialize_const = true;
+		return value;
+	}
 	case EK_NEW:
 		return AnalyzeNew(expr);
 	case EK_DELETE:
@@ -203,6 +222,8 @@ SemValue SemExprAnalyzer::AnalyzeLiteral(const AstExpr& expr)
 	}
 	else if (expr.literal_kind == PTK_UD_STRING)
 		return AnalyzeStringUdl(expr);
+	else if (expr.literal_kind == PTK_UD_INTEGER)
+		return AnalyzeNumericUdl(expr);
 	else
 		throw OutsideBoundary("user-defined literal");
 	value.node->type = value.type;
@@ -396,7 +417,9 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	value.node->type = value.type;
 	value.node->category = value.category;
 	value.node->entity_scope = binding->owner;
-	value.node->entity_name = binding->name;
+	// PA19: a pack-element binding reads/writes its expanded slot.
+	value.node->entity_name = binding->pack_element_name.empty()
+		? binding->name : binding->pack_element_name;
 	value.node->fn_spec = binding->fn_self_spec;
 	host_.OnSpecializationOdrUsed(binding->fn_self_spec);
 	return value;
@@ -1321,12 +1344,33 @@ SemValue SemExprAnalyzer::AnalyzeMember(const AstExpr& expr)
 
 // --- casts and sizeof -------------------------------------------------------
 
+// Analyzes one argument/initializer list, expanding `pattern...` pack
+// items in place (14.5.3).
+void SemExprAnalyzer::AnalyzeArgumentList(const vector<AstExprPtr>& items,
+                                          vector<SemValue>& out)
+{
+	for (size_t i = 0; i < items.size(); i++)
+	{
+		if (items[i]->kind == EK_PACK_EXPANSION)
+		{
+			if (!host_.ExpandPackExpression(*items[i]->operands[0], out))
+				throw runtime_error("pack expansion outside an "
+				                    "expandable context");
+			continue;
+		}
+		out.push_back(Analyze(*items[i]));
+	}
+}
+
 SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(const AstExpr& braced,
                                               TypePtr& dest)
 {
 	if (dest->kind != TK_ARRAY)
 		throw OutsideBoundary("braced initialization form");
-	const vector<AstExprPtr>& elements = braced.arguments;
+	// Pack expansions among the elements resolve before the bound
+	// completes (8.5.1p4 over the expanded list).
+	vector<SemValue> elements;
+	AnalyzeArgumentList(braced.arguments, elements);
 	if (dest->bound_known && elements.size() > dest->bound)
 		throw runtime_error("too many braced initializers");
 	if (!dest->bound_known)
@@ -1337,9 +1381,8 @@ SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(const AstExpr& braced,
 	node->category = VC_LVALUE;
 	for (size_t i = 0; i < elements.size(); i++)
 	{
-		SemValue element = Analyze(*elements[i]);
-		CopyInitialize(element, dest->target, "array element");
-		node->children.push_back(std::move(element.node));
+		CopyInitialize(elements[i], dest->target, "array element");
+		node->children.push_back(std::move(elements[i].node));
 	}
 	return node;
 }

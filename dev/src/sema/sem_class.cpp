@@ -52,19 +52,32 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 {
 	(void)info;
 	ClassInfo* cls = OpenClass();
-	if (decl.bases.size() != 1)
-		throw OutsideBoundary("multiple inheritance");
-	const AstBaseSpecifier& base = decl.bases[0];
-	if (base.is_virtual)
-		throw OutsideBoundary("virtual inheritance");
-	if (base.pack)
-		throw OutsideBoundary("base pack expansion");
+	// PA19: base-specifier packs expand per element; the first
+	// resolved base is the (single-inheritance) primary chain, and any
+	// extra bases are supported only when empty (the fixtures use
+	// empty pack-expanded bases for layout/alignment only).
+	std::vector<TypePtr> base_types;
 	bool saved_implicit = in_implicit_type_context_;
 	in_implicit_type_context_ = true;
-	TypePtr base_type;
+	bool any_dependent = false;
 	try
 	{
-		base_type = ResolveTypeName(base.name);
+		for (size_t b = 0; b < decl.bases.size(); b++)
+		{
+			const AstBaseSpecifier& spec = decl.bases[b];
+			if (spec.is_virtual)
+				throw OutsideBoundary("virtual inheritance");
+			if (spec.has_access && b > 0)
+				throw OutsideBoundary("access-specified extra base");
+			if (BaseClauseIsDependent(spec.name))
+				any_dependent = true;
+			if (spec.pack)
+			{
+				ExpandPackBases(spec, base_types);
+				continue;
+			}
+			base_types.push_back(ResolveTypeName(spec.name));
+		}
 	}
 	catch (...)
 	{
@@ -72,6 +85,25 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 		throw;
 	}
 	in_implicit_type_context_ = saved_implicit;
+	if (base_types.empty())
+	{
+		// A pack that expanded to nothing: the class stays baseless
+		// (the OnClassOpened layout already began).
+		if (instantiating_ && any_dependent)
+			scope->base_dependent = true;
+		return;
+	}
+	for (size_t b = 1; b < base_types.size(); b++)
+	{
+		const TypePtr& extra = base_types[b];
+		if (extra->kind != TK_CLASS || !extra->named->complete)
+			throw runtime_error("base class is not a complete class");
+		const ClassInfo* extra_cls = unit_.classes.Find(extra->named);
+		if (!extra_cls || !extra_cls->is_empty)
+			throw OutsideBoundary("multiple inheritance");
+	}
+	const AstBaseSpecifier& base = decl.bases[0];
+	TypePtr base_type = base_types[0];
 	if (base_type->kind != TK_CLASS || !base_type->named->complete)
 		throw runtime_error("base class is not a complete class");
 	ClassInfo* base_cls = unit_.classes.Find(base_type->named);
@@ -95,7 +127,7 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	// PA18 14.6.2p3: a base spelled with a template parameter is
 	// dependent; the instantiated scope remembers it so unqualified
 	// lookup skips the base subtree.
-	if (instantiating_ && BaseClauseIsDependent(base.name))
+	if (instantiating_ && any_dependent)
 		scope->base_dependent = true;
 	// PA17: the derived class inherits the base's vtable slots (an
 	// overrider replaces in place) and the virtual-destructor facts.

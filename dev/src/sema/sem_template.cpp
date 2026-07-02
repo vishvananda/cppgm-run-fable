@@ -383,6 +383,13 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	tmpl->decl = &decl;
 	tmpl->pattern_decl = &inner;
 	tmpl->has_definition = definition;
+	// 14.3p1 shape checks apply to declarations too (a pack-expansion
+	// argument targeting a non-pack parameter is ill-formed without
+	// any instantiation).
+	ValidateSignatureTemplateIds(inner.specifiers,
+	                             inner.kind == DK_FUNCTION
+	                                 ? inner.declarator.get()
+	                                 : inner.declarators[0].declarator.get());
 	if (definition)
 		CheckTemplateDefinitionSanity(*tmpl);
 	if (!binding)
@@ -453,8 +460,25 @@ Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                  tmpl.declaring);
-	for (size_t i = 0; i < args.size() && i < tmpl.params.size(); i++)
-		BindParamAlias(*scope, tmpl.params[i], args[i]);
+	std::vector<std::pair<size_t, size_t>> spans;
+	if (!MapParamSpans(tmpl.params, args.size(), spans))
+	{
+		// A partially-bound (deduction) list without a pack: bind what
+		// is known one-to-one.
+		for (size_t i = 0; i < args.size() && i < tmpl.params.size();
+		     i++)
+			BindParamAlias(*scope, tmpl.params[i], args[i]);
+		return scope;
+	}
+	for (size_t i = 0; i < tmpl.params.size(); i++)
+	{
+		if (tmpl.params[i].pack)
+			BindPackAlias(*scope, tmpl.params[i], args,
+			              spans[i].first, spans[i].second);
+		else if (spans[i].first < spans[i].second)
+			BindParamAlias(*scope, tmpl.params[i],
+			               args[spans[i].first]);
+	}
 	return scope;
 }
 

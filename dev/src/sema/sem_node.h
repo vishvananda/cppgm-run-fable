@@ -198,6 +198,9 @@ struct SemNode
 	// value-initialization zero-fills `value.bits` bytes of the target
 	// before the (non-user-provided) default constructor runs.
 	bool value_zero_fill = false;
+	// PA19 SN_LITERAL: lowers as a materialized `const` instruction
+	// instead of an immediate (the sizeof... reference shape).
+	bool materialize_const = false;
 	// A synthesized subobject constructor action whose whole chain does
 	// nothing: the callee is still demanded (emitted on use) but the
 	// call itself is not printed.

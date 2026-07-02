@@ -196,6 +196,16 @@ void FunctionLowerer::LowerCondition(const SemNode& node,
 LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
 {
 	LowerValue value;
+	if (node.materialize_const)
+	{
+		// PA19 sizeof...: the value materializes through a `const`
+		// instruction (the reference shape) instead of an immediate.
+		value.type = NodeType(node);
+		value.text = NewTemp();
+		Emit(value.text + " = const " + LowerValueType(value.type) +
+		     " " + to_string(node.value.bits));
+		return value;
+	}
 	if (node.is_string_literal)
 	{
 		// 4.2: the literal object's address; no decay instruction is

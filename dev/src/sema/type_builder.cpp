@@ -171,6 +171,18 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 	return info;
 }
 
+// Whether the parameter's declarator carries a top-level `...` pack
+// marker (`Args... args` / `Args&&...`).
+static bool ParameterIsPackExpanded(const AstParameter& parameter)
+{
+	if (!parameter.declarator)
+		return false;
+	for (size_t i = 0; i < parameter.declarator->items.size(); i++)
+		if (parameter.declarator->items[i].kind == DI_PACK)
+			return true;
+	return false;
+}
+
 void TypeBuilder::BuildParameters(const AstParameterClause& clause,
                                   vector<ParameterInfo>& parameters,
                                   vector<TypePtr>& types)
@@ -178,6 +190,23 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 	for (size_t i = 0; i < clause.parameters.size(); i++)
 	{
 		const AstParameter& parameter = clause.parameters[i];
+		if (ParameterIsPackExpanded(parameter))
+		{
+			// PA19: one composed parameter per pack element; an
+			// abstract context has nothing to expand and the whole
+			// composition fails over to per-parameter patterns.
+			vector<ParameterInfo> expanded;
+			if (!host_.ExpandPackParameter(parameter, expanded))
+				throw runtime_error("parameter pack outside an "
+				                    "expandable context");
+			for (size_t k = 0; k < expanded.size(); k++)
+			{
+				host_.OnParameterComposed(expanded[k].name,
+				                          expanded[k].type);
+				parameters.push_back(expanded[k]);
+			}
+			continue;
+		}
 		DeclSpecifierInfo specs =
 			ProcessSpecifiers(parameter.specifiers, false);
 		DeclaratorInfo composed =
@@ -293,9 +322,46 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 // prefix operators apply to the base left to right; the suffixes bind
 // tighter than nesting and compose right to left (8.3.4p3); the nested
 // core then recurses over the result (8.3p6).
-void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items,
+void TypeBuilder::ComposeItems(const vector<AstDeclaratorItem>& items_in,
                                bool collapsible, DeclaratorInfo& out)
 {
+	// PA19: the `...` pack marker is expansion structure, not type
+	// structure - composing the pattern (one element's type) ignores
+	// it. AstDeclaratorItem owns unique_ptrs, so the filtered view
+	// indexes the original items.
+	vector<const AstDeclaratorItem*> filtered;
+	bool has_pack = false;
+	for (size_t i = 0; i < items_in.size(); i++)
+		if (items_in[i].kind == DI_PACK)
+			has_pack = true;
+	if (has_pack)
+	{
+		for (size_t i = 0; i < items_in.size(); i++)
+			if (items_in[i].kind != DI_PACK)
+				filtered.push_back(&items_in[i]);
+		ComposeItemPtrs(filtered, collapsible, out);
+		return;
+	}
+	vector<const AstDeclaratorItem*> all;
+	for (size_t i = 0; i < items_in.size(); i++)
+		all.push_back(&items_in[i]);
+	ComposeItemPtrs(all, collapsible, out);
+}
+
+void TypeBuilder::ComposeItemPtrs(
+	const vector<const AstDeclaratorItem*>& item_ptrs, bool collapsible,
+	DeclaratorInfo& out)
+{
+	struct ItemsView
+	{
+		const vector<const AstDeclaratorItem*>& ptrs;
+		const AstDeclaratorItem& operator[](size_t i) const
+		{
+			return *ptrs[i];
+		}
+		size_t size() const { return ptrs.size(); }
+	};
+	ItemsView items = {item_ptrs};
 	size_t prefix_end = 0;
 	while (prefix_end < items.size() &&
 	       (items[prefix_end].kind == DI_PTR ||

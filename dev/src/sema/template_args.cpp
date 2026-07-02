@@ -39,6 +39,20 @@ const AstName* BareTypeIdName(const AstTypeId& type_id)
 	return &type_id.specifiers[0].name;
 }
 
+// A `T...` template argument parses as a type-id whose abstract
+// declarator carries the `...` as a DI_PACK item (the argument's own
+// pack flag stays false); the composition filters the marker, so
+// detection reads the declarator.
+bool TypeIdHasPackMarker(const AstTypeId& type_id)
+{
+	if (!type_id.declarator)
+		return false;
+	for (size_t i = 0; i < type_id.declarator->items.size(); i++)
+		if (type_id.declarator->items[i].kind == DI_PACK)
+			return true;
+	return false;
+}
+
 // The unparenthesized id-expression under `expr`, when that is its
 // whole shape (mirrors the constant evaluator's disambiguation).
 const AstName* PlainExprName(const AstExpr& expr)
@@ -102,11 +116,59 @@ void SemBinder::CollectTemplateParams(const AstDecl& decl,
 		default:
 			throw OutsideBoundary("template template parameter");
 		}
-		if (parameter.pack)
-			throw OutsideBoundary("template parameter pack");
 		param.pack = parameter.pack;
 		params.push_back(param);
 	}
+	// At most one parameter pack per list (14.1: the supported PA19
+	// shape - later parameters can only be defaulted or deduced).
+	size_t packs = 0;
+	for (size_t i = 0; i < params.size(); i++)
+		if (params[i].pack)
+			packs++;
+	if (packs > 1)
+		throw OutsideBoundary("multiple template parameter packs");
+}
+
+// The index of the parameter pack in `params`, or params.size() when
+// there is none.
+size_t TemplatePackIndex(const vector<TemplateParam>& params)
+{
+	for (size_t i = 0; i < params.size(); i++)
+		if (params[i].pack)
+			return i;
+	return params.size();
+}
+
+// Maps a RESOLVED flattened argument list onto the parameter list:
+// non-pack parameters take one argument each (in order, with any
+// post-pack parameters occupying the tail) and the pack owns the
+// middle run. Each parameter's span is [spans[i].first,
+// spans[i].second). False when the counts cannot line up.
+bool MapParamSpans(const vector<TemplateParam>& params, size_t argc,
+                   vector<std::pair<size_t, size_t>>& spans)
+{
+	size_t pack_at = TemplatePackIndex(params);
+	spans.clear();
+	if (pack_at == params.size())
+	{
+		if (argc > params.size())
+			return false;
+		for (size_t i = 0; i < params.size(); i++)
+			spans.push_back(std::make_pair(
+				i < argc ? i : argc, i < argc ? i + 1 : argc));
+		return true;
+	}
+	size_t trailing = params.size() - pack_at - 1;
+	if (argc + 1 < params.size())
+		return false;
+	size_t middle = argc - pack_at - trailing;
+	for (size_t i = 0; i < pack_at; i++)
+		spans.push_back(std::make_pair(i, i + 1));
+	spans.push_back(std::make_pair(pack_at, pack_at + middle));
+	for (size_t i = 0; i < trailing; i++)
+		spans.push_back(std::make_pair(pack_at + middle + i,
+		                               pack_at + middle + i + 1));
+	return true;
 }
 
 // Whether the current lookup context is an abstract template pattern
@@ -255,6 +317,75 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 	return arg;
 }
 
+// --- definition-time template-id shape validation ---------------------------
+//
+// 14.3p1 structural checks a captured signature can fail without any
+// instantiation: a pack-expansion argument must target a parameter
+// pack. (Kind and arity mismatches that depend on resolved types stay
+// instantiation-side.)
+
+void SemBinder::ValidateTemplateIdShape(const AstNamePart& part)
+{
+	const ScopeBinding* found =
+		UnqualifiedLookup(current_, part.identifier, SLF_ANY);
+	if (!found || found->kind != SB_CLASS_TEMPLATE || !found->templ)
+		return;
+	const vector<TemplateParam>& params = found->templ->params;
+	size_t cursor = 0;
+	for (size_t i = 0; i < part.arguments.size(); i++)
+	{
+		const AstTemplateArgument& argument = part.arguments[i];
+		bool is_expansion = argument.pack ||
+			(argument.is_type && argument.type &&
+			 TypeIdHasPackMarker(*argument.type));
+		if (cursor >= params.size())
+			return;  // arity checks resolve at instantiation
+		if (is_expansion && !params[cursor].pack)
+			throw runtime_error("pack-expansion argument for a "
+			                    "non-pack parameter of " +
+			                    found->templ->name);
+		if (!params[cursor].pack)
+			cursor++;
+	}
+}
+
+void SemBinder::ValidateSignatureTemplateIds(const AstSpecifierSeq& specifiers,
+                                             const AstDeclarator* declarator)
+{
+	for (size_t i = 0; i < specifiers.size(); i++)
+	{
+		if (specifiers[i].kind != SPEC_TYPE_NAME)
+			continue;
+		const AstName& name = specifiers[i].name;
+		for (size_t p = 0; p < name.parts.size(); p++)
+		{
+			const AstNamePart& part = name.parts[p];
+			if (part.kind != NP_TEMPLATE_ID)
+				continue;
+			ValidateTemplateIdShape(part);
+			for (size_t a = 0; a < part.arguments.size(); a++)
+				if (part.arguments[a].type)
+					ValidateSignatureTemplateIds(
+						part.arguments[a].type->specifiers,
+						part.arguments[a].type->declarator.get());
+		}
+	}
+	if (!declarator)
+		return;
+	for (size_t i = 0; i < declarator->items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator->items[i];
+		if (item.kind == DI_NESTED && item.nested)
+			ValidateSignatureTemplateIds(AstSpecifierSeq(),
+			                             item.nested.get());
+		else if (item.kind == DI_PARAMS && item.params)
+			for (size_t p = 0; p < item.params->parameters.size(); p++)
+				ValidateSignatureTemplateIds(
+					item.params->parameters[p].specifiers,
+					item.params->parameters[p].declarator.get());
+	}
+}
+
 // Binds one parameter name to its argument in an alias scope: type
 // arguments as type aliases, value arguments as objectless constants
 // (reads fold; LookupConstant sees the value); pattern value slots
@@ -288,6 +419,28 @@ void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
 	AddBinding(scope, alias);
 }
 
+// Binds a parameter pack's alias: the run of elements it owns.
+void SemBinder::BindPackAlias(Scope& scope, const TemplateParam& param,
+                              const vector<TemplateArg>& args,
+                              size_t begin, size_t end)
+{
+	if (param.name.empty())
+		return;
+	ScopeBinding alias;
+	alias.name = param.name;
+	alias.is_pack = true;
+	if (param.kind == TPK_TYPE)
+		alias.kind = SB_TYPE_ALIAS;
+	else
+	{
+		alias.kind = SB_VARIABLE;
+		alias.no_object = true;
+	}
+	for (size_t i = begin; i < end && i < args.size(); i++)
+		alias.pack_args.push_back(args[i]);
+	AddBinding(scope, alias);
+}
+
 // The lazily-created binding scope of one argument list: the earlier
 // arguments' aliases, used by dependent value-parameter types and by
 // default arguments (14.1: defaults resolve in the template's
@@ -307,86 +460,125 @@ Scope* SemBinder::EnsureArgBindingScope(TemplateInfo& tmpl,
 	return partial;
 }
 
+// Resolves one source argument against a parameter's kind.
+TemplateArg SemBinder::ResolveOneArgument(TemplateInfo& tmpl,
+                                          const TemplateParam& param,
+                                          const AstTemplateArgument& argument,
+                                          const vector<TemplateArg>& so_far,
+                                          Scope*& partial)
+{
+	if (param.kind == TPK_TYPE)
+	{
+		if (!argument.is_type || !argument.type)
+			throw runtime_error("expected a type argument for " +
+			                    tmpl.name);
+		return TemplateArg(builder_.ResolveTypeId(*argument.type));
+	}
+	TypePtr param_type = ValueParamType(
+		param, EnsureArgBindingScope(tmpl, so_far, partial));
+	return ResolveValueArgument(argument, param_type);
+}
+
 vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 	TemplateInfo& tmpl, const AstNamePart& part)
 {
 	const std::vector<AstTemplateArgument>& source = part.arguments;
-	if (source.size() > tmpl.params.size())
-		throw runtime_error("too many template arguments for " +
-		                    tmpl.name);
-	vector<TemplateArg> args;
+	size_t pack_at = TemplatePackIndex(tmpl.params);
+	bool has_pack = pack_at < tmpl.params.size();
+	// The binding scope of the earlier parameters: created eagerly
+	// when any parameter could need it (dependent value-parameter
+	// types, defaults, packs); aliases bind incrementally as each
+	// parameter resolves.
+	bool needs_scope = has_pack || source.size() < tmpl.params.size();
+	for (size_t i = 0; i < tmpl.params.size() && !needs_scope; i++)
+		if (tmpl.params[i].kind == TPK_VALUE)
+			needs_scope = true;
 	Scope* partial = 0;
-	for (size_t i = 0; i < tmpl.params.size(); i++)
+	vector<TemplateArg> args;
+	if (needs_scope)
+		EnsureArgBindingScope(tmpl, args, partial);
+	// Source arguments fill the leading parameters one-to-one; once
+	// the pack parameter is reached it absorbs every remaining source
+	// argument (post-pack parameters can only be defaulted).
+	size_t cursor = 0;
+	for (size_t s = 0; s < source.size(); s++)
 	{
-		const TemplateParam& param = tmpl.params[i];
-		TemplateArg arg;
-		if (i < source.size())
+		if (cursor >= tmpl.params.size())
+			throw runtime_error("too many template arguments for " +
+			                    tmpl.name);
+		const TemplateParam& param = tmpl.params[cursor];
+		const AstTemplateArgument& argument = source[s];
+		bool is_expansion = argument.pack ||
+			(argument.is_type && argument.type &&
+			 TypeIdHasPackMarker(*argument.type));
+		if (is_expansion)
 		{
-			const AstTemplateArgument& argument = source[i];
-			if (argument.pack)
-				throw OutsideBoundary("pack-expansion template "
-				                      "argument");
-			if (param.kind == TPK_TYPE)
-			{
-				if (!argument.is_type || !argument.type)
-					throw runtime_error("expected a type argument "
-					                    "for " + tmpl.name);
-				arg = TemplateArg(
-					builder_.ResolveTypeId(*argument.type));
-			}
-			else
-			{
-				TypePtr param_type = ValueParamType(
-					param,
-					EnsureArgBindingScope(tmpl, args, partial));
-				arg = ResolveValueArgument(argument, param_type);
-			}
+			if (!param.pack)
+				throw OutsideBoundary("pack-expansion argument for a "
+				                      "non-pack parameter");
+			ExpandTemplateArgumentPack(tmpl, param, argument, args,
+			                           partial);
 		}
 		else
+			args.push_back(ResolveOneArgument(tmpl, param, argument,
+			                                  args, partial));
+		if (!param.pack)
 		{
-			// Defaults resolve in the template's declaring scope with
-			// the earlier parameters bound to the resolved arguments.
-			EnsureArgBindingScope(tmpl, args, partial);
+			if (partial)
+				BindParamAlias(*partial, param, args.back());
+			cursor++;
+		}
+	}
+	// The pack's alias (possibly empty) binds once its run is known.
+	if (has_pack && cursor == pack_at)
+	{
+		if (partial)
+			BindPackAlias(*partial, tmpl.params[pack_at], args,
+			              pack_at > args.size() ? args.size() : pack_at,
+			              args.size());
+		cursor = pack_at + 1;
+	}
+	// Defaults fill the remaining parameters (an unreached pack is
+	// empty).
+	for (; cursor < tmpl.params.size(); cursor++)
+	{
+		const TemplateParam& param = tmpl.params[cursor];
+		if (param.pack)
+		{
+			if (partial)
+				BindPackAlias(*partial, param, args, args.size(),
+				              args.size());
+			continue;
+		}
+		EnsureArgBindingScope(tmpl, args, partial);
+		TemplateArg arg;
+		Scope* saved = current_;
+		current_ = partial;
+		try
+		{
 			if (param.kind == TPK_TYPE)
 			{
 				if (!param.default_type)
 					throw runtime_error("too few template arguments "
 					                    "for " + tmpl.name);
-				Scope* saved = current_;
-				current_ = partial;
-				try
-				{
-					arg = TemplateArg(builder_.ResolveTypeId(
-						*param.default_type));
-				}
-				catch (...)
-				{
-					current_ = saved;
-					throw;
-				}
-				current_ = saved;
+				arg = TemplateArg(builder_.ResolveTypeId(
+					*param.default_type));
 			}
 			else
 			{
 				if (!param.default_expr)
 					throw runtime_error("too few template arguments "
 					                    "for " + tmpl.name);
-				TypePtr param_type = ValueParamType(param, partial);
-				Scope* saved = current_;
-				current_ = partial;
-				try
-				{
-					arg = ResolveDefaultValueExpr(*param.default_expr,
-					                              param_type);
-				}
-				catch (...)
-				{
-					current_ = saved;
-					throw;
-				}
-				current_ = saved;
+				arg = ResolveDefaultValueExpr(
+					*param.default_expr, ValueParamType(param, partial));
 			}
 		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
 		args.push_back(arg);
 		if (partial)
 			BindParamAlias(*partial, param, args.back());

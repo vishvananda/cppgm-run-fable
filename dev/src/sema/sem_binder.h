@@ -321,6 +321,65 @@ private:
 	Scope* EnsureArgBindingScope(TemplateInfo& tmpl,
 	                             const vector<TemplateArg>& so_far,
 	                             Scope*& partial);
+	// One source argument against one parameter's kind.
+	TemplateArg ResolveOneArgument(TemplateInfo& tmpl,
+	                               const TemplateParam& param,
+	                               const AstTemplateArgument& argument,
+	                               const vector<TemplateArg>& so_far,
+	                               Scope*& partial);
+	// --- PA19 packs (sem_pack.cpp) ---
+	// A parameter pack's alias binding over its run of elements.
+	void BindPackAlias(Scope& scope, const TemplateParam& param,
+	                   const vector<TemplateArg>& args, size_t begin,
+	                   size_t end);
+	// Lockstep element count of the packs one expansion mentions.
+	size_t PackExpansionLength(const vector<const ScopeBinding*>& packs);
+	// A transient scope binding each mentioned pack name to its k-th
+	// element.
+	Scope* MakePackElementScope(const vector<const ScopeBinding*>& packs,
+	                            size_t index);
+	// `pattern...` in a template-argument list: per-element
+	// re-resolution (or a carried pack-pattern slot in abstract
+	// contexts).
+	void ExpandTemplateArgumentPack(TemplateInfo& tmpl,
+	                                const TemplateParam& param,
+	                                const AstTemplateArgument& argument,
+	                                vector<TemplateArg>& args,
+	                                Scope*& partial);
+	// `Base...` in a base clause: per-element base types.
+	void ExpandPackBases(const AstBaseSpecifier& base,
+	                     std::vector<TypePtr>& out);
+	// Aggregate braced init whose items contain pack expansions.
+	void AppendExpandedAggregateInit(const ClassInfo& cls,
+	                                 const SemNode& target_proto,
+	                                 const AstExpr& braced,
+	                                 vector<SemNodePtr>& out);
+	// sizeof...(name).
+	size_t PackSize(const string& name);
+	// 14.3p1 definition-time shape checks over a captured signature.
+	void ValidateTemplateIdShape(const AstNamePart& part);
+	void ValidateSignatureTemplateIds(const AstSpecifierSeq& specifiers,
+	                                  const AstDeclarator* declarator);
+	// `pattern...` in an argument/initializer list (ISemExprHost).
+	virtual bool ExpandPackExpression(const AstExpr& pattern,
+	                                  vector<SemValue>& out);
+	// `Args... args` in a parameter clause (ITypeBuilderHost).
+	virtual bool ExpandPackParameter(const AstParameter& parameter,
+	                                 std::vector<ParameterInfo>& out);
+	// The most recent clause expansion (one pack parameter per clause
+	// in the slice): the declared pack name and its expanded slots,
+	// consumed right after signature composition to bind the function
+	// -scope pack binding.
+	struct PackParamRecord
+	{
+		string name;
+		vector<string> names;
+		vector<TypePtr> types;
+	};
+	PackParamRecord last_pack_param_;
+	// Binds (or completes) the pack-parameter binding in `scope` from
+	// last_pack_param_.
+	void BindCapturedPackParameter(Scope* scope);
 	// The specialization record for `args`, instantiating the class
 	// body on demand when the definition is available.
 	ClassSpecialization* EnsureClassSpecialization(
@@ -362,7 +421,8 @@ private:
 	bool ComposeFunctionPattern(const vector<TemplateParam>& params,
 	                            Scope* declaring, const AstDecl& inner,
 	                            TypePtr& full,
-	                            vector<TypePtr>& param_patterns);
+	                            vector<TypePtr>& param_patterns,
+	                            vector<bool>& pattern_packs);
 	// Composes the abstract signature pattern (lazily, cached).
 	void EnsureFunctionPattern(TemplateInfo& tmpl);
 	// Whether a new declaration re-declares `tmpl` (positional
@@ -579,6 +639,8 @@ public:
 		TemplateInfo& tmpl, const TypePtr& target);
 	virtual void OnSpecializationOdrUsed(const FunctionSpecialization* spec);
 	virtual void OnStaticMemberReferenced(const ScopeBinding& binding);
+	virtual const FunctionSpecialization* InstantiateCharPackLiteral(
+		const ScopeBinding& binding, const string& chars);
 	virtual bool SwapUnevaluatedOperand(bool active);
 	virtual void OnMemberSignatureBegin(Scope* class_scope);
 	virtual void OnMemberSignatureEnd();

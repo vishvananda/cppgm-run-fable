@@ -244,6 +244,27 @@ AstExprPtr AstParser::ParseSizeofExpression()
 {
 	State entry = Save();
 	Advance();  // KW_SIZEOF
+	if (AtSimple(OP_DOTS))
+	{
+		// sizeof ... ( identifier ): the pack-size operator (5.3.3p5).
+		Advance();
+		if (MatchSimple(OP_LPAREN) && AtIdentifier())
+		{
+			string identifier = Peek().spelling;
+			Advance();
+			if (MatchSimple(OP_RPAREN))
+			{
+				AstExprPtr node = MakeExpr(EK_SIZEOF_PACK);
+				AstNamePart part;
+				part.kind = NP_IDENTIFIER;
+				part.identifier = identifier;
+				node->name.parts.push_back(move(part));
+				return node;
+			}
+		}
+		Restore(entry);
+		return AstExprPtr();
+	}
 	if (AtSimple(OP_LPAREN))
 	{
 		State state = Save();

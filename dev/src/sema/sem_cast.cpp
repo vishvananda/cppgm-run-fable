@@ -213,9 +213,34 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	if (RemoveTopCv(dest)->kind == TK_CLASS)
 		// T(args) over a class: a constructed temporary object.
 		return MakeTemporaryObject(RemoveTopCv(dest), arguments, false);
-	if (arguments.size() == 1)
+	// PA19: pack expansions among the arguments resolve first; the
+	// expanded count selects the form.
+	bool has_pack = false;
+	for (size_t i = 0; i < arguments.size(); i++)
+		if (arguments[i]->kind == EK_PACK_EXPANSION)
+			has_pack = true;
+	if (has_pack)
+	{
+		vector<SemValue> values;
+		AnalyzeArgumentList(arguments, values);
+		if (values.size() > 1)
+			throw OutsideBoundary("multi-argument functional cast");
+		if (values.size() == 1)
+		{
+			// Direct-initialization of the scalar from the expanded
+			// value.
+			ImplicitConversion conv = ClassifyConversionEx(
+				MakeConversionSource(values[0]), dest, true);
+			if (!conv.viable)
+				throw runtime_error("no conversion in functional cast");
+			ApplyConversion(values[0], conv, dest);
+			return std::move(values[0]);
+		}
+		// An empty expansion value-initializes (the form below).
+	}
+	else if (arguments.size() == 1)
 		return AnalyzeCastTo(dest, *arguments[0], false, OP_LPAREN, "");
-	if (!arguments.empty())
+	else if (!arguments.empty())
 		throw OutsideBoundary("multi-argument functional cast");
 	// 5.2.3p2: T() value-initializes; the supported scalar subset dumps
 	// as a zero literal.

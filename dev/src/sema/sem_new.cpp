@@ -231,31 +231,25 @@ SemValue SemExprAnalyzer::AnalyzeNew(const AstExpr& expr)
 		if (expr.new_init)
 		{
 			const AstInitializer& init = *expr.new_init;
-			const AstExpr* arg = 0;
-			size_t given = 0;
+			vector<SemValue> given_args;
 			if (init.kind == INIT_PAREN)
-			{
-				given = init.args.size();
-				arg = given ? init.args[0].get() : 0;
-			}
+				AnalyzeArgumentList(init.args, given_args);
 			else if (init.kind == INIT_BRACED)
-			{
-				given = init.expr->arguments.size();
-				arg = given ? init.expr->arguments[0].get() : 0;
-			}
+				AnalyzeArgumentList(init.expr->arguments, given_args);
 			else
 				throw OutsideBoundary("new initializer form");
-			if (given > 1)
+			if (given_args.size() > 1)
 				throw runtime_error("too many initializers in new");
+			bool has_arg = !given_args.empty();
 			SemValue stored;
-			if (arg)
+			if (has_arg)
 			{
-				stored = Analyze(*arg);
+				stored = std::move(given_args[0]);
 				CopyInitialize(stored, allocated, "new initializer");
 			}
 			else
 				stored = MakeSizeLiteral(0);  // value-initialization
-			if (!arg)
+			if (!has_arg)
 			{
 				stored.node->type = allocated;
 				stored.node->value =
@@ -276,8 +270,7 @@ SemValue SemExprAnalyzer::AnalyzeNew(const AstExpr& expr)
 	{
 		if (expr.new_init->kind != INIT_PAREN)
 			throw OutsideBoundary("new-initializer form");
-		for (size_t i = 0; i < expr.new_init->args.size(); i++)
-			ctor_args.push_back(Analyze(*expr.new_init->args[i]));
+		AnalyzeArgumentList(expr.new_init->args, ctor_args);
 	}
 	int ctor_index = host_.ResolveClassCtorHost(*cls, ctor_args, false,
 	                                            "new-expression");

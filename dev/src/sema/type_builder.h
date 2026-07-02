@@ -17,12 +17,25 @@ using std::vector;
 // the builder reaches through ITypeBuilderHost - so this module owns
 // only the structural rules.
 
+struct ParameterInfo;
+
 struct ITypeBuilderHost
 {
 	// A class-specifier, enum-specifier, or elaborated forward
 	// declaration used inside a specifier sequence: bind it and return
 	// the type it names.
 	virtual TypePtr BindNestedTypeSpecifier(const AstDecl& decl) = 0;
+	// PA19: expands a pack-expanded function parameter (`Args...
+	// args`) into its per-element composed parameters. False when no
+	// concrete pack is in scope (abstract pattern contexts keep the
+	// unexpanded form and fail the full composition).
+	virtual bool ExpandPackParameter(const AstParameter& parameter,
+	                                 std::vector<ParameterInfo>& out)
+	{
+		(void)parameter;
+		(void)out;
+		return false;
+	}
 	// Lookup of a possibly qualified type name (throws when the name
 	// does not name a type).
 	virtual TypePtr ResolveTypeName(const AstName& name) = 0;
@@ -136,6 +149,10 @@ private:
 	                             bool& is_const, bool& is_volatile);
 	void ComposeItems(const vector<AstDeclaratorItem>& items,
 	                  bool collapsible, DeclaratorInfo& out);
+	// The composition core over a filtered item view (PA19: `...` pack
+	// markers drop out before composing the element pattern).
+	void ComposeItemPtrs(const vector<const AstDeclaratorItem*>& item_ptrs,
+	                     bool collapsible, DeclaratorInfo& out);
 	void ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	                           bool fn_const, bool fn_volatile,
 	                           int fn_ref, DeclaratorInfo& out);

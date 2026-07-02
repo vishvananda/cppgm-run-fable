@@ -403,8 +403,7 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	if (!cls || !class_type->named->complete)
 		throw runtime_error("temporary of an incomplete class");
 	vector<SemValue> args;
-	for (size_t i = 0; i < arguments.size(); i++)
-		args.push_back(Analyze(*arguments[i]));
+	AnalyzeArgumentList(arguments, args);
 	if (cls->is_aggregate && !cls->has_user_ctor && !args.empty())
 	{
 		// 5.2.3p3/8.5.1: a braced temporary of an aggregate class
@@ -558,8 +557,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		else
 			throw runtime_error("member is not callable");
 		vector<SemValue> args;
-		for (size_t i = 0; i < expr.arguments.size(); i++)
-			args.push_back(Analyze(*expr.arguments[i]));
+		AnalyzeArgumentList(expr.arguments, args);
 		CheckCallArguments(function_type, args);
 		SemValue value = CallResult(function_type);
 		value.node->children.push_back(std::move(fn.node));
@@ -625,11 +623,9 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	object_source.category = object.category == VC_PRVALUE
 		? VC_XVALUE : object.category;
 	sources.push_back(object_source);
-	for (size_t i = 0; i < arguments.size(); i++)
-	{
-		args.push_back(Analyze(*arguments[i]));
-		sources.push_back(MakeConversionSource(args.back()));
-	}
+	AnalyzeArgumentList(arguments, args);
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
 	vector<TypePtr> candidates;
 	vector<size_t> min_arity;
 	const NamedTypeInfo* owner_entity =
@@ -794,11 +790,9 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 		                    " called without an object");
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
-	for (size_t i = 0; i < expr.arguments.size(); i++)
-	{
-		args.push_back(Analyze(*expr.arguments[i]));
-		sources.push_back(MakeConversionSource(args.back()));
-	}
+	AnalyzeArgumentList(expr.arguments, args);
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
 	vector<ImplicitConversion> conversions;
 	size_t best = SelectBestOverload(candidates, sources, conversions,
 	                                 &min_arity);
@@ -836,6 +830,36 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 
 // 2.14.8: a user-defined string literal calls the literal operator of
 // its suffix with the character array and its length.
+// 13.5.8/2.14.8: a user-defined integer literal without an ordinary
+// operator calls the numeric literal-operator template over the
+// literal's source characters (`0x00_digits` -> <'0','x','0','0'>).
+SemValue SemExprAnalyzer::AnalyzeNumericUdl(const AstExpr& expr)
+{
+	const string op_name = "operator \"\"" + expr.literal_suffix;
+	const ScopeBinding* binding =
+		UnqualifiedLookup(host_.CurrentScope(), op_name, SLF_ANY);
+	if (!binding || binding->kind != SB_FUNCTION)
+		throw runtime_error("no literal operator for suffix " +
+		                    expr.literal_suffix);
+	const string chars = expr.literal.substr(
+		0, expr.literal.size() - expr.literal_suffix.size());
+	const FunctionSpecialization* spec =
+		host_.InstantiateCharPackLiteral(*binding, chars);
+	if (!spec)
+		throw runtime_error("no literal operator template for suffix " +
+		                    expr.literal_suffix);
+	SemValue value = CallResult(spec->type);
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = spec->name;
+	callee->type = spec->type;
+	callee->entity_scope = spec->self.owner;
+	callee->entity_name = spec->name;
+	callee->fn_spec = spec;
+	host_.OnSpecializationOdrUsed(spec);
+	value.node->children.push_back(std::move(callee));
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeStringUdl(const AstExpr& expr)
 {
 	const string op_name = "operator \"\"" + expr.literal_suffix;

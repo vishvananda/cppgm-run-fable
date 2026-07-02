@@ -186,6 +186,8 @@ string ArgSpelling(const TypePtr& type)
 // slots key by their parameter index / expression identity.
 static void AppendArgKey(const TemplateArg& arg, string& out)
 {
+	if (arg.pack_pattern)
+		out += "pk";
 	if (!arg.is_value)
 	{
 		AppendKey(arg.type, out);

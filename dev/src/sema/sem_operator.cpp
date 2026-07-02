@@ -311,11 +311,9 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 {
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
-	for (size_t i = 0; i < expr.arguments.size(); i++)
-	{
-		args.push_back(Analyze(*expr.arguments[i]));
-		sources.push_back(MakeConversionSource(args.back()));
-	}
+	AnalyzeArgumentList(expr.arguments, args);
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
 	set<const void*> seen;
 	vector<OperatorCandidate> candidates;
 	for (size_t i = 0; i < visible.size(); i++)

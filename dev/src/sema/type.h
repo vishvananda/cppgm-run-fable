@@ -81,6 +81,11 @@ struct TemplateArg
 	unsigned long long value_bits;
 	int value_param;
 	const AstExpr* dependent_value;
+	// Pattern slot only: an unexpanded `...` expansion inside a
+	// dependent template-id (`tuple<T&&...>` in a pattern); the
+	// carried type/expression is the expansion pattern. Instantiation
+	// re-resolves the whole template-id concretely.
+	bool pack_pattern = false;
 };
 
 // One record per named-type entity, owned by the semantic model that

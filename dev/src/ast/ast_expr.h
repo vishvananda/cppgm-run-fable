@@ -23,6 +23,7 @@ enum EExprKind
 	EK_KEYWORD_CAST,     // static_cast<...>(...) etc
 	EK_SIZEOF_EXPR,      // sizeof unary-expression
 	EK_SIZEOF_TYPE,      // sizeof ( type-id )
+	EK_SIZEOF_PACK,      // sizeof ... ( identifier )
 	EK_TYPE_TRAIT,       // typeid / alignof / noexcept ( ... )
 	EK_NEW,              // new-expression
 	EK_DELETE,           // delete-expression

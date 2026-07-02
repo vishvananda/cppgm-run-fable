@@ -312,7 +312,7 @@ TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
 
 bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
 {
-	if (a.is_value != b.is_value)
+	if (a.is_value != b.is_value || a.pack_pattern != b.pack_pattern)
 		return false;
 	if (!a.is_value)
 		return TypeEquals(a.type, b.type);
@@ -326,7 +326,7 @@ bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
 
 bool TemplateArgIsDependent(const TemplateArg& arg)
 {
-	if (arg.value_param >= 0 || arg.dependent_value)
+	if (arg.value_param >= 0 || arg.dependent_value || arg.pack_pattern)
 		return true;
 	return TypeIsDependent(arg.type);
 }

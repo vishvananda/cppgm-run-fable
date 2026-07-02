@@ -127,11 +127,9 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	}
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
-	for (size_t i = 0; i < expr.arguments.size(); i++)
-	{
-		args.push_back(Analyze(*expr.arguments[i]));
-		sources.push_back(MakeConversionSource(args.back()));
-	}
+	AnalyzeArgumentList(expr.arguments, args);
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
 	vector<TypePtr> candidates;
 	if (binding.type)
 	{
@@ -243,8 +241,7 @@ SemValue SemExprAnalyzer::AnalyzeIndirectCall(const AstExpr& expr)
 		throw runtime_error("overloaded name in a non-call context");
 
 	vector<SemValue> args;
-	for (size_t i = 0; i < expr.arguments.size(); i++)
-		args.push_back(Analyze(*expr.arguments[i]));
+	AnalyzeArgumentList(expr.arguments, args);
 	CheckCallArguments(function_type, args);
 
 	SemValue value = CallResult(function_type);

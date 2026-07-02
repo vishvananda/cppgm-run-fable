@@ -126,6 +126,17 @@ struct ISemExprHost
 	{
 		(void)binding;
 	}
+	// PA19 5.3.3p5: sizeof...(name).
+	virtual size_t PackSize(const string& name) = 0;
+	// PA19 13.5.8: the numeric literal-operator template of `binding`
+	// instantiated over the literal's source characters (null when no
+	// char-pack template fits).
+	virtual const FunctionSpecialization* InstantiateCharPackLiteral(
+		const ScopeBinding& binding, const string& chars) = 0;
+	// PA19 14.5.3: `pattern...` inside an argument or initializer
+	// list; false when the pattern mentions no expandable pack.
+	virtual bool ExpandPackExpression(const AstExpr& pattern,
+	                                  vector<SemValue>& out) = 0;
 	virtual ~ISemExprHost() {}
 };
 
@@ -242,6 +253,10 @@ public:
 	// Braced initialization of the supported array forms; returns the
 	// braced-init-list node (completing unknown bounds via `dest`).
 	SemNodePtr AnalyzeBracedInit(const AstExpr& braced, TypePtr& dest);
+	// One argument/initializer list with `pattern...` items expanded
+	// in place (PA19 14.5.3).
+	void AnalyzeArgumentList(const vector<AstExprPtr>& items,
+	                         vector<SemValue>& out);
 
 	// PA16: contextual bool conversion; a class operand materializes
 	// its conversion-function call into the value.
@@ -352,6 +367,7 @@ private:
 	                            bool& unwind_no);
 	SemValue MakeSizeLiteral(unsigned long long size);
 	SemValue AnalyzeStringUdl(const AstExpr& expr);
+	SemValue AnalyzeNumericUdl(const AstExpr& expr);
 	// --- PA15 operator overloading (sem_operator.cpp) ---
 	void CollectOperatorCandidates(const string& op_name,
 	                               const vector<SemValue>& operands,

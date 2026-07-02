@@ -348,7 +348,8 @@ bool SemBinder::TemplateCandidateMoreSpecialized(
 // forms); per-parameter patterns then compose individually.
 bool SemBinder::ComposeFunctionPattern(
 	const vector<TemplateParam>& params, Scope* declaring,
-	const AstDecl& inner, TypePtr& full, vector<TypePtr>& param_patterns)
+	const AstDecl& inner, TypePtr& full, vector<TypePtr>& param_patterns,
+	vector<bool>& pattern_packs)
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                  declaring);
@@ -369,8 +370,11 @@ bool SemBinder::ComposeFunctionPattern(
 			// pattern signature become value-parameter slots.
 			binding.kind = SB_VARIABLE;
 			binding.no_object = true;
-			binding.param_index = (int)i;
 		}
+		// param_index marks the abstract pattern binding (packs stay
+		// unexpanded through it).
+		binding.param_index = (int)i;
+		binding.is_pack = params[i].pack;
 		AddBinding(*scope, binding);
 	}
 	const AstDeclarator* declarator = inner.kind == DK_FUNCTION
@@ -381,6 +385,7 @@ bool SemBinder::ComposeFunctionPattern(
 	bool composed_full = false;
 	full = TypePtr();
 	param_patterns.clear();
+	pattern_packs.clear();
 	try
 	{
 		DeclSpecifierInfo specs =
@@ -393,6 +398,7 @@ bool SemBinder::ComposeFunctionPattern(
 			full = composed.type;
 			for (size_t i = 0; i < composed.parameters.size(); i++)
 				param_patterns.push_back(composed.parameters[i].type);
+			pattern_packs.resize(param_patterns.size(), false);
 			composed_full = true;
 		}
 	}
@@ -404,20 +410,28 @@ bool SemBinder::ComposeFunctionPattern(
 	if (!composed_full && declarator)
 	{
 		// Compose each parameter's declared type individually; a
-		// parameter that still fails is a non-deduced context.
+		// parameter that still fails is a non-deduced context. A
+		// pack-expanded parameter's pattern is its element pattern.
 		const AstParameterClause* clause = FunctionParameterClause(
 			*declarator);
 		if (clause)
 			for (size_t i = 0; i < clause->parameters.size(); i++)
 			{
+				const AstParameter& parameter = clause->parameters[i];
+				bool is_pack = false;
+				if (parameter.declarator)
+					for (size_t d = 0;
+					     d < parameter.declarator->items.size(); d++)
+						if (parameter.declarator->items[d].kind ==
+						    DI_PACK)
+							is_pack = true;
 				TypePtr pattern;
 				try
 				{
 					DeclSpecifierInfo pspecs = builder_.ProcessSpecifiers(
-						clause->parameters[i].specifiers, false);
+						parameter.specifiers, false);
 					DeclaratorInfo pcomposed = builder_.ComposeDeclarator(
-						clause->parameters[i].declarator.get(),
-						pspecs.type);
+						parameter.declarator.get(), pspecs.type);
 					pattern = pcomposed.type;
 				}
 				catch (const std::exception&)
@@ -425,6 +439,7 @@ bool SemBinder::ComposeFunctionPattern(
 					pattern = TypePtr();
 				}
 				param_patterns.push_back(pattern);
+				pattern_packs.push_back(is_pack);
 			}
 	}
 	current_ = saved;
@@ -438,7 +453,8 @@ void SemBinder::EnsureFunctionPattern(TemplateInfo& tmpl)
 	tmpl.pattern_ready = true;
 	ComposeFunctionPattern(tmpl.params, tmpl.declaring,
 	                       *tmpl.pattern_decl, tmpl.pattern,
-	                       tmpl.param_patterns);
+	                       tmpl.param_patterns,
+	                       tmpl.param_pattern_packs);
 }
 
 bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
@@ -450,8 +466,10 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	CollectTemplateParams(decl, params);
 	TypePtr full;
 	vector<TypePtr> param_patterns;
+	vector<bool> pattern_packs;
 	bool composed = ComposeFunctionPattern(params, tmpl.declaring, inner,
-	                                       full, param_patterns);
+	                                       full, param_patterns,
+	                                       pattern_packs);
 	if (composed != bool(tmpl.pattern))
 		return false;
 	if (composed)
@@ -482,40 +500,68 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 
 // --- deduction ---------------------------------------------------------------
 
+// The flattened concrete argument list of a deduction result: the
+// per-parameter slots with the pack's deduced elements spliced into
+// its position.
+static vector<TemplateArg> FlattenDeduced(
+	const vector<TemplateParam>& params, const vector<TemplateArg>& bound,
+	const vector<TemplateArg>& pack_elements)
+{
+	vector<TemplateArg> flattened;
+	for (size_t i = 0; i < params.size(); i++)
+	{
+		if (params[i].pack)
+			for (size_t k = 0; k < pack_elements.size(); k++)
+				flattened.push_back(pack_elements[k]);
+		else
+			flattened.push_back(bound[i]);
+	}
+	return flattened;
+}
+
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	TemplateInfo& tmpl, const vector<SemValue>& args,
 	const AstNamePart* explicit_part)
 {
 	EnsureFunctionPattern(tmpl);
-	if (tmpl.param_patterns.size() < args.size())
+	size_t pack_index = TemplatePackIndex(tmpl.params);
+	bool has_pack = pack_index < tmpl.params.size();
+	bool pack_pattern_last = !tmpl.param_pattern_packs.empty() &&
+		tmpl.param_pattern_packs.back();
+	if (!pack_pattern_last && tmpl.param_patterns.size() < args.size())
 		return 0;
 	vector<TemplateArg> bound(tmpl.params.size());
-	// 14.8.1: explicit template arguments bind the leading parameters.
+	vector<TemplateArg> pack_elements;
+	size_t explicit_elements = 0;
+	// 14.8.1: explicit template arguments bind the leading parameters;
+	// the pack absorbs the remaining explicit arguments.
 	if (explicit_part)
 	{
-		if (explicit_part->arguments.size() > tmpl.params.size())
-			return 0;
+		size_t cursor = 0;
 		for (size_t i = 0; i < explicit_part->arguments.size(); i++)
 		{
 			const AstTemplateArgument& argument =
 				explicit_part->arguments[i];
 			if (argument.pack)
 				return 0;
-			const TemplateParam& param = tmpl.params[i];
+			if (cursor >= tmpl.params.size())
+				return 0;
+			const TemplateParam& param = tmpl.params[cursor];
+			TemplateArg resolved;
 			try
 			{
 				if (param.kind == TPK_TYPE)
 				{
 					if (!argument.is_type || !argument.type)
 						return 0;
-					bound[i] = TemplateArg(
+					resolved = TemplateArg(
 						builder_.ResolveTypeId(*argument.type));
 				}
 				else
 				{
 					Scope* partial =
 						MakeArgumentAliasScope(tmpl, bound);
-					bound[i] = ResolveValueArgument(
+					resolved = ResolveValueArgument(
 						argument, ValueParamType(param, partial));
 				}
 			}
@@ -523,60 +569,136 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 			{
 				return 0;
 			}
-			if (TemplateArgIsDependent(bound[i]))
+			if (TemplateArgIsDependent(resolved))
 				return 0;
+			if (param.pack)
+			{
+				pack_elements.push_back(resolved);
+				explicit_elements++;
+			}
+			else
+			{
+				bound[cursor] = resolved;
+				cursor++;
+			}
 		}
 	}
+	// One probe per pack element: the element pattern unifies against
+	// a copy of the bound slots with the pack's slot cleared, so the
+	// pack placeholder yields the element while fixed parameters keep
+	// deducing consistently.
+	size_t deduced_elements = 0;
+	size_t p = 0;
 	for (size_t i = 0; i < args.size(); i++)
 	{
-		const TypePtr& pattern = tmpl.param_patterns[i];
-		if (!pattern)
-			continue;  // non-deduced context
-		if (!TypeIsDependent(pattern))
-			continue;  // ordinary conversion checking applies later
-		TypePtr arg_type = args[i].type;
-		if (!arg_type)
+		if (p >= tmpl.param_patterns.size())
 			return 0;
-		if (IsReferenceType(pattern))
+		bool pattern_is_pack = p < tmpl.param_pattern_packs.size() &&
+			tmpl.param_pattern_packs[p];
+		const TypePtr& pattern = tmpl.param_patterns[p];
+		if (!pattern_is_pack)
 		{
-			TypePtr referee = pattern->target;
-			// 14.8.2.1p3: a forwarding reference binding an lvalue
-			// deduces the parameter as an lvalue reference.
-			if (pattern->kind == TK_RVALUE_REFERENCE &&
-			    referee->kind == TK_TYPE_PARAM && !referee->is_const &&
-			    !referee->is_volatile &&
-			    args[i].category == VC_LVALUE)
+			p++;
+			if (!pattern)
+				continue;  // non-deduced context
+			if (!TypeIsDependent(pattern))
+				continue;  // ordinary conversion checking applies later
+			TypePtr arg_type = args[i].type;
+			if (!arg_type)
+				return 0;
+			if (IsReferenceType(pattern))
 			{
-				int index = referee->named->param_index;
-				if (index < 0 || (size_t)index >= bound.size())
+				TypePtr referee = pattern->target;
+				// 14.8.2.1p3: a forwarding reference binding an lvalue
+				// deduces the parameter as an lvalue reference.
+				if (pattern->kind == TK_RVALUE_REFERENCE &&
+				    referee->kind == TK_TYPE_PARAM &&
+				    !referee->is_const && !referee->is_volatile &&
+				    args[i].category == VC_LVALUE)
+				{
+					int index = referee->named->param_index;
+					if (index < 0 || (size_t)index >= bound.size())
+						return 0;
+					TypePtr as_ref =
+						MakeReferenceType(arg_type, false, true);
+					if (ArgBound(bound[index]) &&
+					    !(bound[index].type &&
+					      TypeEquals(bound[index].type, as_ref)))
+						return 0;
+					bound[index] = TemplateArg(as_ref);
+					continue;
+				}
+				if (!DeduceFromType(referee, arg_type, bound))
 					return 0;
-				TypePtr as_ref =
-					MakeReferenceType(arg_type, false, true);
-				if (ArgBound(bound[index]) &&
-				    !(bound[index].type &&
-				      TypeEquals(bound[index].type, as_ref)))
-					return 0;
-				bound[index] = TemplateArg(as_ref);
 				continue;
 			}
-			if (!DeduceFromType(referee, arg_type, bound))
+			if (!DeduceFromType(RemoveTopCv(pattern),
+			                    DecayForDeduction(arg_type), bound))
 				return 0;
 			continue;
 		}
-		if (!DeduceFromType(RemoveTopCv(pattern),
-		                    DecayForDeduction(arg_type), bound))
+		// The trailing pack pattern: each remaining argument deduces
+		// one element (14.8.2.1p1 last clause).
+		if (!has_pack || !pattern)
 			return 0;
+		TypePtr arg_type = args[i].type;
+		if (!arg_type)
+			return 0;
+		TemplateArg element;
+		bool deduced = false;
+		if (pattern->kind == TK_RVALUE_REFERENCE && pattern->target &&
+		    pattern->target->kind == TK_TYPE_PARAM &&
+		    !pattern->target->is_const && !pattern->target->is_volatile &&
+		    args[i].category == VC_LVALUE)
+		{
+			element = TemplateArg(
+				MakeReferenceType(arg_type, false, true));
+			deduced = true;
+		}
+		if (!deduced)
+		{
+			vector<TemplateArg> probe = bound;
+			probe[pack_index] = TemplateArg();
+			TypePtr pat = pattern;
+			TypePtr at = arg_type;
+			if (IsReferenceType(pat))
+				pat = pat->target;
+			else
+			{
+				pat = RemoveTopCv(pat);
+				at = DecayForDeduction(at);
+			}
+			if (!DeduceFromType(pat, at, probe))
+				return 0;
+			if (!ArgBound(probe[pack_index]))
+				return 0;
+			element = probe[pack_index];
+			for (size_t j = 0; j < probe.size(); j++)
+				if (j != pack_index && !ArgBound(bound[j]) &&
+				    ArgBound(probe[j]))
+					bound[j] = probe[j];
+		}
+		if (deduced_elements < explicit_elements)
+		{
+			if (!TemplateArgEquals(element,
+			                       pack_elements[deduced_elements]))
+				return 0;
+		}
+		else
+			pack_elements.push_back(element);
+		deduced_elements++;
 	}
 	// Unbound parameters fill from default template arguments; any
 	// remaining hole is a deduction failure.
 	for (size_t i = 0; i < bound.size(); i++)
 	{
-		if (ArgBound(bound[i]))
+		if (tmpl.params[i].pack || ArgBound(bound[i]))
 			continue;
 		const TemplateParam& param = tmpl.params[i];
 		if (!param.default_type && !param.default_expr)
 			return 0;
-		Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+		Scope* partial = MakeArgumentAliasScope(
+			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
 		Scope* saved = current_;
 		current_ = partial;
 		try
@@ -598,7 +720,8 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	}
 	// Substitution failure is a hard error (SFINAE candidate dropping
 	// is out of scope); the body instantiates only on odr-use.
-	return EnsureFunctionSpecialization(tmpl, bound);
+	return EnsureFunctionSpecialization(
+		tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
 }
 
 // --- specialization -----------------------------------------------------------
@@ -606,7 +729,10 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	TemplateInfo& tmpl, const vector<TemplateArg>& args)
 {
-	if (args.size() != tmpl.params.size())
+	std::vector<std::pair<size_t, size_t>> spans;
+	if (!MapParamSpans(tmpl.params, args.size(), spans) ||
+	    (TemplatePackIndex(tmpl.params) == tmpl.params.size() &&
+	     args.size() != tmpl.params.size()))
 		throw runtime_error("wrong template argument count for " +
 		                    tmpl.name);
 	string key = TemplateArgumentKey(args);
@@ -641,10 +767,12 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	InstantiationContext context(*this, capture);
 	param_capture_scope_ = capture;
 	PreBindDeclaredParameters(declarator);
+	last_pack_param_ = PackParamRecord();
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(inner.specifiers, true);
 	DeclaratorInfo composed =
 		builder_.ComposeDeclarator(declarator, specs.type);
+	BindCapturedPackParameter(capture);
 	if (!composed.declares_function ||
 	    composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function template " + tmpl.name +
@@ -718,10 +846,12 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// composes before the clause, 8.3.5p2) can name them, then
 	// re-compose the declarator in this specialization's context.
 	PreBindDeclaredParameters(inner.declarator.get());
+	last_pack_param_ = PackParamRecord();
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(inner.specifiers, true);
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
 		inner.declarator.get(), specs.type);
+	BindCapturedPackParameter(fn_scope);
 
 	SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
 	SemNode* node = item.get();
@@ -812,6 +942,11 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 	for (size_t t = 0; t < binding.fn_templates.size(); t++)
 	{
 		TemplateInfo& tmpl = *binding.fn_templates[t];
+		// A template with a parameter pack defers to the call context:
+		// the pack may still gain elements from argument deduction
+		// (14.8.1 with a trailing pack).
+		if (TemplatePackIndex(tmpl.params) < tmpl.params.size())
+			continue;
 		vector<TemplateArg> args;
 		try
 		{

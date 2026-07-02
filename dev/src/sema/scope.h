@@ -97,6 +97,18 @@ struct ScopeBinding
 	bool no_object;
 	int param_index;
 	ConstValue value;
+	// PA19 packs. A template parameter pack's alias binding carries
+	// its elements (types or values); a function parameter pack's
+	// binding additionally carries the expanded parameter slot names
+	// (aligned with pack_args). Only `...` expansions and sizeof...
+	// may use a pack binding by name.
+	bool is_pack = false;
+	vector<TemplateArg> pack_args;
+	vector<string> pack_param_names;
+	// A pack-element binding synthesized during one expansion step:
+	// the lookup name is the pack's, but the entity behind it is the
+	// expanded slot named here.
+	string pack_element_name;
 	// The scope the binding was declared in (stamped by AddBinding; a
 	// using-declaration import keeps the original owner). Powers the
 	// PA12 canonical qualified names.

@@ -278,6 +278,12 @@ void SemBinder::CheckTemplateDefinitionSanity(TemplateInfo& tmpl)
 	const AstDecl& pattern = *tmpl.pattern_decl;
 	if (tmpl.kind == TMPL_FUNCTION)
 	{
+		// 14.3p1: a signature's pack-expansion arguments must target
+		// parameter packs (checkable without instantiation).
+		ValidateSignatureTemplateIds(pattern.specifiers,
+		                             pattern.kind == DK_FUNCTION
+		                                 ? pattern.declarator.get()
+		                                 : 0);
 		if (pattern.kind == DK_FUNCTION)
 			CheckBody(pattern, names, tmpl);
 		return;

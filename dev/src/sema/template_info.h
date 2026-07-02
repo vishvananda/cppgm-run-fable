@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 using std::map;
@@ -144,6 +145,9 @@ struct TemplateInfo
 	bool pattern_ready;
 	TypePtr pattern;
 	vector<TypePtr> param_patterns;
+	// PA19: which function parameters are pack-expanded (aligned with
+	// param_patterns; the pattern entry is the element pattern).
+	vector<bool> param_pattern_packs;
 
 	// --- class templates ---
 	// Out-of-class member definitions seen so far (DK_TEMPLATE nodes
@@ -190,6 +194,13 @@ private:
 // Cyclic or runaway instantiation guard, far above any supported
 // nesting.
 enum { kTemplateInstantiationDepthLimit = 200 };
+
+// PA19 packs: the index of the parameter pack (params.size() when
+// none) and the mapping of a resolved flattened argument list onto
+// the parameter list (the pack owns the middle run).
+size_t TemplatePackIndex(const vector<TemplateParam>& params);
+bool MapParamSpans(const vector<TemplateParam>& params, size_t argc,
+                   vector<std::pair<size_t, size_t>>& spans);
 
 // A stable canonical key for one template-argument list (never
 // printed; entity pointers keep it unique within the translation

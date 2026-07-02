@@ -822,7 +822,14 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	{
 		SemNodePtr proto = VariableObjectExpr(binding);
 		vector<SemNodePtr> actions;
-		AppendAggregateInit(cls, *proto, *braced, actions);
+		bool has_pack_item = false;
+		for (size_t i = 0; i < braced->arguments.size(); i++)
+			if (braced->arguments[i]->kind == EK_PACK_EXPANSION)
+				has_pack_item = true;
+		if (has_pack_item)
+			AppendExpandedAggregateInit(cls, *proto, *braced, actions);
+		else
+			AppendAggregateInit(cls, *proto, *braced, actions);
 		for (size_t i = 0; i < actions.size(); i++)
 			item.children.push_back(std::move(actions[i]));
 		return;
@@ -1008,17 +1015,51 @@ bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
 	}
 	if (!fn || fn->kind != SB_FUNCTION)
 		return false;
-	const AstInitDeclarator& declarator = decl.declarators[0];
-	if (declarator.init || !declarator.declarator ||
-	    declarator.declarator->items.size() != 1 ||
-	    declarator.declarator->items[0].kind != DI_NESTED)
-		return false;
-	const AstDeclarator* inner = declarator.declarator->items[0].nested.get();
-	if (!inner || inner->items.size() != 1 ||
-	    inner->items[0].kind != DI_ID ||
-	    !inner->items[0].name.IsPlainIdentifier())
-		return false;
-	// Synthesize `callee(argument)` over owned AST nodes.
+	// Each init-declarator re-reads as one call argument: `(name)` as
+	// an id-expression, `(&name)` as its address (`f(&a), (b);` is the
+	// declaration reading of `f(&a, b);`).
+	vector<AstExprPtr> arguments;
+	for (size_t d = 0; d < decl.declarators.size(); d++)
+	{
+		const AstInitDeclarator& declarator = decl.declarators[d];
+		if (declarator.init || !declarator.declarator ||
+		    declarator.declarator->items.size() != 1 ||
+		    declarator.declarator->items[0].kind != DI_NESTED)
+			return false;
+		const AstDeclarator* inner =
+			declarator.declarator->items[0].nested.get();
+		if (!inner)
+			return false;
+		bool address = false;
+		size_t id_at = 0;
+		if (inner->items.size() == 2 && inner->items[0].kind == DI_PTR &&
+		    inner->items[0].token == OP_AMP)
+		{
+			address = true;
+			id_at = 1;
+		}
+		else if (inner->items.size() != 1)
+			return false;
+		if (inner->items[id_at].kind != DI_ID ||
+		    !inner->items[id_at].name.IsPlainIdentifier())
+			return false;
+		AstExprPtr argument(new AstExpr(EK_ID));
+		AstNamePart arg_part;
+		arg_part.kind = NP_IDENTIFIER;
+		arg_part.identifier =
+			inner->items[id_at].name.parts[0].identifier;
+		argument->name.parts.push_back(std::move(arg_part));
+		if (address)
+		{
+			AstExprPtr take(new AstExpr(EK_UNARY));
+			take->op = OP_AMP;
+			take->op_spelling = "&";
+			take->operands.push_back(std::move(argument));
+			argument = std::move(take);
+		}
+		arguments.push_back(std::move(argument));
+	}
+	// Synthesize `callee(arguments...)` over owned AST nodes.
 	AstExprPtr callee(new AstExpr(EK_ID));
 	callee->name.global_scope = callee_name.global_scope;
 	for (size_t i = 0; i < callee_name.parts.size(); i++)
@@ -1028,14 +1069,10 @@ bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
 		part.identifier = callee_name.parts[i].identifier;
 		callee->name.parts.push_back(std::move(part));
 	}
-	AstExprPtr argument(new AstExpr(EK_ID));
-	AstNamePart arg_part;
-	arg_part.kind = NP_IDENTIFIER;
-	arg_part.identifier = inner->items[0].name.parts[0].identifier;
-	argument->name.parts.push_back(std::move(arg_part));
 	AstExprPtr call(new AstExpr(EK_CALL));
 	call->operands.push_back(std::move(callee));
-	call->arguments.push_back(std::move(argument));
+	for (size_t d = 0; d < arguments.size(); d++)
+		call->arguments.push_back(std::move(arguments[d]));
 	SemNode* item = AppendItem(SN_EXPRESSION_STATEMENT);
 	SemValue value = analyzer_.Analyze(*call);
 	item->children.push_back(std::move(value.node));
