@@ -153,6 +153,10 @@ public:
 	// odr-used; user-provided definitions reached through synthesized
 	// bodies must be emitted even though the call itself is dropped.
 	void DemandElidedCtor(const SemNode& callee);
+	// PA18: a trivial copy/move lowered as a raw object copy still
+	// demands the synthesized weak definition when sema built one (a
+	// user-defaulted member odr-used inside an instantiated body).
+	void DemandTrivialCtorBody(const SemNode& callee);
 	// PA17: the "@name" spelling of a polymorphic class's vtable
 	// (demand-marks it for emission; lower_vtable.cpp).
 	string VTableRef(const ClassInfo* cls);
@@ -177,6 +181,10 @@ private:
 	void DemandFunction(LowFunctionInfo& info);
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();
+	// A thread-local object's first-use guard global and internal
+	// `__tls_init` function built from its construction actions.
+	void BuildTlsGuardedInit(size_t global_index,
+	                         vector<SemNodePtr>& actions);
 
 	// --- PA17 vtable/RTTI emission (lower_vtable.cpp) ---
 	// The class record behind a this-adjusted member function type.

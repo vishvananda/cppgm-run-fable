@@ -93,6 +93,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_DELETE_EXPRESSION: return "delete-expression";
 	case SN_DELETE_ARRAY: return "delete-array";
 	case SN_VPOINTER_STORE: return "vpointer-store";
+	case SN_STATIC_GUARD: return "static-guard";
 	}
 	throw runtime_error("unknown semantic node kind");
 }

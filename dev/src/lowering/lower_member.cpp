@@ -414,6 +414,8 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
                                              const string& this_text)
 {
 	const SemNode& call = *action.children[0];
+	if (!call.children.empty())
+		program_.DemandTrivialCtorBody(*call.children[0]);
 	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	string dst = this_text;
 	// A member-addressed action (an aggregate item) owns its exact

@@ -1414,7 +1414,14 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 				? ClassHasTrivialCopyCtor(cls)
 				: ClassHasTrivialMoveCtor(cls);
 			if (trivial_transfer)
+			{
 				callee_unwind_no = true;
+				// PA18: a user-defaulted trivial copy/move selected
+				// inside an instantiated body still synthesizes its
+				// weak definition; the call itself stays a raw copy.
+				if (instantiating_ && selected.defaulted)
+					EnsureSpecialCtor(cls, ctor_index);
+			}
 			else
 			{
 				EnsureSpecialCtor(cls, ctor_index);

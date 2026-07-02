@@ -1010,8 +1010,13 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 	if (source->kind == TK_CLASS && bare->kind == TK_CLASS)
 	{
 		// A class prvalue (call result, conditional) binding a
-		// reference: materialize the result object.
-		string address = MaterializeClassResult(node, "arg", "");
+		// reference: materialize the result object. As with
+		// constructor-action temporaries above, an exact binding is an
+		// argument object; a derived temporary is a plain temporary
+		// adjusted to the base referee.
+		bool exact = TypeEquals(source, bare);
+		string address =
+			MaterializeClassResult(node, exact ? "arg" : "tmpobj", "");
 		return AdjustToBase(
 			address, BaseClassDistance(source->named, bare->named));
 	}

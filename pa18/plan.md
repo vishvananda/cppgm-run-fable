@@ -308,11 +308,29 @@ stage requires it.
 - [x] Trailing-return decltype over the parameters (8.3.5p2 ordering)
       during substitution and body instantiation.
 - [ ] Full pa18 suite green through `make test-report-through-pa18`.
-      Current state: 1334/1367 through-tests (160/193 pa18), zero
-      earlier-stage regressions. The remaining 33 are a long tail:
-      xvalue reference-member init, inherited constructors through
-      alias-named bases, move-only by-value elision, `__alignof`
-      extension, variable-template-shaped inputs, several LowIR
-      shape/ordering nuances (tls init ordering, temporary slot
-      naming, immediate-conversion folds), and two ambiguous-overload
-      rankings that need 14.5.6.2-adjacent tie-breaks.
+      Current state: 1335/1367 through-tests, zero earlier-stage
+      regressions. The remaining 32 are a long tail: xvalue
+      reference-member init, inherited constructors through
+      alias-named bases, move-only by-value elision,
+      variable-template-shaped inputs, several LowIR shape/ordering
+      nuances (tls init ordering, temporary slot naming,
+      immediate-conversion folds), and ambiguous-overload rankings
+      that need 14.5.6.2-adjacent tie-breaks.
+
+### Fixture-derived lowering rules (current focus)
+
+- Local scalar-array aggregate tails: the reference stores each
+  value-initialized tail element individually (`store i32 0` per
+  element), not one `zeroinit` span; keep `zeroinit` only for
+  floating tails (no fixture pins those) and dynamic array-new fill.
+- A user-`= default` trivial copy/move constructor odr-used *inside
+  an instantiated template body* still synthesizes and emits its
+  weak definition (14.7.1-adjacent; witness: the Box test emits
+  `_ZN3BoxIiEC1ERKS0_` with `trivial_lifecycle=yes`, while RefPair,
+  whose defaulted copy is used only from `main`, emits none, and the
+  ADL test's *implicit* trivial copy inside `call_pick` emits none).
+  Call sites still lower as raw `copyobj`; only the demanded
+  definition prints. Ownership: sema builds the body on selection
+  (`MakeConstructorCall` trivial path → `EnsureSpecialCtor` when
+  `instantiating_ && selected.defaulted`); the lowering demands the
+  registered synthesized body from the trivial-copy action.

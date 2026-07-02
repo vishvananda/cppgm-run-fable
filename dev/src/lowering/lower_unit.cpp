@@ -513,6 +513,18 @@ void LowerProgram::DemandElidedCtor(const SemNode& callee)
 		DemandTreeCallees(*info.definition);
 }
 
+void LowerProgram::DemandTrivialCtorBody(const SemNode& callee)
+{
+	if (callee.kind != SN_CALLEE || !callee.entity_scope ||
+	    callee.special != SF_CONSTRUCTOR)
+		return;
+	LowFunctionInfo& info = MemberFunctionEntry(
+		callee.entity_scope, callee.entity_name, callee.type, "C1");
+	if (info.defined && info.definition &&
+	    info.definition->synthesized)
+		DemandFunction(info);
+}
+
 void LowerProgram::DemandTreeCallees(const SemNode& node)
 {
 	for (size_t i = 0; i < node.children.size(); i++)
@@ -819,6 +831,44 @@ void LowerProgram::AppendDynamicInit(LowGlobalInfo& info,
 	init_def.children.push_back(std::move(statement));
 }
 
+// PA18: a dynamically initialized thread-local object constructs on
+// first use: an internal thread-local i64 guard and an internal
+// `<name>__tls_init` function running the construction actions once
+// per thread (the backend's TLS wrapper calls it).
+void LowerProgram::BuildTlsGuardedInit(size_t global_index,
+                                       vector<SemNodePtr>& actions)
+{
+	string object_name = globals_[global_index].low_name;
+	LowGlobalInfo guard;
+	guard.type = MakeFundamentalType(FT_LONG_INT);
+	guard.low_name = UniqueSymbol(object_name + "__tls_guard");
+	guard.internal = true;
+	guard.is_thread_local = true;
+	guard.defined = true;
+	global_index_["#tls_guard#" + object_name] = globals_.size();
+	globals_.push_back(guard);
+
+	SemNodePtr guarded = MakeSemNode(SN_STATIC_GUARD);
+	guarded->name = globals_.back().low_name;
+	for (size_t i = 0; i < actions.size(); i++)
+		guarded->children.push_back(std::move(actions[i]));
+	SemNodePtr init_def = MakeSemNode(SN_FUNCTION_DEFINITION);
+	init_def->type = MakeFunctionType(MakeFundamentalType(FT_VOID),
+	                                  vector<TypePtr>(), false);
+	init_def->children.push_back(std::move(guarded));
+
+	LowFunctionInfo info;
+	info.scope = 0;
+	info.name = object_name + "__tls_init";
+	info.type = init_def->type;
+	info.low_name = UniqueSymbol(object_name + "__tls_init");
+	info.internal = true;
+	info.index = functions_.size();
+	functions_.push_back(info);
+	LowerHelper(functions_.back(), *init_def);
+	helper_defs_.push_back(std::move(init_def));
+}
+
 // Builds @__cppgm_init / @__cppgm_fini from the registered
 // namespace-scope objects: construction in declaration order,
 // destruction in reverse declaration order (3.6.2/3.6.3 subset).
@@ -840,23 +890,36 @@ void LowerProgram::BuildLifetimeHelpers()
 			inner = inner->target;
 		bool is_class = RemoveTopCv(inner)->kind == TK_CLASS;
 		// PA18: a weak (instantiated static member) object does not by
-		// itself anchor the init helper.
-		if (is_class && !info.weak)
+		// itself anchor the init helper; a thread-local object
+		// constructs behind its own first-use guard, not in the
+		// program-wide init helper.
+		bool tls_dynamic = info.is_thread_local && is_class;
+		if (is_class && !info.weak && !tls_dynamic)
 			any_class_object = true;
 		const SemNode& item = *info.node;
+		vector<SemNodePtr> tls_actions;
 		for (size_t j = 0; j < item.children.size(); j++)
 		{
 			const SemNode& child = *item.children[j];
 			if (child.kind == SN_CONSTRUCTOR_ACTION)
 			{
-				if (!child.trivial_init)
+				if (child.trivial_init)
+					continue;
+				if (tls_dynamic)
+					tls_actions.push_back(CloneSemNode(child));
+				else
 					init_def->children.push_back(CloneSemNode(child));
 			}
 			else if (child.kind == SN_DESTRUCTOR_ACTION)
 				fini_def->children.push_back(CloneSemNode(child));
 			else if (child.kind == SN_EXPRESSION_STATEMENT)
+			{
 				// Aggregate member stores run dynamically.
-				init_def->children.push_back(CloneSemNode(child));
+				if (tls_dynamic)
+					tls_actions.push_back(CloneSemNode(child));
+				else
+					init_def->children.push_back(CloneSemNode(child));
+			}
 			else if (IsReferenceType(info.type) && j == 0)
 				// The reference binds dynamically: the helper stores
 				// the referent's address into the pointer object.
@@ -868,6 +931,9 @@ void LowerProgram::BuildLifetimeHelpers()
 				// statically, everything else stores in @__cppgm_init.
 				AppendDynamicInit(info, child, false, *init_def);
 		}
+		if (!tls_actions.empty())
+			// May grow globals_; `info` is not used past this point.
+			BuildTlsGuardedInit(i, tls_actions);
 	}
 	// Finalization actions run in reverse declaration order.
 	for (size_t i = 0, j = fini_def->children.size(); i < j / 2; i++)
@@ -969,9 +1035,13 @@ void LowerProgram::Write(ostream& out)
 		string object = info.object_name;
 		if (object.compare(0, 2, "_Z") == 0)
 			object = "_ZTW" + object.substr(2);
+		string meta = info.internal ? "binding=internal"
+		                            : "binding=strong";
+		if (!object.empty())
+			meta += ", object=" + object;
 		sections[1].push_back(
 			"declare function @" + info.low_name +
-			"__tls_wrapper() -> ptr [binding=strong, object=" + object +
+			"__tls_wrapper() -> ptr [" + meta +
 			", tls_for=@" + info.low_name + "]");
 	}
 	for (size_t i = 0; i < strings_.size(); i++)

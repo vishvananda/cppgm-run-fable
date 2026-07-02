@@ -109,7 +109,12 @@ enum ESemNodeKind
 	// PA17 constructor/destructor vpointer store: `type` names the
 	// class whose vtable is stored, children[0] the object address.
 	// Lowering-only; never printed by the PA12 dump.
-	SN_VPOINTER_STORE
+	SN_VPOINTER_STORE,
+	// PA18 guarded once-only initialization: `name` is the raw LowIR
+	// symbol of an i64 guard global; the children run when the guard
+	// is still zero, then the guard is set. Lowering-only; never
+	// printed by the PA12 dump.
+	SN_STATIC_GUARD
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete
