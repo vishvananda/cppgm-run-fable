@@ -368,6 +368,7 @@ private:
 	SemValue MakeSizeLiteral(unsigned long long size);
 	SemValue AnalyzeStringUdl(const AstExpr& expr);
 	SemValue AnalyzeNumericUdl(const AstExpr& expr);
+	SemValue FoldObjectlessConstant(const ScopeBinding& binding);
 	// --- PA15 operator overloading (sem_operator.cpp) ---
 	void CollectOperatorCandidates(const string& op_name,
 	                               const vector<SemValue>& operands,

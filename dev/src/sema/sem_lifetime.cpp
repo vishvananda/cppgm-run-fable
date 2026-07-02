@@ -761,6 +761,33 @@ void SemBinder::AppendElidedObjectInit(SemNode& item,
 	item.children.push_back(std::move(action));
 }
 
+// The initializer-form split of one class-object initializer: paren
+// arguments, a braced list, or a copy-initializing expression.
+// Returns whether the form copy-initializes.
+bool SemBinder::ClassifyClassInitForm(const AstInitializer& init,
+                                      vector<const AstExpr*>& args,
+                                      const AstExpr*& braced)
+{
+	switch (init.kind)
+	{
+	case INIT_PAREN:
+		for (size_t i = 0; i < init.args.size(); i++)
+			args.push_back(init.args[i].get());
+		return false;
+	case INIT_EQ:
+		if (init.expr->kind == EK_BRACED)
+			braced = init.expr.get();
+		else
+			args.push_back(init.expr.get());
+		return true;
+	case INIT_BRACED:
+		braced = init.expr.get();
+		return false;
+	default:
+		throw OutsideBoundary("class initializer form");
+	}
+}
+
 void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
                                       const AstInitializer* init,
                                       const ClassInfo& cls)
@@ -798,26 +825,7 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	// copy-initialization.
 	vector<const AstExpr*> args;
 	const AstExpr* braced = 0;
-	bool copy_init = false;
-	switch (init->kind)
-	{
-	case INIT_PAREN:
-		for (size_t i = 0; i < init->args.size(); i++)
-			args.push_back(init->args[i].get());
-		break;
-	case INIT_EQ:
-		copy_init = true;
-		if (init->expr->kind == EK_BRACED)
-			braced = init->expr.get();
-		else
-			args.push_back(init->expr.get());
-		break;
-	case INIT_BRACED:
-		braced = init->expr.get();
-		break;
-	default:
-		throw OutsideBoundary("class initializer form");
-	}
+	bool copy_init = ClassifyClassInitForm(*init, args, braced);
 	if (braced && cls.is_aggregate)
 	{
 		SemNodePtr proto = VariableObjectExpr(binding);
@@ -875,9 +883,17 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	vector<SemNodePtr> arg_nodes;
 	for (size_t i = 0; i < values.size(); i++)
 		arg_nodes.push_back(std::move(values[i].node));
-	item.children.push_back(MakeConstructorCall(
+	SemNodePtr action = MakeConstructorCall(
 		cls, index, false, AddressOfNode(VariableObjectExpr(binding)),
-		std::move(arg_nodes)));
+		std::move(arg_nodes));
+	// 8.5.4: braced value-initialization of an instantiated
+	// specialization spells its (synthesized) constructor call even
+	// when trivial - the reference pins the demanded C1 for these
+	// classes (ordinary classes keep the elided shape).
+	if (braced && values.empty() && cls.entity &&
+	    cls.entity->spec_template && !cls.entity->is_template_anchor)
+		action->trivial_init = false;
+	item.children.push_back(std::move(action));
 }
 
 void SemBinder::CheckQualifiedDefinitionScope(const Scope* declaring)

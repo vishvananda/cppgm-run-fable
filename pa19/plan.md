@@ -288,12 +288,43 @@ the fixtures never odr-use one as an object.
 - [x] Architecture mapped; failing tests categorized (51 non-type, 15
       pack, 10 explicit-spec, 2 partial-spec, 2 variable-template, 3
       parse, 3 const-expr, 3 LowIR-shape).
-- [ ] Stage 1: TemplateArg model migration (through-pa18 stays green).
-- [ ] Stage 2: non-type parameters/arguments end to end.
-- [ ] Stage 3: const-expr extensions.
-- [ ] Stage 4: packs + `sizeof...` + literal-operator template.
-- [ ] Stage 5: explicit/partial specialization + variable templates.
-- [ ] Stage 6: stragglers, full through-pa19 gate, file audit.
+- [x] Stage 1: TemplateArg model migration (through-pa18 stayed green
+      at every step).
+- [x] Stage 2: non-type parameters/arguments end to end (capture with
+      dependent declared types, param-driven argument resolution with
+      constant evaluation and conversions, objectless constant alias
+      bindings with rvalue folding, class-scope constant recording,
+      deferred static_assert, LiNE mangling, deduction value slots,
+      explicit value arguments, value defaults; plus the
+      reference-pinned lowering shapes: space-as-underscore sanitize,
+      enum cast spelling `(Policy)2`, folded-const enum globals,
+      unsigned-8-byte index copies, signedness-flip conversion copies,
+      demand-driven static-member definitions, specialization member
+      scopes named at creation).
+- [x] Stage 3: const-expr extensions (string-literal element reads,
+      sizeof array-of-template-id re-read, named functional casts,
+      bool(B::value) cast re-read, restricted constexpr conversion for
+      B{} through a single-return conversion function).
+- [x] Stage 4: packs (type/value template packs and function parameter
+      packs; expansions in template-argument lists, base clauses
+      [extra empty bases], parameter clauses with reference-pinned
+      name__packN slots, call arguments, functional casts, scalar
+      new-initializers, braced lists; trailing-pack call deduction
+      with forwarding references; sizeof... parse + const-instruction
+      lowering shape; numeric literal-operator templates; 14.3p1
+      pack-target shape checks; multi-argument vexing-parse recovery).
+- [x] Stage 5: explicit specialization (class/function/variable,
+      template-id and signature-deduced forms, strong-unless-inline
+      function emission, primary-named parameter slots), minimal class
+      partial specialization (structural deduction, exact-match
+      selection), variable templates as per-key objectless constants,
+      alias-template capture-ignore.
+- [x] Stage 6: braced value-init constructor call for instantiated
+      specializations (the 400-stale fixture shape); function-size
+      audit splits (deduction stages, initializer-form classification,
+      objectless-constant fold, special-member specifiers).
+      `make test-report-through-pa19`: 1487/1487; file audit passes
+      (2 pre-existing declaration-weight warnings).
 
 ### Fixture-derived notes
 

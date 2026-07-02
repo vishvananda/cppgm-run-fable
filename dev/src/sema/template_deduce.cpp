@@ -534,6 +534,133 @@ static vector<TemplateArg> FlattenDeduced(
 	return flattened;
 }
 
+// 14.8.1: explicit template arguments bind the leading parameters;
+// the pack absorbs the remaining explicit arguments. False on any
+// unresolvable or dependent argument (the template contributes no
+// candidate).
+bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
+                                          const AstNamePart& part,
+                                          vector<TemplateArg>& bound,
+                                          vector<TemplateArg>& pack_elements)
+{
+	size_t cursor = 0;
+	for (size_t i = 0; i < part.arguments.size(); i++)
+	{
+		const AstTemplateArgument& argument = part.arguments[i];
+		if (argument.pack || cursor >= tmpl.params.size())
+			return false;
+		const TemplateParam& param = tmpl.params[cursor];
+		TemplateArg resolved;
+		try
+		{
+			if (param.kind == TPK_TYPE)
+			{
+				if (!argument.is_type || !argument.type)
+					return false;
+				resolved = TemplateArg(
+					builder_.ResolveTypeId(*argument.type));
+			}
+			else
+			{
+				Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+				resolved = ResolveValueArgument(
+					argument, ValueParamType(param, partial));
+			}
+		}
+		catch (const std::exception&)
+		{
+			return false;
+		}
+		if (TemplateArgIsDependent(resolved))
+			return false;
+		if (param.pack)
+			pack_elements.push_back(resolved);
+		else
+			bound[cursor++] = resolved;
+	}
+	return true;
+}
+
+// One fixed (non-pack) parameter pattern against one call argument
+// (14.8.2.1 subset with the p3 forwarding-reference rule).
+bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
+                                     const SemValue& arg,
+                                     vector<TemplateArg>& bound)
+{
+	if (!pattern)
+		return true;  // non-deduced context
+	if (!TypeIsDependent(pattern))
+		return true;  // ordinary conversion checking applies later
+	TypePtr arg_type = arg.type;
+	if (!arg_type)
+		return false;
+	if (IsReferenceType(pattern))
+	{
+		TypePtr referee = pattern->target;
+		// 14.8.2.1p3: a forwarding reference binding an lvalue deduces
+		// the parameter as an lvalue reference.
+		if (pattern->kind == TK_RVALUE_REFERENCE &&
+		    referee->kind == TK_TYPE_PARAM && !referee->is_const &&
+		    !referee->is_volatile && arg.category == VC_LVALUE)
+		{
+			int index = referee->named->param_index;
+			if (index < 0 || (size_t)index >= bound.size())
+				return false;
+			TypePtr as_ref = MakeReferenceType(arg_type, false, true);
+			if (ArgBound(bound[index]))
+				return bound[index].type &&
+					TypeEquals(bound[index].type, as_ref);
+			bound[index] = TemplateArg(as_ref);
+			return true;
+		}
+		return DeduceFromType(referee, arg_type, bound);
+	}
+	return DeduceFromType(RemoveTopCv(pattern),
+	                      DecayForDeduction(arg_type), bound);
+}
+
+// One pack element: the element pattern unifies against a copy of the
+// bound slots with the pack's slot cleared, so the pack placeholder
+// yields the element while fixed parameters keep deducing
+// consistently.
+bool SemBinder::DeducePackElement(const TypePtr& pattern,
+                                  const SemValue& arg, size_t pack_index,
+                                  vector<TemplateArg>& bound,
+                                  TemplateArg& element)
+{
+	TypePtr arg_type = arg.type;
+	if (!pattern || !arg_type)
+		return false;
+	if (pattern->kind == TK_RVALUE_REFERENCE && pattern->target &&
+	    pattern->target->kind == TK_TYPE_PARAM &&
+	    !pattern->target->is_const && !pattern->target->is_volatile &&
+	    arg.category == VC_LVALUE)
+	{
+		element = TemplateArg(MakeReferenceType(arg_type, false, true));
+		return true;
+	}
+	vector<TemplateArg> probe = bound;
+	probe[pack_index] = TemplateArg();
+	TypePtr pat = pattern;
+	TypePtr at = arg_type;
+	if (IsReferenceType(pat))
+		pat = pat->target;
+	else
+	{
+		pat = RemoveTopCv(pat);
+		at = DecayForDeduction(at);
+	}
+	if (!DeduceFromType(pat, at, probe))
+		return false;
+	if (!ArgBound(probe[pack_index]))
+		return false;
+	element = probe[pack_index];
+	for (size_t j = 0; j < probe.size(); j++)
+		if (j != pack_index && !ArgBound(bound[j]) && ArgBound(probe[j]))
+			bound[j] = probe[j];
+	return true;
+}
+
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	TemplateInfo& tmpl, const vector<SemValue>& args,
 	const AstNamePart* explicit_part)
@@ -547,61 +674,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		return 0;
 	vector<TemplateArg> bound(tmpl.params.size());
 	vector<TemplateArg> pack_elements;
-	size_t explicit_elements = 0;
-	// 14.8.1: explicit template arguments bind the leading parameters;
-	// the pack absorbs the remaining explicit arguments.
-	if (explicit_part)
-	{
-		size_t cursor = 0;
-		for (size_t i = 0; i < explicit_part->arguments.size(); i++)
-		{
-			const AstTemplateArgument& argument =
-				explicit_part->arguments[i];
-			if (argument.pack)
-				return 0;
-			if (cursor >= tmpl.params.size())
-				return 0;
-			const TemplateParam& param = tmpl.params[cursor];
-			TemplateArg resolved;
-			try
-			{
-				if (param.kind == TPK_TYPE)
-				{
-					if (!argument.is_type || !argument.type)
-						return 0;
-					resolved = TemplateArg(
-						builder_.ResolveTypeId(*argument.type));
-				}
-				else
-				{
-					Scope* partial =
-						MakeArgumentAliasScope(tmpl, bound);
-					resolved = ResolveValueArgument(
-						argument, ValueParamType(param, partial));
-				}
-			}
-			catch (const std::exception&)
-			{
-				return 0;
-			}
-			if (TemplateArgIsDependent(resolved))
-				return 0;
-			if (param.pack)
-			{
-				pack_elements.push_back(resolved);
-				explicit_elements++;
-			}
-			else
-			{
-				bound[cursor] = resolved;
-				cursor++;
-			}
-		}
-	}
-	// One probe per pack element: the element pattern unifies against
-	// a copy of the bound slots with the pack's slot cleared, so the
-	// pack placeholder yields the element while fixed parameters keep
-	// deducing consistently.
+	if (explicit_part &&
+	    !BindExplicitDeductionArgs(tmpl, *explicit_part, bound,
+	                               pack_elements))
+		return 0;
+	size_t explicit_elements = pack_elements.size();
 	size_t deduced_elements = 0;
 	size_t p = 0;
 	for (size_t i = 0; i < args.size(); i++)
@@ -614,85 +691,17 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		if (!pattern_is_pack)
 		{
 			p++;
-			if (!pattern)
-				continue;  // non-deduced context
-			if (!TypeIsDependent(pattern))
-				continue;  // ordinary conversion checking applies later
-			TypePtr arg_type = args[i].type;
-			if (!arg_type)
-				return 0;
-			if (IsReferenceType(pattern))
-			{
-				TypePtr referee = pattern->target;
-				// 14.8.2.1p3: a forwarding reference binding an lvalue
-				// deduces the parameter as an lvalue reference.
-				if (pattern->kind == TK_RVALUE_REFERENCE &&
-				    referee->kind == TK_TYPE_PARAM &&
-				    !referee->is_const && !referee->is_volatile &&
-				    args[i].category == VC_LVALUE)
-				{
-					int index = referee->named->param_index;
-					if (index < 0 || (size_t)index >= bound.size())
-						return 0;
-					TypePtr as_ref =
-						MakeReferenceType(arg_type, false, true);
-					if (ArgBound(bound[index]) &&
-					    !(bound[index].type &&
-					      TypeEquals(bound[index].type, as_ref)))
-						return 0;
-					bound[index] = TemplateArg(as_ref);
-					continue;
-				}
-				if (!DeduceFromType(referee, arg_type, bound))
-					return 0;
-				continue;
-			}
-			if (!DeduceFromType(RemoveTopCv(pattern),
-			                    DecayForDeduction(arg_type), bound))
+			if (!DeduceFixedParameter(pattern, args[i], bound))
 				return 0;
 			continue;
 		}
 		// The trailing pack pattern: each remaining argument deduces
 		// one element (14.8.2.1p1 last clause).
-		if (!has_pack || !pattern)
-			return 0;
-		TypePtr arg_type = args[i].type;
-		if (!arg_type)
-			return 0;
 		TemplateArg element;
-		bool deduced = false;
-		if (pattern->kind == TK_RVALUE_REFERENCE && pattern->target &&
-		    pattern->target->kind == TK_TYPE_PARAM &&
-		    !pattern->target->is_const && !pattern->target->is_volatile &&
-		    args[i].category == VC_LVALUE)
-		{
-			element = TemplateArg(
-				MakeReferenceType(arg_type, false, true));
-			deduced = true;
-		}
-		if (!deduced)
-		{
-			vector<TemplateArg> probe = bound;
-			probe[pack_index] = TemplateArg();
-			TypePtr pat = pattern;
-			TypePtr at = arg_type;
-			if (IsReferenceType(pat))
-				pat = pat->target;
-			else
-			{
-				pat = RemoveTopCv(pat);
-				at = DecayForDeduction(at);
-			}
-			if (!DeduceFromType(pat, at, probe))
-				return 0;
-			if (!ArgBound(probe[pack_index]))
-				return 0;
-			element = probe[pack_index];
-			for (size_t j = 0; j < probe.size(); j++)
-				if (j != pack_index && !ArgBound(bound[j]) &&
-				    ArgBound(probe[j]))
-					bound[j] = probe[j];
-		}
+		if (!has_pack ||
+		    !DeducePackElement(pattern, args[i], pack_index, bound,
+		                       element))
+			return 0;
 		if (deduced_elements < explicit_elements)
 		{
 			if (!TemplateArgEquals(element,
@@ -882,10 +891,49 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// unless declared inline (7.1.2); instantiated bodies stay weak.
 	item->inline_def = !spec.explicit_def || spec.explicit_inline;
 	item->fn_spec = &spec;
+	// Slot names follow the first declaration (the primary pattern);
+	// an explicit definition's renamed parameters redirect their body
+	// bindings onto the primary-named slots.
+	vector<string> slot_names(composed.parameters.size());
+	for (size_t i = 0; i < composed.parameters.size(); i++)
+		slot_names[i] = composed.parameters[i].name;
+	if (spec.explicit_def && tmpl.pattern_decl &&
+	    tmpl.pattern_decl->declarator)
+	{
+		const AstParameterClause* primary_clause =
+			FunctionParameterClause(*tmpl.pattern_decl->declarator);
+		for (size_t i = 0;
+		     primary_clause && i < primary_clause->parameters.size() &&
+		     i < slot_names.size(); i++)
+		{
+			const AstDeclarator* pd =
+				primary_clause->parameters[i].declarator.get();
+			const AstName* pid = pd ? pd->IdName() : 0;
+			if (!pid || !pid->IsPlainIdentifier())
+				continue;
+			const string& primary_name = pid->parts[0].identifier;
+			if (primary_name.empty() || primary_name == slot_names[i])
+				continue;
+			if (!slot_names[i].empty())
+				if (ScopeBinding* redirect =
+				        FindOwnBinding(*fn_scope, slot_names[i]))
+				{
+					redirect->pack_element_name = primary_name;
+					// The lowering resolves the slot's own binding
+					// by its primary name.
+					ScopeBinding slot_binding;
+					slot_binding.kind = SB_PARAMETER;
+					slot_binding.name = primary_name;
+					slot_binding.type = redirect->type;
+					AddBinding(*fn_scope, slot_binding);
+				}
+			slot_names[i] = primary_name;
+		}
+	}
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		SemNodePtr parameter = MakeSemNode(SN_PARAMETER);
-		parameter->name = composed.parameters[i].name;
+		parameter->name = slot_names[i];
 		parameter->type = composed.parameters[i].type;
 		parameter->entity_scope = fn_scope;
 		parameter->entity_name = parameter->name;

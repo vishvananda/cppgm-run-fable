@@ -299,6 +299,25 @@ TypePtr SemExprAnalyzer::ThisAdjustedType(const NamedTypeInfo* cls,
 	return adjusted;
 }
 
+// PA19 14.1p4: the constant prvalue behind an objectless binding (a
+// non-type template parameter or variable-template specialization).
+SemValue SemExprAnalyzer::FoldObjectlessConstant(const ScopeBinding& binding)
+{
+	if (!binding.has_value)
+		throw runtime_error(binding.name +
+		                    " is a dependent value parameter");
+	SemValue value;
+	value.node = MakeSemNode(SN_LITERAL);
+	value.node->token = RenderConstValue(binding.value);
+	value.node->type = RemoveTopCv(binding.type);
+	value.node->category = VC_PRVALUE;
+	value.node->has_value = true;
+	value.node->value = binding.value;
+	value.type = value.node->type;
+	value.category = VC_PRVALUE;
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 {
 	const NamedTypeInfo* member_class = 0;
@@ -333,20 +352,7 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		// PA19: a non-type template parameter has no object behind it;
 		// every use folds to its converted constant value (14.1p4).
 		if (binding->no_object)
-		{
-			if (!binding->has_value)
-				throw runtime_error(binding->name +
-				                    " is a dependent value parameter");
-			value.node = MakeSemNode(SN_LITERAL);
-			value.node->token = RenderConstValue(binding->value);
-			value.node->type = RemoveTopCv(binding->type);
-			value.node->category = VC_PRVALUE;
-			value.node->has_value = true;
-			value.node->value = binding->value;
-			value.type = value.node->type;
-			value.category = VC_PRVALUE;
-			return value;
-		}
+			return FoldObjectlessConstant(*binding);
 		// A constant static member named through a qualified-id folds
 		// like an enumerator (9.4.2p4 constant initializer).
 		if (member_class && binding->has_value)

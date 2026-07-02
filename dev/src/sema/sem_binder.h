@@ -388,6 +388,17 @@ private:
 	bool DeduceTemplateArgs(const vector<TemplateArg>& pattern,
 	                        const vector<TemplateArg>& args,
 	                        vector<TemplateArg>& bound);
+	// DeduceFunctionTemplate stages (template_deduce.cpp): explicit
+	// argument binding, one fixed parameter, one pack element.
+	bool BindExplicitDeductionArgs(TemplateInfo& tmpl,
+	                               const AstNamePart& part,
+	                               vector<TemplateArg>& bound,
+	                               vector<TemplateArg>& pack_elements);
+	bool DeduceFixedParameter(const TypePtr& pattern, const SemValue& arg,
+	                          vector<TemplateArg>& bound);
+	bool DeducePackElement(const TypePtr& pattern, const SemValue& arg,
+	                       size_t pack_index, vector<TemplateArg>& bound,
+	                       TemplateArg& element);
 	// `pattern...` in an argument/initializer list (ISemExprHost).
 	virtual bool ExpandPackExpression(const AstExpr& pattern,
 	                                  vector<SemValue>& out);
@@ -514,6 +525,9 @@ private:
 	void AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	                           const AstInitializer* init,
 	                           const ClassInfo& cls);
+	bool ClassifyClassInitForm(const AstInitializer& init,
+	                           vector<const AstExpr*>& args,
+	                           const AstExpr*& braced);
 	void AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 	                          const AstInitializer* init,
 	                          const ClassInfo& cls);

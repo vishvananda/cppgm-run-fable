@@ -260,6 +260,28 @@ void SemBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
 
 // --- special members --------------------------------------------------
 
+// The member-specifier keywords of one special-member declaration
+// (12.1p4: only destructors may be virtual).
+static void ReadSpecialMemberSpecifiers(const AstDecl& decl, bool is_dtor,
+                                        bool& is_explicit,
+                                        bool& is_virtual)
+{
+	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
+	{
+		ETokenType keyword = decl.member_specifiers[i].keyword;
+		if (keyword == KW_EXPLICIT)
+			is_explicit = true;
+		else if (keyword == KW_VIRTUAL)
+		{
+			if (!is_dtor)
+				throw runtime_error("constructor declared virtual");
+			is_virtual = true;
+		}
+		else if (keyword == KW_STATIC || keyword == KW_FRIEND)
+			throw runtime_error("invalid specifier on a special member");
+	}
+}
+
 void SemBinder::BindSpecialMember(const AstDecl& decl)
 {
 	ClassInfo* cls = OpenClass();
@@ -291,21 +313,7 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	bool is_dtor = part.tilde;
 	bool is_explicit = false;
 	bool is_virtual = false;
-	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
-	{
-		ETokenType keyword = decl.member_specifiers[i].keyword;
-		if (keyword == KW_EXPLICIT)
-			is_explicit = true;
-		else if (keyword == KW_VIRTUAL)
-		{
-			// PA17: only destructors may be virtual (12.1p4).
-			if (!is_dtor)
-				throw runtime_error("constructor declared virtual");
-			is_virtual = true;
-		}
-		else if (keyword == KW_STATIC || keyword == KW_FRIEND)
-			throw runtime_error("invalid specifier on a special member");
-	}
+	ReadSpecialMemberSpecifiers(decl, is_dtor, is_explicit, is_virtual);
 	// Composing the declarator over void yields exactly the
 	// constructor/destructor function type over the declared parameters.
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
