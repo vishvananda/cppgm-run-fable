@@ -138,6 +138,10 @@ AstDeclPtr AstParser::ParseUsingDeclarationOrDirective()
 	bool directive = MatchSimple(KW_NAMESPACE);
 	AstDeclPtr decl = MakeDecl(directive ? DK_USING_DIRECTIVE
 	                                     : DK_USING_DECLARATION);
+	// 7.3.3p1 / 14.6: `using typename Base::type;` re-exports a
+	// dependent member type.
+	if (!directive && MatchSimple(KW_TYPENAME))
+		decl->target.typename_keyword = true;
 	if (!ParseIdExpressionName(decl->target) || !MatchSimple(OP_SEMICOLON))
 	{
 		Restore(state);
@@ -211,7 +215,8 @@ AstDeclPtr AstParser::ParseLinkageSpecification()
 AstDeclPtr AstParser::ParseExplicitInstantiation()
 {
 	State state = Save();
-	if (!MatchSimple(KW_EXTERN) || !MatchSimple(KW_TEMPLATE))
+	MatchSimple(KW_EXTERN);  // 14.7.2: `extern` marks a declaration
+	if (!MatchSimple(KW_TEMPLATE))
 	{
 		Restore(state);
 		return AstDeclPtr();
@@ -310,6 +315,26 @@ AstDeclPtr AstParser::ParseSimpleDeclaration()
 // function-definition: decl-specifier-seq declarator
 // compound-statement; the declarator must be function-shaped so
 // `int x{};` stays a braced-initialized simple-declaration.
+namespace {
+
+// Whether a declarator carries a parameter clause anywhere (a nested
+// declarator such as `T (&f(P))[2]` hides it one level down).
+bool DeclaratorHasParameterClause(const AstDeclarator& declarator)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+	{
+		if (declarator.items[i].kind == DI_PARAMS)
+			return true;
+		if (declarator.items[i].kind == DI_NESTED &&
+		    declarator.items[i].nested &&
+		    DeclaratorHasParameterClause(*declarator.items[i].nested))
+			return true;
+	}
+	return false;
+}
+
+}  // namespace
+
 AstDeclPtr AstParser::ParseFunctionDefinition()
 {
 	State state = Save();
@@ -324,10 +349,7 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 		Restore(state);
 		return AstDeclPtr();
 	}
-	bool has_params = false;
-	for (size_t i = 0; i < decl->declarator->items.size(); i++)
-		if (decl->declarator->items[i].kind == DI_PARAMS)
-			has_params = true;
+	bool has_params = DeclaratorHasParameterClause(*decl->declarator);
 	if (!has_params || !AtSimple(OP_LBRACE))
 	{
 		Restore(state);
@@ -400,7 +422,17 @@ AstDeclPtr AstParser::ParseDeclarationForms()
 		}
 	}
 	if (AtSimple(KW_TEMPLATE))
+	{
+		// 14.7.2: a bare `template declaration` without a parameter
+		// clause is an explicit instantiation definition.
+		if (!AtSimple(OP_LT, 1))
+		{
+			AstDeclPtr instantiation = ParseExplicitInstantiation();
+			if (instantiation)
+				return instantiation;
+		}
 		return ParseTemplateDeclaration();
+	}
 	if (AtSimple(KW_STATIC_ASSERT))
 		return ParseStaticAssertDeclaration();
 	AstDeclPtr decl = ParseClassDeclaration();

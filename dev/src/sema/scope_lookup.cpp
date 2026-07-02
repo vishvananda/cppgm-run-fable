@@ -131,6 +131,10 @@ bool SameFoundEntity(const ScopeBinding& a, const ScopeBinding& b)
 	bool b_type = b.kind == SB_TYPE || b.kind == SB_TYPE_ALIAS;
 	if (a_type || b_type)
 		return a_type && b_type && TypeEquals(a.type, b.type);
+	// PA18: class-template names found along several paths name the
+	// same entity when they share the template record.
+	if (a.kind == SB_CLASS_TEMPLATE || b.kind == SB_CLASS_TEMPLATE)
+		return a.kind == b.kind && a.templ == b.templ;
 	return a.kind == b.kind && a.type == b.type &&
 		a.has_value == b.has_value && a.value.bits == b.value.bits;
 }

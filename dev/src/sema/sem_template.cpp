@@ -1,0 +1,596 @@
+#include "sema/sem_binder.h"
+
+#include <stdexcept>
+
+#include "sema/scope_lookup.h"
+
+using std::runtime_error;
+
+// PA18 template machinery: capture of template declarations and
+// on-demand instantiation. A template body is never analyzed at its
+// declaration; instantiation re-binds the stored AST with the
+// parameter names aliased to the concrete argument types, so the
+// PA11-PA17 declaration/class/expression machinery does the semantic
+// work unchanged. Instantiated definitions emit as weak
+// (demand-emitted) LowIR, matching 14.7 linkage expectations.
+
+namespace {
+
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA18 assignment boundary");
+}
+
+const int kMaxInstantiationDepth = 200;
+
+}  // namespace
+
+// --- capture --------------------------------------------------------------
+
+void SemBinder::CollectTemplateParams(const AstDecl& decl,
+                                      vector<TemplateParam>& params)
+{
+	for (size_t i = 0; i < decl.template_params.size(); i++)
+	{
+		const AstTemplateParameter& parameter = decl.template_params[i];
+		if (parameter.kind != TP_TYPE)
+			throw OutsideBoundary("non-type or template template "
+			                      "parameter");
+		if (parameter.pack)
+			throw OutsideBoundary("template parameter pack");
+		TemplateParam param;
+		param.name = parameter.name;
+		if (parameter.has_default_type)
+			param.default_type = parameter.default_type.get();
+		params.push_back(param);
+	}
+}
+
+void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
+{
+	if (!decl.has_parameter_list || !decl.inner)
+		throw OutsideBoundary("explicit specialization");
+	const AstDecl& inner = *decl.inner;
+	if (current_->kind == SCOPE_CLASS)
+		throw OutsideBoundary("member template");
+	if (current_->kind != SCOPE_NAMESPACE)
+		throw OutsideBoundary("block-scope template");
+	switch (inner.kind)
+	{
+	case DK_CLASS:
+		// A qualified class-name defines a nested class of a class
+		// template out of class; a template-id is a partial
+		// specialization (out of scope).
+		if (!inner.has_name)
+			throw OutsideBoundary("unnamed class template");
+		if (inner.class_name.IsPlainIdentifier())
+		{
+			CaptureClassTemplate(decl, inner, true);
+			return;
+		}
+		if (inner.class_name.parts.size() > 1)
+		{
+			RegisterTemplateMember(decl, inner.class_name);
+			return;
+		}
+		throw OutsideBoundary("class template partial specialization");
+	case DK_CLASS_FORWARD:
+		if (!inner.class_name.IsPlainIdentifier())
+			throw OutsideBoundary("class template partial "
+			                      "specialization");
+		CaptureClassTemplate(decl, inner, false);
+		return;
+	case DK_FUNCTION:
+	case DK_SIMPLE:
+	{
+		const AstName* id = 0;
+		if (inner.kind == DK_FUNCTION)
+			id = inner.declarator ? inner.declarator->IdName() : 0;
+		else if (inner.declarators.size() == 1 &&
+		         inner.declarators[0].declarator)
+			id = inner.declarators[0].declarator->IdName();
+		if (!id || id->parts.empty())
+			throw OutsideBoundary("template declarator form");
+		if (id->parts.size() > 1)
+		{
+			RegisterTemplateMember(decl, *id);
+			return;
+		}
+		CaptureFunctionTemplate(decl, inner);
+		return;
+	}
+	case DK_SPECIAL_MEMBER_DEFINITION:
+	case DK_SPECIAL_MEMBER_DECLARATION:
+	{
+		const AstName* id =
+			inner.declarator ? inner.declarator->IdName() : 0;
+		if (!id || id->parts.size() < 2)
+			throw OutsideBoundary("template special-member form");
+		RegisterTemplateMember(decl, *id);
+		return;
+	}
+	case DK_ALIAS:
+		throw OutsideBoundary("alias template");
+	case DK_TEMPLATE:
+		throw OutsideBoundary("nested template declaration");
+	default:
+		throw OutsideBoundary("templated declaration form");
+	}
+}
+
+void SemBinder::CaptureClassTemplate(const AstDecl& decl,
+                                     const AstDecl& inner, bool definition)
+{
+	const string& name = inner.class_name.parts[0].identifier;
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+	TemplateInfo* tmpl = 0;
+	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
+	{
+		if (existing->kind != SB_CLASS_TEMPLATE)
+			throw runtime_error(name + " redeclared as a class template");
+		tmpl = existing->templ;
+		if (tmpl->params.size() != params.size())
+			throw runtime_error("template parameter list of " + name +
+			                    " disagrees with its declaration");
+		if (definition && tmpl->has_definition)
+			throw runtime_error("redefinition of class template " + name);
+		// 14.1p10: a redeclaration may add default arguments; the
+		// definition's parameter names win (positional identity).
+		for (size_t i = 0; i < params.size(); i++)
+		{
+			if (params[i].default_type && tmpl->params[i].default_type)
+				throw runtime_error("template parameter redefines a "
+				                    "default argument");
+			if (!params[i].default_type)
+				params[i].default_type = tmpl->params[i].default_type;
+		}
+		tmpl->params = params;
+	}
+	else
+	{
+		tmpl = unit_.templates.Create(TMPL_CLASS, name, current_);
+		tmpl->params = params;
+		tmpl->anchor = model_.CreateNamedTypeInfo(
+			TypeDisplayName(inner.class_key_spelling, name), current_,
+			name);
+		tmpl->anchor->is_template_anchor = true;
+		tmpl->anchor->spec_template = tmpl;
+		tmpl->anchor->class_key = inner.class_key_spelling;
+		tmpl->anchor->is_union = inner.class_key == KW_UNION;
+		ScopeBinding binding;
+		binding.kind = SB_CLASS_TEMPLATE;
+		binding.name = name;
+		binding.access = current_access_;
+		binding.templ = tmpl;
+		AddBinding(*current_, binding);
+	}
+	if (definition)
+	{
+		tmpl->decl = &decl;
+		tmpl->pattern_decl = &inner;
+		tmpl->has_definition = true;
+		// Specializations named while only the forward declaration was
+		// visible upgrade now, then any ready member definitions.
+		for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
+		         tmpl->class_specs.begin();
+		     it != tmpl->class_specs.end(); ++it)
+			if (!it->second->instantiated)
+				InstantiateClassSpecialization(*tmpl, *it->second);
+		InstantiateReadyMembers(*tmpl);
+	}
+	else if (!tmpl->decl)
+	{
+		tmpl->decl = &decl;
+		tmpl->pattern_decl = &inner;
+	}
+}
+
+void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
+                                        const AstDecl& inner)
+{
+	const AstName* id = inner.kind == DK_FUNCTION
+		? inner.declarator->IdName()
+		: inner.declarators[0].declarator->IdName();
+	const string name = DeclaredFunctionName(id->parts.back());
+	bool definition = inner.kind == DK_FUNCTION;
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+
+	ScopeBinding* binding = FindOwnBinding(*current_, name);
+	if (binding && binding->kind != SB_FUNCTION)
+		throw runtime_error(name + " redeclared as a function template");
+	TemplateInfo* merged = 0;
+	if (binding)
+	{
+		// A declaration and its definition (possibly with renamed
+		// parameters) merge positionally; other same-name templates
+		// overload.
+		for (size_t i = 0; i < binding->fn_templates.size(); i++)
+		{
+			TemplateInfo* other = binding->fn_templates[i];
+			if (other->params.size() != params.size())
+				continue;
+			if (SameFunctionTemplateSignature(*other, decl, inner))
+			{
+				merged = other;
+				break;
+			}
+		}
+	}
+	if (merged)
+	{
+		if (definition)
+		{
+			if (merged->has_definition)
+				throw runtime_error("redefinition of function template " +
+				                    name);
+			merged->decl = &decl;
+			merged->pattern_decl = &inner;
+			merged->has_definition = true;
+			merged->params = params;
+			merged->pattern_ready = false;
+			InstantiatePendingFunctions(*merged);
+		}
+		return;
+	}
+	TemplateInfo* tmpl = unit_.templates.Create(TMPL_FUNCTION, name,
+	                                            current_);
+	tmpl->params = params;
+	tmpl->decl = &decl;
+	tmpl->pattern_decl = &inner;
+	tmpl->has_definition = definition;
+	if (!binding)
+	{
+		ScopeBinding fresh;
+		fresh.kind = SB_FUNCTION;
+		fresh.name = name;
+		fresh.access = current_access_;
+		binding = &AddBinding(*current_, fresh);
+	}
+	binding->fn_templates.push_back(tmpl);
+}
+
+// --- template-id resolution ------------------------------------------------
+
+vector<TypePtr> SemBinder::ResolveTemplateArgumentList(
+	TemplateInfo& tmpl, const AstNamePart& part)
+{
+	vector<TypePtr> args;
+	for (size_t i = 0; i < part.arguments.size(); i++)
+	{
+		const AstTemplateArgument& argument = part.arguments[i];
+		if (argument.pack)
+			throw OutsideBoundary("pack-expansion template argument");
+		if (!argument.is_type || !argument.type)
+			throw OutsideBoundary("non-type template argument");
+		args.push_back(builder_.ResolveTypeId(*argument.type));
+	}
+	if (args.size() > tmpl.params.size())
+		throw runtime_error("too many template arguments for " +
+		                    tmpl.name);
+	if (args.size() < tmpl.params.size())
+	{
+		// Defaults resolve in the template's declaring scope with the
+		// earlier parameters bound to the resolved arguments (14.1).
+		Scope* partial = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
+		                                    tmpl.declaring);
+		for (size_t i = 0; i < args.size(); i++)
+		{
+			if (tmpl.params[i].name.empty())
+				continue;
+			ScopeBinding alias;
+			alias.kind = SB_TYPE_ALIAS;
+			alias.name = tmpl.params[i].name;
+			alias.type = args[i];
+			AddBinding(*partial, alias);
+		}
+		for (size_t k = args.size(); k < tmpl.params.size(); k++)
+		{
+			if (!tmpl.params[k].default_type)
+				throw runtime_error("too few template arguments for " +
+				                    tmpl.name);
+			Scope* saved = current_;
+			current_ = partial;
+			TypePtr resolved;
+			try
+			{
+				resolved = builder_.ResolveTypeId(
+					*tmpl.params[k].default_type);
+			}
+			catch (...)
+			{
+				current_ = saved;
+				throw;
+			}
+			current_ = saved;
+			args.push_back(resolved);
+			if (!tmpl.params[k].name.empty())
+			{
+				ScopeBinding alias;
+				alias.kind = SB_TYPE_ALIAS;
+				alias.name = tmpl.params[k].name;
+				alias.type = resolved;
+				AddBinding(*partial, alias);
+			}
+		}
+	}
+	return args;
+}
+
+const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
+	const AstNamePart& part, Scope* prefix)
+{
+	const ScopeBinding* found = prefix
+		? QualifiedLookup(*prefix, part.identifier, SLF_ANY)
+		: UnqualifiedLookup(current_, part.identifier, SLF_ANY);
+	if (!found)
+		throw runtime_error("undeclared template name " +
+		                    part.identifier);
+	if (found->kind == SB_FUNCTION)
+		return ResolveFunctionTemplateId(*found, part);
+	if (found->kind != SB_CLASS_TEMPLATE)
+		throw runtime_error(part.identifier +
+		                    " does not name a template");
+	TemplateInfo& tmpl = *found->templ;
+	vector<TypePtr> args = ResolveTemplateArgumentList(tmpl, part);
+	bool dependent = false;
+	for (size_t i = 0; i < args.size(); i++)
+		if (TypeIsDependent(args[i]))
+			dependent = true;
+	if (dependent)
+	{
+		// A pattern use (`box<T>` with T still abstract): a dependent
+		// specialization type, resolved for real at instantiation.
+		string key = TemplateArgumentKey(args);
+		unique_ptr<ScopeBinding>& slot = tmpl.dependent_uses[key];
+		if (!slot)
+		{
+			slot.reset(new ScopeBinding());
+			slot->kind = SB_TYPE;
+			slot->name = tmpl.name;
+			slot->type = MakeTemplateSpecType(tmpl.anchor, args);
+			slot->owner = tmpl.declaring;
+			slot->home = tmpl.declaring;
+		}
+		return slot.get();
+	}
+	ClassSpecialization* spec = EnsureClassSpecialization(tmpl, args);
+	return &spec->self;
+}
+
+// --- class instantiation ----------------------------------------------------
+
+Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
+                                         const vector<TypePtr>& args)
+{
+	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
+	                                  tmpl.declaring);
+	for (size_t i = 0; i < args.size() && i < tmpl.params.size(); i++)
+	{
+		if (tmpl.params[i].name.empty())
+			continue;
+		ScopeBinding alias;
+		alias.kind = SB_TYPE_ALIAS;
+		alias.name = tmpl.params[i].name;
+		alias.type = args[i];
+		AddBinding(*scope, alias);
+	}
+	return scope;
+}
+
+ClassSpecialization* SemBinder::EnsureClassSpecialization(
+	TemplateInfo& tmpl, const vector<TypePtr>& args)
+{
+	string key = TemplateArgumentKey(args);
+	unique_ptr<ClassSpecialization>& slot = tmpl.class_specs[key];
+	if (!slot)
+	{
+		slot.reset(new ClassSpecialization());
+		ClassSpecialization* spec = slot.get();
+		spec->owner = &tmpl;
+		spec->args = args;
+		spec->key = key;
+		const string spec_name =
+			tmpl.name + TemplateArgumentSpelling(args);
+		NamedTypeInfo* info = model_.CreateNamedTypeInfo(
+			TypeDisplayName(tmpl.anchor->class_key, spec_name),
+			tmpl.declaring, spec_name);
+		info->is_union = tmpl.anchor->is_union;
+		info->class_key = tmpl.anchor->class_key;
+		info->spec_template = &tmpl;
+		info->spec_args = args;
+		spec->entity = info;
+		spec->self.kind = SB_TYPE;
+		spec->self.name = tmpl.name;
+		spec->self.type = MakeNamedType(TK_CLASS, info);
+		spec->self.owner = tmpl.declaring;
+		spec->self.home = tmpl.declaring;
+	}
+	ClassSpecialization* spec = slot.get();
+	if (!spec->instantiated && tmpl.has_definition)
+	{
+		InstantiateClassSpecialization(tmpl, *spec);
+		InstantiateReadyMembers(tmpl);
+	}
+	return spec;
+}
+
+void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
+                                               ClassSpecialization& spec)
+{
+	if (instantiation_depth_ >= kMaxInstantiationDepth)
+		throw runtime_error("template instantiation depth limit "
+		                    "exceeded for " + tmpl.name);
+	spec.instantiated = true;
+	spec.param_scope = MakeArgumentAliasScope(tmpl, spec.args);
+	// The injected pattern name: `Foo` inside the body names this
+	// specialization (14.6.1p1), and BindClass completes this entity
+	// instead of creating a fresh one.
+	ScopeBinding injected;
+	injected.kind = SB_TYPE;
+	injected.name = tmpl.name;
+	injected.type = spec.self.type;
+	AddBinding(*spec.param_scope, injected);
+
+	InstantiationContext context(*this, spec.param_scope);
+	bool saved_instantiating = instantiating_;
+	instantiating_ = true;
+	try
+	{
+		BindDeclaration(*tmpl.pattern_decl);
+	}
+	catch (...)
+	{
+		instantiating_ = saved_instantiating;
+		throw;
+	}
+	instantiating_ = saved_instantiating;
+	// The member scope adopts the specialization spelling so the
+	// lowering's scope paths and symbol names see `Foo<int>`.
+	if (Scope* members = model_.MemberScope(spec.entity))
+		members->name = spec.entity->name;
+}
+
+// --- out-of-class member definitions ---------------------------------------
+
+TemplateInfo* SemBinder::ResolveMemberOwnerTemplate(const AstName& id,
+                                                    size_t& tmpl_part)
+{
+	// Walk the leading plain components as namespace qualifiers; the
+	// first template-id component names the owner class template.
+	Scope* scope = id.global_scope ? model_.global() : 0;
+	for (size_t i = 0; i + 1 < id.parts.size(); i++)
+	{
+		const AstNamePart& part = id.parts[i];
+		if (part.kind == NP_TEMPLATE_ID)
+		{
+			const ScopeBinding* found = scope
+				? QualifiedLookup(*scope, part.identifier, SLF_ANY)
+				: UnqualifiedLookup(current_, part.identifier, SLF_ANY);
+			if (!found || found->kind != SB_CLASS_TEMPLATE)
+				return 0;
+			tmpl_part = i;
+			return found->templ;
+		}
+		if (part.kind != NP_IDENTIFIER || part.tilde)
+			return 0;
+		const ScopeBinding* found = scope
+			? QualifiedLookup(*scope, part.identifier, SLF_SCOPE_NAMES)
+			: UnqualifiedLookup(current_, part.identifier,
+			                    SLF_SCOPE_NAMES);
+		if (!found)
+			return 0;
+		if (found->kind != SB_NAMESPACE &&
+		    found->kind != SB_NAMESPACE_ALIAS)
+			return 0;
+		scope = found->target;
+	}
+	return 0;
+}
+
+void SemBinder::RegisterTemplateMember(const AstDecl& decl,
+                                       const AstName& id)
+{
+	size_t tmpl_part = 0;
+	TemplateInfo* tmpl = ResolveMemberOwnerTemplate(id, tmpl_part);
+	if (!tmpl)
+		throw OutsideBoundary("qualified template declarator");
+	// The member definition's own parameter names rebind positionally
+	// at each instantiation; arity must agree with the template.
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+	if (params.size() != tmpl->params.size())
+		throw runtime_error("template parameter list of a member of " +
+		                    tmpl->name + " disagrees");
+	tmpl->member_defs.push_back(&decl);
+	InstantiateReadyMembers(*tmpl);
+}
+
+void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
+{
+	for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
+	         tmpl.class_specs.begin();
+	     it != tmpl.class_specs.end(); ++it)
+	{
+		ClassSpecialization& spec = *it->second;
+		if (!spec.instantiated)
+			continue;
+		for (size_t i = 0; i < tmpl.member_defs.size(); i++)
+		{
+			if (spec.members_done.count(i))
+				continue;
+			spec.members_done[i] = true;
+			InstantiateMemberDefinition(tmpl, spec, i);
+		}
+	}
+}
+
+void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
+                                            ClassSpecialization& spec,
+                                            size_t member_index)
+{
+	if (instantiation_depth_ >= kMaxInstantiationDepth)
+		throw runtime_error("template instantiation depth limit "
+		                    "exceeded for " + tmpl.name);
+	const AstDecl& decl = *tmpl.member_defs[member_index];
+	// The definition's own parameter names alias the specialization's
+	// arguments; the qualified declarator prefix (`Foo<T>::`) then
+	// resolves to this specialization through the ordinary machinery.
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+	TemplateInfo shadow;
+	shadow.params = params;
+	shadow.declaring = tmpl.declaring;
+	Scope* alias_scope = MakeArgumentAliasScope(shadow, spec.args);
+	InstantiationContext context(*this, alias_scope);
+	bool saved_instantiating = instantiating_;
+	instantiating_ = true;
+	try
+	{
+		BindDeclaration(*decl.inner);
+	}
+	catch (...)
+	{
+		instantiating_ = saved_instantiating;
+		throw;
+	}
+	instantiating_ = saved_instantiating;
+	FlushDeferredBodies();
+}
+
+// --- explicit instantiation --------------------------------------------------
+
+void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
+{
+	if (!decl.inner)
+		throw OutsideBoundary("explicit instantiation form");
+	const AstDecl& inner = *decl.inner;
+	if (inner.kind == DK_CLASS_FORWARD)
+	{
+		const AstName& name = inner.class_name;
+		if (name.parts.empty() ||
+		    name.parts.back().kind != NP_TEMPLATE_ID)
+			throw OutsideBoundary("explicit instantiation of a "
+			                      "non-template-id");
+		// Resolving the template-id instantiates the class; the eager
+		// member-definition instantiation covers 14.7.2p8 for the
+		// supported subset.
+		const ScopeBinding* binding = ResolveTerminal(name, SLF_ANY);
+		if (!binding || binding->kind != SB_TYPE ||
+		    binding->type->kind != TK_CLASS)
+			throw runtime_error("explicit instantiation does not name "
+			                    "a class specialization");
+		if (!binding->type->named->complete)
+			throw runtime_error("explicit instantiation of an "
+			                    "undefined class template");
+		return;
+	}
+	if (inner.kind == DK_SIMPLE)
+	{
+		BindExplicitFunctionInstantiation(inner);
+		return;
+	}
+	throw OutsideBoundary("explicit instantiation form");
+}

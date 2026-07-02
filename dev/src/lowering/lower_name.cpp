@@ -16,30 +16,64 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA14 assignment boundary");
 }
 
+// One component of a qualified name. A class-template specialization
+// component carries the template name plus its argument list and
+// mangles as `NameI<args>E` (5.1.8), with the template name and the
+// template-id both substitution candidates.
+struct NameComponent
+{
+	NameComponent() : args(0) {}
+
+	string name;
+	const vector<TypePtr>* args;
+};
+
+NameComponent ScopeComponent(const Scope* scope)
+{
+	NameComponent part;
+	if (scope->entity && scope->entity->spec_template &&
+	    !scope->entity->is_template_anchor)
+	{
+		part.name = scope->entity->spec_template->name;
+		part.args = &scope->entity->spec_args;
+	}
+	else
+		part.name = scope->name;
+	return part;
+}
+
 // The named components (namespaces and classes) from the global scope
 // down to `scope`, outermost first.
-vector<string> ScopeComponents(const Scope* scope)
+vector<NameComponent> ScopeComponents(const Scope* scope)
 {
-	vector<string> parts;
+	vector<NameComponent> parts;
 	for (; scope && scope->parent; scope = scope->parent)
 		if ((scope->kind == SCOPE_NAMESPACE ||
 		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
-			parts.insert(parts.begin(), scope->name);
+			parts.insert(parts.begin(), ScopeComponent(scope));
 	return parts;
 }
 
 // The named enclosing components (namespaces and classes) of a
 // named-type entity, outermost first; unnamed components are skipped
 // like the PA12 display qualification.
-vector<string> EntityComponents(const NamedTypeInfo& info)
+vector<NameComponent> EntityComponents(const NamedTypeInfo& info)
 {
-	vector<string> parts;
+	vector<NameComponent> parts;
 	for (const Scope* scope = info.scope; scope && scope->parent;
 	     scope = scope->parent)
 		if ((scope->kind == SCOPE_NAMESPACE ||
 		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
-			parts.insert(parts.begin(), scope->name);
-	parts.push_back(info.name);
+			parts.insert(parts.begin(), ScopeComponent(scope));
+	NameComponent leaf;
+	if (info.spec_template && !info.is_template_anchor)
+	{
+		leaf.name = info.spec_template->name;
+		leaf.args = &info.spec_args;
+	}
+	else
+		leaf.name = info.name;
+	parts.push_back(leaf);
 	return parts;
 }
 
@@ -196,6 +230,155 @@ string MangleSubstitutable(const string& key, const string& spelling,
 	return spelling;
 }
 
+// The structural key of a type, independent of any substitution state.
+string TypeKey(const TypePtr& type)
+{
+	Substitutions throwaway;
+	string key;
+	MangleType(type, throwaway, &key);
+	return key;
+}
+
+// The structural keys of one component under prefix key `prev`: the
+// name key (a template's own name is a substitution candidate) and
+// the full key (with the argument keys for a specialization).
+void ComponentKeys(const NameComponent& part, const string& prev,
+                   string& name_key, string& full_key)
+{
+	name_key = (prev.empty() ? string("T:") : prev + "::") + part.name;
+	full_key = name_key;
+	if (part.args)
+	{
+		full_key += "<";
+		for (size_t i = 0; i < part.args->size(); i++)
+			full_key += TypeKey((*part.args)[i]) + ",";
+		full_key += ">";
+	}
+}
+
+// Appends one component's spelling. A specialization registers its
+// template name first (5.1.9: the template-name is a substitution
+// candidate), then mangles its arguments in sequence; when the
+// component opens the spelling, an already-registered template name
+// compresses ("S_IiE").
+void AppendComponentSpelling(const NameComponent& part,
+                             const string& name_key, Substitutions& subs,
+                             string& out, bool allow_name_substitution)
+{
+	if (!part.args)
+	{
+		out += SourceName(part.name);
+		return;
+	}
+	string tname;
+	if (allow_name_substitution)
+		tname = subs.Find(name_key);
+	if (tname.empty())
+	{
+		subs.Add(name_key);
+		tname = SourceName(part.name);
+	}
+	out += tname + "I";
+	for (size_t i = 0; i < part.args->size(); i++)
+		out += MangleType((*part.args)[i], subs);
+	out += "E";
+}
+
+// The nested/unscoped encoding of a full component list (class and
+// enum types, template-ids): compresses against the longest
+// registered head and registers the candidates in appearance order.
+string MangleComponentList(const vector<NameComponent>& parts,
+                           Substitutions& subs, string* key_out)
+{
+	vector<string> name_keys(parts.size());
+	vector<string> full_keys(parts.size());
+	string prev;
+	for (size_t i = 0; i < parts.size(); i++)
+	{
+		ComponentKeys(parts[i], prev, name_keys[i], full_keys[i]);
+		prev = full_keys[i];
+	}
+	if (key_out)
+		*key_out = full_keys.back();
+	string found = subs.Find(full_keys.back());
+	if (!found.empty())
+		return found;
+	if (parts.size() == 2 && !parts[0].args && parts[0].name == "std" &&
+	    !parts[1].args)
+	{
+		// 5.1.4.2: the abbreviation St spells the std prefix.
+		subs.Add(full_keys.back());
+		return "St" + SourceName(parts[1].name);
+	}
+	// Longest substituted head: the leaf's own template name (it
+	// covers the whole prefix), then the longest prefix component.
+	size_t start = 0;
+	string head;
+	bool head_is_leaf_name = false;
+	if (parts.back().args)
+	{
+		string sub = subs.Find(name_keys.back());
+		if (!sub.empty())
+		{
+			head = sub;
+			head_is_leaf_name = true;
+			start = parts.size() - 1;
+		}
+	}
+	if (head.empty())
+		for (size_t k = parts.size() - 1; k > 0; k--)
+		{
+			string sub = subs.Find(full_keys[k - 1]);
+			if (!sub.empty())
+			{
+				head = sub;
+				start = k;
+				break;
+			}
+		}
+	string body = head;
+	if (head_is_leaf_name)
+	{
+		const NameComponent& leaf = parts.back();
+		body += "I";
+		for (size_t i = 0; i < leaf.args->size(); i++)
+			body += MangleType((*leaf.args)[i], subs);
+		body += "E";
+	}
+	else
+		for (size_t i = start; i < parts.size(); i++)
+		{
+			AppendComponentSpelling(parts[i], name_keys[i], subs, body,
+			                        body.empty());
+			if (i + 1 < parts.size())
+				subs.Add(full_keys[i]);
+		}
+	subs.Add(full_keys.back());
+	if (parts.size() > 1)
+		body = "N" + body + "E";
+	return body;
+}
+
+// Appends the enclosing components of a symbol's nested-name prefix,
+// registering each as a substitution candidate. Returns the prefix
+// key for the terminal component.
+string ManglePrefixComponents(const vector<NameComponent>& parts,
+                              Substitutions& subs, string& encoding)
+{
+	string prev;
+	for (size_t i = 0; i < parts.size(); i++)
+	{
+		string name_key;
+		string full_key;
+		ComponentKeys(parts[i], prev, name_key, full_key);
+		AppendComponentSpelling(parts[i], name_key, subs, encoding,
+		                        false);
+		subs.Add(full_key);
+		prev = full_key;
+	}
+	return prev;
+}
+
 // The substitution keys are structural (composed from the entity
 // identities, not the possibly substituted spellings), so the same
 // type always finds its earlier registration.
@@ -292,56 +475,32 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 	}
 	case TK_CLASS:
 	case TK_ENUM:
-	{
 		// Substitution keys stay name-based ("T:n::E") so the same
 		// entity declared in two translation units compresses alike;
 		// a substituted prefix compresses the nested spelling (NS_...).
-		vector<string> parts = EntityComponents(*type->named);
-		if (parts.size() == 1)
-		{
-			if (key_out)
-				*key_out = "T:" + parts[0];
-			return MangleSubstitutable("T:" + parts[0],
-			                           SourceName(parts[0]), subs);
-		}
-		if (parts.size() == 2 && parts[0] == "std")
-		{
-			// 5.1.4.2: the abbreviation St spells the std prefix.
-			string key = "T:std::" + parts[1];
-			if (key_out)
-				*key_out = key;
-			return MangleSubstitutable(key, "St" + SourceName(parts[1]),
-			                           subs);
-		}
-		vector<string> keys(parts.size());
-		for (size_t i = 0; i < parts.size(); i++)
-			keys[i] = (i ? keys[i - 1] + "::" : string("T:")) + parts[i];
+		return MangleComponentList(EntityComponents(*type->named), subs,
+		                           key_out);
+	case TK_TEMPLATE_SPEC:
+	{
+		// A dependent specialization pattern (`box<T>`): the anchor's
+		// components with this node's argument patterns on the leaf.
+		vector<NameComponent> parts = EntityComponents(*type->named);
+		parts.back().args = &type->parameters;
+		return MangleComponentList(parts, subs, key_out);
+	}
+	case TK_TYPE_PARAM:
+	{
+		// 5.1.5: the n-th template parameter spells T_/T<n-1>_ and is
+		// a substitution candidate.
+		int index = type->named->param_index;
+		if (index < 0)
+			throw OutsideBoundary("mangled type form");
+		string key = "TP:" + to_string(index);
 		if (key_out)
-			*key_out = keys.back();
-		string found = subs.Find(keys.back());
-		if (!found.empty())
-			return found;
-		size_t start = 0;
-		string head;
-		for (size_t k = parts.size() - 1; k > 0; k--)
-		{
-			string sub = subs.Find(keys[k - 1]);
-			if (!sub.empty())
-			{
-				head = sub;
-				start = k;
-				break;
-			}
-		}
-		string spelling = "N" + head;
-		for (size_t i = start; i < parts.size(); i++)
-		{
-			spelling += SourceName(parts[i]);
-			if (i + 1 < parts.size())
-				subs.Add(keys[i]);
-		}
-		spelling += "E";
-		return MangleSubstitutable(keys.back(), spelling, subs);
+			*key_out = key;
+		string spelling = index == 0
+			? string("T_") : "T" + to_string(index - 1) + "_";
+		return MangleSubstitutable(key, spelling, subs);
 	}
 	default:
 		throw OutsideBoundary("mangled type form");
@@ -374,10 +533,16 @@ string MangleTerminalName(const string& name, size_t arity)
 
 string LowerScopePath(const Scope* scope)
 {
-	vector<string> parts = ScopeComponents(scope);
+	vector<string> parts;
+	for (; scope && scope->parent; scope = scope->parent)
+		if ((scope->kind == SCOPE_NAMESPACE ||
+		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
+			parts.insert(parts.begin(), scope->name);
 	string path;
+	// PA18: specialization scopes spell their argument list
+	// ("Box<int>"); the symbol characters sanitize per component.
 	for (size_t i = 0; i < parts.size(); i++)
-		path += parts[i] + "__";
+		path += LowerSanitizeName(parts[i]) + "__";
 	return path;
 }
 
@@ -495,38 +660,60 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
                                 const TypePtr& type)
 {
 	Substitutions subs;
-	vector<string> parts = ScopeComponents(scope);
+	vector<NameComponent> parts = ScopeComponents(scope);
 	string encoding;
 	if (parts.empty())
 		encoding = MangleTerminalName(name, type->parameters.size());
 	else
 	{
-		encoding = "N";
-		string entity_key = "T:";
-		for (size_t i = 0; i < parts.size(); i++)
-		{
-			entity_key += (i ? "::" : "") + parts[i];
-			encoding += SourceName(parts[i]);
-			subs.Add(entity_key);
-		}
-		encoding += MangleTerminalName(name, type->parameters.size()) +
-			"E";
+		string prefix;
+		ManglePrefixComponents(parts, subs, prefix);
+		encoding = "N" + prefix +
+			MangleTerminalName(name, type->parameters.size()) + "E";
 	}
 	return "_Z" + encoding + MangleBareParameters(type, subs);
 }
 
+string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
+{
+	// 5.1.2/5.1.8: <name> I <args> E with the return type included;
+	// the signature mangles from the abstract pattern so parameter
+	// references spell T_/Tn_ (falling back to the concrete signature
+	// when the pattern has non-composing dependent forms).
+	const TemplateInfo& tmpl = *spec.owner;
+	Substitutions subs;
+	vector<NameComponent> parts = ScopeComponents(tmpl.declaring);
+	string prefix;
+	string prev = ManglePrefixComponents(parts, subs, prefix);
+	string name_key = (prev.empty() ? string("T:") : prev + "::") +
+		tmpl.name;
+	subs.Add(name_key);
+	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
+	string terminal =
+		MangleTerminalName(tmpl.name, pattern->parameters.size());
+	string targs;
+	for (size_t i = 0; i < spec.args.size(); i++)
+		targs += MangleType(spec.args[i], subs);
+	string result = MangleType(pattern->target, subs);
+	string params = MangleBareParameters(pattern, subs);
+	string encoding = terminal + "I" + targs + "E";
+	if (!parts.empty())
+		encoding = "N" + prefix + encoding + "E";
+	return "_Z" + encoding + result + params;
+}
+
 string MangleVariableObjectName(const Scope* scope, const string& name)
 {
-	vector<string> parts = ScopeComponents(scope);
+	Substitutions subs;
+	vector<NameComponent> parts = ScopeComponents(scope);
 	if (parts.empty())
 		return "_Z" + SourceName(name);
-	if (parts.size() == 1 && parts[0] == "std")
+	if (parts.size() == 1 && !parts[0].args && parts[0].name == "std")
 		// 5.1.4.2: the abbreviation St spells the std prefix.
 		return "_ZSt" + SourceName(name);
-	string encoding = "N";
-	for (size_t i = 0; i < parts.size(); i++)
-		encoding += SourceName(parts[i]);
-	return "_Z" + encoding + SourceName(name) + "E";
+	string prefix;
+	ManglePrefixComponents(parts, subs, prefix);
+	return "_ZN" + prefix + SourceName(name) + "E";
 }
 
 string MangleClassTypeEncoding(const NamedTypeInfo* entity)
@@ -541,7 +728,7 @@ string MangleMemberFunctionObjectName(const Scope* scope,
                                       const string& special_code)
 {
 	Substitutions subs;
-	vector<string> parts = ScopeComponents(scope);
+	vector<NameComponent> parts = ScopeComponents(scope);
 	// The implicit object parameter carries the method cv-qualifiers
 	// and is dropped from the bare signature.
 	bool is_const = false;
@@ -563,13 +750,7 @@ string MangleMemberFunctionObjectName(const Scope* scope,
 		encoding += "R";
 	else if (type->ref_qual == 2)
 		encoding += "O";
-	string entity_key = "T:";
-	for (size_t i = 0; i < parts.size(); i++)
-	{
-		entity_key += (i ? "::" : "") + parts[i];
-		encoding += SourceName(parts[i]);
-		subs.Add(entity_key);
-	}
+	ManglePrefixComponents(parts, subs, encoding);
 	if (!special_code.empty())
 		encoding += special_code;
 	else

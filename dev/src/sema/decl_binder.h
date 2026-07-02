@@ -76,7 +76,20 @@ protected:
 	virtual void BindFunctionBody(const AstDecl& decl,
 	                              const DeclaratorInfo& composed,
 	                              const string& name);
-	void BindTemplateDeclaration(const AstDecl& decl);
+	// PA11 binds the parameter scope and the inner declaration for the
+	// types dump; the PA18 binder overrides this to capture the
+	// template for on-demand instantiation instead.
+	virtual void BindTemplateDeclaration(const AstDecl& decl);
+	// PA18 seams: explicit instantiation and template-id name parts
+	// (`Foo<int>` as a type name or nested-name-specifier component)
+	// stay outside the PA11 boundary.
+	virtual void BindExplicitInstantiation(const AstDecl& decl);
+	// The binding a template-id name part designates: `prefix` is the
+	// scope its nested-name-specifier resolved to (null for an
+	// unqualified template-id). PA18 instantiates the named class
+	// template on demand.
+	virtual const ScopeBinding* ResolveTemplateIdBinding(
+		const AstNamePart& part, Scope* prefix);
 
 	// --- declaration events (PA12 dump recording; no-ops in PA11) ---
 	virtual void OnTypeAliasBound(const string& name, const TypePtr& type);

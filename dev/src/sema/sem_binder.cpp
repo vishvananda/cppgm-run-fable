@@ -39,7 +39,8 @@ bool SameParameterList(const Type& a, const Type& b)
 
 SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	: DeclBinder(model), unit_(unit), analyzer_(*this),
-	  local_types_(0), pending_local_type_(false), in_bit_field_(false)
+	  local_types_(0), pending_local_type_(false), in_bit_field_(false),
+	  instantiating_(false), instantiation_depth_(0)
 {
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.
@@ -105,6 +106,19 @@ const ScopeBinding* SemBinder::ResolveValue(const AstName& name,
                                             const NamedTypeInfo*& member_class)
 {
 	member_class = 0;
+	// PA18: a template-id terminal resolves through the instantiation
+	// seam (class specializations and explicit function template-ids).
+	if (name.parts.back().kind == NP_TEMPLATE_ID)
+	{
+		Scope* prefix = 0;
+		if (name.parts.size() > 1 || name.global_scope)
+			prefix = ResolvePrefixScope(name);
+		const ScopeBinding* found =
+			ResolveTemplateIdBinding(name.parts.back(), prefix);
+		if (prefix && prefix->kind == SCOPE_CLASS)
+			member_class = model_.ScopeEntity(prefix);
+		return found;
+	}
 	const string& terminal = TerminalName(name);
 	if (name.parts.size() == 1 && !name.global_scope)
 	{
@@ -297,6 +311,13 @@ ScopeBinding& SemBinder::BindFunctionName(const string& name,
 	     current_->kind != SCOPE_CLASS &&
 	     !(allow_block && current_->kind == SCOPE_BLOCK)))
 		throw runtime_error("redeclaration of " + name);
+	// PA18: a name declared so far only by function templates gains
+	// its first ordinary overload.
+	if (!existing->type)
+	{
+		existing->type = type;
+		return *existing;
+	}
 	// 13.1: a matching parameter list redeclares (and must agree in
 	// full); a new parameter list extends the overload set. An own
 	// class member replaces a same-signature using-import (7.3.3p15).

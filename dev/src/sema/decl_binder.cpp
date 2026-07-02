@@ -195,16 +195,32 @@ Scope* DeclBinder::ResolvePrefixScope(const AstName& name)
 		scope = model_.global();
 	else
 	{
-		const ScopeBinding* root = UnqualifiedLookup(
-			current_, PartName(name.parts[0]), SLF_SCOPE_NAMES);
-		if (!root)
-			throw runtime_error("undeclared name " +
-			                    name.parts[0].identifier);
-		scope = ScopeOfBinding(*root);
-		index = 1;
+		// PA18: a template-id component instantiates its class template.
+		if (name.parts[0].kind == NP_TEMPLATE_ID)
+		{
+			scope = ScopeOfBinding(
+				*ResolveTemplateIdBinding(name.parts[0], 0));
+			index = 1;
+		}
+		else
+		{
+			const ScopeBinding* root = UnqualifiedLookup(
+				current_, PartName(name.parts[0]), SLF_SCOPE_NAMES);
+			if (!root)
+				throw runtime_error("undeclared name " +
+				                    name.parts[0].identifier);
+			scope = ScopeOfBinding(*root);
+			index = 1;
+		}
 	}
 	for (; index + 1 < name.parts.size(); index++)
 	{
+		if (name.parts[index].kind == NP_TEMPLATE_ID)
+		{
+			scope = ScopeOfBinding(
+				*ResolveTemplateIdBinding(name.parts[index], scope));
+			continue;
+		}
 		const string& part = PartName(name.parts[index]);
 		const ScopeBinding* found =
 			QualifiedLookup(*scope, part, SLF_SCOPE_NAMES);
@@ -218,6 +234,16 @@ Scope* DeclBinder::ResolvePrefixScope(const AstName& name)
 const ScopeBinding* DeclBinder::ResolveTerminal(const AstName& name,
                                                 EScopeLookupFilter filter)
 {
+	// PA18: a terminal template-id resolves through the instantiation
+	// seam (class templates; function template-ids are handled by the
+	// expression layer before reaching here).
+	if (name.parts.back().kind == NP_TEMPLATE_ID)
+	{
+		Scope* prefix = 0;
+		if (name.parts.size() > 1 || name.global_scope)
+			prefix = ResolvePrefixScope(name);
+		return ResolveTemplateIdBinding(name.parts.back(), prefix);
+	}
 	const string& terminal = TerminalName(name);
 	if (name.parts.size() == 1 && !name.global_scope)
 		return UnqualifiedLookup(current_, terminal, filter);
@@ -420,9 +446,24 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 		BindBitFieldDeclaration(decl);
 		return;
 	case DK_EXPLICIT_INSTANTIATION:
-		break;
+		BindExplicitInstantiation(decl);
+		return;
 	}
 	throw OutsideBoundary("declaration form");
+}
+
+void DeclBinder::BindExplicitInstantiation(const AstDecl& decl)
+{
+	(void)decl;
+	throw OutsideBoundary("explicit instantiation");
+}
+
+const ScopeBinding* DeclBinder::ResolveTemplateIdBinding(
+	const AstNamePart& part, Scope* prefix)
+{
+	(void)part;
+	(void)prefix;
+	throw OutsideBoundary("template-id name");
 }
 
 void DeclBinder::BindNamespace(const AstDecl& decl)

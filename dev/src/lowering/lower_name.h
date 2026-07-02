@@ -5,6 +5,7 @@
 using std::string;
 
 #include "sema/scope.h"
+#include "sema/template_info.h"
 #include "sema/type.h"
 
 // PA14 symbol naming: deterministic LowIR symbol spellings derived
@@ -43,6 +44,11 @@ bool LowerInUnnamedNamespace(const Scope* scope);
 // (_Z<name> at the global scope, _ZN...E inside namespaces).
 string MangleFunctionObjectName(const Scope* scope, const string& name,
                                 const TypePtr& type);
+
+// PA18: the Itanium spelling of a function-template specialization
+// (`_Z1fIiEvT_`): template-argument list and pattern-based signature
+// with the return type included.
+string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec);
 string MangleVariableObjectName(const Scope* scope, const string& name);
 
 // PA15: the Itanium spelling of a non-static member function,

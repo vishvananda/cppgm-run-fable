@@ -265,10 +265,42 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 		if (a->named != b->named)
 			return false;
 		break;
+	case TK_TEMPLATE_SPEC:
+	{
+		if (a->named != b->named ||
+		    a->parameters.size() != b->parameters.size())
+			return false;
+		for (size_t i = 0; i < a->parameters.size(); i++)
+			if (!TypeEquals(a->parameters[i], b->parameters[i]))
+				return false;
+		return true;
+	}
 	default:
 		break;
 	}
 	return TypeEquals(a->target, b->target);
+}
+
+TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
+                             const vector<TypePtr>& args)
+{
+	Type type;
+	type.kind = TK_TEMPLATE_SPEC;
+	type.named = anchor;
+	type.parameters = args;
+	return make_shared<Type>(type);
+}
+
+bool TypeIsDependent(const TypePtr& type)
+{
+	if (!type)
+		return false;
+	if (type->kind == TK_TYPE_PARAM || type->kind == TK_TEMPLATE_SPEC)
+		return true;
+	for (size_t i = 0; i < type->parameters.size(); i++)
+		if (TypeIsDependent(type->parameters[i]))
+			return true;
+	return TypeIsDependent(type->target);
 }
 
 TypePtr RemoveTopCv(const TypePtr& type)
@@ -378,7 +410,8 @@ static unsigned long long FundamentalSize(EFundamentalType type)
 // a template), which has no size for PA11 purposes.
 static const NamedTypeInfo& CompleteNamedInfo(const TypePtr& type)
 {
-	if (type->kind == TK_TYPE_PARAM || !type->named->complete ||
+	if (type->kind == TK_TYPE_PARAM || type->kind == TK_TEMPLATE_SPEC ||
+	    !type->named->complete ||
 	    type->named->alignment == 0)
 		throw runtime_error(type->named->display + " is an incomplete type");
 	return *type->named;
@@ -400,6 +433,7 @@ unsigned long long TypeSize(const TypePtr& type)
 	case TK_CLASS:
 	case TK_ENUM:
 	case TK_TYPE_PARAM:
+	case TK_TEMPLATE_SPEC:
 		return CompleteNamedInfo(type).size;
 	case TK_ARRAY:
 	{
@@ -430,6 +464,7 @@ unsigned long long TypeAlignment(const TypePtr& type)
 	case TK_CLASS:
 	case TK_ENUM:
 	case TK_TYPE_PARAM:
+	case TK_TEMPLATE_SPEC:
 		return CompleteNamedInfo(type).alignment;
 	case TK_ARRAY:
 		return TypeAlignment(type->target);
@@ -459,6 +494,17 @@ string DescribeType(const TypePtr& type)
 	case TK_MEMBER_POINTER:
 		return cv + "member-pointer of " + type->named->display + " to " +
 			DescribeType(type->target);
+	case TK_TEMPLATE_SPEC:
+	{
+		string args;
+		for (size_t i = 0; i < type->parameters.size(); i++)
+		{
+			if (i > 0)
+				args += ", ";
+			args += DescribeType(type->parameters[i]);
+		}
+		return cv + type->named->display + "<" + args + ">";
+	}
 	case TK_LVALUE_REFERENCE:
 		return "lvalue-reference to " + DescribeType(type->target);
 	case TK_RVALUE_REFERENCE:

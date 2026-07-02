@@ -654,7 +654,8 @@ ImplicitConversion ClassifyConversionEx(const ConversionSource& source,
 size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<ConversionSource>& args,
                           vector<ImplicitConversion>& conversions,
-                          const vector<size_t>* min_arity)
+                          const vector<size_t>* min_arity,
+                          const vector<bool>* is_template)
 {
 	vector<ViableCandidate> viable;
 	for (size_t c = 0; c < candidates.size(); c++)
@@ -690,12 +691,30 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
 	}
 	if (viable.empty())
 		throw NoViableOverloadError("no matching function for call");
+	// PA18 13.3.3p1 final tie-break: a non-template candidate beats a
+	// deduced template specialization with equal conversion sequences.
+	struct Better
+	{
+		const vector<ConversionSource>& args;
+		const vector<bool>* is_template;
+		bool operator()(const ViableCandidate& a,
+		                const ViableCandidate& b) const
+		{
+			if (BetterCandidate(a, b, args))
+				return true;
+			if (BetterCandidate(b, a, args))
+				return false;
+			return is_template && !(*is_template)[a.index] &&
+				(*is_template)[b.index];
+		}
+	};
+	Better better = {args, is_template};
 	size_t best = 0;
 	for (size_t i = 1; i < viable.size(); i++)
-		if (BetterCandidate(viable[i], viable[best], args))
+		if (better(viable[i], viable[best]))
 			best = i;
 	for (size_t i = 0; i < viable.size(); i++)
-		if (i != best && !BetterCandidate(viable[best], viable[i], args))
+		if (i != best && !better(viable[best], viable[i]))
 			throw runtime_error("ambiguous overloaded call");
 	conversions = viable[best].conversions;
 	return viable[best].index;

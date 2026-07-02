@@ -121,7 +121,9 @@ void AppendBindingOverloads(const ScopeBinding& binding, bool is_member,
                             vector<OperatorCandidate>& out,
                             set<const void*>& seen)
 {
-	size_t count = binding.overloads.size() + 1;
+	// PA18: a name declared only by function templates has no ordinary
+	// overload entries.
+	size_t count = binding.type ? binding.overloads.size() + 1 : 0;
 	for (size_t i = 0; i < count; i++)
 	{
 		if (!include_hidden && i < binding.fn_adl_only.size() &&
@@ -142,6 +144,41 @@ void AppendBindingOverloads(const ScopeBinding& binding, bool is_member,
 }
 
 }  // namespace
+
+// PA18: the scope a binding's default arguments analyze in (see
+// sem_expr.h).
+Scope* TemplateDefaultArgScope(const ScopeBinding& binding)
+{
+	for (const Scope* scope = binding.home; scope; scope = scope->parent)
+		if (scope->kind == SCOPE_TEMPLATE_PARAMS)
+			return const_cast<Scope*>(binding.home);
+	return 0;
+}
+
+// PA18: deduce every function template of `binding` against the
+// argument list; successful deductions join as ordinary candidates
+// carrying their specialization identity.
+void SemExprAnalyzer::AppendTemplateCandidates(
+	const ScopeBinding& binding, const vector<SemValue>& args,
+	vector<OperatorCandidate>& out, set<const void*>& seen)
+{
+	for (size_t t = 0; t < binding.fn_templates.size(); t++)
+	{
+		const FunctionSpecialization* spec =
+			host_.DeduceFunctionTemplate(*binding.fn_templates[t], args);
+		if (!spec)
+			continue;
+		if (!seen.insert(&spec->self).second)
+			continue;
+		OperatorCandidate candidate;
+		candidate.binding = &spec->self;
+		candidate.index = 0;
+		candidate.is_member = false;
+		candidate.declared = spec->type;
+		candidate.spec = spec;
+		out.push_back(candidate);
+	}
+}
 
 // Collects the user-declared candidates of `operator <spelling>` for
 // the analyzed operand list.
@@ -169,7 +206,10 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 		UnqualifiedLookup(host_.CurrentScope(), op_name, SLF_ANY);
 	if (visible && visible->kind == SB_FUNCTION &&
 	    visible->home && visible->home->kind != SCOPE_CLASS)
+	{
 		AppendBindingOverloads(*visible, false, false, out, seen);
+		AppendTemplateCandidates(*visible, operands, out, seen);
+	}
 	// Argument-dependent lookup, hidden friends included.
 	vector<const Scope*> namespaces;
 	for (size_t i = 0; i < operands.size(); i++)
@@ -183,7 +223,10 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 		const ScopeBinding* found =
 			FindOwnBinding(*namespaces[i], op_name);
 		if (found && found->kind == SB_FUNCTION)
+		{
 			AppendBindingOverloads(*found, false, true, out, seen);
+			AppendTemplateCandidates(*found, operands, out, seen);
+		}
 	}
 }
 
@@ -205,8 +248,11 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	set<const void*> seen;
 	vector<OperatorCandidate> candidates;
 	for (size_t i = 0; i < visible.size(); i++)
+	{
 		AppendBindingOverloads(*visible[i], false, false, candidates,
 		                       seen);
+		AppendTemplateCandidates(*visible[i], args, candidates, seen);
+	}
 	vector<const Scope*> namespaces;
 	for (size_t i = 0; i < args.size(); i++)
 		CollectAssociatedNamespaces(host_.Model(), args[i].type,
@@ -219,7 +265,10 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 		const ScopeBinding* found = FindOwnBinding(*namespaces[i], name);
 		if (found && found->kind == SB_FUNCTION &&
 		    found->owner == namespaces[i])
+		{
 			AppendBindingOverloads(*found, false, true, candidates, seen);
+			AppendTemplateCandidates(*found, args, candidates, seen);
+		}
 	}
 	if (candidates.empty())
 		throw runtime_error("undeclared name " + name);
@@ -238,9 +287,12 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 			required--;
 		min_arity.push_back(required);
 	}
+	vector<bool> is_template;
+	for (size_t c = 0; c < candidates.size(); c++)
+		is_template.push_back(candidates[c].spec != 0);
 	vector<ImplicitConversion> conversions;
 	size_t winner = SelectBestOverload(ranking, sources, conversions,
-	                                   &min_arity);
+	                                   &min_arity, &is_template);
 	const OperatorCandidate& chosen = candidates[winner];
 	const ScopeBinding& binding = *chosen.binding;
 	if (chosen.index < binding.fn_deleted.size() &&
@@ -252,8 +304,22 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 			ApplyConversion(args[i], conversions[i], fn->parameters[i]);
 	for (size_t i = args.size(); i < fn->parameters.size(); i++)
 	{
-		SemValue filled =
-			Analyze(*binding.fn_defaults[chosen.index][i]);
+		Scope* default_scope = TemplateDefaultArgScope(binding);
+		Scope* saved = default_scope
+			? host_.SwapLookupScope(default_scope) : 0;
+		SemValue filled;
+		try
+		{
+			filled = Analyze(*binding.fn_defaults[chosen.index][i]);
+		}
+		catch (...)
+		{
+			if (default_scope)
+				host_.SwapLookupScope(saved);
+			throw;
+		}
+		if (default_scope)
+			host_.SwapLookupScope(saved);
 		CopyInitialize(filled, fn->parameters[i], "default argument");
 		args.push_back(std::move(filled));
 	}
@@ -263,6 +329,7 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	callee->type = fn;
 	callee->entity_scope = binding.owner;
 	callee->entity_name = binding.name;
+	callee->fn_spec = chosen.spec;
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;
@@ -357,6 +424,10 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	}
 	size_t builtin_pos = AppendBuiltinCandidate(
 		spelling, operands, member_only, ranking, viable_arity);
+	vector<bool> is_template;
+	for (size_t c = 0; c < candidates.size(); c++)
+		is_template.push_back(candidates[c].spec != 0);
+	is_template.resize(ranking.size(), false);
 	// Arity filter happens inside SelectBestOverload; a fully
 	// non-viable set falls back to the built-in operator. An ambiguous
 	// joint ranking is ill-formed (13.3.1.2p3) and propagates.
@@ -365,7 +436,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	try
 	{
 		winner = SelectBestOverload(ranking, sources, conversions,
-		                            &viable_arity);
+		                            &viable_arity, &is_template);
 	}
 	catch (const NoViableOverloadError&)
 	{
@@ -411,6 +482,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	callee->entity_scope = binding.owner;
 	callee->entity_name = binding.name;
 	callee->is_method = chosen.is_member;
+	callee->fn_spec = chosen.spec;
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;

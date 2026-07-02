@@ -41,6 +41,7 @@ NamedTypeInfo* TypesModel::MutableInfo(const NamedTypeInfo* info)
 
 void TypesModel::SetMemberScope(const NamedTypeInfo* info, Scope* scope)
 {
+	scope->entity = info;
 	member_scopes_[info] = scope;
 	scope_entities_[scope] = info;
 }
@@ -127,6 +128,7 @@ const char* BindingKeyword(EScopeBindingKind kind)
 	case SB_PARAMETER: return "parameter";
 	case SB_NAMESPACE:
 	case SB_NAMESPACE_ALIAS:
+	case SB_CLASS_TEMPLATE:  // PA18: never printed by the PA11 dump
 		break;
 	}
 	return 0;

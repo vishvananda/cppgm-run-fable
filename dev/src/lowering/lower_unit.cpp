@@ -113,7 +113,8 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 	// entries; friend definitions emit unconditionally, static members
 	// on demand.
 	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
-	                                      item.entity_name, item.type);
+	                                      item.entity_name, item.type,
+	                                      item.fn_spec);
 	if (!info.defined)
 	{
 		info.defined = true;
@@ -199,16 +200,29 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 
 LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
                                              const string& name,
-                                             const TypePtr& type)
+                                             const TypePtr& type,
+                                             const FunctionSpecialization* spec)
 {
 	string key = QualifiedKey(scope, name) + "#" + DescribeType(type);
 	map<string, size_t>::iterator found = function_index_.find(key);
 	if (found != function_index_.end())
-		return functions_[found->second];
+	{
+		LowFunctionInfo& existing = functions_[found->second];
+		// PA18: a use may reach the entry before the definition item
+		// carries the specialization identity; adopt it on sight.
+		if (spec && !existing.fn_spec)
+		{
+			existing.fn_spec = spec;
+			existing.object_name =
+				MangleFunctionTemplateObjectName(*spec);
+		}
+		return existing;
+	}
 	LowFunctionInfo info;
 	info.scope = scope;
 	info.name = name;
 	info.type = type;
+	info.fn_spec = spec;
 	info.is_main = name == "main" && scope->kind == SCOPE_NAMESPACE &&
 		!scope->parent;
 	// The implicitly declared global allocation functions carry their
@@ -251,7 +265,9 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 	info.low_name = info.is_main ? "main" : UniqueSymbol(base);
 	info.internal = LowerInUnnamedNamespace(scope);
 	info.deleted = LowerOverloadDeleted(scope, name, type);
-	if (!info.is_main)
+	if (spec)
+		info.object_name = MangleFunctionTemplateObjectName(*spec);
+	else if (!info.is_main)
 		info.object_name = MangleFunctionObjectName(scope, name, type);
 	info.index = functions_.size();
 	function_index_[key] = functions_.size();
@@ -349,7 +365,8 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 		return;
 	}
 	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
-	                                      item.entity_name, item.type);
+	                                      item.entity_name, item.type,
+	                                      item.fn_spec);
 	if (item.c_linkage)
 	{
 		info.c_linkage = true;
@@ -441,7 +458,7 @@ void LowerProgram::DemandElidedCtor(const SemNode& callee)
 			                      callee.entity_name, callee.type,
 			                      code)
 			: FunctionEntry(callee.entity_scope, callee.entity_name,
-			                callee.type);
+			                callee.type, callee.fn_spec);
 	// The elided call itself emits nothing; a synthesized body it
 	// selected is implicitly defined, so the user-provided members
 	// that body odr-uses must still appear. Demand state is monotonic,
@@ -474,7 +491,8 @@ void LowerProgram::DemandTreeCallees(const SemNode& node)
 					                      child.entity_name,
 					                      child.type, code)
 					: FunctionEntry(child.entity_scope,
-					                child.entity_name, child.type);
+					                child.entity_name, child.type,
+					                child.fn_spec);
 			if (info.definition)
 			{
 				if (!info.definition->synthesized)

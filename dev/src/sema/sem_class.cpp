@@ -739,8 +739,10 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 	// body analyzes immediately (and emits as a strong definition).
 	body.out_of_class = true;
 	// PA17: defining the class's key function anchors its vtable in
-	// this translation unit (emitted strong by the lowering).
-	if (cls->is_polymorphic && !cls->key_is_dtor &&
+	// this translation unit (emitted strong by the lowering). An
+	// instantiated member definition anchors nothing: specialization
+	// vtables stay weak.
+	if (!instantiating_ && cls->is_polymorphic && !cls->key_is_dtor &&
 	    !cls->key_name.empty() && cls->key_name == name &&
 	    TypeEquals(cls->key_type, composed.type))
 		cls->key_defined_in_tu = true;
@@ -904,11 +906,13 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	current_return_ = saved_return;
 
 	PublishBodyUnwindFact(body, special, *node);
-	if (body.out_of_class && special == SF_NONE)
+	// PA18: an instantiated out-of-class member definition emits weak
+	// and on demand, like an in-class one (14.7.1).
+	if (body.out_of_class && special == SF_NONE && !instantiating_)
 		AppendItem(std::move(item));
 	else
 	{
-		if (body.out_of_class)
+		if (body.out_of_class && !instantiating_)
 			// A source-owned constructor prints unconditionally.
 			node->inline_def = false;
 		unit_.deferred.push_back(std::move(item));

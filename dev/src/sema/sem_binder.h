@@ -248,6 +248,88 @@ private:
 	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
 	                              SemNodePtr address);
 
+	// --- PA18 templates (sem_template.cpp) ---
+	// Capture seams: template declarations are recorded, not analyzed;
+	// instantiation re-binds the stored AST on demand.
+	virtual void BindTemplateDeclaration(const AstDecl& decl);
+	virtual void BindExplicitInstantiation(const AstDecl& decl);
+	virtual const ScopeBinding* ResolveTemplateIdBinding(
+		const AstNamePart& part, Scope* prefix);
+	void CaptureClassTemplate(const AstDecl& decl, const AstDecl& inner,
+	                          bool definition);
+	void CaptureFunctionTemplate(const AstDecl& decl,
+	                             const AstDecl& inner);
+	// Collects the type-parameter list of a template head (throws on
+	// the out-of-scope parameter forms).
+	static void CollectTemplateParams(const AstDecl& decl,
+	                                  vector<TemplateParam>& params);
+	// An out-of-class definition of a class-template member (function,
+	// static data member, nested class, special member): recorded on
+	// the owner template and instantiated for every existing
+	// specialization.
+	void RegisterTemplateMember(const AstDecl& decl, const AstName& id);
+	// The class template a qualified member-definition id names;
+	// `tmpl_part` receives the index of its template-id (or plain
+	// name) component.
+	TemplateInfo* ResolveMemberOwnerTemplate(const AstName& id,
+	                                         size_t& tmpl_part);
+	// Resolves the argument list of one template-id part against
+	// `tmpl` (type-id arguments; defaults fill the tail).
+	vector<TypePtr> ResolveTemplateArgumentList(TemplateInfo& tmpl,
+	                                            const AstNamePart& part);
+	// A SCOPE_TEMPLATE_PARAMS scope under the template's declaring
+	// scope with each parameter name aliased to its argument type.
+	Scope* MakeArgumentAliasScope(const TemplateInfo& tmpl,
+	                              const vector<TypePtr>& args);
+	// The specialization record for `args`, instantiating the class
+	// body on demand when the definition is available.
+	ClassSpecialization* EnsureClassSpecialization(
+		TemplateInfo& tmpl, const vector<TypePtr>& args);
+	void InstantiateClassSpecialization(TemplateInfo& tmpl,
+	                                    ClassSpecialization& spec);
+	// Instantiates the registered out-of-class member definitions that
+	// are ready (definition and specialization both seen).
+	void InstantiateReadyMembers(TemplateInfo& tmpl);
+	void InstantiateMemberDefinition(TemplateInfo& tmpl,
+	                                 ClassSpecialization& spec,
+	                                 size_t member_index);
+	// Saved-and-cleared binder state around one instantiation; the
+	// destructor restores it (exception-safe). Defined at the end of
+	// this header (it captures the binder's private state).
+	struct InstantiationContext;
+
+	// --- PA18 function templates (template_deduce.cpp) ---
+	// The shared positional placeholder type for deduction patterns.
+	TypePtr PlaceholderType(size_t index);
+	// Composes a function-template declarator with the parameters
+	// bound to the positional placeholders; false when the full
+	// signature has dependent qualified forms (per-parameter patterns
+	// still fill, with null non-deduced entries).
+	bool ComposeFunctionPattern(const vector<TemplateParam>& params,
+	                            Scope* declaring, const AstDecl& inner,
+	                            TypePtr& full,
+	                            vector<TypePtr>& param_patterns);
+	// Composes the abstract signature pattern (lazily, cached).
+	void EnsureFunctionPattern(TemplateInfo& tmpl);
+	// Whether a new declaration re-declares `tmpl` (positional
+	// parameter identity over the composed pattern).
+	bool SameFunctionTemplateSignature(TemplateInfo& tmpl,
+	                                   const AstDecl& decl,
+	                                   const AstDecl& inner);
+	// The specialization for an explicit/deduced argument list,
+	// composing the concrete signature on first use (and the body once
+	// the definition is available).
+	FunctionSpecialization* EnsureFunctionSpecialization(
+		TemplateInfo& tmpl, const vector<TypePtr>& args);
+	void InstantiateFunctionBody(TemplateInfo& tmpl,
+	                             FunctionSpecialization& spec);
+	void InstantiatePendingFunctions(TemplateInfo& tmpl);
+	// A fully explicit function template-id (`f<int>`): resolves the
+	// specialization named by `part` over the templates of `binding`.
+	const ScopeBinding* ResolveFunctionTemplateId(
+		const ScopeBinding& binding, const AstNamePart& part);
+	void BindExplicitFunctionInstantiation(const AstDecl& inner);
+
 	// --- PA17 virtual members (sem_virtual.cpp) ---
 	// Declaration-time slot recording for an ordinary member function
 	// (10.3p2 override matching, 10.3p4 final, 10.3p7 covariant returns)
@@ -367,4 +449,77 @@ private:
 	vector<DeferredBody> deferred_bodies_;
 	MethodContext method_;
 	bool in_bit_field_;
+
+	// --- PA18 template state (sem_template.cpp / template_deduce.cpp) ---
+	// True while binding instantiated declarations: their definitions
+	// emit weak (demand-emitted) instead of strong.
+	bool instantiating_;
+	int instantiation_depth_;
+	// Shared positional deduction placeholders (`#0`, `#1`, ...).
+	vector<TypePtr> placeholders_;
+
+public:
+	// ISemExprHost template hooks.
+	virtual const FunctionSpecialization* DeduceFunctionTemplate(
+		TemplateInfo& tmpl, const vector<SemValue>& args);
+	virtual Scope* SwapLookupScope(Scope* scope);
 };
+
+// Saved-and-cleared binder state around one instantiation: the
+// instantiated declarations bind in their own context (the template's
+// lexical scope), never into the open class/function/dump state of the
+// use site. The destructor restores everything (exception-safe).
+struct SemBinder::InstantiationContext
+{
+	InstantiationContext(SemBinder& binder, Scope* scope)
+		: binder_(binder)
+	{
+		saved_scope_ = binder.current_;
+		saved_fields_ = binder.current_fields_;
+		saved_access_ = binder.current_access_;
+		saved_c_linkage_ = binder.in_c_linkage_;
+		saved_method_ = binder.method_;
+		saved_return_ = binder.current_return_;
+		saved_bit_field_ = binder.in_bit_field_;
+		saved_parents_.swap(binder.parents_);
+		saved_open_classes_.swap(binder.open_classes_);
+		saved_deferred_.swap(binder.deferred_bodies_);
+		binder.current_ = scope;
+		binder.current_fields_ = 0;
+		binder.current_access_ = MA_PUBLIC;
+		binder.in_c_linkage_ = false;
+		binder.method_ = MethodContext();
+		binder.current_return_ = TypePtr();
+		binder.in_bit_field_ = false;
+		binder.instantiation_depth_++;
+	}
+
+	~InstantiationContext()
+	{
+		binder_.instantiation_depth_--;
+		binder_.current_ = saved_scope_;
+		binder_.current_fields_ = saved_fields_;
+		binder_.current_access_ = saved_access_;
+		binder_.in_c_linkage_ = saved_c_linkage_;
+		binder_.method_ = saved_method_;
+		binder_.current_return_ = saved_return_;
+		binder_.in_bit_field_ = saved_bit_field_;
+		binder_.parents_.swap(saved_parents_);
+		binder_.open_classes_.swap(saved_open_classes_);
+		binder_.deferred_bodies_.swap(saved_deferred_);
+	}
+
+private:
+	SemBinder& binder_;
+	Scope* saved_scope_;
+	std::vector<TypePtr>* saved_fields_;
+	EMemberAccess saved_access_;
+	bool saved_c_linkage_;
+	MethodContext saved_method_;
+	TypePtr saved_return_;
+	bool saved_bit_field_;
+	vector<SemNode*> saved_parents_;
+	vector<ClassInfo*> saved_open_classes_;
+	vector<DeferredBody> saved_deferred_;
+};
+

@@ -42,7 +42,12 @@ enum EScopeBindingKind
 	SB_VARIABLE,
 	SB_PARAMETER,
 	SB_NAMESPACE,       // member namespace (prints as a child scope)
-	SB_NAMESPACE_ALIAS  // namespace-alias-definition (never printed)
+	SB_NAMESPACE_ALIAS,  // namespace-alias-definition (never printed)
+	// PA18: a class-template name (the template itself, not a type);
+	// `templ` holds the template record. Function templates ride on
+	// SB_FUNCTION bindings through `fn_templates` instead so they
+	// overload with ordinary functions.
+	SB_CLASS_TEMPLATE
 };
 
 // A typed value of the PA11 integral constant-expression subset. For
@@ -69,12 +74,14 @@ enum EMemberAccess
 	MA_PRIVATE
 };
 
+struct TemplateInfo;
+
 struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
 	                 owner(0), home(0), c_linkage(false),
 	                 access(MA_PUBLIC), is_mutable(false),
-	                 is_thread_local(false) {}
+	                 is_thread_local(false), templ(0) {}
 
 	EScopeBindingKind kind;
 	string name;
@@ -122,12 +129,18 @@ struct ScopeBinding
 	// imported overloads into the target's set; each entry keeps the
 	// scope that really declared it (null falls back to `owner`).
 	vector<const Scope*> fn_owner;
+	// PA18 templates. SB_CLASS_TEMPLATE: the class template this name
+	// declares. SB_FUNCTION: the function templates declared under
+	// this name beside the ordinary overloads (using-declaration
+	// imports copy the binding and carry them along).
+	TemplateInfo* templ;
+	vector<TemplateInfo*> fn_templates;
 };
 
 struct Scope
 {
 	Scope() : kind(SCOPE_NAMESPACE), parent(0), class_base(0),
-	          unnamed_member(0) {}
+	          entity(0), unnamed_member(0) {}
 
 	EScopeKind kind;
 	string name;  // empty for the global namespace, blocks, and
@@ -136,6 +149,10 @@ struct Scope
 	// PA15 single inheritance: the direct base class's member scope
 	// (null otherwise); member lookup searches the base chain (10.2).
 	Scope* class_base;
+	// PA18: the named-type entity this member scope belongs to (set by
+	// SetMemberScope; null for non-member scopes). The lowering's
+	// symbol mangling reads the entity's template identity from here.
+	const NamedTypeInfo* entity;
 
 	vector<ScopeBinding> bindings;      // first-binding (print) order
 	map<string, size_t> binding_index;  // name -> bindings position

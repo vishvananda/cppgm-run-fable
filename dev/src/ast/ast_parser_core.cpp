@@ -246,6 +246,14 @@ void AstParser::RegisterParameters(const AstDeclarator& declarator)
 {
 	for (size_t i = 0; i < declarator.items.size(); i++)
 	{
+		// A nested declarator (`T (&f(P))[2]`) carries the clause one
+		// level down.
+		if (declarator.items[i].kind == DI_NESTED &&
+		    declarator.items[i].nested)
+		{
+			RegisterParameters(*declarator.items[i].nested);
+			continue;
+		}
 		if (declarator.items[i].kind != DI_PARAMS)
 			continue;
 		const AstParameterClause& clause = *declarator.items[i].params;

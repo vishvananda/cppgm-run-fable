@@ -1,5 +1,6 @@
 #pragma once
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,16 @@ struct ISemExprHost
 	// constructor over the converted items (8.5.1 over a prvalue).
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
 	                                          vector<SemValue> args) = 0;
+	// --- PA18 templates ---
+	// Deduce `tmpl` against the call arguments and return the
+	// instantiated specialization (null when deduction fails, 14.8.3:
+	// the template contributes no candidate).
+	virtual const FunctionSpecialization* DeduceFunctionTemplate(
+		TemplateInfo& tmpl, const vector<SemValue>& args) = 0;
+	// Swap the analyzer's lookup scope (default-argument analysis of
+	// instantiated signatures rebinds under the argument alias scope);
+	// returns the previous scope.
+	virtual Scope* SwapLookupScope(Scope* scope) = 0;
 	virtual ~ISemExprHost() {}
 };
 
@@ -123,13 +134,24 @@ struct SemValue
 // One user-declared operator candidate (sem_operator.cpp).
 struct OperatorCandidate
 {
-	OperatorCandidate() : binding(0), index(0), is_member(false) {}
+	OperatorCandidate() : binding(0), index(0), is_member(false),
+	                      spec(0) {}
 
 	const ScopeBinding* binding;
 	size_t index;     // overload position in the binding
 	bool is_member;
 	TypePtr declared; // declared function type
+	// PA18: set when the candidate is a deduced function-template
+	// specialization (13.3.3 prefers non-templates on a tie).
+	const FunctionSpecialization* spec;
 };
+
+// PA18: the scope default-argument expressions of `binding` analyze
+// in — non-null only for bindings inside a template-argument alias
+// scope, whose defaults reference the template parameters (8.3.6p9
+// evaluation stays at the call site; lookup uses the declaration
+// context).
+Scope* TemplateDefaultArgScope(const ScopeBinding& binding);
 
 // The canonical qualified name of a binding declared in `owner`: the
 // named namespace path from the global scope (unnamed namespace
@@ -265,6 +287,12 @@ private:
 	                               const vector<SemValue>& operands,
 	                               bool member_only,
 	                               vector<OperatorCandidate>& out);
+	// PA18: deduced function-template specializations of `binding`
+	// against the argument list join the candidate set.
+	void AppendTemplateCandidates(const ScopeBinding& binding,
+	                              const vector<SemValue>& args,
+	                              vector<OperatorCandidate>& out,
+	                              std::set<const void*>& seen);
 	static bool OperatorOperand(const SemValue& value);
 	bool TryBinaryOperator(const string& spelling, SemValue& lhs,
 	                       SemValue& rhs, SemValue& result);

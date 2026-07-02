@@ -124,7 +124,12 @@ bool IsObjectPointer(const TypePtr& type);
 // per-argument conversions. `min_arity`, when given, holds each
 // candidate's minimum argument count (parameters minus trailing
 // default arguments, 8.3.6).
+// PA18 `is_template`, when given, marks candidates that are deduced
+// function-template specializations: a non-template candidate beats a
+// template specialization when their conversion sequences tie
+// (13.3.3p1).
 size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<ConversionSource>& args,
                           vector<ImplicitConversion>& conversions,
-                          const vector<size_t>* min_arity = 0);
+                          const vector<size_t>* min_arity = 0,
+                          const vector<bool>* is_template = 0);

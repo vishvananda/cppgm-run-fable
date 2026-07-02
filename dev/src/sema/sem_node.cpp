@@ -26,7 +26,8 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  vtable_slot(-1),
 	  inline_def(false), needs_dtor(false), trivial_init(false),
 	  elided(false), bf_plain_store(false), synth_copy(false),
-	  trivial_copy(false), ctor_addressed(false), synthesized(false)
+	  trivial_copy(false), ctor_addressed(false), synthesized(false),
+	  fn_spec(0)
 {
 }
 

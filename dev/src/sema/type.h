@@ -39,10 +39,18 @@ enum ETypeKind
 	TK_TYPE_PARAM,
 	// PA12: pointer to member of the class `named` of type `target`
 	// (8.3.3). Node cv is the pointer's own qualification.
-	TK_MEMBER_POINTER
+	TK_MEMBER_POINTER,
+	// PA18: a dependent class-template specialization pattern
+	// (`box<T>` with T still a template parameter): `named` is the
+	// template's anchor entity and `parameters` holds the argument
+	// pattern types. Never appears in a concrete (instantiated)
+	// declaration; deduction and mangling walk it.
+	TK_TEMPLATE_SPEC
 };
 
 struct Scope;
+struct Type;
+typedef shared_ptr<const Type> TypePtr;
 
 // One record per named-type entity, owned by the semantic model that
 // declared it and shared by every Type node naming it, so completing
@@ -53,7 +61,8 @@ struct NamedTypeInfo
 	NamedTypeInfo()
 		: scope(0), complete(false), is_union(false), is_scoped(false),
 		  is_defined(false), enum_underlying(FT_INT), size(0), alignment(0),
-		  base_entity(0), class_record(0)
+		  base_entity(0), class_record(0), spec_template(0),
+		  is_template_anchor(false), param_index(-1)
 	{}
 
 	string display;  // canonical spelling: "struct C", "enum class FY",
@@ -82,15 +91,24 @@ struct NamedTypeInfo
 	// PA15: the class metadata record (sema/class_info.h), set when the
 	// class opens; the conversion rules read the constructor set.
 	const struct ClassInfo* class_record;
+	// PA18 template identity. For an instantiated class-template
+	// specialization: the source template and the concrete argument
+	// list (the mangler emits `NameI<args>E`). For a class template's
+	// anchor entity (the identity behind TK_TEMPLATE_SPEC patterns):
+	// `is_template_anchor` is set and `spec_args` is empty. For a
+	// template type-parameter placeholder used in deduction/mangling
+	// patterns: `param_index` is its zero-based position (-1
+	// otherwise).
+	const struct TemplateInfo* spec_template;
+	vector<TypePtr> spec_args;
+	bool is_template_anchor;
+	int param_index;
 };
 
 // 4.10p3/4.11p2 derivation distance from `from` to `to` along the
 // single-inheritance chain: 0 for the same entity, -1 when `to` is not
 // a (possibly indirect) base of `from`.
 int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to);
-
-struct Type;
-typedef shared_ptr<const Type> TypePtr;
 
 struct Type
 {
@@ -191,6 +209,15 @@ TypePtr MergeRedeclaredType(const TypePtr& existing,
                             const TypePtr& redeclared);
 
 // --- queries ---
+
+// PA18: a dependent specialization pattern type over the template
+// anchored by `anchor` with the given argument pattern.
+TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
+                             const vector<TypePtr>& args);
+
+// PA18: whether any component of `type` is (or contains) a template
+// parameter or dependent specialization pattern.
+bool TypeIsDependent(const TypePtr& type);
 
 // Structural equality, including cv at every level.
 bool TypeEquals(const TypePtr& a, const TypePtr& b);

@@ -757,11 +757,6 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 		}
 		return AnalyzeStaticMethodCall(expr, binding);
 	}
-	vector<TypePtr> candidates;
-	candidates.push_back(binding.type);
-	for (size_t i = 0; i < binding.overloads.size(); i++)
-		candidates.push_back(binding.overloads[i]);
-
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
 	for (size_t i = 0; i < expr.arguments.size(); i++)
@@ -769,14 +764,43 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 		args.push_back(Analyze(*expr.arguments[i]));
 		sources.push_back(MakeConversionSource(args.back()));
 	}
+	vector<TypePtr> candidates;
+	if (binding.type)
+	{
+		candidates.push_back(binding.type);
+		for (size_t i = 0; i < binding.overloads.size(); i++)
+			candidates.push_back(binding.overloads[i]);
+	}
+	// PA18: deduced function-template specializations join after the
+	// ordinary overloads.
+	const size_t ordinary = candidates.size();
+	vector<const FunctionSpecialization*> specs(ordinary, (const FunctionSpecialization*)0);
+	{
+		std::set<const void*> seen;
+		vector<OperatorCandidate> deduced;
+		AppendTemplateCandidates(binding, args, deduced, seen);
+		for (size_t i = 0; i < deduced.size(); i++)
+		{
+			candidates.push_back(deduced[i].declared);
+			specs.push_back(deduced[i].spec);
+		}
+	}
 	// 8.3.6: trailing default arguments lower each candidate's minimum
 	// call arity.
 	vector<size_t> min_arity(candidates.size());
+	vector<bool> is_template(candidates.size(), false);
 	for (size_t c = 0; c < candidates.size(); c++)
 	{
 		size_t required = candidates[c]->parameters.size();
-		const vector<const AstExpr*>* defaults =
-			c < binding.fn_defaults.size() ? &binding.fn_defaults[c] : 0;
+		const vector<const AstExpr*>* defaults = 0;
+		if (c < ordinary)
+			defaults = c < binding.fn_defaults.size()
+				? &binding.fn_defaults[c] : 0;
+		else
+		{
+			defaults = &specs[c]->self.fn_defaults[0];
+			is_template[c] = true;
+		}
 		while (defaults && required > 0 &&
 		       required <= defaults->size() && (*defaults)[required - 1])
 			required--;
@@ -784,8 +808,12 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	}
 	vector<ImplicitConversion> conversions;
 	size_t winner = SelectBestOverload(candidates, sources, conversions,
-	                                   &min_arity);
-	if (winner < binding.fn_deleted.size() && binding.fn_deleted[winner])
+	                                   &min_arity, &is_template);
+	const FunctionSpecialization* spec =
+		winner < ordinary ? 0 : specs[winner];
+	const ScopeBinding& chosen = spec ? spec->self : binding;
+	const size_t slot = spec ? 0 : winner;
+	if (slot < chosen.fn_deleted.size() && chosen.fn_deleted[slot])
 		throw runtime_error("use of deleted function " + binding.name);
 	const TypePtr& function_type = candidates[winner];
 	for (size_t i = 0; i < args.size(); i++)
@@ -793,10 +821,27 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 			ApplyConversion(args[i], conversions[i],
 			                function_type->parameters[i]);
 	// Synthesize the omitted trailing arguments from the recorded
-	// default expressions (8.3.6p9: evaluated at the call site).
+	// default expressions (8.3.6p9: evaluated at the call site;
+	// instantiated signatures look their names up in their argument
+	// alias scope).
 	for (size_t i = args.size(); i < function_type->parameters.size(); i++)
 	{
-		SemValue filled = Analyze(*binding.fn_defaults[winner][i]);
+		Scope* default_scope = TemplateDefaultArgScope(chosen);
+		Scope* saved = default_scope
+			? host_.SwapLookupScope(default_scope) : 0;
+		SemValue filled;
+		try
+		{
+			filled = Analyze(*chosen.fn_defaults[slot][i]);
+		}
+		catch (...)
+		{
+			if (default_scope)
+				host_.SwapLookupScope(saved);
+			throw;
+		}
+		if (default_scope)
+			host_.SwapLookupScope(saved);
 		CopyInitialize(filled, function_type->parameters[i],
 		               "default argument");
 		args.push_back(std::move(filled));
@@ -804,10 +849,13 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 
 	SemValue value = CallResult(function_type);
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
+	callee->name = CanonicalQualifiedName(chosen.owner, chosen.name);
 	callee->type = function_type;
-	callee->entity_scope = binding.owner;
-	callee->entity_name = binding.name;
+	callee->entity_scope = chosen.owner;
+	callee->entity_name = chosen.name;
+	callee->fn_spec = spec;
+	if (slot < chosen.fn_unwind_no.size() && chosen.fn_unwind_no[slot])
+		callee->unwind_no = true;
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));

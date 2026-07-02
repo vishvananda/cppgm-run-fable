@@ -12,6 +12,7 @@ using std::vector;
 
 #include "sema/class_info.h"
 #include "sema/scope.h"
+#include "sema/template_info.h"
 #include "sema/type.h"
 
 // The PA12 semantic dump tree: one kind-tagged node per printed line,
@@ -214,6 +215,10 @@ struct SemNode
 	// SN_FUNCTION_DEFINITION: a compiler-synthesized special-member
 	// body (implicit/defaulted); emitted only when directly called.
 	bool synthesized;
+	// PA18 SN_FUNCTION_DEFINITION / SN_CALLEE of a function-template
+	// specialization: its identity record (the lowering mangles the
+	// object name from the pattern signature and argument list).
+	const FunctionSpecialization* fn_spec;
 	// SN_CALL_EXPRESSION / SN_CONDITIONAL_EXPRESSION with needs_dtor:
 	// the resolved destructor action for the materialized result
 	// temporary (12.2), pinned by the binder so the lowering never
@@ -241,6 +246,9 @@ struct SemUnit
 	// first-demand order.
 	ClassRegistry classes;
 	vector<SemNodePtr> deferred;
+	// PA18: the captured template declarations and their instantiated
+	// specializations.
+	TemplateRegistry templates;
 };
 
 // Writes the `translation-unit` line and the tree below it.

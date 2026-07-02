@@ -54,6 +54,9 @@ struct LowFunctionInfo
 	string special_code;
 	string alias_object;
 	string role;  // role=init / role=fini helpers
+	// PA18: the function-template specialization this entry emits
+	// (null for ordinary functions); the object name mangles from it.
+	const FunctionSpecialization* fn_spec = 0;
 	const SemNode* definition;
 	size_t index;        // position in functions_ (demand rescan key)
 	string body_text;    // lowered definition text
@@ -154,7 +157,8 @@ private:
 	void RegisterDeferred(const SemNode& item);
 	LowGlobalInfo& GlobalEntry(const Scope* scope, const string& name);
 	LowFunctionInfo& FunctionEntry(const Scope* scope, const string& name,
-	                               const TypePtr& type);
+	                               const TypePtr& type,
+	                               const FunctionSpecialization* spec = 0);
 	LowFunctionInfo& MemberFunctionEntry(const Scope* scope,
 	                                     const string& name,
 	                                     const TypePtr& type,
