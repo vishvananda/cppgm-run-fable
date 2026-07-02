@@ -313,6 +313,18 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		// like an enumerator (9.4.2p4 constant initializer).
 		if (member_class && binding->has_value)
 			return AnalyzeStaticMemberValue(*binding, written);
+		// 5.3.1p3: only non-static data members carry the member
+		// -pointer facts; a static member behaves as an ordinary
+		// namespace-scope object.
+		if (member_class)
+		{
+			const ClassInfo* owner_cls = 0;
+			if (const NamedTypeInfo* owner_entity =
+			        host_.Model().ScopeEntity(binding->owner))
+				owner_cls = host_.Classes().Find(owner_entity);
+			if (!owner_cls || !FindClassField(*owner_cls, binding->name))
+				member_class = 0;
+		}
 		// 5p5: the expression type is the declared type with references
 		// stripped; the result is an lvalue either way.
 		TypePtr declared = binding->type;

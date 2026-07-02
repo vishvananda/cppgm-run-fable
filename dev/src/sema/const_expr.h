@@ -22,6 +22,9 @@ struct IConstExprContext
 	// (the 5.3.3 semantic disambiguation of `sizeof(T)`).
 	virtual TypePtr TryResolveTypeFromName(const AstName& name) = 0;
 	virtual TypePtr ResolveTypeId(const AstTypeId& type_id) = 0;
+	// PA18: completes a deferred member-class definition before a
+	// sizeof/alignof reads its layout (no-op outside templates).
+	virtual void RequireCompleteForLayout(const TypePtr& type) {}
 	virtual ~IConstExprContext() {}
 };
 

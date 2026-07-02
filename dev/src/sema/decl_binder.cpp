@@ -477,6 +477,15 @@ void DeclBinder::BindExplicitInstantiation(const AstDecl& decl)
 	throw OutsideBoundary("explicit instantiation");
 }
 
+void DeclBinder::RequireCompleteForLayout(const TypePtr& type)
+{
+	TypePtr bare = type;
+	while (bare && bare->kind == TK_ARRAY)
+		bare = bare->target;
+	if (bare && bare->kind == TK_CLASS)
+		EnsureTypeCompleteness(bare->named);
+}
+
 const ScopeBinding* DeclBinder::ResolveTemplateIdBinding(
 	const AstNamePart& part, Scope* prefix)
 {

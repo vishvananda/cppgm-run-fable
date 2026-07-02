@@ -37,6 +37,7 @@ public:
 	virtual ConstValue LookupConstant(const AstName& name);
 	virtual TypePtr TryResolveTypeFromName(const AstName& name);
 	virtual TypePtr ResolveTypeId(const AstTypeId& type_id);
+	virtual void RequireCompleteForLayout(const TypePtr& type);
 
 protected:
 	// --- declarations ---

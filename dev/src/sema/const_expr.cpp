@@ -339,7 +339,10 @@ ConstValue EvaluateSizeofExpr(const AstExpr& expr,
 	{
 		TypePtr named = context.TryResolveTypeFromName(*name);
 		if (named)
+		{
+			context.RequireCompleteForLayout(named);
 			return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(named));
+		}
 	}
 	throw OutsideSubset("sizeof of an expression");
 }
@@ -407,8 +410,11 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	case EK_FUNCTIONAL_CAST:
 		return EvaluateFunctionalCast(expr, context);
 	case EK_SIZEOF_TYPE:
-		return ConstValue(FT_UNSIGNED_LONG_INT,
-		                  TypeSize(context.ResolveTypeId(*expr.type)));
+	{
+		TypePtr sized = context.ResolveTypeId(*expr.type);
+		context.RequireCompleteForLayout(sized);
+		return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(sized));
+	}
 	case EK_SIZEOF_EXPR:
 		return EvaluateSizeofExpr(expr, context);
 	case EK_TYPE_TRAIT:

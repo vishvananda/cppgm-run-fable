@@ -611,6 +611,11 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	item->entity_scope = declaring;
 	item->entity_name = name;
 	item->unwind_no = composed.noexcept_simple;
+	// 7.1.2p4: an inline function emits weak and only where used.
+	for (size_t i = 0; i < decl.specifiers.size(); i++)
+		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
+		    decl.specifiers[i].keyword == KW_INLINE)
+			item->inline_def = true;
 	if (const ScopeBinding* fn = FindOwnBinding(*declaring, name))
 		item->c_linkage = fn->c_linkage;
 	for (size_t i = 0; i < composed.parameters.size(); i++)

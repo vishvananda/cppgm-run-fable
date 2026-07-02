@@ -420,6 +420,9 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 		info.defined = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
+		// 7.1.2p4: inline definitions emit weak, on demand.
+		if (item.inline_def)
+			info.weak = true;
 	}
 }
 
@@ -836,7 +839,9 @@ void LowerProgram::BuildLifetimeHelpers()
 		while (inner->kind == TK_ARRAY)
 			inner = inner->target;
 		bool is_class = RemoveTopCv(inner)->kind == TK_CLASS;
-		if (is_class)
+		// PA18: a weak (instantiated static member) object does not by
+		// itself anchor the init helper.
+		if (is_class && !info.weak)
 			any_class_object = true;
 		const SemNode& item = *info.node;
 		for (size_t j = 0; j < item.children.size(); j++)
