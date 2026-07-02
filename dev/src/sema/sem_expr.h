@@ -99,6 +99,11 @@ struct ISemExprHost
 	// instantiated signatures rebinds under the argument alias scope);
 	// returns the previous scope.
 	virtual Scope* SwapLookupScope(Scope* scope) = 0;
+	// PA18 14.5.6.2 subset: partial-ordering tie-break between two
+	// deduced template candidates of one viable call.
+	virtual bool TemplateCandidateMoreSpecialized(
+		const FunctionSpecialization* a,
+		const FunctionSpecialization* b, size_t argc) = 0;
 	// PA18: completes a deferred member-class definition when the
 	// context requires the complete type (14.7.1p1).
 	virtual void RequireCompleteType(const NamedTypeInfo* info) = 0;
@@ -107,6 +112,31 @@ struct ISemExprHost
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target) = 0;
 	virtual ~ISemExprHost() {}
+};
+
+// Routes SelectBestOverload's template tie-break to the host's
+// 14.5.6.2 partial-ordering subset over the call's deduced
+// specializations (indexed like the candidate list; null entries are
+// non-template candidates).
+struct SpecOverloadOrder : OverloadOrder
+{
+	SpecOverloadOrder(ISemExprHost& host,
+	                  const vector<const FunctionSpecialization*>& specs,
+	                  size_t argc)
+		: host_(host), specs_(specs), argc_(argc) {}
+	virtual bool MoreSpecialized(size_t a, size_t b) const
+	{
+		const FunctionSpecialization* first =
+			a < specs_.size() ? specs_[a] : 0;
+		const FunctionSpecialization* second =
+			b < specs_.size() ? specs_[b] : 0;
+		return host_.TemplateCandidateMoreSpecialized(first, second,
+		                                              argc_);
+	}
+private:
+	ISemExprHost& host_;
+	const vector<const FunctionSpecialization*>& specs_;
+	size_t argc_;
 };
 
 // One analyzed expression: the dump node plus composition facts. The

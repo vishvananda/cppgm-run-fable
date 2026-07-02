@@ -352,11 +352,16 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 		min_arity.push_back(required);
 	}
 	vector<bool> is_template;
+	vector<const FunctionSpecialization*> specs;
 	for (size_t c = 0; c < candidates.size(); c++)
+	{
 		is_template.push_back(candidates[c].spec != 0);
+		specs.push_back(candidates[c].spec);
+	}
 	vector<ImplicitConversion> conversions;
+	SpecOverloadOrder order(host_, specs, sources.size());
 	size_t winner = SelectBestOverload(ranking, sources, conversions,
-	                                   &min_arity, &is_template);
+	                                   &min_arity, &is_template, &order);
 	const OperatorCandidate& chosen = candidates[winner];
 	const ScopeBinding& binding = *chosen.binding;
 	if (chosen.index < binding.fn_deleted.size() &&
@@ -489,18 +494,24 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	size_t builtin_pos = AppendBuiltinCandidate(
 		spelling, operands, member_only, ranking, viable_arity);
 	vector<bool> is_template;
+	vector<const FunctionSpecialization*> specs;
 	for (size_t c = 0; c < candidates.size(); c++)
+	{
 		is_template.push_back(candidates[c].spec != 0);
+		specs.push_back(candidates[c].spec);
+	}
 	is_template.resize(ranking.size(), false);
+	specs.resize(ranking.size(), (const FunctionSpecialization*)0);
 	// Arity filter happens inside SelectBestOverload; a fully
 	// non-viable set falls back to the built-in operator. An ambiguous
 	// joint ranking is ill-formed (13.3.1.2p3) and propagates.
 	vector<ImplicitConversion> conversions;
 	size_t winner;
+	SpecOverloadOrder order(host_, specs, sources.size());
 	try
 	{
 		winner = SelectBestOverload(ranking, sources, conversions,
-		                            &viable_arity, &is_template);
+		                            &viable_arity, &is_template, &order);
 	}
 	catch (const NoViableOverloadError&)
 	{

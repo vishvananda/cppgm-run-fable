@@ -107,6 +107,20 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		return DeduceFromType(pattern->target, arg->target, bound);
 	case TK_TEMPLATE_SPEC:
 	{
+		// A pattern-shaped argument (partial ordering's transformed
+		// parameter types) matches the same template structurally.
+		if (arg->kind == TK_TEMPLATE_SPEC)
+		{
+			if (arg->named->spec_template !=
+			        pattern->named->spec_template ||
+			    arg->parameters.size() != pattern->parameters.size())
+				return false;
+			for (size_t i = 0; i < pattern->parameters.size(); i++)
+				if (!DeduceFromType(pattern->parameters[i],
+				                    arg->parameters[i], bound))
+					return false;
+			return true;
+		}
 		// Match a specialization of the same template, walking the
 		// single-inheritance chain for the derived-to-base case.
 		const NamedTypeInfo* entity =
@@ -134,6 +148,63 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 TypePtr DecayForDeduction(const TypePtr& type)
 {
 	return AdjustParameterType(type);
+}
+
+// 14.5.6.2p3: the transformed parameter type of one partial-ordering
+// candidate - every type parameter replaced by its synthesized unique
+// type. Null when the pattern has a shape outside the ordering subset.
+TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
+                                const vector<TypePtr>& uniques)
+{
+	if (!pattern)
+		return pattern;
+	if (!TypeIsDependent(pattern))
+		return pattern;
+	switch (pattern->kind)
+	{
+	case TK_TYPE_PARAM:
+	{
+		int index = pattern->named->param_index;
+		if (index < 0 || (size_t)index >= uniques.size())
+			return TypePtr();
+		return MakeCvQualifiedType(uniques[index], pattern->is_const,
+		                           pattern->is_volatile);
+	}
+	case TK_POINTER:
+	{
+		TypePtr target = SubstituteOrderingTypes(pattern->target,
+		                                         uniques);
+		if (!target)
+			return TypePtr();
+		return MakePointerType(target, pattern->is_const,
+		                       pattern->is_volatile);
+	}
+	case TK_LVALUE_REFERENCE:
+	case TK_RVALUE_REFERENCE:
+	{
+		TypePtr target = SubstituteOrderingTypes(pattern->target,
+		                                         uniques);
+		if (!target)
+			return TypePtr();
+		return MakeReferenceType(target,
+		                         pattern->kind == TK_RVALUE_REFERENCE,
+		                         false);
+	}
+	case TK_TEMPLATE_SPEC:
+	{
+		Type copy = *pattern;
+		for (size_t i = 0; i < copy.parameters.size(); i++)
+		{
+			copy.parameters[i] = SubstituteOrderingTypes(
+				copy.parameters[i], uniques);
+			if (!copy.parameters[i])
+				return TypePtr();
+		}
+		return TypePtr(new Type(copy));
+	}
+	default:
+		return TypePtr();
+	}
 }
 
 // The parameter clause of a function declarator (the first DI_PARAMS
@@ -167,6 +238,71 @@ TypePtr SemBinder::PlaceholderType(size_t index)
 		placeholders_.push_back(MakeNamedType(TK_TYPE_PARAM, info));
 	}
 	return placeholders_[index];
+}
+
+TypePtr SemBinder::OrderingUniqueType(size_t index)
+{
+	while (ordering_uniques_.size() <= index)
+	{
+		NamedTypeInfo* info = model_.CreateNamedTypeInfo(
+			"struct #unique" + std::to_string(ordering_uniques_.size()),
+			model_.global(),
+			"#unique" + std::to_string(ordering_uniques_.size()));
+		ordering_uniques_.push_back(MakeNamedType(TK_CLASS, info));
+	}
+	return ordering_uniques_[index];
+}
+
+// 14.5.6.2p8 (subset): `a` is at least as specialized as `b` for the
+// leading `argc` parameters when `b`'s parameters deduce from `a`'s
+// transformed parameter types.
+bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
+                                             TemplateInfo& b,
+                                             size_t argc)
+{
+	EnsureFunctionPattern(a);
+	EnsureFunctionPattern(b);
+	if (a.param_patterns.size() < argc || b.param_patterns.size() < argc)
+		return false;
+	vector<TypePtr> uniques;
+	for (size_t i = 0; i < a.params.size(); i++)
+		uniques.push_back(OrderingUniqueType(i));
+	vector<TypePtr> bound(b.params.size());
+	for (size_t i = 0; i < argc; i++)
+	{
+		TypePtr transformed = SubstituteOrderingTypes(
+			a.param_patterns[i], uniques);
+		TypePtr pattern = b.param_patterns[i];
+		if (!transformed || !pattern)
+			return false;
+		// 14.8.2.4p5-7: references and top-level cv-qualifiers drop
+		// on both sides before deduction.
+		if (IsReferenceType(pattern))
+			pattern = pattern->target;
+		if (IsReferenceType(transformed))
+			transformed = transformed->target;
+		pattern = RemoveTopCv(pattern);
+		transformed = RemoveTopCv(transformed);
+		if (!TypeIsDependent(pattern))
+		{
+			if (!TypeEquals(pattern, transformed))
+				return false;
+			continue;
+		}
+		if (!DeduceFromType(pattern, transformed, bound))
+			return false;
+	}
+	return true;
+}
+
+bool SemBinder::TemplateCandidateMoreSpecialized(
+	const FunctionSpecialization* a, const FunctionSpecialization* b,
+	size_t argc)
+{
+	if (!a || !b || !a->owner || !b->owner || a->owner == b->owner)
+		return false;
+	return OrderingAtLeastAsSpecialized(*a->owner, *b->owner, argc) &&
+		!OrderingAtLeastAsSpecialized(*b->owner, *a->owner, argc);
 }
 
 // Composes the declarator of a function-template declaration with the

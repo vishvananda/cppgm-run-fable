@@ -58,13 +58,17 @@ struct ImplicitConversion
 	ImplicitConversion()
 		: viable(false), rank(CR_EXACT), base_distance(0),
 		  null_to_pointer(false), bool_from_pointer(false),
-		  reference_binding(false), binds_rvalue_reference(false),
-		  selected_overload(-1), user_class(0), user_ctor(-1),
-		  conv_class(0), conv_index(-1), second_rank(CR_EXACT)
+		  qualification(false), reference_binding(false),
+		  binds_rvalue_reference(false), selected_overload(-1),
+		  user_class(0), user_ctor(-1), conv_class(0), conv_index(-1),
+		  second_rank(CR_EXACT)
 	{}
 
 	bool viable;
 	EConversionRank rank;
+	// 13.3.3.2p3: an exact-rank sequence with a real qualification
+	// conversion loses to the identity form.
+	bool qualification;
 	// 13.3.3.2p4 derivation-distance tie-break: 0 for non-hierarchy
 	// conversions, the base-chain distance for derived-to-base pointer
 	// and reference forms, large for conversions to void pointers.
@@ -128,8 +132,19 @@ bool IsObjectPointer(const TypePtr& type);
 // function-template specializations: a non-template candidate beats a
 // template specialization when their conversion sequences tie
 // (13.3.3p1).
+// 13.3.3p1 final template tie-break hook: partial ordering between
+// two viable deduced template specializations (14.5.6.2 subset,
+// implemented by the binder; the ranking itself stays conversion-only).
+struct OverloadOrder
+{
+	virtual bool MoreSpecialized(size_t a, size_t b) const = 0;
+protected:
+	~OverloadOrder() {}
+};
+
 size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<ConversionSource>& args,
                           vector<ImplicitConversion>& conversions,
                           const vector<size_t>* min_arity = 0,
-                          const vector<bool>* is_template = 0);
+                          const vector<bool>* is_template = 0,
+                          const OverloadOrder* order = 0);

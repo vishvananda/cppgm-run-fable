@@ -166,6 +166,8 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		{
 			result.viable = true;
 			result.rank = CR_EXACT;
+			// 13.3.3.2p3: identity beats a real qualification step.
+			result.qualification = !TypeEquals(from, dest);
 			return result;
 		}
 		// 4.10p3: pointer to derived converts to pointer to a (no less
@@ -364,6 +366,10 @@ int CompareConversions(const ImplicitConversion& a,
 		return a.second_rank < b.second_rank ? -1 : 1;
 	if (a.bool_from_pointer != b.bool_from_pointer)
 		return a.bool_from_pointer ? 1 : -1;
+	if (a.qualification != b.qualification)
+		// 13.3.3.2p3: the sequence without the qualification
+		// conversion is the proper subsequence.
+		return a.qualification ? 1 : -1;
 	if (a.base_distance != b.base_distance)
 		return a.base_distance < b.base_distance ? -1 : 1;
 	if (!a.reference_binding || !b.reference_binding)
@@ -655,7 +661,8 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<ConversionSource>& args,
                           vector<ImplicitConversion>& conversions,
                           const vector<size_t>* min_arity,
-                          const vector<bool>* is_template)
+                          const vector<bool>* is_template,
+                          const OverloadOrder* order)
 {
 	vector<ViableCandidate> viable;
 	for (size_t c = 0; c < candidates.size(); c++)
@@ -697,6 +704,7 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
 	{
 		const vector<ConversionSource>& args;
 		const vector<bool>* is_template;
+		const OverloadOrder* order;
 		bool operator()(const ViableCandidate& a,
 		                const ViableCandidate& b) const
 		{
@@ -704,11 +712,18 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
 				return true;
 			if (BetterCandidate(b, a, args))
 				return false;
-			return is_template && !(*is_template)[a.index] &&
-				(*is_template)[b.index];
+			if (is_template && !(*is_template)[a.index] &&
+			    (*is_template)[b.index])
+				return true;
+			// 14.5.6.2: both template specializations with equal
+			// conversions rank by partial ordering.
+			if (order && is_template && (*is_template)[a.index] &&
+			    (*is_template)[b.index])
+				return order->MoreSpecialized(a.index, b.index);
+			return false;
 		}
 	};
-	Better better = {args, is_template};
+	Better better = {args, is_template, order};
 	size_t best = 0;
 	for (size_t i = 1; i < viable.size(); i++)
 		if (better(viable[i], viable[best]))

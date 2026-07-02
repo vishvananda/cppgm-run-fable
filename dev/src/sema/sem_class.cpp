@@ -1273,7 +1273,13 @@ SemNodePtr SemBinder::MemberAssignAction(const ClassField& field,
 {
 	if (IsReferenceType(field.type))
 	{
-		if (value.category != VC_LVALUE)
+		// 8.5.3p5: an lvalue binds any reference form; an xvalue binds
+		// an rvalue reference or a const lvalue reference. A prvalue
+		// initializer (temporary materialization) stays out of scope.
+		bool xvalue_ok = field.type->kind == TK_RVALUE_REFERENCE ||
+			field.type->target->is_const;
+		if (value.category != VC_LVALUE &&
+		    !(value.category == VC_XVALUE && xvalue_ok))
 			throw runtime_error("reference member binds a non-lvalue");
 		TypePtr referee = field.type->target;
 		if (!TypeEquals(RemoveTopCv(referee), RemoveTopCv(value.type)) &&

@@ -165,8 +165,9 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	NamedCallMinArity(binding, candidates, specs, ordinary, min_arity,
 	                  is_template);
 	vector<ImplicitConversion> conversions;
+	SpecOverloadOrder order(host_, specs, args.size());
 	size_t winner = SelectBestOverload(candidates, sources, conversions,
-	                                   &min_arity, &is_template);
+	                                   &min_arity, &is_template, &order);
 	const FunctionSpecialization* spec =
 		winner < ordinary ? 0 : specs[winner];
 	const ScopeBinding& chosen = spec ? spec->self : binding;

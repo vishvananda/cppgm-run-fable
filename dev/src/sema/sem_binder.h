@@ -482,6 +482,8 @@ private:
 	int instantiation_depth_;
 	// Shared positional deduction placeholders (`#0`, `#1`, ...).
 	vector<TypePtr> placeholders_;
+	// Synthesized unique argument types for partial ordering.
+	vector<TypePtr> ordering_uniques_;
 	// True inside contexts that are grammatically type-only (base
 	// clauses): 14.6p3 typename is not required there.
 	bool in_implicit_type_context_;
@@ -506,6 +508,14 @@ public:
 		const AstNamePart* explicit_part);
 	virtual Scope* SwapLookupScope(Scope* scope);
 	virtual void RequireCompleteType(const NamedTypeInfo* info);
+	// PA18 14.5.6.2 subset (template_deduce.cpp): partial ordering of
+	// two deduced candidates over the call's leading `argc` parameters.
+	virtual bool TemplateCandidateMoreSpecialized(
+		const FunctionSpecialization* a,
+		const FunctionSpecialization* b, size_t argc);
+	TypePtr OrderingUniqueType(size_t index);
+	bool OrderingAtLeastAsSpecialized(TemplateInfo& a, TemplateInfo& b,
+	                                  size_t argc);
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target);
 	virtual void OnParameterComposed(const string& name,
