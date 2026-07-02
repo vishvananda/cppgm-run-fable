@@ -78,8 +78,9 @@ LowerValue FunctionLowerer::ConvertToBool(LowerValue value,
 }
 
 // Integral immediates canonicalize to the converted spelling except
-// for width-changing conversions that also change signedness (the
-// oracle keeps those spelled, e.g. int -> unsigned long).
+// for widening conversions that also change signedness (the oracle
+// keeps those spelled, e.g. int -> unsigned long; narrowing ones
+// fold, e.g. int -> unsigned char).
 LowerValue FunctionLowerer::ConvertIntegralImmediate(LowerValue value,
                                                      const TypePtr& source,
                                                      const TypePtr& target)
@@ -88,11 +89,10 @@ LowerValue FunctionLowerer::ConvertIntegralImmediate(LowerValue value,
 		? target->named->enum_underlying : target->fundamental;
 	EFundamentalType source_fund = source->kind == TK_ENUM
 		? source->named->enum_underlying : source->fundamental;
-	bool width_change = LowerValueWidth(source) !=
-		LowerValueWidth(target);
+	bool widening = LowerValueWidth(source) < LowerValueWidth(target);
 	bool sign_change = IsSignedIntegralFundamental(source_fund) !=
 		IsSignedIntegralFundamental(target_fund);
-	if (width_change && sign_change && source_fund != FT_BOOL)
+	if (widening && sign_change && source_fund != FT_BOOL)
 	{
 		string temp = NewTemp();
 		Emit(temp + " = convert " + LowerConvertOp(source, target) +

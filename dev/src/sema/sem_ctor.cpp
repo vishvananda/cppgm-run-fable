@@ -64,9 +64,18 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 				member_cls, index, false,
 				AddressOfNode(ThisFieldExpr(field)),
 				std::move(arg_nodes));
-			action->has_value = true;
-			action->value = ConstValue(FT_UNSIGNED_LONG_INT,
-			                           member_cls.size);
+			// 8.5p7: zero-initialization precedes the constructor
+			// only when the selected default constructor is not
+			// user-provided.
+			bool user_provided = index >= 0 &&
+				!member_cls.ctors[index].implicit &&
+				!member_cls.ctors[index].defaulted;
+			if (!user_provided)
+			{
+				action->has_value = true;
+				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+				                           member_cls.size);
+			}
 			out.push_back(std::move(action));
 			return;
 		}

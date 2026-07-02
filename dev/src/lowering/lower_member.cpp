@@ -421,15 +421,25 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	// A member-addressed action (an aggregate item) owns its exact
 	// subobject address; a caller-supplied destination names only the
 	// enclosing object.
-	if (first_arg == 2 &&
-	    (dst.empty() ||
-	     call.children[1]->children[0]->kind == SN_MEMBER_EXPRESSION))
+	bool member_addressed = first_arg == 2 &&
+		(dst.empty() ||
+		 call.children[1]->children[0]->kind == SN_MEMBER_EXPRESSION);
+	if (member_addressed)
 		dst = LowerAddressExpr(*call.children[1]->children[0]);
 	else if (dst.empty())
 		throw OutsideBoundary("trivial copy without a destination");
 	const SemNode& source = *call.children[first_arg];
-	string src = LowerAddressExpr(source);
 	TypePtr cls_type = RemoveTopCv(action.type);
+	// An empty object has no bytes to transfer (the PA15 convention):
+	// a member-addressed action prints only the member address, while
+	// an argument/temporary copy still evaluates the source lvalue.
+	bool empty = cls_type->named->class_record &&
+		cls_type->named->class_record->is_empty;
+	if (empty && member_addressed)
+		return;
+	string src = LowerAddressExpr(source);
+	if (empty)
+		return;
 	// A derived source adjusts to the copied base subobject.
 	TypePtr source_type = RemoveTopCv(StripRef(source.type));
 	if (source_type->kind == TK_CLASS)
@@ -437,10 +447,6 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 		src = AdjustToBase(
 			src, BaseClassDistance(source_type->named, cls_type->named));
 	}
-	// An empty object has no bytes to transfer (the PA15 convention).
-	if (cls_type->named->class_record &&
-	    cls_type->named->class_record->is_empty)
-		return;
 	Emit("copyobj " + to_string(TypeSize(cls_type)) + "x" +
 	     to_string(TypeAlignment(cls_type)) + " " + src + ", " + dst);
 }
