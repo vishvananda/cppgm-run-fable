@@ -90,8 +90,11 @@ struct ISemExprHost
 	// Deduce `tmpl` against the call arguments and return the
 	// instantiated specialization (null when deduction fails, 14.8.3:
 	// the template contributes no candidate).
+	// `explicit_part`, when given, is the call's template-id: its
+	// arguments pre-bind the leading parameters (14.8.1).
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
-		TemplateInfo& tmpl, const vector<SemValue>& args) = 0;
+		TemplateInfo& tmpl, const vector<SemValue>& args,
+		const AstNamePart* explicit_part) = 0;
 	// Swap the analyzer's lookup scope (default-argument analysis of
 	// instantiated signatures rebinds under the argument alias scope);
 	// returns the previous scope.
@@ -305,7 +308,8 @@ private:
 	void AppendTemplateCandidates(const ScopeBinding& binding,
 	                              const vector<SemValue>& args,
 	                              vector<OperatorCandidate>& out,
-	                              std::set<const void*>& seen);
+	                              std::set<const void*>& seen,
+	                              const AstNamePart* explicit_part = 0);
 	// PA18 13.4p2: extends a target-directed function set with the
 	// specializations deduced from the destination type.
 	void AddTargetDeducedOverloads(SemValue& value, const TypePtr& dest);

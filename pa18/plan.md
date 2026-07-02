@@ -276,22 +276,43 @@ stage requires it.
 ## Status
 
 - [x] Architecture mapped; comparison/canonicalization rules read.
-- [ ] Template capture (class + function) without body analysis.
-- [ ] Class template instantiation on demand + cache (re-entrant
-      context save/restore).
-- [ ] Default template arguments (including references to earlier
+- [x] Template capture (class + function) without body analysis.
+- [x] Class template instantiation on demand + cache (re-entrant
+      context save/restore; injected-class-name re-enters the
+      template, 14.6.1p1).
+- [x] Default template arguments (including references to earlier
       parameters).
-- [ ] Function template deduction for direct calls + explicit args.
-- [ ] Non-template-preferred tie-break; template specializations in
-      overload sets (template-id callees; template-vs-nontemplate).
-- [ ] Out-of-class member function/static member/nested-class member
-      definitions of class templates (registered on TemplateInfo;
-      instantiated on demand at class instantiation or later use).
-- [ ] Explicit instantiation (class + function forms).
-- [ ] Operator templates via ADL/using declarations; conversion
-      operators in instantiated classes (existing machinery).
-- [ ] Dependent-base unqualified-lookup skip; `typename` requirement
-      check; definition-time sanity pass for the `-bad` tests.
-- [ ] Template-aware mangling (`I..E`, `T_` back-references, return
-      type for function templates).
+- [x] Function template deduction for direct calls, explicit and
+      partial-explicit template-ids (14.8.1), target-directed
+      deduction (13.4p2), forwarding references, derived-to-base
+      `Foo<T>` matching.
+- [x] Non-template-preferred tie-break; template specializations in
+      overload sets and operator candidate sweeps.
+- [x] Out-of-class member function/static member/nested-class member
+      definitions (registered on TemplateInfo; instantiated per
+      specialization); member classes defer per 14.7.1p1 and complete
+      on demand (fields, variables, member access, sizeof, qualified
+      lookup, constant-expression layout).
+- [x] Explicit instantiation (class + function forms) with
+      `object_root=yes` member emission (14.7.2p8).
+- [x] Operator templates via ADL/using declarations; ADL associates
+      specialization argument namespaces (3.4.2p2).
+- [x] Dependent-base unqualified-lookup skip (14.6.2p3); `typename`
+      requirement (14.6p3); definition-time sanity pass
+      (parameter-shadow, unresolved non-dependent names, out-of-class
+      noexcept mismatch).
+- [x] Template-aware mangling (`I..E`, `T_`/`Tn_` back-references,
+      template-name substitution candidates, return type for function
+      templates); sanitized specialization scope paths; weak
+      instantiated definitions and static members.
+- [x] Trailing-return decltype over the parameters (8.3.5p2 ordering)
+      during substitution and body instantiation.
 - [ ] Full pa18 suite green through `make test-report-through-pa18`.
+      Current state: 1334/1367 through-tests (160/193 pa18), zero
+      earlier-stage regressions. The remaining 33 are a long tail:
+      xvalue reference-member init, inherited constructors through
+      alias-named bases, move-only by-value elision, `__alignof`
+      extension, variable-template-shaped inputs, several LowIR
+      shape/ordering nuances (tls init ordering, temporary slot
+      naming, immediate-conversion folds), and two ambiguous-overload
+      rankings that need 14.5.6.2-adjacent tie-breaks.

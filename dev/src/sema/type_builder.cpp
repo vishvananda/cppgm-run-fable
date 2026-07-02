@@ -190,6 +190,7 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 			result.name = composed.id->parts[0].identifier;
 		}
 		result.type = composed.type;
+		host_.OnParameterComposed(result.name, composed.type);
 		if (parameter.default_arg)
 		{
 			// 8.3.6: only the `= expression` form; recorded for call

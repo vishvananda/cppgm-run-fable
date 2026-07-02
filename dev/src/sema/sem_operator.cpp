@@ -167,12 +167,14 @@ Scope* TemplateDefaultArgScope(const ScopeBinding& binding)
 // carrying their specialization identity.
 void SemExprAnalyzer::AppendTemplateCandidates(
 	const ScopeBinding& binding, const vector<SemValue>& args,
-	vector<OperatorCandidate>& out, set<const void*>& seen)
+	vector<OperatorCandidate>& out, set<const void*>& seen,
+	const AstNamePart* explicit_part)
 {
 	for (size_t t = 0; t < binding.fn_templates.size(); t++)
 	{
 		const FunctionSpecialization* spec =
-			host_.DeduceFunctionTemplate(*binding.fn_templates[t], args);
+			host_.DeduceFunctionTemplate(*binding.fn_templates[t], args,
+			                             explicit_part);
 		if (!spec)
 			continue;
 		if (!seen.insert(&spec->self).second)

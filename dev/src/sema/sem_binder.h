@@ -485,6 +485,9 @@ private:
 	// True inside contexts that are grammatically type-only (base
 	// clauses): 14.6p3 typename is not required there.
 	bool in_implicit_type_context_;
+	// Non-null while composing a function-template signature: composed
+	// parameters bind here so trailing-return decltype resolves them.
+	Scope* param_capture_scope_;
 	// Deferred member-class definitions of instantiated classes
 	// (14.7.1p1), completed on demand by EnsureTypeCompleteness.
 	struct PendingClassDefinition
@@ -499,11 +502,14 @@ private:
 public:
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
-		TemplateInfo& tmpl, const vector<SemValue>& args);
+		TemplateInfo& tmpl, const vector<SemValue>& args,
+		const AstNamePart* explicit_part);
 	virtual Scope* SwapLookupScope(Scope* scope);
 	virtual void RequireCompleteType(const NamedTypeInfo* info);
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target);
+	virtual void OnParameterComposed(const string& name,
+	                                 const TypePtr& type);
 };
 
 // Saved-and-cleared binder state around one instantiation: the

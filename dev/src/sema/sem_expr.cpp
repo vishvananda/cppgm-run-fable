@@ -821,12 +821,22 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	}
 	// PA18: deduced function-template specializations join after the
 	// ordinary overloads.
+	// An explicit template-id callee pre-binds the leading template
+	// parameters (14.8.1).
+	const AstNamePart* explicit_part = 0;
+	{
+		const AstExpr* callee = StripParens(expr.operands[0].get());
+		if (callee->kind == EK_ID && !callee->name.parts.empty() &&
+		    callee->name.parts.back().kind == NP_TEMPLATE_ID)
+			explicit_part = &callee->name.parts.back();
+	}
 	const size_t ordinary = candidates.size();
 	vector<const FunctionSpecialization*> specs(ordinary, (const FunctionSpecialization*)0);
 	{
 		std::set<const void*> seen;
 		vector<OperatorCandidate> deduced;
-		AppendTemplateCandidates(binding, args, deduced, seen);
+		AppendTemplateCandidates(binding, args, deduced, seen,
+		                         explicit_part);
 		for (size_t i = 0; i < deduced.size(); i++)
 		{
 			candidates.push_back(deduced[i].declared);

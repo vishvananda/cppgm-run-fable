@@ -30,6 +30,15 @@ struct ITypeBuilderHost
 	virtual TypePtr ResolveDecltype(const AstExpr& expr) = 0;
 	// 8.3.4: the value of an array-bound constant expression.
 	virtual unsigned long long EvaluateArrayBound(const AstExpr& expr) = 0;
+	// PA18: each composed parameter reports its declared name and type
+	// so a trailing-return decltype can see the parameters (8.3.5p2);
+	// no-op outside template substitution.
+	virtual void OnParameterComposed(const string& name,
+	                                 const TypePtr& type)
+	{
+		(void)name;
+		(void)type;
+	}
 	virtual ~ITypeBuilderHost() {}
 };
 

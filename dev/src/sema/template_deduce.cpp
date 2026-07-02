@@ -290,12 +290,36 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 // --- deduction ---------------------------------------------------------------
 
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
-	TemplateInfo& tmpl, const vector<SemValue>& args)
+	TemplateInfo& tmpl, const vector<SemValue>& args,
+	const AstNamePart* explicit_part)
 {
 	EnsureFunctionPattern(tmpl);
 	if (tmpl.param_patterns.size() < args.size())
 		return 0;
 	vector<TypePtr> bound(tmpl.params.size());
+	// 14.8.1: explicit template arguments bind the leading parameters.
+	if (explicit_part)
+	{
+		if (explicit_part->arguments.size() > tmpl.params.size())
+			return 0;
+		for (size_t i = 0; i < explicit_part->arguments.size(); i++)
+		{
+			const AstTemplateArgument& argument =
+				explicit_part->arguments[i];
+			if (argument.pack || !argument.is_type || !argument.type)
+				return 0;
+			try
+			{
+				bound[i] = builder_.ResolveTypeId(*argument.type);
+			}
+			catch (const std::exception&)
+			{
+				return 0;
+			}
+			if (bound[i] && TypeIsDependent(bound[i]))
+				return 0;
+		}
+	}
 	for (size_t i = 0; i < args.size(); i++)
 	{
 		const TypePtr& pattern = tmpl.param_patterns[i];
@@ -398,16 +422,55 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->name = tmpl.name + TemplateArgumentSpelling(args);
 	spec->param_scope = MakeArgumentAliasScope(tmpl, args);
 
-	// Compose the concrete signature in the template's context.
+	// Compose the concrete signature in the template's context; the
+	// parameters bind into a scratch scope so a trailing-return
+	// decltype can name them (8.3.5p2).
 	const AstDecl& inner = *tmpl.pattern_decl;
 	const AstDeclarator* declarator = inner.kind == DK_FUNCTION
 		? inner.declarator.get()
 		: inner.declarators[0].declarator.get();
-	InstantiationContext context(*this, spec->param_scope);
-	DeclSpecifierInfo specs =
-		builder_.ProcessSpecifiers(inner.specifiers, true);
-	DeclaratorInfo composed =
-		builder_.ComposeDeclarator(declarator, specs.type);
+	Scope* capture = model_.CreateScope(SCOPE_FUNCTION, tmpl.name,
+	                                    spec->param_scope);
+	InstantiationContext context(*this, capture);
+	Scope* saved_capture = param_capture_scope_;
+	param_capture_scope_ = capture;
+	// A trailing-return decltype resolves before the parameter clause
+	// composes (8.3.5p2), so the parameters pre-bind from the clause.
+	if (declarator)
+		if (const AstParameterClause* clause =
+		        FunctionParameterClause(*declarator))
+			for (size_t i = 0; i < clause->parameters.size(); i++)
+			{
+				try
+				{
+					DeclSpecifierInfo pspecs = builder_.ProcessSpecifiers(
+						clause->parameters[i].specifiers, false);
+					DeclaratorInfo pcomposed = builder_.ComposeDeclarator(
+						clause->parameters[i].declarator.get(),
+						pspecs.type);
+					if (pcomposed.id && pcomposed.id->IsPlainIdentifier())
+						OnParameterComposed(
+							pcomposed.id->parts[0].identifier,
+							pcomposed.type);
+				}
+				catch (const std::exception&)
+				{
+					// The full composition below reports real errors.
+				}
+			}
+	DeclSpecifierInfo specs;
+	DeclaratorInfo composed;
+	try
+	{
+		specs = builder_.ProcessSpecifiers(inner.specifiers, true);
+		composed = builder_.ComposeDeclarator(declarator, specs.type);
+	}
+	catch (...)
+	{
+		param_capture_scope_ = saved_capture;
+		throw;
+	}
+	param_capture_scope_ = saved_capture;
 	if (!composed.declares_function ||
 	    composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function template " + tmpl.name +
@@ -453,30 +516,47 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	if (inner.kind != DK_FUNCTION || !inner.body)
 		throw runtime_error("function template " + tmpl.name +
 		                    " has no definition");
-	InstantiationContext context(*this, spec.param_scope);
+	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, spec.name,
+	                                     spec.param_scope);
+	InstantiationContext context(*this, fn_scope);
 	bool saved_instantiating = instantiating_;
 	instantiating_ = true;
+	Scope* saved_capture = param_capture_scope_;
+	param_capture_scope_ = fn_scope;
 	try
 	{
-		// Re-compose in this specialization's context so the parameter
-		// names bind (positional identity with the declaring pattern).
+		// Pre-bind the parameters so the trailing-return decltype (which
+		// composes before the clause, 8.3.5p2) can name them, then
+		// re-compose the declarator in this specialization's context.
+		if (inner.declarator)
+			if (const AstParameterClause* clause =
+			        FunctionParameterClause(*inner.declarator))
+				for (size_t i = 0; i < clause->parameters.size(); i++)
+				{
+					try
+					{
+						DeclSpecifierInfo pspecs =
+							builder_.ProcessSpecifiers(
+								clause->parameters[i].specifiers, false);
+						DeclaratorInfo pcomposed =
+							builder_.ComposeDeclarator(
+								clause->parameters[i].declarator.get(),
+								pspecs.type);
+						if (pcomposed.id &&
+						    pcomposed.id->IsPlainIdentifier())
+							OnParameterComposed(
+								pcomposed.id->parts[0].identifier,
+								pcomposed.type);
+					}
+					catch (const std::exception&)
+					{
+						// The full composition below reports errors.
+					}
+				}
 		DeclSpecifierInfo specs =
 			builder_.ProcessSpecifiers(inner.specifiers, true);
 		DeclaratorInfo composed = builder_.ComposeDeclarator(
 			inner.declarator.get(), specs.type);
-		Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, spec.name,
-		                                     spec.param_scope);
-		for (size_t i = 0; i < composed.parameters.size(); i++)
-		{
-			const ParameterInfo& parameter = composed.parameters[i];
-			if (parameter.name.empty())
-				continue;
-			ScopeBinding binding;
-			binding.kind = SB_PARAMETER;
-			binding.name = parameter.name;
-			binding.type = parameter.type;
-			AddBinding(*fn_scope, binding);
-		}
 
 		SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
 		SemNode* node = item.get();
@@ -520,9 +600,11 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	catch (...)
 	{
 		instantiating_ = saved_instantiating;
+		param_capture_scope_ = saved_capture;
 		throw;
 	}
 	instantiating_ = saved_instantiating;
+	param_capture_scope_ = saved_capture;
 }
 
 void SemBinder::InstantiatePendingFunctions(TemplateInfo& tmpl)
@@ -569,8 +651,9 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 		resolved = spec;
 	}
 	if (!resolved)
-		throw runtime_error("no matching function template for " +
-		                    part.identifier);
+		// A call context can still deduce the remaining parameters
+		// from the arguments (14.8.1); hand back the overload set.
+		return &binding;
 	return &resolved->self;
 }
 
@@ -628,6 +711,20 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner)
 		return;
 	}
 	throw runtime_error("explicit instantiation matches no template");
+}
+
+void SemBinder::OnParameterComposed(const string& name,
+                                    const TypePtr& type)
+{
+	if (!param_capture_scope_ || name.empty())
+		return;
+	if (FindOwnBinding(*param_capture_scope_, name))
+		return;
+	ScopeBinding binding;
+	binding.kind = SB_PARAMETER;
+	binding.name = name;
+	binding.type = type;
+	AddBinding(*param_capture_scope_, binding);
 }
 
 Scope* SemBinder::SwapLookupScope(Scope* scope)
