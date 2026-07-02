@@ -301,6 +301,26 @@ LowerValue FunctionLowerer::LowerNewInit(const SemNode& node)
 	return value;
 }
 
+// PA17 5.3.5p3: a virtual destructor dispatches through the
+// deleting-destructor slot, which also frees the storage.
+void FunctionLowerer::LowerDeletingDispatch(const SemNode& dtor_callee,
+                                            const string& pointer_text)
+{
+	string vpointer = NewTemp();
+	Emit(vpointer + " = load ptr " + pointer_text);
+	string slot_address = vpointer;
+	if (dtor_callee.vtable_slot > 0)
+	{
+		slot_address = NewTemp();
+		Emit(slot_address + " = index i8 " + vpointer + ", " +
+		     to_string(8 * dtor_callee.vtable_slot));
+	}
+	string fn = NewTemp();
+	Emit(fn + " = load ptr " + slot_address);
+	Emit("call void " + fn + "(" + pointer_text + ")" +
+	     IndirectCallSignature(dtor_callee.type));
+}
+
 // delete / delete[]: the null check, element destruction, and the
 // deallocation call. Class arrays read their count header at -8.
 void FunctionLowerer::LowerDelete(const SemNode& node)
@@ -341,16 +361,24 @@ void FunctionLowerer::LowerDelete(const SemNode& node)
 	OpenBlock(nonnull_label);
 	if (!array_form)
 	{
-		if (dtor)
+		const SemNode* dtor_callee = dtor
+			? dtor->children[0]->children[0].get() : 0;
+		if (dtor_callee && dtor_callee->vtable_slot >= 0)
+			LowerDeletingDispatch(*dtor_callee, pointer.text);
+		else
 		{
-			const SemNode& call = *dtor->children[0];
-			Emit("call void " +
-			     program_.MemberFunctionRef(*call.children[0]) + "(" +
-			     pointer.text + ")");
+			if (dtor)
+			{
+				const SemNode& call = *dtor->children[0];
+				Emit("call void " +
+				     program_.MemberFunctionRef(*call.children[0]) + "(" +
+				     pointer.text + ")");
+			}
+			string fn = program_.FunctionRef(callee.entity_scope,
+			                                 callee.entity_name,
+			                                 callee.type);
+			Emit("call void " + fn + "(" + pointer.text + ")");
 		}
-		string fn = program_.FunctionRef(callee.entity_scope,
-		                                 callee.entity_name, callee.type);
-		Emit("call void " + fn + "(" + pointer.text + ")");
 	}
 	else
 	{

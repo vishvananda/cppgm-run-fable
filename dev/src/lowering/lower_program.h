@@ -90,6 +90,24 @@ struct LowStringLiteral
 	string bytes;  // object representation including the terminator
 };
 
+// PA17: one polymorphic class's vtable global. Emitted strong when the
+// class's key function is defined in this program, weak on demand when
+// no key function exists, and as an external declare when the key
+// function lives in another translation unit.
+struct LowVTableInfo
+{
+	LowVTableInfo() : cls(0), used(false), strong(false), rendered(false)
+	{}
+
+	const ClassInfo* cls;
+	string low_name;     // <Class>__vtable
+	string object_name;  // _ZTV<class encoding>
+	bool used;
+	bool strong;    // key function defined in this program
+	bool rendered;
+	string text;    // rendered definition ("" for declare-only)
+};
+
 class LowerProgram
 {
 public:
@@ -125,6 +143,9 @@ public:
 	// odr-used; user-provided definitions reached through synthesized
 	// bodies must be emitted even though the call itself is dropped.
 	void DemandElidedCtor(const SemNode& callee);
+	// PA17: the "@name" spelling of a polymorphic class's vtable
+	// (demand-marks it for emission; lower_vtable.cpp).
+	string VTableRef(const ClassInfo* cls);
 
 private:
 	void CollectItem(const SemNode& item);
@@ -145,6 +166,24 @@ private:
 	void DemandFunction(LowFunctionInfo& info);
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();
+
+	// --- PA17 vtable/RTTI emission (lower_vtable.cpp) ---
+	// The class record behind a this-adjusted member function type.
+	const ClassInfo* MethodClass(const TypePtr& adjusted) const;
+	LowVTableInfo& VTableEntry(const ClassInfo* cls);
+	// Renders every demanded-but-unrendered vtable (demanding its slot
+	// functions and RTTI chain); returns whether any rendered, so the
+	// caller can rerun the function-lowering sweep to a fixpoint.
+	bool RenderPendingVTables();
+	// Merges the polymorphic declares/globals into the output phases.
+	void AppendPolymorphicSections(vector<string>* sections);
+	string RenderVTableDefinition(LowVTableInfo& entry);
+	// The "@name" of a class's RTTI record, rendering it (and its
+	// typeinfo-name data and base chain) on first use.
+	string RttiRef(const ClassInfo* cls);
+	// The "@name" of the external abi class/si_class typeinfo-vtable.
+	string ExternalRttiVtableRef(bool si);
+	void EnsurePureVirtualDeclare(const TypePtr& adjusted);
 	void AppendDynamicInit(LowGlobalInfo& info, const SemNode& child,
 	                       bool ref, SemNode& init_def);
 	void LowerHelper(LowFunctionInfo& info, const SemNode& definition);
@@ -180,4 +219,15 @@ private:
 	// Synthesized definitions whose callees were already demand-walked
 	// (DemandTreeCallees); demand is monotonic, so once is enough.
 	set<const SemNode*> demanded_trees_;
+
+	// --- PA17 polymorphic emission state (lower_vtable.cpp) ---
+	deque<LowVTableInfo> vtables_;
+	map<const ClassInfo*, size_t> vtable_index_;
+	map<const ClassInfo*, string> rtti_names_;   // rendered RTTI records
+	vector<string> poly_declare_globals_;  // external abi/vtable declares
+	vector<string> poly_globals_;          // RTTI + typeinfo-name texts
+	string pure_virtual_name_;     // "" until a pure slot renders
+	string pure_virtual_declare_;
+	string external_class_rtti_name_;
+	string external_si_rtti_name_;
 };

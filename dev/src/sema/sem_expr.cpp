@@ -718,7 +718,12 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 				return AnalyzeAdlCall(
 					expr, callee->name.parts[0].identifier,
 					vector<const ScopeBinding*>(1, binding));
-			return AnalyzeNamedCall(expr, *binding, member_class);
+			// 10.3p15: explicit scope qualification suppresses the
+			// virtual call mechanism.
+			bool qualified = callee->name.parts.size() > 1 ||
+				callee->name.global_scope;
+			return AnalyzeNamedCall(expr, *binding, member_class,
+			                        qualified);
 		}
 	}
 	return AnalyzeIndirectCall(expr);
@@ -726,7 +731,8 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 
 SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
                                            const ScopeBinding& binding,
-                                           const NamedTypeInfo* member_class)
+                                           const NamedTypeInfo* member_class,
+                                           bool qualified)
 {
 	// A member function named without an object: bind the implicit
 	// *this when the context provides one; otherwise only static
@@ -747,7 +753,7 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 			object.type = object.node->type;
 			object.category = VC_LVALUE;
 			return AnalyzeMethodCall(std::move(object), binding,
-			                         expr.arguments);
+			                         expr.arguments, qualified);
 		}
 		return AnalyzeStaticMethodCall(expr, binding);
 	}

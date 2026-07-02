@@ -64,6 +64,16 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 	// member definitions arrive through unit.deferred.
 	for (size_t i = 0; i < unit.deferred.size(); i++)
 		RegisterDeferred(*unit.deferred[i]);
+	// PA17: a class whose key function is defined in this unit anchors
+	// its vtable here (emitted strong even without local construction).
+	const vector<const ClassInfo*>& classes = unit.classes.All();
+	for (size_t i = 0; i < classes.size(); i++)
+		if (classes[i]->is_polymorphic && classes[i]->key_defined_in_tu)
+		{
+			LowVTableInfo& entry = VTableEntry(classes[i]);
+			entry.used = true;
+			entry.strong = true;
+		}
 }
 
 // A deferred in-class definition (method, hidden friend, constructor,
@@ -285,6 +295,9 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		base += "__ov" + to_string(overload + 1);
 	if (special_code == "C2" || special_code == "D2")
 		base += "__base_entry";
+	else if (special_code == "D0")
+		// PA17: the deleting destructor entry (vtable slot pair).
+		base += "__deleting_entry";
 	info.low_name = UniqueSymbol(base);
 	info.internal = LowerInUnnamedNamespace(scope);
 	info.object_name = MangleMemberFunctionObjectName(scope, name, type,
@@ -300,7 +313,8 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	ESpecialFunction special = SF_NONE;
 	if (special_code == "C1" || special_code == "C2")
 		special = SF_CONSTRUCTOR;
-	else if (special_code == "D1" || special_code == "D2")
+	else if (special_code == "D1" || special_code == "D2" ||
+	         special_code == "D0")
 		special = SF_DESTRUCTOR;
 	map<string, const SemNode*>::iterator def = member_defs_.find(
 		MemberDefinitionKey(scope, name, type, special));
@@ -656,6 +670,19 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 	if (info.defined && info.body_text.empty() &&
 	    info.index < lower_floor_)
 		lower_floor_ = info.index;
+	// PA17: an emitted base entry of a user-provided constructor or
+	// destructor of a class with a virtual destructor also prints the
+	// complete entry (which carries the base-entry alias), mirroring
+	// the reference comdat-style member emission.
+	if ((info.special_code == "C2" || info.special_code == "D2") &&
+	    info.defined && info.definition && !info.definition->synthesized)
+	{
+		const ClassInfo* cls = MethodClass(info.type);
+		if (cls && cls->is_polymorphic && cls->dtor_virtual)
+			DemandFunction(MemberFunctionEntry(
+				info.scope, info.name, info.type,
+				info.special_code == "C2" ? "C1" : "D1"));
+	}
 }
 
 // Lowers the reachable definitions: source-owned roots first, then
@@ -811,6 +838,22 @@ void LowerProgram::BuildLifetimeHelpers()
 	}
 }
 
+// PA17 polymorphic emission: external declares, the pure-virtual
+// stand-in, RTTI records, and the vtable definitions merge into the
+// declare-global, declare-function, and global output phases.
+void LowerProgram::AppendPolymorphicSections(vector<string>* sections)
+{
+	for (size_t i = 0; i < poly_declare_globals_.size(); i++)
+		sections[0].push_back(poly_declare_globals_[i]);
+	if (!pure_virtual_declare_.empty())
+		sections[1].push_back(pure_virtual_declare_);
+	for (size_t i = 0; i < poly_globals_.size(); i++)
+		sections[2].push_back(poly_globals_[i]);
+	for (size_t i = 0; i < vtables_.size(); i++)
+		if (!vtables_[i].text.empty())
+			sections[2].push_back(vtables_[i].text);
+}
+
 void LowerProgram::Write(ostream& out)
 {
 	// Lifetime helpers register dynamic-init facts before the globals
@@ -821,6 +864,11 @@ void LowerProgram::Write(ostream& out)
 		if (globals_[i].defined)
 			globals_[i].init_text = RenderGlobal(globals_[i]);
 	LowerUsedFunctions();
+	// PA17: rendering a demanded vtable demands its slot definitions
+	// (and their bodies may demand further vtables), so the two sweeps
+	// alternate to a fixpoint.
+	while (RenderPendingVTables())
+		LowerUsedFunctions();
 
 	vector<string> sections[5];
 	for (size_t i = 0; i < globals_.size(); i++)
@@ -877,6 +925,7 @@ void LowerProgram::Write(ostream& out)
 	for (size_t i = 0; i < globals_.size(); i++)
 		if (globals_[i].defined)
 			sections[2].push_back(globals_[i].init_text);
+	AppendPolymorphicSections(sections);
 	for (size_t i = 0; i < functions_.size(); i++)
 	{
 		const LowFunctionInfo& info = functions_[i];

@@ -333,10 +333,29 @@ void SemBinder::OnTypeAliasBound(const string& name, const TypePtr& type)
 }
 
 void SemBinder::OnFunctionDeclared(ScopeBinding& binding,
-                                   const TypePtr& type)
+                                   const TypePtr& type,
+                                   const DeclSpecifierInfo* specs,
+                                   const DeclaratorInfo* composed,
+                                   bool pure)
 {
 	if (current_->kind == SCOPE_CLASS)
+	{
+		// PA17: record the member's virtual-slot facts while the class
+		// is open (out-of-class definitions redeclare nothing).
+		ClassInfo* cls = OpenClass();
+		if (cls && current_ == cls->members)
+		{
+			size_t index = 0;
+			for (size_t i = 0; i < binding.overloads.size(); i++)
+				if (TypeEquals(binding.overloads[i], type))
+					index = i + 1;
+			bool defined = index < binding.fn_inline_def.size() &&
+				binding.fn_inline_def[index];
+			RecordVirtualMember(*cls, binding.name, type, specs,
+			                    composed, pure, defined);
+		}
 		return;
+	}
 	SemNode* item = AppendItem(SN_FUNCTION_DECLARATION);
 	item->name = CanonicalQualifiedName(binding.owner, binding.name);
 	item->type = type;

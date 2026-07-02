@@ -110,6 +110,32 @@ struct ClassConversion
 	EMemberAccess access;
 };
 
+// PA17: one vtable slot (10.3). Slots inherit position from the base
+// class; an override replaces the final overrider in place. A virtual
+// destructor occupies two adjacent slots (complete, then deleting).
+enum EVirtualSlotKind
+{
+	VS_METHOD,
+	VS_DTOR_COMPLETE,
+	VS_DTOR_DELETING
+};
+
+struct VirtualSlot
+{
+	VirtualSlot()
+		: kind(VS_METHOD), owner(0), pure(false), is_final(false)
+	{}
+
+	EVirtualSlotKind kind;
+	string name;          // member name ("~C" for destructor slots)
+	// The final overrider's this-adjusted function type (the member
+	// entry identity the lowering keys on). VS_METHOD only.
+	TypePtr type;
+	const Scope* owner;   // final overrider's class member scope
+	bool pure;            // 10.4 pure-virtual declaration
+	bool is_final;        // 10.3p4 method-level final
+};
+
 struct ClassInfo
 {
 	ClassInfo()
@@ -127,6 +153,9 @@ struct ClassInfo
 		  move_assign_index(-1), copy_assign_deleted(false),
 		  copy_assign_built(false), move_assign_built(false),
 		  copy_assign_unwind_no(false), move_assign_unwind_no(false),
+		  is_polymorphic(false), declares_virtual(false),
+		  dtor_virtual(false), dtor_slot(-1), key_is_dtor(false),
+		  key_defined_in_tu(false),
 		  facts_version(0), facts_valid(0), facts_value(0)
 	{}
 
@@ -183,6 +212,28 @@ struct ClassInfo
 	bool move_assign_built;
 	bool copy_assign_unwind_no;
 	bool move_assign_unwind_no;
+
+	// --- PA17 polymorphic object-model facts (10.3) ---
+	// A polymorphic class carries the single shared vpointer at offset
+	// 0: inherited from a polymorphic direct base, or introduced by the
+	// first textually `virtual` member (pre-scanned before layout so
+	// fields declared ahead of the first virtual member still follow
+	// the vpointer).
+	bool is_polymorphic;
+	bool declares_virtual;  // own members spell the `virtual` keyword
+	// Vtable slot order: inherited base slots first (overriders replace
+	// in place), then newly introduced slots in declaration order.
+	vector<VirtualSlot> vslots;
+	bool dtor_virtual;  // declared virtual or inherits a virtual dtor
+	int dtor_slot;      // VS_DTOR_COMPLETE position (-1 when none)
+	// Itanium-style key function: the first declared non-pure virtual
+	// member (destructor included) without an in-class definition. The
+	// vtable emits strong in the translation unit that defines it, weak
+	// on demand when no key function exists.
+	string key_name;    // empty when the class has no key function
+	TypePtr key_type;   // declared (unadjusted) function type
+	bool key_is_dtor;
+	bool key_defined_in_tu;
 	// Lazily memoized recursive class facts (triviality and
 	// construction/destruction queries). Out-of-class special-member
 	// definitions can change the underlying facts after class
@@ -200,6 +251,13 @@ public:
 	ClassInfo& Create(const NamedTypeInfo* entity);
 	ClassInfo* Find(const NamedTypeInfo* entity);
 	const ClassInfo* Find(const NamedTypeInfo* entity) const;
+
+	// Creation-order iteration (deterministic; the lowering walks it
+	// for key-function vtable emission).
+	const vector<const ClassInfo*>& All() const
+	{
+		return order_;
+	}
 
 	// Whether destruction of an object of this class requires code (a
 	// user destructor anywhere in the base/member subobject tree).
@@ -225,6 +283,7 @@ private:
 	bool ComputeDefaultConstructionEffects(const ClassInfo& info) const;
 
 	map<const NamedTypeInfo*, unique_ptr<ClassInfo>> infos_;
+	vector<const ClassInfo*> order_;  // creation order
 };
 
 // --- layout -----------------------------------------------------------
@@ -251,6 +310,18 @@ void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity,
 
 // The field row of `name` declared in this class (no base search).
 const ClassField* FindClassField(const ClassInfo& info, const string& name);
+
+// PA17: the vtable slot of the virtual member function matching the
+// declared (unadjusted) function signature - name, parameter list, and
+// method cv-qualification (10.3p2) - or -1. Callers pass the static
+// class of the object expression; inherited slots keep their base
+// positions, so the index is dispatch-ready.
+int FindVirtualSlotIndex(const ClassInfo& info, const string& name,
+                         const TypePtr& declared);
+
+// PA17 layout pre-scan: whether a class body textually declares a
+// virtual member (drives vpointer reservation before fields lay out).
+bool ClassBodyDeclaresVirtual(const AstDecl& decl);
 
 // The constructor overload position whose parameter list matches
 // `type`, or -1 (used for deterministic low-name overload suffixes).

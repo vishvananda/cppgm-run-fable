@@ -668,16 +668,21 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	if (composed.type->kind == TK_FUNCTION)
 	{
 		// 8.4.3: `= delete` is a deleted definition; `= default` is a
-		// defaulted definition of a special member function; any other
-		// initializer on a function declarator is ill-formed.
+		// defaulted definition of a special member function; `= 0` on a
+		// member function declarator is the pure-specifier (9.2p1); any
+		// other initializer on a function declarator is ill-formed.
 		bool deleted = declarator.init &&
 			declarator.init->kind == INIT_DELETE;
 		bool defaulted = declarator.init &&
 			declarator.init->kind == INIT_DEFAULT;
+		bool pure = current_->kind == SCOPE_CLASS && declarator.init &&
+			declarator.init->kind == INIT_EQ && declarator.init->expr &&
+			declarator.init->expr->kind == EK_LITERAL &&
+			declarator.init->expr->literal == "0";
 		if (defaulted &&
 		    (current_->kind != SCOPE_CLASS || name != "operator ="))
 			throw runtime_error("defaulted non-special member function");
-		if (declarator.init && !deleted && !defaulted)
+		if (declarator.init && !deleted && !defaulted && !pure)
 			throw OutsideBoundary("function declarator initializer");
 		// 8.3.5p6: cv-qualifiers only on non-static member functions.
 		if ((composed.type->is_const || composed.type->is_volatile) &&
@@ -697,7 +702,8 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 		}
 		if (in_c_linkage_)
 			binding.c_linkage = true;
-		OnFunctionDeclared(binding, composed.type);
+		OnFunctionDeclared(binding, composed.type, &specs, &composed,
+		                   pure);
 		return;
 	}
 	// 7.1.5p9: a constexpr object declaration declares a const object.
@@ -846,6 +852,11 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	                    declaring->kind == SCOPE_CLASS);
 	if (in_c_linkage_)
 		binding.c_linkage = true;
+	// PA17: an in-class member function definition declares the member;
+	// the binder records virtual-slot facts through the same event.
+	if (declaring->kind == SCOPE_CLASS)
+		OnFunctionDeclared(binding, composed.type, &specs, &composed,
+		                   false);
 	Scope* scope = model_.CreateScope(SCOPE_FUNCTION, name, declaring);
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
@@ -918,10 +929,16 @@ void DeclBinder::OnVariableBound(ScopeBinding& binding,
 }
 
 void DeclBinder::OnFunctionDeclared(ScopeBinding& binding,
-                                    const TypePtr& type)
+                                    const TypePtr& type,
+                                    const DeclSpecifierInfo* specs,
+                                    const DeclaratorInfo* composed,
+                                    bool pure)
 {
 	(void)binding;
 	(void)type;
+	(void)specs;
+	(void)composed;
+	(void)pure;
 }
 
 void DeclBinder::BindTemplateDeclaration(const AstDecl& decl)

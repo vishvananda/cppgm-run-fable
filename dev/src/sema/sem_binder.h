@@ -65,7 +65,10 @@ protected:
 	                             const AstInitializer* init,
 	                             const DeclSpecifierInfo& specs);
 	virtual void OnFunctionDeclared(ScopeBinding& binding,
-	                                const TypePtr& type);
+	                                const TypePtr& type,
+	                                const DeclSpecifierInfo* specs = 0,
+	                                const DeclaratorInfo* composed = 0,
+	                                bool pure = false);
 	virtual void BindAnonymousUnionMembers(const AstDecl& decl,
 	                                       const TypePtr& type,
 	                                       const Scope& union_scope);
@@ -233,12 +236,35 @@ private:
 	void AppendBaseTransfer(const ClassInfo& cls, bool is_move,
 	                        bool assign_form, const SemNode& source_proto,
 	                        vector<SemNodePtr>& out);
+	void AppendMemberArrayTransfer(const ClassInfo& member,
+	                               const ClassField& field,
+	                               const SemNode& source_proto,
+	                               EValueCategory category,
+	                               vector<SemNodePtr>& out);
 	void AppendTransferActions(const ClassInfo& cls, bool is_move,
 	                           bool assign_form, const SemNode& source_proto,
 	                           vector<SemNodePtr>& out);
 	virtual void BindInheritingConstructors(Scope* base_scope);
 	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
 	                              SemNodePtr address);
+
+	// --- PA17 virtual members (sem_virtual.cpp) ---
+	// Declaration-time slot recording for an ordinary member function
+	// (10.3p2 override matching, 10.3p4 final, 10.3p7 covariant returns)
+	// and for a declared destructor.
+	void RecordVirtualMember(ClassInfo& cls, const string& name,
+	                         const TypePtr& type,
+	                         const DeclSpecifierInfo* specs,
+	                         const DeclaratorInfo* composed, bool pure,
+	                         bool defined);
+	void RecordVirtualDtor(ClassInfo& cls, bool declared_virtual,
+	                       const DeclaratorInfo& composed, bool defined,
+	                       bool defaulted, bool deleted);
+	// Class-completion fixup: an implicit destructor overrides an
+	// inherited virtual destructor (12.4p9).
+	void FinishClassVirtualFacts(ClassInfo& cls);
+	// The vpointer-store action of a constructor/destructor body.
+	SemNodePtr MakeVPointerStore(const ClassInfo& cls);
 	bool NodeMayThrow(const SemNode& node) const;
 	bool DerivedToBaseClass(const TypePtr& from, const TypePtr& to);
 	void AttachObjectLifetime(SemNode& item, ScopeBinding& binding,

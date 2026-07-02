@@ -75,7 +75,8 @@ struct ParameterInfo
 struct DeclaratorInfo
 {
 	DeclaratorInfo() : id(0), declares_function(false),
-	                   noexcept_simple(false) {}
+	                   noexcept_simple(false), has_override(false),
+	                   has_final(false) {}
 
 	TypePtr type;
 	// 8.3.5p2: a pending trailing-return-type replacing an `auto`
@@ -91,6 +92,9 @@ struct DeclaratorInfo
 	// PA14: bare `noexcept` or empty `throw()` on the declarator (the
 	// cheap non-unwinding markings; expressions are not evaluated).
 	bool noexcept_simple;
+	// PA17 virt-specifiers on a member function declarator (10.3).
+	bool has_override;
+	bool has_final;
 };
 
 class TypeBuilder

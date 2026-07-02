@@ -545,7 +545,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 // take a neutral identity binding.
 SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	SemValue object, const ScopeBinding& binding,
-	const vector<AstExprPtr>& arguments)
+	const vector<AstExprPtr>& arguments, bool qualified)
 {
 	const NamedTypeInfo* object_entity = object.type->named;
 	vector<TypePtr> declared;
@@ -657,6 +657,22 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	if (winner < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[winner])
 		callee->unwind_no = true;
+	// PA17 dynamic dispatch: an unqualified call to a virtual member
+	// dispatches through the static class's vtable slot (10.3p6); the
+	// dynamic callee may not be the statically selected one.
+	if (!is_static && !qualified)
+	{
+		const ClassInfo* static_cls = host_.Classes().Find(object_entity);
+		if (static_cls)
+		{
+			// 15.4p3: overriders keep a no-less-strict exception
+			// specification, so the static callee's unwind fact holds
+			// for every dynamic target.
+			int slot = FindVirtualSlotIndex(*static_cls, binding.name, fn);
+			if (slot >= 0)
+				callee->vtable_slot = slot;
+		}
+	}
 	value.node->children.push_back(std::move(callee));
 	if (!is_static)
 	{

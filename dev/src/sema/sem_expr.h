@@ -191,7 +191,8 @@ private:
 	SemValue AnalyzeCall(const AstExpr& expr);
 	SemValue AnalyzeNamedCall(const AstExpr& expr,
 	                          const ScopeBinding& binding,
-	                          const NamedTypeInfo* member_class);
+	                          const NamedTypeInfo* member_class,
+	                          bool qualified);
 	SemValue AnalyzeIndirectCall(const AstExpr& expr);
 	// PA16: an unqualified call with argument-dependent lookup
 	// (sem_operator.cpp); `visible` holds the ordinary-lookup function
@@ -234,8 +235,11 @@ private:
 	                               const string& written);
 	SemValue AnalyzeMemberCall(const AstExpr& expr,
 	                           const AstExpr& callee);
+	// PA17: `qualified` suppresses dynamic dispatch (10.3p15 explicit
+	// scope qualification calls the named function directly).
 	SemValue AnalyzeMethodCall(SemValue object, const ScopeBinding& binding,
-	                           const vector<AstExprPtr>& arguments);
+	                           const vector<AstExprPtr>& arguments,
+	                           bool qualified = false);
 	SemValue AnalyzeStaticMethodCall(const AstExpr& expr,
 	                                 const ScopeBinding& binding);
 	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,

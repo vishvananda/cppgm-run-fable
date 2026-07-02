@@ -223,6 +223,20 @@ private:
 	string ClassArrayElement(const string& base, const LowerValue& index,
 	                         const TypePtr& element);
 
+	// --- PA17 polymorphic lowering (lower_member.cpp) ---
+	// SN_VPOINTER_STORE: stores the class's vtable entry pointer into
+	// the object addressed by children[0].
+	void LowerVPointerStore(const SemNode& node);
+	// The trailing `operator delete(this)` call of a deleting
+	// destructor entry (special_code "D0").
+	void EmitDeletingEpilogue();
+	// Scalar delete of a class with a virtual destructor: the indirect
+	// call through the deleting-destructor slot.
+	void LowerDeletingDispatch(const SemNode& dtor_callee,
+	                           const string& pointer_text);
+	// The `as (...) -> ...` suffix of an indirect (or dispatched) call.
+	string IndirectCallSignature(const TypePtr& fn_type);
+
 	// --- PA15 lifetime (lower_member.cpp) ---
 	// Full-expression temporaries (12.2): registered as each one is
 	// constructed, destroyed at the end of the enclosing full

@@ -556,6 +556,10 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 	}
 	else if (base_init)
 		throw runtime_error("base initializer without a base class");
+	// PA17: the vpointer stores after base construction, before any
+	// member initialization.
+	if (cls.is_polymorphic)
+		actions.push_back(MakeVPointerStore(cls));
 	size_t matched = base_init ? 1 : 0;
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
@@ -673,6 +677,8 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 	{
 		if (cls.base)
 			AppendBaseDefaultInit(cls, actions);
+		if (cls.is_polymorphic)
+			actions.push_back(MakeVPointerStore(cls));
 		for (size_t i = 0; i < cls.fields.size(); i++)
 			if (!cls.is_union &&
 			    (!cls.fields[i].name.empty() ||
@@ -731,6 +737,10 @@ void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in,
 	method_.this_type = node->type->parameters[0];
 	try
 	{
+		// PA17: the destructor re-stores this class's vpointer before
+		// destroying members and bases.
+		if (cls.is_polymorphic)
+			node->children.push_back(MakeVPointerStore(cls));
 		AnalyzeDtorEpilogue(cls, *node);
 	}
 	catch (...)

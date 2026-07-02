@@ -337,9 +337,18 @@ SemValue SemExprAnalyzer::AnalyzeDelete(const AstExpr& expr)
 		if (array_form)
 			value.node->member_offset = 8;
 		if (host_.Classes().NeedsDestruction(*cls))
+		{
 			// 5.3.5p6: the deleted object's destructor runs even when
 			// the chain is effect-free.
-			value.node->children.push_back(host_.MakeTemporaryDtor(*cls));
+			SemNodePtr dtor = host_.MakeTemporaryDtor(*cls);
+			// PA17 5.3.5p3: scalar delete of a class with a virtual
+			// destructor dispatches through the deleting-destructor
+			// vtable slot (which also frees the storage).
+			if (!array_form && cls->dtor_virtual && cls->dtor_slot >= 0)
+				dtor->children[0]->children[0]->vtable_slot =
+					cls->dtor_slot + 1;
+			value.node->children.push_back(std::move(dtor));
+		}
 	}
 	return value;
 }

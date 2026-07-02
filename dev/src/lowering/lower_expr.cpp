@@ -1109,17 +1109,37 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		preserve_slot = AddMatSlot("call",
 		                           LowerValueType(fn_type->target));
 	string arguments;
+	string object_text;  // the implicit object argument (dispatch)
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
 		TypePtr param = i - 1 < fn_type->parameters.size()
 			? fn_type->parameters[i - 1] : TypePtr();
 		string text = LowerCallArgument(*node.children[i], param);
+		if (i == 1)
+			object_text = text;
 		arguments += (i > 1 ? ", " : "") + text;
 	}
 	// The callee value of an indirect call lowers after the arguments
 	// (the oracle's evaluation order).
+	bool dispatch = direct && callee.vtable_slot >= 0;
 	string callee_text;
-	if (direct && (callee.is_method || callee.special != SF_NONE))
+	if (dispatch)
+	{
+		// PA17 dynamic dispatch: the callee loads from the object's
+		// vpointer at the resolved slot.
+		string vpointer = NewTemp();
+		Emit(vpointer + " = load ptr " + object_text);
+		string slot_address = vpointer;
+		if (callee.vtable_slot > 0)
+		{
+			slot_address = NewTemp();
+			Emit(slot_address + " = index i8 " + vpointer + ", " +
+			     to_string(8 * callee.vtable_slot));
+		}
+		callee_text = NewTemp();
+		Emit(callee_text + " = load ptr " + slot_address);
+	}
+	else if (direct && (callee.is_method || callee.special != SF_NONE))
 		callee_text = program_.MemberFunctionRef(callee);
 	else if (direct)
 		callee_text = program_.FunctionRef(callee.entity_scope,
@@ -1157,29 +1177,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// call itself still runs protected.
 	if (protected_call && !eh_open_ && !in_cleanup_emission_)
 		OpenEhRegion();
-	if (!direct)
-	{
-		string signature;
-		size_t at = 0;
-		if (indirect_result)
-		{
-			signature = "%arg0 : ptr [pass=indirect_result]";
-			at = 1;
-		}
-		for (size_t i = 0; i < fn_type->parameters.size(); i++, at++)
-		{
-			string param_text;
-			string pass;
-			LowerAbiParameter(fn_type->parameters[i], param_text, pass);
-			signature += (at ? ", " : "") + string("%arg") +
-				to_string(at) + " : " + param_text;
-			if (!pass.empty())
-				signature += " [pass=" + pass + "]";
-		}
-		line += " as (" + signature + ") -> " + return_text;
-		if (fn_type->variadic)
-			line += " [arity=variadic]";
-	}
+	if (!direct || dispatch)
+		line += IndirectCallSignature(fn_type);
 	Emit(line);
 	bool class_result =
 		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&

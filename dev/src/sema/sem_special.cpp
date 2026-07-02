@@ -374,6 +374,11 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 {
 	alignment = 1;
 	first_suffix = 0;
+	// PA17: a polymorphic object's storage prefix starts with the
+	// vpointer, which must never copy from the source (the dynamic
+	// types can differ); every subobject transfers individually.
+	if (cls.is_polymorphic)
+		return 0;
 	// The prefix spans subobjects whose transfer of *this* form is
 	// trivial: constructor forms check copy/move constructors, assign
 	// forms check copy/move assignments (12.8p25/p28).
@@ -473,6 +478,37 @@ void SemBinder::AppendBaseTransfer(const ClassInfo& cls, bool is_move,
 	                                  std::move(arg_nodes)));
 }
 
+// Per-element transfer of a class array member through the element
+// class's copy/move constructor.
+void SemBinder::AppendMemberArrayTransfer(const ClassInfo& member,
+                                          const ClassField& field,
+                                          const SemNode& source_proto,
+                                          EValueCategory category,
+                                          vector<SemNodePtr>& out)
+{
+	TypePtr bare = RemoveTopCv(field.type);
+	TypePtr element = RemoveTopCv(bare->target);
+	for (unsigned long long j = 0; j < bare->bound; j++)
+	{
+		SemValue source;
+		source.node = SubscriptNode(
+			SourceFieldExpr(source_proto, field, category), j);
+		source.node->category = category;
+		source.type = element;
+		source.category = category;
+		vector<SemValue> args;
+		args.push_back(std::move(source));
+		int index = ResolveClassConstructor(member, args, false,
+		                                    field.name.c_str());
+		vector<SemNodePtr> arg_nodes;
+		arg_nodes.push_back(std::move(args[0].node));
+		out.push_back(MakeConstructorCall(
+			member, index, false,
+			AddressOfNode(SubscriptNode(ThisFieldExpr(field), j)),
+			std::move(arg_nodes)));
+	}
+}
+
 void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
                                       bool assign_form,
                                       const SemNode& source_proto,
@@ -491,6 +527,11 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 		AppendBaseTransfer(cls, is_move, assign_form, source_proto,
 		                   out);
 	}
+	// PA17: a synthesized copy/move constructor stores this class's own
+	// vpointer after the base transfer; assignment never changes the
+	// established dynamic type.
+	if (!assign_form && cls.is_polymorphic)
+		out.push_back(MakeVPointerStore(cls));
 	for (size_t i = first_suffix; i < cls.fields.size(); i++)
 	{
 		const ClassField& field = cls.fields[i];
@@ -500,27 +541,8 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 		TypePtr bare = RemoveTopCv(field.type);
 		if (member && bare->kind == TK_ARRAY)
 		{
-			// Per-element transfer of a class array member.
-			TypePtr element = RemoveTopCv(bare->target);
-			for (unsigned long long j = 0; j < bare->bound; j++)
-			{
-				SemValue source;
-				source.node = SubscriptNode(
-					SourceFieldExpr(source_proto, field, category), j);
-				source.node->category = category;
-				source.type = element;
-				source.category = category;
-				vector<SemValue> args;
-				args.push_back(std::move(source));
-				int index = ResolveClassConstructor(*member, args, false,
-				                                    field.name.c_str());
-				vector<SemNodePtr> arg_nodes;
-				arg_nodes.push_back(std::move(args[0].node));
-				out.push_back(MakeConstructorCall(
-					*member, index, false,
-					AddressOfNode(SubscriptNode(ThisFieldExpr(field), j)),
-					std::move(arg_nodes)));
-			}
+			AppendMemberArrayTransfer(*member, field, source_proto,
+			                          category, out);
 			continue;
 		}
 		if (member && !assign_form)

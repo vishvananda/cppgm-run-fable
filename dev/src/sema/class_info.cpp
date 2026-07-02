@@ -63,6 +63,7 @@ ClassInfo& ClassRegistry::Create(const NamedTypeInfo* entity)
 	{
 		slot.reset(new ClassInfo());
 		slot->entity = entity;
+		order_.push_back(slot.get());
 	}
 	return *slot;
 }
@@ -112,7 +113,8 @@ bool ClassRegistry::NeedsConstruction(const ClassInfo& info) const
 	bool value;
 	if (FactCached(info, CF_NEEDS_CONSTRUCTION, value))
 		return value;
-	value = info.has_user_ctor;
+	// PA17: constructing a polymorphic object must store the vpointer.
+	value = info.has_user_ctor || info.is_polymorphic;
 	if (!value && info.base)
 		value = NeedsConstruction(*info.base);
 	for (size_t i = 0; !value && i < info.fields.size(); i++)
@@ -136,9 +138,11 @@ bool ClassRegistry::DestructionHasEffects(const ClassInfo& info) const
 	bool value;
 	if (FactCached(info, CF_DESTRUCTION_EFFECTS, value))
 		return value;
-	value = info.has_user_dtor &&
-		(!info.dtor_definition ||
-		 !EmptyMemberBody(info.dtor_definition->body.get()));
+	// PA17: a polymorphic destructor re-stores the vpointer.
+	value = info.is_polymorphic ||
+		(info.has_user_dtor &&
+		 (!info.dtor_definition ||
+		  !EmptyMemberBody(info.dtor_definition->body.get())));
 	if (!value && info.base)
 		value = DestructionHasEffects(*info.base);
 	for (size_t i = 0; !value && i < info.fields.size(); i++)
@@ -161,6 +165,9 @@ bool ClassRegistry::DefaultConstructionHasEffects(const ClassInfo& info) const
 bool ClassRegistry::ComputeDefaultConstructionEffects(
 	const ClassInfo& info) const
 {
+	// PA17: the vpointer store is emitted construction work.
+	if (info.is_polymorphic)
+		return true;
 	if (info.has_user_ctor)
 	{
 		const ClassCtor* found = 0;
@@ -213,15 +220,29 @@ void BeginClassLayout(ClassInfo& info)
 	info.bit_cursor = 0;
 	info.alignment = 1;
 	info.is_empty = true;
-	if (!info.base)
-		return;
-	info.alignment = info.base->alignment;
-	// The direct base subobject sits at offset 0; an empty base
-	// occupies no storage (the empty-base optimization), every other
-	// base reserves its full size before the first member.
-	if (!info.base->is_empty)
+	info.is_polymorphic = info.declares_virtual ||
+		(info.base && info.base->is_polymorphic);
+	if (info.base)
 	{
-		info.bit_cursor = info.base->size * 8;
+		info.alignment = info.base->alignment;
+		// The direct base subobject sits at offset 0; an empty base
+		// occupies no storage (the empty-base optimization), every other
+		// base reserves its full size before the first member.
+		if (!info.base->is_empty)
+		{
+			info.bit_cursor = info.base->size * 8;
+			info.is_empty = false;
+		}
+	}
+	// PA17: a class that introduces the polymorphic layer carries the
+	// vpointer at offset 0 ahead of every field. A polymorphic base
+	// already reserved it inside its own span.
+	if (info.is_polymorphic && (!info.base || !info.base->is_polymorphic))
+	{
+		if (info.bit_cursor < 64)
+			info.bit_cursor = 64;
+		if (info.alignment < 8)
+			info.alignment = 8;
 		info.is_empty = false;
 	}
 }
@@ -398,7 +419,9 @@ bool ClassHasTrivialDtor(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_DTOR, value))
 		return value;
+	// 12.4p5: a virtual destructor is not trivial.
 	value = !info.has_user_dtor && !info.dtor_deleted &&
+		!info.dtor_virtual &&
 		SubobjectsSatisfy<ClassHasTrivialDtor>(info);
 	return FactStore(info, CF_TRIVIAL_DTOR, value);
 }
@@ -408,7 +431,8 @@ bool ClassHasTrivialCopyCtor(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_COPY_CTOR, value))
 		return value;
-	value = !UserProvidedCtor(info, CK_COPY) &&
+	// 12.8p12: virtual functions make the copy constructor non-trivial.
+	value = !UserProvidedCtor(info, CK_COPY) && !info.is_polymorphic &&
 		SubobjectsSatisfy<ClassHasTrivialCopyCtor>(info);
 	return FactStore(info, CF_TRIVIAL_COPY_CTOR, value);
 }
@@ -418,7 +442,7 @@ bool ClassHasTrivialMoveCtor(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_MOVE_CTOR, value))
 		return value;
-	value = !UserProvidedCtor(info, CK_MOVE) &&
+	value = !UserProvidedCtor(info, CK_MOVE) && !info.is_polymorphic &&
 		SubobjectsSatisfy<ClassHasTrivialMoveCtor>(info);
 	return FactStore(info, CF_TRIVIAL_MOVE_CTOR, value);
 }
@@ -428,7 +452,8 @@ bool ClassHasTrivialCopyAssign(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_COPY_ASSIGN, value))
 		return value;
-	value = !info.has_user_copy_assign &&
+	// 12.8p25: virtual functions make copy assignment non-trivial.
+	value = !info.has_user_copy_assign && !info.is_polymorphic &&
 		SubobjectsSatisfy<ClassHasTrivialCopyAssign>(info);
 	return FactStore(info, CF_TRIVIAL_COPY_ASSIGN, value);
 }
@@ -438,7 +463,7 @@ bool ClassHasTrivialMoveAssign(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_MOVE_ASSIGN, value))
 		return value;
-	value = !info.has_user_move_assign &&
+	value = !info.has_user_move_assign && !info.is_polymorphic &&
 		SubobjectsSatisfy<ClassHasTrivialMoveAssign>(info);
 	return FactStore(info, CF_TRIVIAL_MOVE_ASSIGN, value);
 }

@@ -262,12 +262,20 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		out.trailing_return = ResolveTypeId(*item.trailing_type);
 		break;
 	case DI_FUNC_QUAL:
-		// Exception specifications do not enter the PA11 type model;
-		// virt-specifiers are PA17 territory (ref-qualifiers are
-		// consumed by the suffix walk). The cheap non-unwinding
-		// markings are kept for the PA14 LowIR boundary metadata.
+		// Exception specifications do not enter the PA11 type model
+		// (ref-qualifiers are consumed by the suffix walk). The cheap
+		// non-unwinding markings are kept for the PA14 LowIR boundary
+		// metadata; PA17 records the virt-specifiers for the binder.
 		if (item.qual.kind == FQ_VIRT)
-			throw OutsideBoundary("virt-specifier");
+		{
+			if (item.qual.spelling == "override")
+				out.has_override = true;
+			else if (item.qual.spelling == "final")
+				out.has_final = true;
+			else
+				throw OutsideBoundary("virt-specifier");
+			break;
+		}
 		if ((item.qual.kind == FQ_NOEXCEPT && !item.qual.has_expr) ||
 		    (item.qual.kind == FQ_THROW && item.qual.throw_types.empty()))
 			out.noexcept_simple = true;

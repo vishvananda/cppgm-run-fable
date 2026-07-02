@@ -104,7 +104,11 @@ enum ESemNodeKind
 	// (optional) the element destructor action. `value.bits` is the
 	// element size, `member_offset` the count-header bytes.
 	SN_DELETE_EXPRESSION,
-	SN_DELETE_ARRAY
+	SN_DELETE_ARRAY,
+	// PA17 constructor/destructor vpointer store: `type` names the
+	// class whose vtable is stored, children[0] the object address.
+	// Lowering-only; never printed by the PA12 dump.
+	SN_VPOINTER_STORE
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete
@@ -172,6 +176,10 @@ struct SemNode
 	// with the hidden `this` first parameter / argument.
 	bool is_method;
 	ESpecialFunction special;  // constructor / destructor entry kind
+	// PA17 SN_CALLEE: dynamic dispatch through the object's vpointer at
+	// this vtable slot (-1: direct call). Explicit qualification and
+	// explicit destructor calls stay direct (10.3p15).
+	int vtable_slot;
 	// SN_FUNCTION_DEFINITION: defined in-class (weak, demand-emitted).
 	bool inline_def;
 	// SN_VARIABLE: the object's lifetime ends at scope exit; the

@@ -29,11 +29,20 @@ ClassInfo* SemBinder::OpenClass() const
 void SemBinder::OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
                               Scope* scope)
 {
-	(void)decl;
 	ClassInfo& cls = unit_.classes.Create(info);
 	cls.members = scope;
 	cls.is_union = info->is_union;
 	model_.MutableInfo(info)->class_record = &cls;
+	// PA17: pre-scan the body so the vpointer reserves offset 0 before
+	// any field lays out (10.3p1: introducing a virtual member spells
+	// the keyword; overriding without it needs a polymorphic base).
+	cls.declares_virtual = ClassBodyDeclaresVirtual(decl);
+	if (cls.declares_virtual)
+	{
+		if (cls.is_union)
+			throw runtime_error("virtual member in a union");
+		cls.is_aggregate = false;
+	}
 	BeginClassLayout(cls);
 	open_classes_.push_back(&cls);
 }
@@ -71,6 +80,16 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	// Base members become reachable through unqualified and qualified
 	// member lookup (10.2 subset: single inheritance, no hiding merge).
 	scope->class_base = base_cls->members;
+	// PA17: the derived class inherits the base's vtable slots (an
+	// overrider replaces in place) and the virtual-destructor facts.
+	// Introducing the first vpointer over a non-empty non-polymorphic
+	// base would need base-subobject pointer adjustment (out of scope).
+	cls->vslots = base_cls->vslots;
+	cls->dtor_slot = base_cls->dtor_slot;
+	if (cls->declares_virtual && !base_cls->is_polymorphic &&
+	    !base_cls->is_empty)
+		throw OutsideBoundary("vpointer introduction over a non-empty "
+		                      "non-polymorphic base");
 	BeginClassLayout(*cls);
 }
 
@@ -171,7 +190,13 @@ void SemBinder::CompleteClass(const AstDecl& decl, NamedTypeInfo* info,
 	ClassInfo* cls = OpenClass();
 	FinishClassLayout(*cls, *info, RequestedAlignment(decl));
 	info->complete = true;
+	FinishClassVirtualFacts(*cls);
 	DeclareImplicitSpecialMembers(*cls);
+	// PA17: a virtual destructor occupies vtable slots, so an implicit
+	// one must exist as a demandable definition even when no local code
+	// destroys an object (the emitted vtable references its entries).
+	if (cls->dtor_virtual && !cls->has_user_dtor && !cls->dtor_deleted)
+		EnsureImplicitDtor(*cls);
 	open_classes_.pop_back();
 	if (open_classes_.empty())
 		FlushDeferredBodies();
@@ -204,13 +229,19 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 		throw runtime_error("special member does not name its class");
 	bool is_dtor = part.tilde;
 	bool is_explicit = false;
+	bool is_virtual = false;
 	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
 	{
 		ETokenType keyword = decl.member_specifiers[i].keyword;
 		if (keyword == KW_EXPLICIT)
 			is_explicit = true;
 		else if (keyword == KW_VIRTUAL)
-			throw OutsideBoundary("virtual special member");
+		{
+			// PA17: only destructors may be virtual (12.1p4).
+			if (!is_dtor)
+				throw runtime_error("constructor declared virtual");
+			is_virtual = true;
+		}
 		else if (keyword == KW_STATIC || keyword == KW_FRIEND)
 			throw runtime_error("invalid specifier on a special member");
 	}
@@ -238,6 +269,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 		cls->dtor_deleted = deleted;
 		cls->dtor_definition = defined ? &decl : 0;
 		cls->dtor_unwind_no = composed.noexcept_simple;
+		RecordVirtualDtor(*cls, is_virtual, composed, defined, defaulted,
+		                  deleted);
 		if (defined)
 		{
 			DeferredBody body;
@@ -252,6 +285,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 		}
 		return;
 	}
+	if (composed.has_override || composed.has_final)
+		throw runtime_error("virt-specifier on a constructor");
 	ClassCtor ctor;
 	ctor.type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
@@ -457,6 +492,10 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		cls->dtor_definition = &decl;
 		cls->has_user_dtor = true;
 		InvalidateClassFacts();
+		// PA17: an out-of-class destructor definition anchors the
+		// vtable when the destructor is the class's key function.
+		if (cls->is_polymorphic && cls->key_is_dtor)
+			cls->key_defined_in_tu = true;
 		AnalyzeDeferredBody(body);
 		return;
 	}
@@ -693,6 +732,12 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 	// An out-of-class member definition: the class is complete, so the
 	// body analyzes immediately (and emits as a strong definition).
 	body.out_of_class = true;
+	// PA17: defining the class's key function anchors its vtable in
+	// this translation unit (emitted strong by the lowering).
+	if (cls->is_polymorphic && !cls->key_is_dtor &&
+	    !cls->key_name.empty() && cls->key_name == name &&
+	    TypeEquals(cls->key_type, composed.type))
+		cls->key_defined_in_tu = true;
 	AnalyzeDeferredBody(body);
 }
 
@@ -829,6 +874,10 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	{
 		if (special == SF_CONSTRUCTOR)
 			AnalyzeMemberInits(body, *node);
+		// PA17: a polymorphic destructor re-stores this class's
+		// vpointer before the body runs (12.4, 10.4p6 dispatch model).
+		if (special == SF_DESTRUCTOR && body.cls->is_polymorphic)
+			node->children.push_back(MakeVPointerStore(*body.cls));
 		BindStatement(*body.decl->body);
 		if (special == SF_DESTRUCTOR)
 			AnalyzeDtorEpilogue(*body.cls, *node);
@@ -986,6 +1035,8 @@ void SemBinder::EnsureInheritedCtor(const ClassInfo& cls_in, int index)
 	node->children.push_back(MakeConstructorCall(
 		*base, base_index, true, ThisBaseAddress(cls), std::move(args)));
 	vector<SemNodePtr> actions;
+	if (cls.is_polymorphic)
+		actions.push_back(MakeVPointerStore(cls));
 	for (size_t i = 0; i < cls.fields.size(); i++)
 		if (!cls.fields[i].name.empty() || !cls.fields[i].is_bit_field)
 			AppendFieldDefaultInit(cls, cls.fields[i], actions);

@@ -83,8 +83,14 @@ protected:
 	virtual void OnVariableBound(ScopeBinding& binding,
 	                             const AstInitializer* init,
 	                             const DeclSpecifierInfo& specs);
+	// PA17: member declarations pass the specifier/declarator facts and
+	// the pure-specifier through so the binder can record virtual-slot
+	// metadata (null/false from contexts that carry none).
 	virtual void OnFunctionDeclared(ScopeBinding& binding,
-	                                const TypePtr& type);
+	                                const TypePtr& type,
+	                                const DeclSpecifierInfo* specs = 0,
+	                                const DeclaratorInfo* composed = 0,
+	                                bool pure = false);
 
 	// --- classes and enums ---
 	TypePtr BindClass(const AstDecl& decl, bool standalone);

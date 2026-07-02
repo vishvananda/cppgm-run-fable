@@ -71,6 +71,10 @@ string FunctionLowerer::Lower()
 	}
 	EmitParameterStores();
 	LowerStatementList(def_.children, first_statement);
+	// PA17: a deleting destructor entry frees the object after the
+	// (shared) destructor body ran.
+	if (info_.special_code == "D0")
+		EmitDeletingEpilogue();
 	TerminateOpenEnd();
 	return Render();
 }
@@ -408,6 +412,9 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 	case SN_DELETE_ARRAY:
 		LowerDelete(node);
 		return;
+	case SN_VPOINTER_STORE:
+		LowerVPointerStore(node);
+		return;
 	case SN_RETURN_STATEMENT:
 		LowerReturn(node);
 		return;
@@ -514,6 +521,17 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 		                      "ptr");
 		BeginFullExpression(node);
 		string address = LowerAddressExpr(*node.children[0]);
+		// PA17: a base reference binding a derived lvalue projects to
+		// the base subobject.
+		TypePtr source = node.children[0]->type
+			? RemoveTopCv(StripReference(node.children[0]->type))
+			: TypePtr();
+		TypePtr referee = RemoveTopCv(declared->target);
+		if (source && source->kind == TK_CLASS &&
+		    referee->kind == TK_CLASS)
+			address = AdjustToBase(
+				address,
+				BaseClassDistance(source->named, referee->named));
 		Emit("store ptr " + address + ", $" + slot);
 		EndFullExpression();
 		return;

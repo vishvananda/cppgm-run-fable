@@ -811,3 +811,70 @@ void FunctionLowerer::EmitTempCleanups(size_t from)
 	in_cleanup_emission_ = saved_emission;
 	in_lifetime_action_ = saved;
 }
+
+// --- PA17 polymorphic lowering ----------------------------------------------
+
+// SN_VPOINTER_STORE: the constructor/destructor stores the address of
+// the class's first vtable function slot (vtable + 16, past the
+// offset-to-top and RTTI entries) into the object's vpointer.
+void FunctionLowerer::LowerVPointerStore(const SemNode& node)
+{
+	string self = LowerValueExpr(*node.children[0]).text;
+	const ClassInfo* cls = RemoveTopCv(node.type)->named->class_record;
+	if (!cls)
+		throw runtime_error("vpointer store without a class record");
+	string table = NewTemp();
+	Emit(table + " = addr " + program_.VTableRef(cls));
+	string entry = NewTemp();
+	Emit(entry + " = index i8 " + table + ", 16");
+	Emit("store ptr " + entry + ", " + self);
+}
+
+// The deleting destructor entry (D0) shares the complete destructor's
+// body and then frees the object through the usual deallocation
+// function (5.3.5, no operator-delete overloading in this subset).
+void FunctionLowerer::EmitDeletingEpilogue()
+{
+	const Scope* global = info_.scope;
+	while (global && global->parent)
+		global = global->parent;
+	const ScopeBinding* binding =
+		global ? FindOwnBinding(*global, "operator delete") : 0;
+	if (!binding || binding->kind != SB_FUNCTION)
+		throw runtime_error("deleting destructor without a declared "
+		                    "operator delete");
+	string fn = program_.FunctionRef(global, "operator delete",
+	                                 binding->type);
+	string self = NewTemp();
+	Emit(self + " = load ptr $this");
+	Emit("call void " + fn + "(" + self + ")");
+}
+
+// The explicit `as (...) -> ...` signature of an indirect or
+// vtable-dispatched call, spelled from the lowered ABI boundary.
+string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type)
+{
+	string return_text;
+	bool indirect_result = LowerAbiReturn(fn_type->target, return_text);
+	string signature;
+	size_t at = 0;
+	if (indirect_result)
+	{
+		signature = "%arg0 : ptr [pass=indirect_result]";
+		at = 1;
+	}
+	for (size_t i = 0; i < fn_type->parameters.size(); i++, at++)
+	{
+		string param_text;
+		string pass;
+		LowerAbiParameter(fn_type->parameters[i], param_text, pass);
+		signature += (at ? ", " : "") + string("%arg") + to_string(at) +
+			" : " + param_text;
+		if (!pass.empty())
+			signature += " [pass=" + pass + "]";
+	}
+	string text = " as (" + signature + ") -> " + return_text;
+	if (fn_type->variadic)
+		text += " [arity=variadic]";
+	return text;
+}

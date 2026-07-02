@@ -23,6 +23,7 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  c_linkage(false), unwind_no(false), member_offset(0),
 	  base_hops(0), is_bit_field(false), bit_offset(0), bit_width(0),
 	  member_ref(false), is_method(false), special(SF_NONE),
+	  vtable_slot(-1),
 	  inline_def(false), needs_dtor(false), trivial_init(false),
 	  elided(false), bf_plain_store(false), synth_copy(false),
 	  trivial_copy(false), ctor_addressed(false), synthesized(false)
@@ -90,6 +91,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_NEW_ARRAY: return "new-array";
 	case SN_DELETE_EXPRESSION: return "delete-expression";
 	case SN_DELETE_ARRAY: return "delete-array";
+	case SN_VPOINTER_STORE: return "vpointer-store";
 	}
 	throw runtime_error("unknown semantic node kind");
 }
@@ -210,6 +212,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.bit_width = node.bit_width;
 	out.is_method = node.is_method;
 	out.special = node.special;
+	out.vtable_slot = node.vtable_slot;
 	out.inline_def = node.inline_def;
 	out.needs_dtor = node.needs_dtor;
 	out.trivial_init = node.trivial_init;

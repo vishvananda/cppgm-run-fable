@@ -529,6 +529,12 @@ string MangleVariableObjectName(const Scope* scope, const string& name)
 	return "_Z" + encoding + SourceName(name) + "E";
 }
 
+string MangleClassTypeEncoding(const NamedTypeInfo* entity)
+{
+	Substitutions subs;
+	return MangleType(MakeNamedType(TK_CLASS, entity), subs);
+}
+
 string MangleMemberFunctionObjectName(const Scope* scope,
                                       const string& name,
                                       const TypePtr& type,
