@@ -211,6 +211,15 @@ void SemExprAnalyzer::AddTargetDeducedOverloads(SemValue& value,
 				*value.fn_templates[t], target);
 		if (!spec)
 			continue;
+		// The set fills once per ranked candidate: a specialization
+		// deduced for an earlier candidate must not join again (a
+		// duplicate defeats the exactly-one-match selection rule).
+		bool present = false;
+		for (size_t i = 0; i < value.overload_specs.size(); i++)
+			if (value.overload_specs[i] == spec)
+				present = true;
+		if (present)
+			continue;
 		value.overloads.push_back(spec->type);
 		value.overload_specs.push_back(spec);
 	}
@@ -399,6 +408,7 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	callee->entity_scope = binding.owner;
 	callee->entity_name = binding.name;
 	callee->fn_spec = chosen.spec;
+	host_.OnSpecializationOdrUsed(chosen.spec);
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;
@@ -558,6 +568,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	callee->entity_name = binding.name;
 	callee->is_method = chosen.is_member;
 	callee->fn_spec = chosen.spec;
+	host_.OnSpecializationOdrUsed(chosen.spec);
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;

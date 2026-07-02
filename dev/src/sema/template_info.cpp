@@ -2,9 +2,57 @@
 
 #include <cstdio>
 
+#include "ast/ast_text.h"
+
 using std::to_string;
 
 namespace {
+
+bool IdentifierChar(char c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_';
+}
+
+// Replaces whole-identifier occurrences of `name` in `text`.
+void ReplaceWholeIdentifier(string& text, const string& name,
+                            const string& with)
+{
+	if (name.empty())
+		return;
+	size_t at = 0;
+	while ((at = text.find(name, at)) != string::npos)
+	{
+		bool left = at > 0 && IdentifierChar(text[at - 1]);
+		bool right = at + name.size() < text.size() &&
+			IdentifierChar(text[at + name.size()]);
+		if (!left && !right)
+		{
+			text.replace(at, name.size(), with);
+			at += with.size();
+		}
+		else
+			at += name.size();
+	}
+}
+
+// The first parameter clause of `declarator`, through one nesting
+// level (mirrors the declarator composition's function detection).
+const AstParameterClause* DeclaratorParameterClause(
+	const AstDeclarator& declarator)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator.items[i];
+		if (item.kind == DI_PARAMS)
+			return item.params.get();
+		if (item.kind == DI_NESTED && item.nested)
+			if (const AstParameterClause* inner =
+			        DeclaratorParameterClause(*item.nested))
+				return inner;
+	}
+	return 0;
+}
 
 // Structural rendering with entity addresses: unique per distinct
 // argument list within one translation unit, never printed.
@@ -73,6 +121,30 @@ void AppendKey(const TypePtr& type, string& out)
 	}
 }
 
+// The enclosing named namespace/class path of an argument entity.
+// Distinct same-named entities must spell apart: the spellings become
+// specialization entity/scope names, which the lowering's printed
+// symbols and function identity keys derive from. Unnamed namespace
+// components spell a stable marker for the same reason.
+string EntityScopePrefix(const NamedTypeInfo& info)
+{
+	string path;
+	for (const Scope* scope = info.scope; scope && scope->parent;
+	     scope = scope->parent)
+	{
+		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
+			continue;
+		if (scope->name.empty())
+		{
+			if (scope->kind == SCOPE_NAMESPACE)
+				path = "(unnamed)::" + path;
+			continue;
+		}
+		path = scope->name + "::" + path;
+	}
+	return path;
+}
+
 // A source-like spelling of one type for specialization entity names.
 // Only the shapes that appear in supported template-argument lists
 // matter; anything else falls back to the PA7 description (which still
@@ -90,6 +162,7 @@ string ArgSpelling(const TypePtr& type)
 		return cv + FundamentalTypeName(type->fundamental);
 	case TK_CLASS:
 	case TK_ENUM:
+		return cv + EntityScopePrefix(*type->named) + type->named->name;
 	case TK_TYPE_PARAM:
 		return cv + type->named->name;
 	case TK_POINTER:
@@ -131,4 +204,42 @@ string TemplateArgumentSpelling(const vector<TypePtr>& args)
 	}
 	text += ">";
 	return text;
+}
+
+string PositionalizeTemplateNames(const string& text,
+                                  const vector<TemplateParam>& params)
+{
+	string out = text;
+	for (size_t i = 0; i < params.size(); i++)
+		ReplaceWholeIdentifier(out, params[i].name,
+		                       "#" + to_string(i));
+	return out;
+}
+
+string CanonicalDeclaratorParams(const AstDeclarator& declarator,
+                                 const vector<TemplateParam>& params)
+{
+	const AstParameterClause* clause =
+		DeclaratorParameterClause(declarator);
+	string out;
+	if (clause)
+		for (size_t p = 0; p < clause->parameters.size(); p++)
+		{
+			const AstParameter& parameter = clause->parameters[p];
+			string text = FlattenSpecifierSeq(parameter.specifiers);
+			if (parameter.declarator)
+			{
+				// The declarator-id is not part of the signature; the
+				// shape (`*`, `&`, nested clauses) is.
+				string shape = FlattenDeclarator(*parameter.declarator);
+				const AstName* id = parameter.declarator->IdName();
+				if (id && id->parts.size() == 1 &&
+				    id->parts[0].kind == NP_IDENTIFIER)
+					ReplaceWholeIdentifier(
+						shape, id->parts[0].identifier, "");
+				text += "|" + shape;
+			}
+			out += text + ";";
+		}
+	return PositionalizeTemplateNames(out, params);
 }

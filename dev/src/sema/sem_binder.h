@@ -340,6 +340,10 @@ private:
 	void InstantiateFunctionBody(TemplateInfo& tmpl,
 	                             FunctionSpecialization& spec);
 	void InstantiatePendingFunctions(TemplateInfo& tmpl);
+	// Pre-binds the declared parameters into the capture scope so a
+	// trailing-return decltype (which composes before the clause,
+	// 8.3.5p2) can name them.
+	void PreBindDeclaredParameters(const AstDeclarator* declarator);
 	// A fully explicit function template-id (`f<int>`): resolves the
 	// specialization named by `part` over the templates of `binding`.
 	const ScopeBinding* ResolveFunctionTemplateId(
@@ -350,8 +354,9 @@ private:
 	// re-check at the end of the unit.
 	void CheckTemplateDefinitionSanity(TemplateInfo& tmpl);
 	void FinishTemplateChecks();
-	void CheckMemberDefinitionAgainstPattern(const TemplateInfo& tmpl,
-	                                         const AstDecl& inner);
+	void CheckMemberDefinitionAgainstPattern(
+		const TemplateInfo& tmpl, const AstDecl& inner,
+		const vector<TemplateParam>& def_params);
 	// 14.6.2p1: whether a base-clause name mentions a template
 	// parameter of the current instantiation context.
 	bool BaseClauseIsDependent(const AstName& name);
@@ -492,6 +497,10 @@ private:
 	// True inside contexts that are grammatically type-only (base
 	// clauses): 14.6p3 typename is not required there.
 	bool in_implicit_type_context_;
+	// True while analyzing an unevaluated operand (decltype, constant
+	// sizeof): names there are not odr-used (3.2p2), so specialization
+	// bodies do not instantiate.
+	bool in_unevaluated_operand_;
 	// Non-null while composing a function-template signature: composed
 	// parameters bind here so trailing-return decltype resolves them.
 	Scope* param_capture_scope_;
@@ -526,6 +535,8 @@ public:
 	                                  size_t argc);
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target);
+	virtual void OnSpecializationOdrUsed(const FunctionSpecialization* spec);
+	virtual bool SwapUnevaluatedOperand(bool active);
 	virtual void OnMemberSignatureBegin(Scope* class_scope);
 	virtual void OnMemberSignatureEnd();
 	virtual void OnParameterComposed(const string& name,
@@ -535,46 +546,15 @@ public:
 // Saved-and-cleared binder state around one instantiation: the
 // instantiated declarations bind in their own context (the template's
 // lexical scope), never into the open class/function/dump state of the
-// use site. The destructor restores everything (exception-safe).
+// use site. `instantiating` marks a body/definition instantiation
+// (weak emission); signature composition passes false and inherits
+// the surrounding mode. The destructor restores everything
+// (exception-safe); bodies live in sem_template.cpp.
 struct SemBinder::InstantiationContext
 {
-	InstantiationContext(SemBinder& binder, Scope* scope)
-		: binder_(binder)
-	{
-		saved_scope_ = binder.current_;
-		saved_fields_ = binder.current_fields_;
-		saved_access_ = binder.current_access_;
-		saved_c_linkage_ = binder.in_c_linkage_;
-		saved_method_ = binder.method_;
-		saved_return_ = binder.current_return_;
-		saved_bit_field_ = binder.in_bit_field_;
-		saved_parents_.swap(binder.parents_);
-		saved_open_classes_.swap(binder.open_classes_);
-		saved_deferred_.swap(binder.deferred_bodies_);
-		binder.current_ = scope;
-		binder.current_fields_ = 0;
-		binder.current_access_ = MA_PUBLIC;
-		binder.in_c_linkage_ = false;
-		binder.method_ = MethodContext();
-		binder.current_return_ = TypePtr();
-		binder.in_bit_field_ = false;
-		binder.instantiation_depth_++;
-	}
-
-	~InstantiationContext()
-	{
-		binder_.instantiation_depth_--;
-		binder_.current_ = saved_scope_;
-		binder_.current_fields_ = saved_fields_;
-		binder_.current_access_ = saved_access_;
-		binder_.in_c_linkage_ = saved_c_linkage_;
-		binder_.method_ = saved_method_;
-		binder_.current_return_ = saved_return_;
-		binder_.in_bit_field_ = saved_bit_field_;
-		binder_.parents_.swap(saved_parents_);
-		binder_.open_classes_.swap(saved_open_classes_);
-		binder_.deferred_bodies_.swap(saved_deferred_);
-	}
+	InstantiationContext(SemBinder& binder, Scope* scope,
+	                     bool instantiating = false);
+	~InstantiationContext();
 
 private:
 	SemBinder& binder_;
@@ -585,6 +565,10 @@ private:
 	MethodContext saved_method_;
 	TypePtr saved_return_;
 	bool saved_bit_field_;
+	bool saved_instantiating_;
+	bool saved_unevaluated_;
+	Scope* saved_param_capture_;
+	std::map<unsigned long long, bool> saved_bf_units_;
 	vector<SemNode*> saved_parents_;
 	vector<ClassInfo*> saved_open_classes_;
 	vector<DeferredBody> saved_deferred_;

@@ -378,6 +378,7 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	value.node->entity_scope = binding->owner;
 	value.node->entity_name = binding->name;
 	value.node->fn_spec = binding->fn_self_spec;
+	host_.OnSpecializationOdrUsed(binding->fn_self_spec);
 	return value;
 }
 
@@ -504,6 +505,7 @@ void SemExprAnalyzer::ApplySelectedOverload(SemValue& value,
 			value.node->entity_scope = spec->self.owner;
 			value.node->entity_name = spec->self.name;
 			value.node->fn_spec = spec;
+			host_.OnSpecializationOdrUsed(spec);
 			value.fn_owner = spec->self.owner;
 			value.fn_name = spec->self.name;
 		}

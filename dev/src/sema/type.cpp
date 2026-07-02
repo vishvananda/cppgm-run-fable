@@ -390,6 +390,32 @@ bool QualificationConvertible(const TypePtr& from, const TypePtr& to)
 	return TypeEquals(make_shared<Type>(fs), make_shared<Type>(ts));
 }
 
+// 13.3.3.2p3: whether similar type `a`'s cv-qualification signature is
+// a proper subset of `b`'s (cv never exceeds at any level, and at
+// least one level is strictly smaller).
+bool CvSignatureProperSubset(const TypePtr& a, const TypePtr& b)
+{
+	const Type* x = a.get();
+	const Type* y = b.get();
+	bool proper = false;
+	while (x->kind == TK_POINTER && y->kind == TK_POINTER)
+	{
+		const Type* xp = x->target.get();
+		const Type* yp = y->target.get();
+		if ((xp->is_const && !yp->is_const) ||
+		    (xp->is_volatile && !yp->is_volatile))
+			return false;
+		if (xp->is_const != yp->is_const ||
+		    xp->is_volatile != yp->is_volatile)
+			proper = true;
+		x = xp;
+		y = yp;
+	}
+	if (x->kind == TK_POINTER || y->kind == TK_POINTER)
+		return false;
+	return proper;
+}
+
 static unsigned long long FundamentalSize(EFundamentalType type)
 {
 	switch (type)

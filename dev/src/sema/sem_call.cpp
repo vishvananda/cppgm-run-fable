@@ -198,6 +198,10 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	callee->entity_scope = chosen.owner;
 	callee->entity_name = chosen.name;
 	callee->fn_spec = spec;
+	// An explicit template-id callee arrives as the specialization's
+	// own single-overload binding (fn_self_spec) rather than a deduced
+	// candidate; both forms odr-use the specialization.
+	host_.OnSpecializationOdrUsed(spec ? spec : chosen.fn_self_spec);
 	if (slot < chosen.fn_unwind_no.size() && chosen.fn_unwind_no[slot])
 		callee->unwind_no = true;
 	value.node->children.push_back(std::move(callee));

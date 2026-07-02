@@ -71,7 +71,7 @@ struct ClassSpecialization
 struct FunctionSpecialization
 {
 	FunctionSpecialization()
-		: owner(0), param_scope(0), body_emitted(false)
+		: owner(0), param_scope(0), odr_used(false), body_emitted(false)
 	{}
 
 	TemplateInfo* owner;
@@ -82,6 +82,10 @@ struct FunctionSpecialization
 	vector<TypePtr> declared_params;  // pre-adjustment parameter types
 	Scope* param_scope;  // argument alias scope (body + defaults bind here)
 	ScopeBinding self;
+	// 14.7.1p2: the body instantiates on the first odr-use (deduction
+	// alone composes only the signature); an odr-used specialization
+	// still undefined at the end of the unit is an error.
+	bool odr_used;
 	bool body_emitted;
 };
 
@@ -161,10 +165,28 @@ private:
 	vector<unique_ptr<TemplateInfo>> all_;
 };
 
+// Cyclic or runaway instantiation guard, far above any supported
+// nesting.
+enum { kTemplateInstantiationDepthLimit = 200 };
+
 // A stable canonical key for one template-argument list (never
 // printed; entity pointers keep it unique within the translation
 // unit).
 string TemplateArgumentKey(const vector<TypePtr>& args);
+
+// The flattened `text` with each template-parameter name replaced by
+// its positional marker (14.1: parameter identity is positional).
+// Whole-identifier replacement; 14.6.1p6 guarantees no other entity
+// in a template body carries a parameter's name.
+string PositionalizeTemplateNames(const string& text,
+                                  const vector<TemplateParam>& params);
+
+// The canonical parameter-clause spelling of a function declarator:
+// per-parameter declared-type text with the declarator-ids stripped
+// and the template-parameter names positionalized, so declarations
+// with renamed parameters compare structurally.
+string CanonicalDeclaratorParams(const AstDeclarator& declarator,
+                                 const vector<TemplateParam>& params);
 
 // The source-like spelling of one template-argument list, used for
 // specialization entity names ("Box<int>"): the lowering's sanitized

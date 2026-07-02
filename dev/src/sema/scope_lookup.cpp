@@ -2,6 +2,7 @@
 
 #include <set>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using std::runtime_error;
@@ -94,28 +95,32 @@ struct ActiveDirective
 
 // The transitive closure of the using-directives visible from the
 // lexical chain of `from` (7.3.4p4: directives inside a nominated
-// namespace are active too, anchored at their own location).
+// namespace act as if they appeared at the site of the directive that
+// nominated it, so the effective site propagates outward-in).
 vector<ActiveDirective> DirectiveClosure(const Scope* from)
 {
 	vector<ActiveDirective> closure;
-	set<const Scope*> nominated_seen;
-	vector<const Scope*> worklist;
-	for (const Scope* scope = from; scope; scope = scope->parent)
-		worklist.push_back(scope);
+	// (effective site, nominated) pairs already expanded.
+	set<std::pair<const Scope*, const Scope*>> seen;
 	// Each worklist entry is a scope whose lexical directives are
-	// active; nominated namespaces join the list once each.
+	// active, paired with the site those directives act from.
+	vector<std::pair<const Scope*, const Scope*>> worklist;
+	for (const Scope* scope = from; scope; scope = scope->parent)
+		worklist.push_back(std::make_pair(scope, scope));
 	for (size_t i = 0; i < worklist.size(); i++)
 	{
-		const Scope* site = worklist[i];
-		for (size_t j = 0; j < site->using_directives.size(); j++)
+		const Scope* holder = worklist[i].first;
+		const Scope* site = worklist[i].second;
+		for (size_t j = 0; j < holder->using_directives.size(); j++)
 		{
-			const Scope* nominated = site->using_directives[j];
+			const Scope* nominated = holder->using_directives[j];
+			if (!seen.insert(std::make_pair(site, nominated)).second)
+				continue;
 			ActiveDirective directive;
 			directive.anchor = DirectiveAnchor(site, nominated);
 			directive.nominated = nominated;
 			closure.push_back(directive);
-			if (nominated_seen.insert(nominated).second)
-				worklist.push_back(nominated);
+			worklist.push_back(std::make_pair(nominated, site));
 		}
 	}
 	return closure;
@@ -169,15 +174,6 @@ void MergeFound(const ScopeBinding* candidate, const ScopeBinding*& result,
 		                           candidate->name);
 }
 
-// Defined below (3.4.3.2p2 qualified search); the directive walk
-// reuses it so names surfaced into a nominated namespace by its own
-// directives (notably inline member namespaces, 7.3.1p9/7.3.4p4) are
-// visible through an outer directive as well.
-const ScopeBinding* QualifiedNamespaceSearch(const Scope& scope,
-                                             const string& name,
-                                             EScopeLookupFilter filter,
-                                             set<const Scope*>& visited);
-
 }  // namespace
 
 const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
@@ -209,10 +205,9 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 		{
 			if (closure[i].anchor != scope)
 				continue;
-			set<const Scope*> visited;
-			const ScopeBinding* member = QualifiedNamespaceSearch(
-				*closure[i].nominated, name, filter, visited);
-			if (member)
+			const ScopeBinding* member =
+				FindOwnBinding(*closure[i].nominated, name);
+			if (member && BindingPassesFilter(*member, filter))
 				MergeFound(member, found, functions);
 		}
 		if (found && !functions.empty())

@@ -23,8 +23,6 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA18 assignment boundary");
 }
 
-const int kMaxInstantiationDepth = 200;
-
 bool DeclaratorSpellsNoexcept(const AstDeclarator& declarator)
 {
 	for (size_t i = 0; i < declarator.items.size(); i++)
@@ -44,6 +42,63 @@ size_t DeclaratorArity(const AstDeclarator& declarator)
 }
 
 }  // namespace
+
+// --- instantiation context --------------------------------------------------
+
+SemBinder::InstantiationContext::InstantiationContext(SemBinder& binder,
+                                                      Scope* scope,
+                                                      bool instantiating)
+	: binder_(binder)
+{
+	saved_scope_ = binder.current_;
+	saved_fields_ = binder.current_fields_;
+	saved_access_ = binder.current_access_;
+	saved_c_linkage_ = binder.in_c_linkage_;
+	saved_method_ = binder.method_;
+	saved_return_ = binder.current_return_;
+	saved_bit_field_ = binder.in_bit_field_;
+	saved_instantiating_ = binder.instantiating_;
+	saved_unevaluated_ = binder.in_unevaluated_operand_;
+	saved_param_capture_ = binder.param_capture_scope_;
+	saved_bf_units_.swap(binder.bf_units_written_);
+	saved_parents_.swap(binder.parents_);
+	saved_open_classes_.swap(binder.open_classes_);
+	saved_deferred_.swap(binder.deferred_bodies_);
+	binder.current_ = scope;
+	binder.current_fields_ = 0;
+	binder.current_access_ = MA_PUBLIC;
+	binder.in_c_linkage_ = false;
+	binder.method_ = MethodContext();
+	binder.current_return_ = TypePtr();
+	binder.in_bit_field_ = false;
+	if (instantiating)
+		binder.instantiating_ = true;
+	// The instantiated declarations are their own evaluation context,
+	// even when the instantiation triggered inside an unevaluated
+	// operand.
+	binder.in_unevaluated_operand_ = false;
+	binder.param_capture_scope_ = 0;
+	binder.instantiation_depth_++;
+}
+
+SemBinder::InstantiationContext::~InstantiationContext()
+{
+	binder_.instantiation_depth_--;
+	binder_.current_ = saved_scope_;
+	binder_.current_fields_ = saved_fields_;
+	binder_.current_access_ = saved_access_;
+	binder_.in_c_linkage_ = saved_c_linkage_;
+	binder_.method_ = saved_method_;
+	binder_.current_return_ = saved_return_;
+	binder_.in_bit_field_ = saved_bit_field_;
+	binder_.instantiating_ = saved_instantiating_;
+	binder_.in_unevaluated_operand_ = saved_unevaluated_;
+	binder_.param_capture_scope_ = saved_param_capture_;
+	binder_.bf_units_written_.swap(saved_bf_units_);
+	binder_.parents_.swap(saved_parents_);
+	binder_.open_classes_.swap(saved_open_classes_);
+	binder_.deferred_bodies_.swap(saved_deferred_);
+}
 
 // --- capture --------------------------------------------------------------
 
@@ -501,8 +556,11 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 		spec->key = key;
 		const string spec_name =
 			tmpl.name + TemplateArgumentSpelling(args);
+		// The display qualifies by the template's declaring scope (the
+		// specialization lives there), not the first-use scope.
 		NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-			TypeDisplayName(tmpl.anchor->class_key, spec_name),
+			tmpl.anchor->class_key + " " +
+				QualifiedScopePath(tmpl.declaring) + spec_name,
 			tmpl.declaring, spec_name);
 		info->is_union = tmpl.anchor->is_union;
 		info->class_key = tmpl.anchor->class_key;
@@ -527,7 +585,7 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
                                                ClassSpecialization& spec)
 {
-	if (instantiation_depth_ >= kMaxInstantiationDepth)
+	if (instantiation_depth_ >= kTemplateInstantiationDepthLimit)
 		throw runtime_error("template instantiation depth limit "
 		                    "exceeded for " + tmpl.name);
 	spec.instantiated = true;
@@ -541,19 +599,8 @@ void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
 	injected.type = spec.self.type;
 	AddBinding(*spec.param_scope, injected);
 
-	InstantiationContext context(*this, spec.param_scope);
-	bool saved_instantiating = instantiating_;
-	instantiating_ = true;
-	try
-	{
-		BindDeclaration(*tmpl.pattern_decl);
-	}
-	catch (...)
-	{
-		instantiating_ = saved_instantiating;
-		throw;
-	}
-	instantiating_ = saved_instantiating;
+	InstantiationContext context(*this, spec.param_scope, true);
+	BindDeclaration(*tmpl.pattern_decl);
 	// The member scope adopts the specialization spelling so the
 	// lowering's scope paths and symbol names see `Foo<int>`.
 	if (Scope* members = model_.MemberScope(spec.entity))
@@ -611,16 +658,20 @@ void SemBinder::RegisterTemplateMember(const AstDecl& decl,
 	if (params.size() != tmpl->params.size())
 		throw runtime_error("template parameter list of a member of " +
 		                    tmpl->name + " disagrees");
-	CheckMemberDefinitionAgainstPattern(*tmpl, *decl.inner);
+	CheckMemberDefinitionAgainstPattern(*tmpl, *decl.inner, params);
 	tmpl->member_defs.push_back(&decl);
 	InstantiateReadyMembers(*tmpl);
 }
 
 // 15.4p5: an out-of-class special-member definition must repeat the
 // declared exception specification; checked syntactically at
-// registration (the definition may never instantiate).
+// registration (the definition may never instantiate). Pairing goes
+// by the canonical parameter spelling (positional parameter identity,
+// so same-arity overloads pair correctly); arity is the fallback for
+// shapes the canonical spelling cannot express.
 void SemBinder::CheckMemberDefinitionAgainstPattern(
-	const TemplateInfo& tmpl, const AstDecl& inner)
+	const TemplateInfo& tmpl, const AstDecl& inner,
+	const vector<TemplateParam>& def_params)
 {
 	if (!tmpl.has_definition ||
 	    (inner.kind != DK_SPECIAL_MEMBER_DEFINITION &&
@@ -631,6 +682,9 @@ void SemBinder::CheckMemberDefinitionAgainstPattern(
 	bool def_dtor = id && !id->parts.empty() && id->parts.back().tilde;
 	bool def_noexcept = DeclaratorSpellsNoexcept(*inner.declarator);
 	size_t def_arity = DeclaratorArity(*inner.declarator);
+	string def_sig = CanonicalDeclaratorParams(*inner.declarator,
+	                                           def_params);
+	const AstDecl* by_arity = 0;
 	for (size_t i = 0; i < pattern.members.size(); i++)
 	{
 		const AstDecl& member = *pattern.members[i];
@@ -644,12 +698,22 @@ void SemBinder::CheckMemberDefinitionAgainstPattern(
 			continue;
 		if (DeclaratorArity(*member.declarator) != def_arity)
 			continue;
+		if (!by_arity)
+			by_arity = &member;
+		if (CanonicalDeclaratorParams(*member.declarator, tmpl.params) !=
+		    def_sig)
+			continue;
 		if (DeclaratorSpellsNoexcept(*member.declarator) != def_noexcept)
 			throw runtime_error("out-of-class definition of a member of "
 			                    + tmpl.name +
 			                    " changes the exception specification");
 		return;
 	}
+	if (by_arity &&
+	    DeclaratorSpellsNoexcept(*by_arity->declarator) != def_noexcept)
+		throw runtime_error("out-of-class definition of a member of " +
+		                    tmpl.name +
+		                    " changes the exception specification");
 }
 
 void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
@@ -678,7 +742,7 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
                                             ClassSpecialization& spec,
                                             size_t member_index)
 {
-	if (instantiation_depth_ >= kMaxInstantiationDepth)
+	if (instantiation_depth_ >= kTemplateInstantiationDepthLimit)
 		throw runtime_error("template instantiation depth limit "
 		                    "exceeded for " + tmpl.name);
 	const AstDecl& decl = *tmpl.member_defs[member_index];
@@ -691,19 +755,8 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	shadow.params = params;
 	shadow.declaring = tmpl.declaring;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, spec.args);
-	InstantiationContext context(*this, alias_scope);
-	bool saved_instantiating = instantiating_;
-	instantiating_ = true;
-	try
-	{
-		BindDeclaration(*decl.inner);
-	}
-	catch (...)
-	{
-		instantiating_ = saved_instantiating;
-		throw;
-	}
-	instantiating_ = saved_instantiating;
+	InstantiationContext context(*this, alias_scope, true);
+	BindDeclaration(*decl.inner);
 	FlushDeferredBodies();
 }
 
@@ -826,21 +879,10 @@ void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 		return;
 	PendingClassDefinition pending = found->second;
 	pending_classes_.erase(found);
-	InstantiationContext context(*this, pending.scope);
-	bool saved_instantiating = instantiating_;
-	instantiating_ = true;
-	try
-	{
-		// The forward-declared entity completes in place (the pending
-		// scope is its declaring class scope).
-		BindClass(*pending.decl, true);
-	}
-	catch (...)
-	{
-		instantiating_ = saved_instantiating;
-		throw;
-	}
-	instantiating_ = saved_instantiating;
+	InstantiationContext context(*this, pending.scope, true);
+	// The forward-declared entity completes in place (the pending
+	// scope is its declaring class scope).
+	BindClass(*pending.decl, true);
 }
 
 // --- explicit instantiation --------------------------------------------------

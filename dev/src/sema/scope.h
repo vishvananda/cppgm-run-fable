@@ -213,7 +213,6 @@ private:
 	vector<unique_ptr<Scope>> scopes_;
 	vector<unique_ptr<NamedTypeInfo>> infos_;
 	map<const NamedTypeInfo*, Scope*> member_scopes_;
-	map<const Scope*, const NamedTypeInfo*> scope_entities_;
 	Scope* global_;
 };
 

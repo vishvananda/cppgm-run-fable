@@ -168,6 +168,8 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 			result.rank = CR_EXACT;
 			// 13.3.3.2p3: identity beats a real qualification step.
 			result.qualification = !TypeEquals(from, dest);
+			if (result.qualification)
+				result.qual_dest = dest;
 			return result;
 		}
 		// 4.10p3: pointer to derived converts to pointer to a (no less
@@ -370,6 +372,17 @@ int CompareConversions(const ImplicitConversion& a,
 		// 13.3.3.2p3: the sequence without the qualification
 		// conversion is the proper subsequence.
 		return a.qualification ? 1 : -1;
+	if (a.qualification && a.qual_dest && b.qual_dest &&
+	    !TypeEquals(a.qual_dest, b.qual_dest))
+	{
+		// 13.3.3.2p3: between two qualification conversions of the same
+		// source, the destination whose cv-signature is a proper subset
+		// of the other's is the better sequence.
+		if (CvSignatureProperSubset(a.qual_dest, b.qual_dest))
+			return -1;
+		if (CvSignatureProperSubset(b.qual_dest, a.qual_dest))
+			return 1;
+	}
 	if (a.base_distance != b.base_distance)
 		return a.base_distance < b.base_distance ? -1 : 1;
 	if (!a.reference_binding || !b.reference_binding)

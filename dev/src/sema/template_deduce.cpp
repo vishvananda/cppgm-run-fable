@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -420,6 +421,15 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 		    !TypeEquals(param_patterns[i], tmpl.param_patterns[i]))
 			return false;
 	}
+	// The dependent return spelling distinguishes overloads the
+	// abstract composition cannot see (`typename T::A f(T)` vs
+	// `typename T::B f(T)` are distinct templates).
+	if (PositionalizeTemplateNames(FlattenSpecifierSeq(inner.specifiers),
+	                               params) !=
+	    PositionalizeTemplateNames(
+	        FlattenSpecifierSeq(tmpl.pattern_decl->specifiers),
+	        tmpl.params))
+		return false;
 	return true;
 }
 
@@ -518,16 +528,9 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		}
 		current_ = saved;
 	}
-	try
-	{
-		return EnsureFunctionSpecialization(tmpl, bound);
-	}
-	catch (const std::exception&)
-	{
-		// Substitution failure is a hard error in general, but a
-		// candidate that cannot even form drops out here.
-		return 0;
-	}
+	// Substitution failure is a hard error (SFINAE candidate dropping
+	// is out of scope); the body instantiates only on odr-use.
+	return EnsureFunctionSpecialization(tmpl, bound);
 }
 
 // --- specialization -----------------------------------------------------------
@@ -545,7 +548,7 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 		if (found != tmpl.fn_specs.end())
 			return found->second.get();
 	}
-	if (instantiation_depth_ >= 200)
+	if (instantiation_depth_ >= kTemplateInstantiationDepthLimit)
 		throw runtime_error("template instantiation depth limit "
 		                    "exceeded for " + tmpl.name);
 	// The record enters the cache only after the signature composes:
@@ -568,45 +571,12 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	Scope* capture = model_.CreateScope(SCOPE_FUNCTION, tmpl.name,
 	                                    spec->param_scope);
 	InstantiationContext context(*this, capture);
-	Scope* saved_capture = param_capture_scope_;
 	param_capture_scope_ = capture;
-	// A trailing-return decltype resolves before the parameter clause
-	// composes (8.3.5p2), so the parameters pre-bind from the clause.
-	if (declarator)
-		if (const AstParameterClause* clause =
-		        FunctionParameterClause(*declarator))
-			for (size_t i = 0; i < clause->parameters.size(); i++)
-			{
-				try
-				{
-					DeclSpecifierInfo pspecs = builder_.ProcessSpecifiers(
-						clause->parameters[i].specifiers, false);
-					DeclaratorInfo pcomposed = builder_.ComposeDeclarator(
-						clause->parameters[i].declarator.get(),
-						pspecs.type);
-					if (pcomposed.id && pcomposed.id->IsPlainIdentifier())
-						OnParameterComposed(
-							pcomposed.id->parts[0].identifier,
-							pcomposed.type);
-				}
-				catch (const std::exception&)
-				{
-					// The full composition below reports real errors.
-				}
-			}
-	DeclSpecifierInfo specs;
-	DeclaratorInfo composed;
-	try
-	{
-		specs = builder_.ProcessSpecifiers(inner.specifiers, true);
-		composed = builder_.ComposeDeclarator(declarator, specs.type);
-	}
-	catch (...)
-	{
-		param_capture_scope_ = saved_capture;
-		throw;
-	}
-	param_capture_scope_ = saved_capture;
+	PreBindDeclaredParameters(declarator);
+	DeclSpecifierInfo specs =
+		builder_.ProcessSpecifiers(inner.specifiers, true);
+	DeclaratorInfo composed =
+		builder_.ComposeDeclarator(declarator, specs.type);
 	if (!composed.declares_function ||
 	    composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function template " + tmpl.name +
@@ -638,9 +608,23 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 		defaults[i] = composed.parameters[i].default_arg;
 
 	tmpl.fn_specs[key] = std::move(fresh);
-	if (tmpl.has_definition)
-		InstantiateFunctionBody(tmpl, *spec);
 	return spec;
+}
+
+// 14.7.1p2: the first odr-use of a deduced specialization
+// instantiates its body; a use before the definition re-checks when
+// the definition is captured, and the end-of-unit pass errors on
+// odr-used specializations that never gained one.
+void SemBinder::OnSpecializationOdrUsed(const FunctionSpecialization* spec)
+{
+	// 3.2p2: names in unevaluated operands are not odr-used.
+	if (!spec || in_unevaluated_operand_)
+		return;
+	FunctionSpecialization& used =
+		*const_cast<FunctionSpecialization*>(spec);
+	used.odr_used = true;
+	if (used.owner && used.owner->has_definition && !used.body_emitted)
+		InstantiateFunctionBody(*used.owner, used);
 }
 
 void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
@@ -648,6 +632,10 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 {
 	if (spec.body_emitted)
 		return;
+	// Set before the bind as the recursion guard (a recursive call in
+	// the body finds its own specialization already in progress); a
+	// bind failure propagates as a hard error, so the flag never
+	// outlives a failed instantiation.
 	spec.body_emitted = true;
 	const AstDecl& inner = *tmpl.pattern_decl;
 	if (inner.kind != DK_FUNCTION || !inner.body)
@@ -655,93 +643,81 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 		                    " has no definition");
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, spec.name,
 	                                     spec.param_scope);
-	InstantiationContext context(*this, fn_scope);
-	bool saved_instantiating = instantiating_;
-	instantiating_ = true;
-	Scope* saved_capture = param_capture_scope_;
+	InstantiationContext context(*this, fn_scope, true);
 	param_capture_scope_ = fn_scope;
-	try
-	{
-		// Pre-bind the parameters so the trailing-return decltype (which
-		// composes before the clause, 8.3.5p2) can name them, then
-		// re-compose the declarator in this specialization's context.
-		if (inner.declarator)
-			if (const AstParameterClause* clause =
-			        FunctionParameterClause(*inner.declarator))
-				for (size_t i = 0; i < clause->parameters.size(); i++)
-				{
-					try
-					{
-						DeclSpecifierInfo pspecs =
-							builder_.ProcessSpecifiers(
-								clause->parameters[i].specifiers, false);
-						DeclaratorInfo pcomposed =
-							builder_.ComposeDeclarator(
-								clause->parameters[i].declarator.get(),
-								pspecs.type);
-						if (pcomposed.id &&
-						    pcomposed.id->IsPlainIdentifier())
-							OnParameterComposed(
-								pcomposed.id->parts[0].identifier,
-								pcomposed.type);
-					}
-					catch (const std::exception&)
-					{
-						// The full composition below reports errors.
-					}
-				}
-		DeclSpecifierInfo specs =
-			builder_.ProcessSpecifiers(inner.specifiers, true);
-		DeclaratorInfo composed = builder_.ComposeDeclarator(
-			inner.declarator.get(), specs.type);
+	// Pre-bind the parameters so the trailing-return decltype (which
+	// composes before the clause, 8.3.5p2) can name them, then
+	// re-compose the declarator in this specialization's context.
+	PreBindDeclaredParameters(inner.declarator.get());
+	DeclSpecifierInfo specs =
+		builder_.ProcessSpecifiers(inner.specifiers, true);
+	DeclaratorInfo composed = builder_.ComposeDeclarator(
+		inner.declarator.get(), specs.type);
 
-		SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
-		SemNode* node = item.get();
-		item->name = CanonicalQualifiedName(tmpl.declaring, spec.name);
-		item->type = composed.type;
-		item->entity_scope = spec.param_scope;
-		item->entity_name = spec.name;
-		item->unwind_no = composed.noexcept_simple;
-		item->inline_def = true;
-		item->fn_spec = &spec;
-		for (size_t i = 0; i < composed.parameters.size(); i++)
-		{
-			SemNodePtr parameter = MakeSemNode(SN_PARAMETER);
-			parameter->name = composed.parameters[i].name;
-			parameter->type = composed.parameters[i].type;
-			parameter->entity_scope = fn_scope;
-			parameter->entity_name = parameter->name;
-			AttachParameterDtor(*parameter);
-			item->children.push_back(std::move(parameter));
-		}
-		current_ = fn_scope;
-		method_.fn_scope = fn_scope;
-		method_.fn_owner = tmpl.declaring;
-		method_.fn_name = spec.name;
-		current_return_ = composed.type->target;
-		parents_.push_back(node);
-		BindStatement(*inner.body);
-		parents_.pop_back();
-
-		bool may_throw = false;
-		for (size_t i = 0; i < node->children.size(); i++)
-			if (NodeMayThrow(*node->children[i]))
-				may_throw = true;
-		if (!may_throw)
-		{
-			node->unwind_no = true;
-			spec.self.fn_unwind_no[0] = true;
-		}
-		unit_.deferred.push_back(std::move(item));
-	}
-	catch (...)
+	SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
+	SemNode* node = item.get();
+	item->name = CanonicalQualifiedName(tmpl.declaring, spec.name);
+	item->type = composed.type;
+	item->entity_scope = spec.param_scope;
+	item->entity_name = spec.name;
+	item->unwind_no = composed.noexcept_simple;
+	item->inline_def = true;
+	item->fn_spec = &spec;
+	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
-		instantiating_ = saved_instantiating;
-		param_capture_scope_ = saved_capture;
-		throw;
+		SemNodePtr parameter = MakeSemNode(SN_PARAMETER);
+		parameter->name = composed.parameters[i].name;
+		parameter->type = composed.parameters[i].type;
+		parameter->entity_scope = fn_scope;
+		parameter->entity_name = parameter->name;
+		AttachParameterDtor(*parameter);
+		item->children.push_back(std::move(parameter));
 	}
-	instantiating_ = saved_instantiating;
-	param_capture_scope_ = saved_capture;
+	current_ = fn_scope;
+	method_.fn_scope = fn_scope;
+	method_.fn_owner = tmpl.declaring;
+	method_.fn_name = spec.name;
+	current_return_ = composed.type->target;
+	parents_.push_back(node);
+	BindStatement(*inner.body);
+	parents_.pop_back();
+
+	bool may_throw = false;
+	for (size_t i = 0; i < node->children.size(); i++)
+		if (NodeMayThrow(*node->children[i]))
+			may_throw = true;
+	if (!may_throw)
+	{
+		node->unwind_no = true;
+		spec.self.fn_unwind_no[0] = true;
+	}
+	unit_.deferred.push_back(std::move(item));
+}
+
+void SemBinder::PreBindDeclaredParameters(const AstDeclarator* declarator)
+{
+	if (!declarator)
+		return;
+	const AstParameterClause* clause = FunctionParameterClause(*declarator);
+	if (!clause)
+		return;
+	for (size_t i = 0; i < clause->parameters.size(); i++)
+	{
+		try
+		{
+			DeclSpecifierInfo pspecs = builder_.ProcessSpecifiers(
+				clause->parameters[i].specifiers, false);
+			DeclaratorInfo pcomposed = builder_.ComposeDeclarator(
+				clause->parameters[i].declarator.get(), pspecs.type);
+			if (pcomposed.id && pcomposed.id->IsPlainIdentifier())
+				OnParameterComposed(pcomposed.id->parts[0].identifier,
+				                    pcomposed.type);
+		}
+		catch (const std::exception&)
+		{
+			// The full composition reports real errors.
+		}
+	}
 }
 
 void SemBinder::InstantiatePendingFunctions(TemplateInfo& tmpl)
@@ -749,7 +725,7 @@ void SemBinder::InstantiatePendingFunctions(TemplateInfo& tmpl)
 	for (map<string, unique_ptr<FunctionSpecialization>>::iterator it =
 	         tmpl.fn_specs.begin();
 	     it != tmpl.fn_specs.end(); ++it)
-		if (!it->second->body_emitted)
+		if (it->second->odr_used && !it->second->body_emitted)
 			InstantiateFunctionBody(tmpl, *it->second);
 }
 
@@ -760,7 +736,9 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 {
 	// Explicit arguments select among the templates of this name; the
 	// PA18 subset requires the argument list (with defaults) to bind
-	// every parameter.
+	// every parameter. An argument list that does not bind them all is
+	// not an error here: a partial-explicit template-id falls back to
+	// the overload set so the call context deduces the rest (14.8.1).
 	const FunctionSpecialization* resolved = 0;
 	for (size_t t = 0; t < binding.fn_templates.size(); t++)
 	{
@@ -819,7 +797,11 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner)
 		throw runtime_error("explicit instantiation of a non-function");
 	if (terminal.kind == NP_TEMPLATE_ID)
 	{
-		ResolveFunctionTemplateId(*binding, terminal);
+		// 14.7.2: the explicit instantiation demands the definition.
+		const ScopeBinding* named =
+			ResolveFunctionTemplateId(*binding, terminal);
+		if (named && named->fn_self_spec)
+			OnSpecializationOdrUsed(named->fn_self_spec);
 		return;
 	}
 	// Deduce the template arguments from the declared parameter types.
@@ -844,7 +826,8 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner)
 				complete = false;
 		if (!complete)
 			continue;
-		EnsureFunctionSpecialization(tmpl, bound);
+		// 14.7.2: the explicit instantiation demands the definition.
+		OnSpecializationOdrUsed(EnsureFunctionSpecialization(tmpl, bound));
 		return;
 	}
 	throw runtime_error("explicit instantiation matches no template");
@@ -891,12 +874,6 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
 	for (size_t i = 0; i < bound.size(); i++)
 		if (!bound[i])
 			return 0;
-	try
-	{
-		return EnsureFunctionSpecialization(tmpl, bound);
-	}
-	catch (const std::exception&)
-	{
-		return 0;
-	}
+	// Substitution failure is a hard error (no SFINAE dropping).
+	return EnsureFunctionSpecialization(tmpl, bound);
 }

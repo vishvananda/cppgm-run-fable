@@ -111,6 +111,14 @@ struct ISemExprHost
 	// when deduction fails).
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target) = 0;
+	// PA18 14.7.1p2: a resolved use selected this specialization - the
+	// analyzer reports every winner so the host instantiates its body
+	// (deduction alone composes only the signature).
+	virtual void OnSpecializationOdrUsed(
+		const FunctionSpecialization* spec) = 0;
+	// Marks an unevaluated operand (3.2p2: no odr-use inside); returns
+	// the previous state for restoring.
+	virtual bool SwapUnevaluatedOperand(bool active) = 0;
 	virtual ~ISemExprHost() {}
 };
 

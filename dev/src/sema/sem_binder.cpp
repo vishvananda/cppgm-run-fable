@@ -41,7 +41,8 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	: DeclBinder(model), unit_(unit), analyzer_(*this),
 	  local_types_(0), pending_local_type_(false), in_bit_field_(false),
 	  instantiating_(false), instantiation_depth_(0),
-	  in_implicit_type_context_(false), param_capture_scope_(0)
+	  in_implicit_type_context_(false), in_unevaluated_operand_(false),
+	  param_capture_scope_(0)
 {
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.
@@ -211,19 +212,31 @@ bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 	}
 }
 
+bool SemBinder::SwapUnevaluatedOperand(bool active)
+{
+	bool previous = in_unevaluated_operand_;
+	in_unevaluated_operand_ = active;
+	return previous;
+}
+
 TypePtr SemBinder::TryAnalyzeExpressionType(const AstExpr& expr)
 {
+	// 5.3.3p1: the operand is unevaluated, so names in it are not
+	// odr-used (3.2p2) - no specialization bodies instantiate here.
+	bool saved = in_unevaluated_operand_;
+	in_unevaluated_operand_ = true;
+	TypePtr result;
 	try
 	{
 		SemValue value = analyzer_.Analyze(expr);
-		if (value.function_set || !value.type)
-			return TypePtr();
-		return value.type;
+		if (!value.function_set && value.type)
+			result = value.type;
 	}
 	catch (const std::exception&)
 	{
-		return TypePtr();
 	}
+	in_unevaluated_operand_ = saved;
+	return result;
 }
 
 TypePtr SemBinder::ResolveDecltype(const AstExpr& expr)
@@ -231,9 +244,22 @@ TypePtr SemBinder::ResolveDecltype(const AstExpr& expr)
 	// 7.1.6.2p4: an unparenthesized id-expression yields the declared
 	// type (the PA11 rule); any other operand classifies as an
 	// expression: T& for lvalues, T&& for xvalues, T for prvalues.
+	// The operand is unevaluated (3.2p2): no odr-use.
 	if (StripParens(&expr)->kind == EK_ID)
 		return DeclBinder::ResolveDecltype(expr);
-	SemValue value = analyzer_.Analyze(expr);
+	bool saved = in_unevaluated_operand_;
+	in_unevaluated_operand_ = true;
+	SemValue value;
+	try
+	{
+		value = analyzer_.Analyze(expr);
+	}
+	catch (...)
+	{
+		in_unevaluated_operand_ = saved;
+		throw;
+	}
+	in_unevaluated_operand_ = saved;
 	if (value.category == VC_LVALUE)
 		return MakeReferenceType(value.type, false, true);
 	if (value.category == VC_XVALUE)

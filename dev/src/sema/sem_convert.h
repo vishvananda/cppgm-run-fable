@@ -67,8 +67,11 @@ struct ImplicitConversion
 	bool viable;
 	EConversionRank rank;
 	// 13.3.3.2p3: an exact-rank sequence with a real qualification
-	// conversion loses to the identity form.
+	// conversion loses to the identity form; between two qualification
+	// conversions the destination whose cv-signature is a proper
+	// subset wins (`qual_dest` records the destination compared).
 	bool qualification;
+	TypePtr qual_dest;
 	// 13.3.3.2p4 derivation-distance tie-break: 0 for non-hierarchy
 	// conversions, the base-chain distance for derived-to-base pointer
 	// and reference forms, large for conversions to void pointers.

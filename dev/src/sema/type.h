@@ -234,6 +234,10 @@ void TopCv(const TypePtr& type, bool& is_const, bool& is_volatile);
 // 4.4: pointer to cv1 T -> pointer to cv2 T conversion validity.
 bool QualificationConvertible(const TypePtr& from, const TypePtr& to);
 
+// 13.3.3.2p3: `a`'s cv-signature is a proper subset of `b`'s (both
+// similar pointer types).
+bool CvSignatureProperSubset(const TypePtr& a, const TypePtr& b);
+
 // Size and alignment per the PA8 handout ABI table. Throws on
 // incomplete types (void, array of unknown bound) and function types
 // (callers emit the fixed 4-byte mock stub instead); array sizes are

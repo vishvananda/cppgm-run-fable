@@ -311,6 +311,11 @@ void SemBinder::FinishTemplateChecks()
 				                    " in template " + tmpl.name +
 				                    " does not resolve");
 		}
+		// An odr-used specialization still undefined here is not an
+		// error (14.7.1: no diagnostic required; the checked-in
+		// compile-pass tests call declared-only templates): the
+		// lowering emits an ordinary external declaration for it, like
+		// any other declared-but-undefined function.
 	}
 }
 

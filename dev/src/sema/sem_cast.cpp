@@ -266,7 +266,20 @@ SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 		if (operand->kind == EK_ID)
 			operand_type = host_.TryResolveCalleeType(operand->name);
 		if (!operand_type)
-			operand_type = Analyze(*expr.operands[0]).type;
+		{
+			// 5.3.3p1: the operand is unevaluated (no odr-use).
+			bool saved = host_.SwapUnevaluatedOperand(true);
+			try
+			{
+				operand_type = Analyze(*expr.operands[0]).type;
+			}
+			catch (...)
+			{
+				host_.SwapUnevaluatedOperand(saved);
+				throw;
+			}
+			host_.SwapUnevaluatedOperand(saved);
+		}
 	}
 	// 5.3.3p1 / 5.3.6p1: requires a complete object type; the size (or
 	// alignment) is the value. PA18: deferred nested member-class

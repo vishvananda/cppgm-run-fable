@@ -43,14 +43,11 @@ void TypesModel::SetMemberScope(const NamedTypeInfo* info, Scope* scope)
 {
 	scope->entity = info;
 	member_scopes_[info] = scope;
-	scope_entities_[scope] = info;
 }
 
 const NamedTypeInfo* TypesModel::ScopeEntity(const Scope* scope) const
 {
-	map<const Scope*, const NamedTypeInfo*>::const_iterator found =
-		scope_entities_.find(scope);
-	return found == scope_entities_.end() ? 0 : found->second;
+	return scope ? scope->entity : 0;
 }
 
 Scope* TypesModel::MemberScope(const NamedTypeInfo* info) const
