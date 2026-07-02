@@ -108,7 +108,11 @@ void AstParser::ParseClassAdornments(AstDecl& decl)
 			}
 			State operand = Save();
 			AstTypeIdPtr type;
-			if (ParseTypeId(type) && MatchSimple(OP_RPAREN))
+			// GNU `__alignof(T)` is an expression operand even though
+			// it parses as a type-id shape.
+			if (!AtIdentifierSpelled("__alignof") &&
+			    !AtIdentifierSpelled("__alignof__") &&
+			    ParseTypeId(type) && MatchSimple(OP_RPAREN))
 			{
 				decl.align_types.push_back(move(type));
 				continue;

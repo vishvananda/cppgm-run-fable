@@ -347,6 +347,28 @@ ConstValue EvaluateSizeofExpr(const AstExpr& expr,
 	throw OutsideSubset("sizeof of an expression");
 }
 
+// The GNU `__alignof(type)` extension parses as a call to an
+// identifier; only that shape evaluates here.
+ConstValue EvaluateGnuAlignof(const AstExpr& expr,
+                              IConstExprContext& context)
+{
+	const AstExpr* callee = expr.operands.empty()
+		? 0 : expr.operands[0].get();
+	if (!callee || callee->kind != EK_ID ||
+	    !callee->name.IsPlainIdentifier() ||
+	    (callee->name.parts[0].identifier != "__alignof" &&
+	     callee->name.parts[0].identifier != "__alignof__") ||
+	    expr.arguments.size() != 1)
+		throw OutsideSubset("expression form");
+	const AstName* name = UnparenthesizedIdName(*expr.arguments[0]);
+	TypePtr named = name ? context.TryResolveTypeFromName(*name)
+	                     : TypePtr();
+	if (!named)
+		throw OutsideSubset("__alignof operand");
+	context.RequireCompleteForLayout(named);
+	return ConstValue(FT_UNSIGNED_LONG_INT, TypeAlignment(named));
+}
+
 ConstValue EvaluateTypeTrait(const AstExpr& expr,
                              IConstExprContext& context)
 {
@@ -417,6 +439,8 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	}
 	case EK_SIZEOF_EXPR:
 		return EvaluateSizeofExpr(expr, context);
+	case EK_CALL:
+		return EvaluateGnuAlignof(expr, context);
 	case EK_TYPE_TRAIT:
 		return EvaluateTypeTrait(expr, context);
 	default:
