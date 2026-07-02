@@ -73,7 +73,8 @@ ConstValue SuccessorValue(const ConstValue& value, EFundamentalType type)
 DeclBinder::DeclBinder(TypesModel& model)
 	: model_(model), builder_(*this), current_(model.global()),
 	  current_fields_(0), anonymous_enums_(0), in_c_linkage_(false),
-	  current_access_(MA_PUBLIC)
+	  current_access_(MA_PUBLIC),
+	  allow_qualified_class_name_(false)
 {
 }
 
@@ -175,6 +176,7 @@ Scope* DeclBinder::ScopeOfBinding(const ScopeBinding& binding)
 		const TypePtr& type = binding.type;
 		if (type->kind != TK_CLASS && type->kind != TK_ENUM)
 			break;
+		EnsureTypeCompleteness(type->named);
 		Scope* members = model_.MemberScope(type->named);
 		if (!members)
 			throw runtime_error(type->named->display +
@@ -425,7 +427,7 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 		BindTemplateDeclaration(decl);
 		return;
 	case DK_CLASS:
-		BindClass(decl, true);
+		BindClassDeclaration(decl);
 		return;
 	case DK_CLASS_FORWARD:
 		BindClassForward(decl, false);
@@ -450,6 +452,16 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 		return;
 	}
 	throw OutsideBoundary("declaration form");
+}
+
+void DeclBinder::BindClassDeclaration(const AstDecl& decl)
+{
+	BindClass(decl, true);
+}
+
+void DeclBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
+{
+	(void)info;
 }
 
 void DeclBinder::BindExplicitInstantiation(const AstDecl& decl)
@@ -1172,12 +1184,14 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 	string name;
 	if (anonymous)
 		name = AnonymousTypeName(decl);
-	else
-	{
-		if (!decl.class_name.IsPlainIdentifier())
-			throw OutsideBoundary("qualified or template class-name");
+	else if (decl.class_name.IsPlainIdentifier())
 		name = decl.class_name.parts[0].identifier;
-	}
+	else if (allow_qualified_class_name_)
+		// PA18 out-of-class nested definition: the seam resolved the
+		// qualified prefix into `current_` already.
+		name = PartName(decl.class_name.parts.back());
+	else
+		throw OutsideBoundary("qualified or template class-name");
 	if (standalone && anonymous && !is_union &&
 	    current_->kind != SCOPE_CLASS)
 		throw runtime_error("anonymous class declaration declares nothing");

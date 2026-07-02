@@ -285,8 +285,13 @@ string LowerProgram::MemberDefinitionKey(const Scope* scope,
 		kind = "ctor";
 	else if (special == SF_DESTRUCTOR || special == SF_DESTRUCTOR_BASE)
 		kind = "dtor";
-	return LowerScopeKey(scope) + name + "#" + DescribeType(type) + "#" +
-		kind;
+	// Constructor/destructor keys drop the spelled name: the class
+	// scope and kind identify them, and a specialization's definitions
+	// carry the pattern spelling while call sites spell the
+	// specialization ("RefPair" vs "RefPair<int>").
+	string spelled = special == SF_NONE ? name : string();
+	return LowerScopeKey(scope) + spelled + "#" + DescribeType(type) +
+		"#" + kind;
 }
 
 LowFunctionInfo& LowerProgram::MemberFunctionEntry(

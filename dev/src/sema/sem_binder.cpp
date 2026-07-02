@@ -394,6 +394,11 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 		RecordMemberField(binding, init, specs);
 		return;
 	}
+	TypePtr var_bare = binding.type;
+	while (var_bare->kind == TK_ARRAY)
+		var_bare = var_bare->target;
+	if (var_bare->kind == TK_CLASS)
+		EnsureTypeCompleteness(var_bare->named);
 	SemNode* item = AppendItem(SN_VARIABLE);
 	item->name = binding.name;
 	item->type = binding.type;

@@ -630,3 +630,8 @@ Scope* SemBinder::SwapLookupScope(Scope* scope)
 	current_ = scope;
 	return previous;
 }
+
+void SemBinder::RequireCompleteType(const NamedTypeInfo* info)
+{
+	EnsureTypeCompleteness(info);
+}

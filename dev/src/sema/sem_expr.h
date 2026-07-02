@@ -96,6 +96,9 @@ struct ISemExprHost
 	// instantiated signatures rebinds under the argument alias scope);
 	// returns the previous scope.
 	virtual Scope* SwapLookupScope(Scope* scope) = 0;
+	// PA18: completes a deferred member-class definition when the
+	// context requires the complete type (14.7.1p1).
+	virtual void RequireCompleteType(const NamedTypeInfo* info) = 0;
 	virtual ~ISemExprHost() {}
 };
 

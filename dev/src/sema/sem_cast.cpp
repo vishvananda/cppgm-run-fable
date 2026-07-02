@@ -228,7 +228,13 @@ SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 			operand_type = Analyze(*expr.operands[0]).type;
 	}
 	// 5.3.3p1 / 5.3.6p1: requires a complete object type; the size (or
-	// alignment) is the value.
+	// alignment) is the value. PA18: deferred nested member-class
+	// definitions complete here.
+	TypePtr sizeof_bare = operand_type;
+	while (sizeof_bare->kind == TK_ARRAY)
+		sizeof_bare = sizeof_bare->target;
+	if (sizeof_bare->kind == TK_CLASS)
+		host_.RequireCompleteType(sizeof_bare->named);
 	unsigned long long size = alignment ? TypeAlignment(operand_type)
 	                                    : TypeSize(operand_type);
 	SemValue value;

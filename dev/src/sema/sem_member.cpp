@@ -168,6 +168,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
                                               ETokenType op,
                                               bool implicit_this)
 {
+	if (object.type && object.type->kind == TK_CLASS)
+		host_.RequireCompleteType(object.type->named);
 	if (object.type->kind != TK_CLASS)
 		throw runtime_error("member access on a non-class value");
 	const NamedTypeInfo* object_entity = object.type->named;
@@ -390,6 +392,8 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	const TypePtr& class_type, const vector<AstExprPtr>& arguments,
 	bool braced_assign)
 {
+	if (class_type->kind == TK_CLASS)
+		host_.RequireCompleteType(class_type->named);
 	const ClassInfo* cls = host_.Classes().Find(class_type->named);
 	if (!cls || !class_type->named->complete)
 		throw runtime_error("temporary of an incomplete class");

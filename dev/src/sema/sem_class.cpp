@@ -108,6 +108,13 @@ void SemBinder::RecordMemberField(ScopeBinding& binding,
 	}
 	if (in_bit_field_)
 		return;  // the bit-field path lays its own rows
+	// PA18: a field requires its class type complete (deferred nested
+	// member-class definitions instantiate here).
+	TypePtr field_bare = binding.type;
+	while (field_bare->kind == TK_ARRAY)
+		field_bare = field_bare->target;
+	if (field_bare->kind == TK_CLASS)
+		EnsureTypeCompleteness(field_bare->named);
 	ClassField field;
 	field.name = binding.name;
 	field.type = binding.type;

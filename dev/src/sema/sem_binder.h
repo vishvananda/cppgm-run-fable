@@ -297,6 +297,11 @@ private:
 	// destructor restores it (exception-safe). Defined at the end of
 	// this header (it captures the binder's private state).
 	struct InstantiationContext;
+	// DK_CLASS dispatch (14.7.1p1: a member-class definition of an
+	// instantiated class defers; a qualified class-name defines a
+	// nested class out of class).
+	virtual void BindClassDeclaration(const AstDecl& decl);
+	virtual void EnsureTypeCompleteness(const NamedTypeInfo* info);
 
 	// --- PA18 function templates (template_deduce.cpp) ---
 	// The shared positional placeholder type for deduction patterns.
@@ -457,12 +462,23 @@ private:
 	int instantiation_depth_;
 	// Shared positional deduction placeholders (`#0`, `#1`, ...).
 	vector<TypePtr> placeholders_;
+	// Deferred member-class definitions of instantiated classes
+	// (14.7.1p1), completed on demand by EnsureTypeCompleteness.
+	struct PendingClassDefinition
+	{
+		PendingClassDefinition() : decl(0), scope(0) {}
+
+		const AstDecl* decl;
+		Scope* scope;  // the class scope the definition binds in
+	};
+	std::map<const NamedTypeInfo*, PendingClassDefinition> pending_classes_;
 
 public:
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
 		TemplateInfo& tmpl, const vector<SemValue>& args);
 	virtual Scope* SwapLookupScope(Scope* scope);
+	virtual void RequireCompleteType(const NamedTypeInfo* info);
 };
 
 // Saved-and-cleared binder state around one instantiation: the

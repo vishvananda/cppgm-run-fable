@@ -330,10 +330,17 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		                    part.identifier);
 	if (found->kind == SB_FUNCTION)
 		return ResolveFunctionTemplateId(*found, part);
-	if (found->kind != SB_CLASS_TEMPLATE)
+	TemplateInfo* named_template = found->templ;
+	// 14.6.1p1: the injected-class-name of a specialization followed
+	// by an argument list acts as the template-name.
+	if (!named_template && found->kind == SB_TYPE && found->type &&
+	    found->type->kind == TK_CLASS && found->type->named->spec_template)
+		named_template = const_cast<TemplateInfo*>(
+			found->type->named->spec_template);
+	if (!named_template)
 		throw runtime_error(part.identifier +
 		                    " does not name a template");
-	TemplateInfo& tmpl = *found->templ;
+	TemplateInfo& tmpl = *named_template;
 	vector<TypePtr> args = ResolveTemplateArgumentList(tmpl, part);
 	bool dependent = false;
 	for (size_t i = 0; i < args.size(); i++)
@@ -515,7 +522,10 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 	     it != tmpl.class_specs.end(); ++it)
 	{
 		ClassSpecialization& spec = *it->second;
-		if (!spec.instantiated)
+		// A specialization whose body is still binding (a member of it
+		// re-entered instantiation) picks its members up when its own
+		// instantiation completes.
+		if (!spec.instantiated || !spec.entity->complete)
 			continue;
 		for (size_t i = 0; i < tmpl.member_defs.size(); i++)
 		{
@@ -558,6 +568,80 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	}
 	instantiating_ = saved_instantiating;
 	FlushDeferredBodies();
+}
+
+// --- nested member classes ---------------------------------------------------
+
+void SemBinder::BindClassDeclaration(const AstDecl& decl)
+{
+	// 14.7.1p1: instantiating a class template instantiates the
+	// declarations, not the definitions, of its member classes; the
+	// definition completes on first use of the complete type.
+	if (instantiating_ && decl.has_name &&
+	    decl.class_name.IsPlainIdentifier() &&
+	    current_->kind == SCOPE_CLASS)
+	{
+		TypePtr forward = BindClassForward(decl, false);
+		PendingClassDefinition pending;
+		pending.decl = &decl;
+		pending.scope = current_;
+		pending_classes_[forward->named] = pending;
+		return;
+	}
+	// An out-of-class definition of a nested class of a specialization
+	// (`struct Foo<int>::Inner { ... };` or the instantiated form of a
+	// qualified member-class template definition).
+	if (decl.has_name && decl.class_name.parts.size() > 1)
+	{
+		Scope* declaring = ResolvePrefixScope(decl.class_name);
+		if (declaring->kind != SCOPE_CLASS)
+			throw OutsideBoundary("qualified class definition scope");
+		Scope* saved = current_;
+		bool saved_allow = allow_qualified_class_name_;
+		current_ = declaring;
+		allow_qualified_class_name_ = true;
+		try
+		{
+			BindClass(decl, true);
+		}
+		catch (...)
+		{
+			current_ = saved;
+			allow_qualified_class_name_ = saved_allow;
+			throw;
+		}
+		current_ = saved;
+		allow_qualified_class_name_ = saved_allow;
+		return;
+	}
+	BindClass(decl, true);
+}
+
+void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
+{
+	if (!info || info->complete)
+		return;
+	std::map<const NamedTypeInfo*, PendingClassDefinition>::iterator
+		found = pending_classes_.find(info);
+	if (found == pending_classes_.end())
+		return;
+	PendingClassDefinition pending = found->second;
+	pending_classes_.erase(found);
+	InstantiationContext context(*this, pending.scope);
+	bool saved_instantiating = instantiating_;
+	instantiating_ = true;
+	try
+	{
+		// The forward-declared entity completes in place (the pending
+		// scope is its declaring class scope).
+		BindClass(*pending.decl, true);
+	}
+	catch (...)
+	{
+		instantiating_ = saved_instantiating;
+		throw;
+	}
+	instantiating_ = saved_instantiating;
 }
 
 // --- explicit instantiation --------------------------------------------------

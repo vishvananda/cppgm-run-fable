@@ -106,6 +106,13 @@ protected:
 	                                bool pure = false);
 
 	// --- classes and enums ---
+	// The DK_CLASS dispatch seam: PA18 defers nested member-class
+	// definitions inside instantiations and admits qualified
+	// out-of-class nested-class definitions.
+	virtual void BindClassDeclaration(const AstDecl& decl);
+	// Completes a deferred (pending) class definition when a context
+	// requires the complete type; no-op in PA11.
+	virtual void EnsureTypeCompleteness(const NamedTypeInfo* info);
 	TypePtr BindClass(const AstDecl& decl, bool standalone);
 	TypePtr BindClassForward(const AstDecl& decl, bool elaborated);
 	void CompleteClassLayout(NamedTypeInfo& info,
@@ -191,6 +198,9 @@ protected:
 	TypesModel& model_;
 	TypeBuilder builder_;
 	Scope* current_;
+	// PA18: a qualified class-name on a class definition is admitted
+	// when the caller (the PA18 seam) resolved the prefix scope.
+	bool allow_qualified_class_name_;
 	// Non-static data member types of the class currently being bound
 	// (null outside a class-specifier body), for layout completion.
 	std::vector<TypePtr>* current_fields_;
