@@ -360,6 +360,34 @@ private:
 	void ValidateTemplateIdShape(const AstNamePart& part);
 	void ValidateSignatureTemplateIds(const AstSpecifierSeq& specifiers,
 	                                  const AstDeclarator* declarator);
+	// --- PA19 explicit/partial specialization + variable templates
+	// (sem_spec.cpp) ---
+	void BindExplicitSpecialization(const AstDecl& decl);
+	void BindClassExplicitSpecialization(const AstDecl& inner);
+	void BindFunctionExplicitSpecialization(const AstDecl& inner);
+	void BindVariableExplicitSpecialization(const AstDecl& inner);
+	void CaptureVariableTemplate(const AstDecl& decl,
+	                             const AstDecl& inner);
+	void RegisterVariablePartial(const AstDecl& decl,
+	                             const AstDecl& inner);
+	void RegisterClassPartial(const AstDecl& decl, const AstDecl& inner);
+	vector<TemplateArg> ComposePartialPattern(
+		TemplateInfo& primary, const vector<TemplateParam>& params,
+		const AstNamePart& part);
+	int MatchPartialSpecialization(TemplateInfo& tmpl,
+	                               const vector<TemplateArg>& args,
+	                               vector<TemplateArg>& bound);
+	const ScopeBinding* ResolveVariableTemplateId(TemplateInfo& tmpl,
+	                                              const AstNamePart& part);
+	void InstantiateClassFromPartial(TemplateInfo& tmpl,
+	                                 ClassSpecialization& spec,
+	                                 const PartialSpecialization& partial,
+	                                 const vector<TemplateArg>& bound);
+	// Structural deduction of a pattern argument list against concrete
+	// arguments (template_deduce.cpp).
+	bool DeduceTemplateArgs(const vector<TemplateArg>& pattern,
+	                        const vector<TemplateArg>& args,
+	                        vector<TemplateArg>& bound);
 	// `pattern...` in an argument/initializer list (ISemExprHost).
 	virtual bool ExpandPackExpression(const AstExpr& pattern,
 	                                  vector<SemValue>& out);

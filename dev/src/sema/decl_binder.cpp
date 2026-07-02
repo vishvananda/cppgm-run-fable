@@ -1132,8 +1132,12 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 		name = decl.class_name.parts[0].identifier;
 	else if (allow_qualified_class_name_)
 		// PA18 out-of-class nested definition: the seam resolved the
-		// qualified prefix into `current_` already.
-		name = PartName(decl.class_name.parts.back());
+		// qualified prefix into `current_` already. A PA19 explicit
+		// -specialization head names the template through its
+		// template-id.
+		name = decl.class_name.parts.back().kind == NP_TEMPLATE_ID
+			? decl.class_name.parts.back().identifier
+			: PartName(decl.class_name.parts.back());
 	else
 		throw OutsideBoundary("qualified or template class-name");
 	if (standalone && anonymous && !is_union &&

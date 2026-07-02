@@ -27,7 +27,8 @@ using std::vector;
 enum ETemplateKind
 {
 	TMPL_CLASS,
-	TMPL_FUNCTION
+	TMPL_FUNCTION,
+	TMPL_VARIABLE
 };
 
 // One parameter of a template head: a type parameter or a PA19
@@ -77,6 +78,12 @@ struct ClassSpecialization
 	ScopeBinding self;
 	bool instantiated;   // pattern body bound (set before member binding
 	                     // so current-instantiation uses resolve here)
+	// PA19 explicit/partial specialization: the body bound for this
+	// key came from an explicit specialization definition or a partial
+	// specialization pattern (the primary's registered member
+	// definitions do not apply then).
+	bool explicit_spec = false;
+	bool from_partial = false;
 	// PA19 14.7.1: static-data-member definitions instantiate on
 	// demand (odr-use of the member, or definition of an object of
 	// this specialization); set once an object definition demanded
@@ -110,6 +117,24 @@ struct FunctionSpecialization
 	// still undefined at the end of the unit is an error.
 	bool odr_used;
 	bool body_emitted;
+	// PA19 14.7.3: the explicit-specialization definition owning this
+	// key (its body replaces the primary pattern's; non-inline
+	// explicit definitions emit strong).
+	const AstDecl* explicit_def = 0;
+	bool explicit_inline = false;
+};
+
+// PA19: one partial specialization of a class or variable template:
+// its own parameter list, the argument pattern (over abstract
+// placeholder slots), and the defining declaration.
+struct PartialSpecialization
+{
+	PartialSpecialization() : decl(0), init(0) {}
+
+	vector<TemplateParam> params;
+	vector<TemplateArg> pattern;
+	const AstDecl* decl;      // class definition (TMPL_CLASS)
+	const AstExpr* init;      // initializer (TMPL_VARIABLE)
 };
 
 // One captured template declaration (class or function). Forward
@@ -161,6 +186,15 @@ struct TemplateInfo
 
 	map<string, unique_ptr<ClassSpecialization>> class_specs;
 	map<string, unique_ptr<FunctionSpecialization>> fn_specs;
+	// PA19 partial specializations in declaration order.
+	vector<PartialSpecialization> partials;
+	// PA19 variable templates: the primary initializer and declared
+	// type AST, explicit-specialization initializers by key, and the
+	// resolved constant binding per argument key.
+	const AstDecl* var_decl = 0;
+	const AstExpr* var_init = 0;
+	map<string, const AstExpr*> var_explicit;
+	map<string, unique_ptr<ScopeBinding>> var_specs;
 	// Dependent uses of this class template (`box<T>` with abstract
 	// arguments): one stable SB_TYPE binding per argument pattern,
 	// carrying a TK_TEMPLATE_SPEC type.

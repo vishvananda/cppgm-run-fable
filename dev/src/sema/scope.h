@@ -47,7 +47,11 @@ enum EScopeBindingKind
 	// `templ` holds the template record. Function templates ride on
 	// SB_FUNCTION bindings through `fn_templates` instead so they
 	// overload with ordinary functions.
-	SB_CLASS_TEMPLATE
+	SB_CLASS_TEMPLATE,
+	// PA19: a variable-template name; `templ` holds the record and
+	// uses resolve through the template-id seam to per-key constant
+	// bindings.
+	SB_VARIABLE_TEMPLATE
 };
 
 // A typed value of the PA11 integral constant-expression subset. For

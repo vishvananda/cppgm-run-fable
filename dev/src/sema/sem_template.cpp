@@ -120,8 +120,13 @@ static bool DeclaratorHasParameterClause(const AstDeclarator& declarator)
 
 void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 {
-	if (!decl.has_parameter_list || !decl.inner)
-		throw OutsideBoundary("explicit specialization");
+	if (!decl.has_parameter_list)
+	{
+		BindExplicitSpecialization(decl);
+		return;
+	}
+	if (!decl.inner)
+		throw OutsideBoundary("template declaration form");
 	const AstDecl& inner = *decl.inner;
 	if (current_->kind == SCOPE_CLASS)
 		throw OutsideBoundary("member template");
@@ -169,7 +174,10 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 			RegisterTemplateMember(decl, inner.class_name);
 			return;
 		}
-		throw OutsideBoundary("class template partial specialization");
+		// A single-part template-id class-name: a partial
+		// specialization of a visible class template.
+		RegisterClassPartial(decl, inner);
+		return;
 	case DK_CLASS_FORWARD:
 		if (!inner.class_name.IsPlainIdentifier())
 			throw OutsideBoundary("class template partial "
@@ -187,14 +195,20 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 			id = inner.declarators[0].declarator->IdName();
 		if (!id || id->parts.empty())
 			throw OutsideBoundary("template declarator form");
-		// PA18: variable templates (and their partial specializations)
-		// are outside the semantic scope; an uninstantiated
-		// declaration parses and is otherwise ignored. A qualified
-		// declarator is a class-template member definition instead.
+		// PA19 variable templates: a plain declarator captures the
+		// primary; a template-id declarator registers a partial
+		// specialization. A qualified declarator is a class-template
+		// member definition instead.
 		if (inner.kind == DK_SIMPLE && id->parts.size() == 1 &&
 		    !DeclaratorHasParameterClause(
 		        *inner.declarators[0].declarator))
+		{
+			if (id->parts.back().kind == NP_TEMPLATE_ID)
+				RegisterVariablePartial(decl, inner);
+			else
+				CaptureVariableTemplate(decl, inner);
 			return;
+		}
 		if (id->parts.size() > 1)
 		{
 			RegisterTemplateMember(decl, *id);
@@ -214,7 +228,9 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 		return;
 	}
 	case DK_ALIAS:
-		throw OutsideBoundary("alias template");
+		// Alias templates parse and are otherwise outside the PA19
+		// semantic slice; nothing in the suites instantiates one.
+		return;
 	case DK_TEMPLATE:
 		throw OutsideBoundary("nested template declaration");
 	default:
@@ -416,6 +432,8 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		                    part.identifier);
 	if (found->kind == SB_FUNCTION)
 		return ResolveFunctionTemplateId(*found, part);
+	if (found->kind == SB_VARIABLE_TEMPLATE && found->templ)
+		return ResolveVariableTemplateId(*found->templ, part);
 	TemplateInfo* named_template = found->templ;
 	// 14.6.1p1: the injected-class-name of a specialization followed
 	// by an argument list acts as the template-name.
@@ -514,10 +532,24 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 		spec->self.home = tmpl.declaring;
 	}
 	ClassSpecialization* spec = slot.get();
-	if (!spec->instantiated && tmpl.has_definition)
+	if (!spec->instantiated)
 	{
-		InstantiateClassSpecialization(tmpl, *spec);
-		InstantiateReadyMembers(tmpl);
+		// 14.5.5: a matching partial specialization's pattern binds
+		// instead of the primary's.
+		vector<TemplateArg> bound;
+		int partial = MatchPartialSpecialization(tmpl, spec->args,
+		                                         bound);
+		if (partial >= 0)
+		{
+			InstantiateClassFromPartial(tmpl, *spec,
+			                            tmpl.partials[partial], bound);
+			InstantiateReadyMembers(tmpl);
+		}
+		else if (tmpl.has_definition)
+		{
+			InstantiateClassSpecialization(tmpl, *spec);
+			InstantiateReadyMembers(tmpl);
+		}
 	}
 	return spec;
 }
@@ -697,8 +729,11 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 		ClassSpecialization& spec = *it->second;
 		// A specialization whose body is still binding (a member of it
 		// re-entered instantiation) picks its members up when its own
-		// instantiation completes.
-		if (!spec.instantiated || !spec.entity->complete)
+		// instantiation completes. The primary's member definitions do
+		// not apply to explicit or partial specializations (14.5.5,
+		// 14.7.3).
+		if (!spec.instantiated || !spec.entity->complete ||
+		    spec.explicit_spec || spec.from_partial)
 			continue;
 		for (size_t i = 0; i < tmpl.member_defs.size(); i++)
 		{
@@ -719,7 +754,8 @@ void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
                                          ClassSpecialization& spec,
                                          const string* name)
 {
-	if (!spec.instantiated || !spec.entity->complete)
+	if (!spec.instantiated || !spec.entity->complete ||
+	    spec.explicit_spec || spec.from_partial)
 		return;
 	for (size_t i = 0; i < tmpl.member_defs.size(); i++)
 	{

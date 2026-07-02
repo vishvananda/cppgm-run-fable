@@ -498,6 +498,21 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	return true;
 }
 
+// Structural deduction of a partial-specialization pattern list
+// against concrete arguments: leading pattern slots unify one-to-one;
+// trailing concrete arguments (defaulted tails) are accepted.
+bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
+                                   const vector<TemplateArg>& args,
+                                   vector<TemplateArg>& bound)
+{
+	if (pattern.size() > args.size())
+		return false;
+	for (size_t i = 0; i < pattern.size(); i++)
+		if (!DeduceFromArg(pattern[i], args[i], bound))
+			return false;
+	return true;
+}
+
 // --- deduction ---------------------------------------------------------------
 
 // The flattened concrete argument list of a deduction result: the
@@ -832,8 +847,11 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// the body finds its own specialization already in progress); a
 	// bind failure propagates as a hard error, so the flag never
 	// outlives a failed instantiation.
+	// An explicit specialization's own definition replaces the primary
+	// pattern (14.7.3); a use before it deduced only the signature.
 	spec.body_emitted = true;
-	const AstDecl& inner = *tmpl.pattern_decl;
+	const AstDecl& inner = spec.explicit_def ? *spec.explicit_def
+	                                         : *tmpl.pattern_decl;
 	if (inner.kind != DK_FUNCTION || !inner.body)
 		throw runtime_error("function template " + tmpl.name +
 		                    " has no definition");
@@ -860,7 +878,9 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	item->entity_scope = spec.param_scope;
 	item->entity_name = spec.name;
 	item->unwind_no = composed.noexcept_simple;
-	item->inline_def = true;
+	// An explicit specialization is an ordinary definition: strong
+	// unless declared inline (7.1.2); instantiated bodies stay weak.
+	item->inline_def = !spec.explicit_def || spec.explicit_inline;
 	item->fn_spec = &spec;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
@@ -890,7 +910,10 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 		node->unwind_no = true;
 		spec.self.fn_unwind_no[0] = true;
 	}
-	unit_.deferred.push_back(std::move(item));
+	if (item->inline_def)
+		unit_.deferred.push_back(std::move(item));
+	else
+		unit_.items.push_back(std::move(item));
 }
 
 void SemBinder::PreBindDeclaredParameters(const AstDeclarator* declarator)
