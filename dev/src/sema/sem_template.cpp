@@ -24,6 +24,24 @@ runtime_error OutsideBoundary(const char* what)
 
 const int kMaxInstantiationDepth = 200;
 
+bool DeclaratorSpellsNoexcept(const AstDeclarator& declarator)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+		if (declarator.items[i].kind == DI_FUNC_QUAL &&
+		    declarator.items[i].qual.kind == FQ_NOEXCEPT)
+			return true;
+	return false;
+}
+
+size_t DeclaratorArity(const AstDeclarator& declarator)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+		if (declarator.items[i].kind == DI_PARAMS &&
+		    declarator.items[i].params)
+			return declarator.items[i].params->parameters.size();
+	return 0;
+}
+
 }  // namespace
 
 // --- capture --------------------------------------------------------------
@@ -171,6 +189,7 @@ void SemBinder::CaptureClassTemplate(const AstDecl& decl,
 		tmpl->decl = &decl;
 		tmpl->pattern_decl = &inner;
 		tmpl->has_definition = true;
+		CheckTemplateDefinitionSanity(*tmpl);
 		// Specializations named while only the forward declaration was
 		// visible upgrade now, then any ready member definitions.
 		for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
@@ -241,6 +260,8 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	tmpl->decl = &decl;
 	tmpl->pattern_decl = &inner;
 	tmpl->has_definition = definition;
+	if (definition)
+		CheckTemplateDefinitionSanity(*tmpl);
 	if (!binding)
 	{
 		ScopeBinding fresh;
@@ -511,8 +532,45 @@ void SemBinder::RegisterTemplateMember(const AstDecl& decl,
 	if (params.size() != tmpl->params.size())
 		throw runtime_error("template parameter list of a member of " +
 		                    tmpl->name + " disagrees");
+	CheckMemberDefinitionAgainstPattern(*tmpl, *decl.inner);
 	tmpl->member_defs.push_back(&decl);
 	InstantiateReadyMembers(*tmpl);
+}
+
+// 15.4p5: an out-of-class special-member definition must repeat the
+// declared exception specification; checked syntactically at
+// registration (the definition may never instantiate).
+void SemBinder::CheckMemberDefinitionAgainstPattern(
+	const TemplateInfo& tmpl, const AstDecl& inner)
+{
+	if (!tmpl.has_definition ||
+	    (inner.kind != DK_SPECIAL_MEMBER_DEFINITION &&
+	     inner.kind != DK_SPECIAL_MEMBER_DECLARATION))
+		return;
+	const AstDecl& pattern = *tmpl.pattern_decl;
+	const AstName* id = inner.declarator->IdName();
+	bool def_dtor = id && !id->parts.empty() && id->parts.back().tilde;
+	bool def_noexcept = DeclaratorSpellsNoexcept(*inner.declarator);
+	size_t def_arity = DeclaratorArity(*inner.declarator);
+	for (size_t i = 0; i < pattern.members.size(); i++)
+	{
+		const AstDecl& member = *pattern.members[i];
+		if (member.kind != DK_SPECIAL_MEMBER_DECLARATION ||
+		    !member.declarator)
+			continue;
+		const AstName* member_id = member.declarator->IdName();
+		bool member_dtor = member_id && !member_id->parts.empty() &&
+			member_id->parts.back().tilde;
+		if (member_dtor != def_dtor)
+			continue;
+		if (DeclaratorArity(*member.declarator) != def_arity)
+			continue;
+		if (DeclaratorSpellsNoexcept(*member.declarator) != def_noexcept)
+			throw runtime_error("out-of-class definition of a member of "
+			                    + tmpl.name +
+			                    " changes the exception specification");
+		return;
+	}
 }
 
 void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)

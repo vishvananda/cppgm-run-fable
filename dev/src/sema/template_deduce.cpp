@@ -379,14 +379,19 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 		throw runtime_error("wrong template argument count for " +
 		                    tmpl.name);
 	string key = TemplateArgumentKey(args);
-	unique_ptr<FunctionSpecialization>& slot = tmpl.fn_specs[key];
-	if (slot)
-		return slot.get();
+	{
+		map<string, unique_ptr<FunctionSpecialization>>::iterator found =
+			tmpl.fn_specs.find(key);
+		if (found != tmpl.fn_specs.end())
+			return found->second.get();
+	}
 	if (instantiation_depth_ >= 200)
 		throw runtime_error("template instantiation depth limit "
 		                    "exceeded for " + tmpl.name);
-	slot.reset(new FunctionSpecialization());
-	FunctionSpecialization* spec = slot.get();
+	// The record enters the cache only after the signature composes:
+	// a substitution failure must not leave a half-built entry behind.
+	unique_ptr<FunctionSpecialization> fresh(new FunctionSpecialization());
+	FunctionSpecialization* spec = fresh.get();
 	spec->owner = &tmpl;
 	spec->args = args;
 	spec->key = key;
@@ -432,6 +437,7 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		defaults[i] = composed.parameters[i].default_arg;
 
+	tmpl.fn_specs[key] = std::move(fresh);
 	if (tmpl.has_definition)
 		InstantiateFunctionBody(tmpl, *spec);
 	return spec;

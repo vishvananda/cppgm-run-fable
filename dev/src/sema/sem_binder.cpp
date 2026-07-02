@@ -40,7 +40,8 @@ bool SameParameterList(const Type& a, const Type& b)
 SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	: DeclBinder(model), unit_(unit), analyzer_(*this),
 	  local_types_(0), pending_local_type_(false), in_bit_field_(false),
-	  instantiating_(false), instantiation_depth_(0)
+	  instantiating_(false), instantiation_depth_(0),
+	  in_implicit_type_context_(false)
 {
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.

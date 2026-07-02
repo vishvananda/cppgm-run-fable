@@ -125,6 +125,10 @@ struct TemplateInfo
 	// source order.
 	vector<const AstDecl*> member_defs;
 
+	// Unqualified names the definition-time sanity walk could not
+	// account for; re-checked at the end of the translation unit.
+	vector<string> suspicious_names;
+
 	map<string, unique_ptr<ClassSpecialization>> class_specs;
 	map<string, unique_ptr<FunctionSpecialization>> fn_specs;
 	// Dependent uses of this class template (`box<T>` with abstract
@@ -137,6 +141,11 @@ struct TemplateInfo
 class TemplateRegistry
 {
 public:
+	const vector<unique_ptr<TemplateInfo>>& All() const
+	{
+		return all_;
+	}
+
 	TemplateInfo* Create(ETemplateKind kind, const string& name,
 	                     Scope* declaring)
 	{

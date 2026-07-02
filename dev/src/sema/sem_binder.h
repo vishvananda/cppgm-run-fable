@@ -16,6 +16,10 @@ class SemBinder : public DeclBinder, public ISemExprHost
 public:
 	SemBinder(TypesModel& model, SemUnit& unit);
 
+	// PA18: the end-of-unit template re-checks run after the forward
+	// pass (definition-time sanity, 14.6p7).
+	virtual void BindTranslationUnit(const AstDecl& unit);
+
 	// ISemExprHost
 	virtual Scope* CurrentScope();
 	virtual TypesModel& Model();
@@ -334,6 +338,13 @@ private:
 	const ScopeBinding* ResolveFunctionTemplateId(
 		const ScopeBinding& binding, const AstNamePart& part);
 	void BindExplicitFunctionInstantiation(const AstDecl& inner);
+	// Definition-time template sanity (sem_template_check.cpp):
+	// parameter-shadow errors throw; unresolved non-dependent names
+	// re-check at the end of the unit.
+	void CheckTemplateDefinitionSanity(TemplateInfo& tmpl);
+	void FinishTemplateChecks();
+	void CheckMemberDefinitionAgainstPattern(const TemplateInfo& tmpl,
+	                                         const AstDecl& inner);
 
 	// --- PA17 virtual members (sem_virtual.cpp) ---
 	// Declaration-time slot recording for an ordinary member function
@@ -462,6 +473,9 @@ private:
 	int instantiation_depth_;
 	// Shared positional deduction placeholders (`#0`, `#1`, ...).
 	vector<TypePtr> placeholders_;
+	// True inside contexts that are grammatically type-only (base
+	// clauses): 14.6p3 typename is not required there.
+	bool in_implicit_type_context_;
 	// Deferred member-class definitions of instantiated classes
 	// (14.7.1p1), completed on demand by EnsureTypeCompleteness.
 	struct PendingClassDefinition

@@ -1059,6 +1059,24 @@ bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
 
 TypePtr SemBinder::ResolveTypeName(const AstName& name)
 {
+	// 14.6p3: a qualified dependent type whose qualifier names a
+	// template parameter needs the `typename` disambiguator (base
+	// clauses and other implicit type contexts do not, and pass a set
+	// flag through the caller seam).
+	if (name.parts.size() > 1 && !name.typename_keyword &&
+	    !name.global_scope && !in_implicit_type_context_ &&
+	    name.parts[0].kind == NP_IDENTIFIER && !name.parts[0].tilde)
+	{
+		const ScopeBinding* first = UnqualifiedLookup(
+			current_, name.parts[0].identifier, SLF_ANY);
+		if (first &&
+		    (first->kind == SB_TYPE || first->kind == SB_TYPE_ALIAS) &&
+		    first->home &&
+		    first->home->kind == SCOPE_TEMPLATE_PARAMS)
+			throw runtime_error("dependent qualified name " +
+			                    name.parts[0].identifier +
+			                    "::... needs typename");
+	}
 	const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
 	if (!found)
 		throw runtime_error("undeclared type name " + TerminalName(name));

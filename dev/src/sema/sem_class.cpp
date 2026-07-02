@@ -59,7 +59,19 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 		throw OutsideBoundary("virtual inheritance");
 	if (base.pack)
 		throw OutsideBoundary("base pack expansion");
-	TypePtr base_type = ResolveTypeName(base.name);
+	bool saved_implicit = in_implicit_type_context_;
+	in_implicit_type_context_ = true;
+	TypePtr base_type;
+	try
+	{
+		base_type = ResolveTypeName(base.name);
+	}
+	catch (...)
+	{
+		in_implicit_type_context_ = saved_implicit;
+		throw;
+	}
+	in_implicit_type_context_ = saved_implicit;
 	if (base_type->kind != TK_CLASS || !base_type->named->complete)
 		throw runtime_error("base class is not a complete class");
 	ClassInfo* base_cls = unit_.classes.Find(base_type->named);

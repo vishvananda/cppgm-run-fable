@@ -25,7 +25,7 @@ public:
 	explicit DeclBinder(TypesModel& model);
 	virtual ~DeclBinder() {}
 
-	void BindTranslationUnit(const AstDecl& unit);
+	virtual void BindTranslationUnit(const AstDecl& unit);
 
 	// ITypeBuilderHost
 	virtual TypePtr BindNestedTypeSpecifier(const AstDecl& decl);
