@@ -150,6 +150,13 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		if (composed.parameters[i].default_arg && !defaults[i])
 			defaults[i] = composed.parameters[i].default_arg;
+	// PA18: remember declared parameter names (first non-empty wins).
+	binding.fn_param_names.resize(count);
+	vector<string>& names = binding.fn_param_names[index];
+	names.resize(composed.parameters.size());
+	for (size_t i = 0; i < composed.parameters.size(); i++)
+		if (names[i].empty())
+			names[i] = composed.parameters[i].name;
 }
 
 string DeclBinder::TerminalName(const AstName& name)

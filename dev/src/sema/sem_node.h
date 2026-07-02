@@ -250,8 +250,11 @@ struct SemUnit
 	ClassRegistry classes;
 	vector<SemNodePtr> deferred;
 	// PA18: the captured template declarations and their instantiated
-	// specializations.
+	// specializations, plus the class entities named by explicit
+	// instantiation definitions (their members emit unconditionally,
+	// 14.7.2p8).
 	TemplateRegistry templates;
+	vector<const NamedTypeInfo*> explicit_instantiations;
 };
 
 // Writes the `translation-unit` line and the tree below it.

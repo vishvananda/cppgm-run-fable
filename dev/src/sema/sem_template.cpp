@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include <set>
 #include <stdexcept>
 
 #include "sema/scope_lookup.h"
@@ -682,6 +683,46 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	FlushDeferredBodies();
 }
 
+// --- dependent bases ----------------------------------------------------------
+
+// Whether a base-clause name mentions a template parameter (an alias
+// bound in a SCOPE_TEMPLATE_PARAMS scope of the current chain), making
+// the base dependent in the pattern (14.6.2p1).
+bool SemBinder::BaseClauseIsDependent(const AstName& name)
+{
+	std::set<string> params;
+	for (const Scope* scope = current_; scope; scope = scope->parent)
+		if (scope->kind == SCOPE_TEMPLATE_PARAMS)
+			for (size_t i = 0; i < scope->bindings.size(); i++)
+				params.insert(scope->bindings[i].name);
+	if (params.empty())
+		return false;
+	return NameMentionsAny(name, params);
+}
+
+bool SemBinder::NameMentionsAny(const AstName& name,
+                                const std::set<string>& params)
+{
+	for (size_t i = 0; i < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		if (params.count(part.identifier))
+			return true;
+		for (size_t a = 0; a < part.arguments.size(); a++)
+		{
+			const AstTemplateArgument& argument = part.arguments[a];
+			if (!argument.is_type || !argument.type)
+				continue;
+			const AstSpecifierSeq& specs = argument.type->specifiers;
+			for (size_t k = 0; k < specs.size(); k++)
+				if (specs[k].kind == SPEC_TYPE_NAME &&
+				    NameMentionsAny(specs[k].name, params))
+					return true;
+		}
+	}
+	return false;
+}
+
 // --- nested member classes ---------------------------------------------------
 
 void SemBinder::BindClassDeclaration(const AstDecl& decl)
@@ -803,6 +844,7 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 		if (!binding->type->named->complete)
 			throw runtime_error("explicit instantiation of an "
 			                    "undefined class template");
+		unit_.explicit_instantiations.push_back(binding->type->named);
 		return;
 	}
 	if (inner.kind == DK_SIMPLE)

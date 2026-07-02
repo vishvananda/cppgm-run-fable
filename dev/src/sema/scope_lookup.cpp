@@ -47,13 +47,18 @@ bool BindingPassesFilter(const ScopeBinding& binding,
 // hide base declarations; otherwise the search continues up the base
 // chain.
 const ScopeBinding* ClassChainLookup(const Scope& scope, const string& name,
-                                     EScopeLookupFilter filter)
+                                     EScopeLookupFilter filter,
+                                     bool skip_dependent_base = false)
 {
 	for (const Scope* link = &scope; link; link = link->class_base)
 	{
 		const ScopeBinding* own = FindOwnBinding(*link, name);
 		if (own && BindingPassesFilter(*own, filter))
 			return own;
+		// PA18 14.6.2p3: an unqualified name does not search a base
+		// that was dependent in the template pattern.
+		if (skip_dependent_base && link->base_dependent)
+			break;
 	}
 	return 0;
 }
@@ -174,7 +179,7 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 	for (const Scope* scope = from; scope; scope = scope->parent)
 	{
 		const ScopeBinding* own = scope->kind == SCOPE_CLASS
-			? ClassChainLookup(*scope, name, filter)
+			? ClassChainLookup(*scope, name, filter, true)
 			: FindOwnBinding(*scope, name);
 		if (own && !BindingPassesFilter(*own, filter))
 			own = 0;

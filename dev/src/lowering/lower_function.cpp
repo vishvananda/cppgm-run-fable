@@ -107,6 +107,8 @@ string FunctionLowerer::Header() const
 	                                : "binding=strong");
 	if (!info_.object_name.empty())
 		meta.push_back("object=" + info_.object_name);
+	if (info_.object_root)
+		meta.push_back("object_root=yes");
 	if (info_.is_main)
 		meta.push_back("keep_alias=yes");
 	string metadata;

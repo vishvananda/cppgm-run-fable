@@ -92,6 +92,11 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	// Base members become reachable through unqualified and qualified
 	// member lookup (10.2 subset: single inheritance, no hiding merge).
 	scope->class_base = base_cls->members;
+	// PA18 14.6.2p3: a base spelled with a template parameter is
+	// dependent; the instantiated scope remembers it so unqualified
+	// lookup skips the base subtree.
+	if (instantiating_ && BaseClauseIsDependent(base.name))
+		scope->base_dependent = true;
 	// PA17: the derived class inherits the base's vtable slots (an
 	// overrider replaces in place) and the virtual-destructor facts.
 	// Introducing the first vpointer over a non-empty non-polymorphic
@@ -833,10 +838,27 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 	}
 	else
 		item->type = body.composed.type;
+	// PA18: an unnamed definition parameter borrows the declaration's
+	// recorded name for its lowered slot.
+	const vector<string>* declared_names = 0;
+	if (const ScopeBinding* fn = FindOwnBinding(*body.declaring,
+	                                            body.name))
+		if (fn->kind == SB_FUNCTION)
+		{
+			size_t index = 0;
+			for (size_t i = 0; i < fn->overloads.size(); i++)
+				if (TypeEquals(fn->overloads[i], body.composed.type))
+					index = i + 1;
+			if (index < fn->fn_param_names.size())
+				declared_names = &fn->fn_param_names[index];
+		}
 	for (size_t i = 0; i < body.composed.parameters.size(); i++)
 	{
 		SemNodePtr parameter = MakeSemNode(SN_PARAMETER);
 		parameter->name = body.composed.parameters[i].name;
+		if (parameter->name.empty() && declared_names &&
+		    i < declared_names->size())
+			parameter->name = (*declared_names)[i];
 		parameter->type = body.composed.parameters[i].type;
 		parameter->entity_scope = body.fn_scope;
 		parameter->entity_name = parameter->name;

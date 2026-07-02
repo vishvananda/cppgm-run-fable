@@ -57,6 +57,9 @@ struct LowFunctionInfo
 	// PA18: the function-template specialization this entry emits
 	// (null for ordinary functions); the object name mangles from it.
 	const FunctionSpecialization* fn_spec = 0;
+	// PA18 14.7.2p8: emitted because an explicit instantiation
+	// definition names its class (`object_root=yes`).
+	bool object_root = false;
 	const SemNode* definition;
 	size_t index;        // position in functions_ (demand rescan key)
 	string body_text;    // lowered definition text

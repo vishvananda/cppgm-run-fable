@@ -64,6 +64,39 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 	// member definitions arrive through unit.deferred.
 	for (size_t i = 0; i < unit.deferred.size(); i++)
 		RegisterDeferred(*unit.deferred[i]);
+	// PA18 14.7.2p8: an explicit instantiation definition emits every
+	// instantiated member definition of its class unconditionally.
+	for (size_t e = 0; e < unit.explicit_instantiations.size(); e++)
+	{
+		const NamedTypeInfo* entity = unit.explicit_instantiations[e];
+		for (size_t i = 0; i < unit.deferred.size(); i++)
+		{
+			const SemNode& item = *unit.deferred[i];
+			if (item.kind != SN_FUNCTION_DEFINITION ||
+			    !item.entity_scope || item.synthesized ||
+			    item.entity_scope->entity != entity)
+				continue;
+			LowFunctionInfo* info;
+			if (item.special != SF_NONE)
+			{
+				bool is_ctor = item.special == SF_CONSTRUCTOR ||
+					item.special == SF_CONSTRUCTOR_BASE;
+				info = &MemberFunctionEntry(item.entity_scope,
+				                            item.entity_name, item.type,
+				                            is_ctor ? "C1" : "D1");
+			}
+			else if (item.is_method)
+				info = &MemberFunctionEntry(item.entity_scope,
+				                            item.entity_name, item.type,
+				                            "");
+			else
+				info = &FunctionEntry(item.entity_scope,
+				                      item.entity_name, item.type,
+				                      item.fn_spec);
+			info->object_root = true;
+			DemandFunction(*info);
+		}
+	}
 	// PA17: a class whose key function is defined in this unit anchors
 	// its vtable here (emitted strong even without local construction).
 	const vector<const ClassInfo*>& classes = unit.classes.All();

@@ -129,6 +129,10 @@ struct ScopeBinding
 	// imported overloads into the target's set; each entry keeps the
 	// scope that really declared it (null falls back to `owner`).
 	vector<const Scope*> fn_owner;
+	// PA18: per-overload declared parameter names (first declaration
+	// wins per slot); an out-of-class definition with unnamed
+	// parameters falls back to them for its lowered slot names.
+	vector<vector<string>> fn_param_names;
 	// PA18 templates. SB_CLASS_TEMPLATE: the class template this name
 	// declares. SB_FUNCTION: the function templates declared under
 	// this name beside the ordinary overloads (using-declaration
@@ -140,7 +144,7 @@ struct ScopeBinding
 struct Scope
 {
 	Scope() : kind(SCOPE_NAMESPACE), parent(0), class_base(0),
-	          entity(0), unnamed_member(0) {}
+	          base_dependent(false), entity(0), unnamed_member(0) {}
 
 	EScopeKind kind;
 	string name;  // empty for the global namespace, blocks, and
@@ -149,6 +153,10 @@ struct Scope
 	// PA15 single inheritance: the direct base class's member scope
 	// (null otherwise); member lookup searches the base chain (10.2).
 	Scope* class_base;
+	// PA18 14.6.2p3: the base was dependent in the template pattern;
+	// unqualified lookup does not search it (qualified and member
+	// -access lookup still do).
+	bool base_dependent;
 	// PA18: the named-type entity this member scope belongs to (set by
 	// SetMemberScope; null for non-member scopes). The lowering's
 	// symbol mangling reads the entity's template identity from here.

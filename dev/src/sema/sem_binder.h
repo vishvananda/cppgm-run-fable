@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 
 #include "sema/class_info.h"
 #include "sema/decl_binder.h"
@@ -348,6 +349,11 @@ private:
 	void FinishTemplateChecks();
 	void CheckMemberDefinitionAgainstPattern(const TemplateInfo& tmpl,
 	                                         const AstDecl& inner);
+	// 14.6.2p1: whether a base-clause name mentions a template
+	// parameter of the current instantiation context.
+	bool BaseClauseIsDependent(const AstName& name);
+	bool NameMentionsAny(const AstName& name,
+	                     const std::set<string>& params);
 
 	// --- PA17 virtual members (sem_virtual.cpp) ---
 	// Declaration-time slot recording for an ordinary member function
