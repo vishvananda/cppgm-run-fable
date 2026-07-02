@@ -222,17 +222,21 @@ string TemplateArgumentKey(const vector<TemplateArg>& args)
 }
 
 // The source-like spelling of one concrete value: bool parameters
-// spell true/false, signed types the signed decimal, everything else
-// the unsigned decimal. Distinct values of one parameter cannot
-// collide.
+// spell true/false, enumerations the cast form "(Policy)2", signed
+// types the signed decimal, everything else the unsigned decimal.
+// Distinct values of one parameter cannot collide.
 static string ValueSpelling(const TemplateArg& arg)
 {
 	if (arg.type && arg.type->kind == TK_FUNDAMENTAL &&
 	    arg.type->fundamental == FT_BOOL)
 		return arg.value_bits ? "true" : "false";
-	if (IsSignedIntegralFundamental(arg.value_type))
-		return to_string((long long)arg.value_bits);
-	return to_string(arg.value_bits);
+	string digits = IsSignedIntegralFundamental(arg.value_type)
+		? to_string((long long)arg.value_bits)
+		: to_string(arg.value_bits);
+	if (arg.type && arg.type->kind == TK_ENUM)
+		return "(" + EntityScopePrefix(*arg.type->named) +
+			arg.type->named->name + ")" + digits;
+	return digits;
 }
 
 string TemplateArgumentSpelling(const vector<TemplateArg>& args)

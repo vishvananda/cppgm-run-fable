@@ -284,10 +284,15 @@ ConstValue EvaluateTypedCast(const AstExpr& expr, IConstExprContext& context)
 	if (!expr.type || expr.operands.size() != 1)
 		throw OutsideSubset("cast form");
 	TypePtr target = context.ResolveTypeId(*expr.type);
-	if (!IsIntegralType(target))
+	EFundamentalType fundamental;
+	if (IsIntegralType(target))
+		fundamental = target->fundamental;
+	else if (target->kind == TK_ENUM)
+		fundamental = target->named->enum_underlying;
+	else
 		throw OutsideSubset("cast to a non-integral type");
 	ConstValue operand = EvaluateConstExpr(*expr.operands[0], context);
-	return ConvertConstValue(operand, target->fundamental);
+	return ConvertConstValue(operand, fundamental);
 }
 
 EFundamentalType FunctionalCastTarget(ETokenType keyword)
@@ -383,6 +388,33 @@ ConstValue EvaluateGnuAlignof(const AstExpr& expr,
 	return ConstValue(FT_UNSIGNED_LONG_INT, TypeAlignment(named));
 }
 
+// The 5.2.3 semantic disambiguation of `T(x)`: a call whose callee
+// names a type is a functional cast; integral and enumeration targets
+// fold within the subset.
+ConstValue EvaluateCall(const AstExpr& expr, IConstExprContext& context)
+{
+	const AstExpr* callee = expr.operands.empty()
+		? 0 : expr.operands[0].get();
+	if (callee && callee->kind == EK_ID && expr.arguments.size() == 1)
+	{
+		TypePtr named = context.TryResolveTypeFromName(callee->name);
+		if (named)
+		{
+			EFundamentalType target;
+			if (IsIntegralType(named))
+				target = named->fundamental;
+			else if (named->kind == TK_ENUM)
+				target = named->named->enum_underlying;
+			else
+				throw OutsideSubset("functional cast to a "
+				                    "non-integral type");
+			return ConvertConstValue(
+				EvaluateConstExpr(*expr.arguments[0], context), target);
+		}
+	}
+	return EvaluateGnuAlignof(expr, context);
+}
+
 ConstValue EvaluateTypeTrait(const AstExpr& expr,
                              IConstExprContext& context)
 {
@@ -454,7 +486,7 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	case EK_SIZEOF_EXPR:
 		return EvaluateSizeofExpr(expr, context);
 	case EK_CALL:
-		return EvaluateGnuAlignof(expr, context);
+		return EvaluateCall(expr, context);
 	case EK_TYPE_TRAIT:
 		return EvaluateTypeTrait(expr, context);
 	default:

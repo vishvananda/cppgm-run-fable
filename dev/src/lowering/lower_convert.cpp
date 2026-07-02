@@ -244,8 +244,22 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		if (enum_identity && LowerUnsignedOps(target) &&
 		    TypeSize(target) == 8)
 			enum_identity = false;
+		// A same-spelling conversion that flips signedness (unsigned
+		// long <-> long: both spell i64) changes value semantics and
+		// keeps its copy in every context; a same-spelling,
+		// same-signedness conversion (int -> wchar_t) is an identity
+		// (the reference elides it even when spelled).
+		EFundamentalType source_fund = source->kind == TK_ENUM
+			? source->named->enum_underlying : source->fundamental;
+		EFundamentalType target_fund = target->kind == TK_ENUM
+			? target->named->enum_underlying : target->fundamental;
+		bool sign_flip =
+			IsSignedIntegralFundamental(source_fund) !=
+			IsSignedIntegralFundamental(target_fund);
 		if (LowerValueType(source) != LowerValueType(target) ||
-		    (context == LCC_CAST && !enum_identity))
+		    sign_flip || (context == LCC_CAST && !enum_identity &&
+		                  LowerUnsignedOps(target) &&
+		                  TypeSize(target) == 8))
 		{
 		string temp = NewTemp();
 		Emit(temp + " = copy " + LowerValueType(target) + " " +

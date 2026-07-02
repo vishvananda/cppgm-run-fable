@@ -123,6 +123,11 @@ private:
 	// --- initialization and implicit constructors ---
 	void AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	                         const AstInitializer* init);
+	// 8.5.2: the synthesized per-code-unit element list of a string
+	// -literal array initializer.
+	SemNodePtr StringLiteralArrayInit(ScopeBinding& binding,
+	                                  const SemNode& literal,
+	                                  const TypePtr& literal_type);
 	void EmitConstructorAction(SemNode& item, const string& var_name,
 	                           const TypePtr& type);
 	const string& EnsureDefaultConstructor(const TypePtr& type,
@@ -298,6 +303,24 @@ private:
 	// objectless constant).
 	void BindParamAlias(Scope& scope, const TemplateParam& param,
 	                    const TemplateArg& arg);
+	// --- PA19 value arguments (template_args.cpp) ---
+	// Whether abstract pattern bindings are in scope (unevaluable
+	// value arguments are then dependent, not ill-formed).
+	bool InAbstractTemplateContext() const;
+	// The declared type of one value parameter under the earlier
+	// parameters' bindings.
+	TypePtr ValueParamType(const TemplateParam& param, Scope* bindings);
+	// One value argument / defaulted value expression against the
+	// parameter's declared type.
+	TemplateArg ResolveValueArgument(const AstTemplateArgument& argument,
+	                                 const TypePtr& param_type);
+	TemplateArg ResolveDefaultValueExpr(const AstExpr& expr,
+	                                    const TypePtr& param_type);
+	// The lazily-created binding scope over the already-resolved
+	// leading arguments.
+	Scope* EnsureArgBindingScope(TemplateInfo& tmpl,
+	                             const vector<TemplateArg>& so_far,
+	                             Scope*& partial);
 	// The specialization record for `args`, instantiating the class
 	// body on demand when the definition is available.
 	ClassSpecialization* EnsureClassSpecialization(
@@ -310,6 +333,15 @@ private:
 	void InstantiateMemberDefinition(TemplateInfo& tmpl,
 	                                 ClassSpecialization& spec,
 	                                 size_t member_index);
+	// PA19 14.7.1p8: static-data-member definitions instantiate on
+	// demand (odr-use, or definition of an object of the
+	// specialization type).
+	void InstantiateStaticMembers(TemplateInfo& tmpl,
+	                              ClassSpecialization& spec,
+	                              const string* name);
+	ClassSpecialization* FindSpecializationRecord(
+		const NamedTypeInfo* entity);
+	void DemandSpecializationStatics(const NamedTypeInfo* entity);
 	// Saved-and-cleared binder state around one instantiation; the
 	// destructor restores it (exception-safe). Defined at the end of
 	// this header (it captures the binder's private state).
@@ -542,6 +574,7 @@ public:
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target);
 	virtual void OnSpecializationOdrUsed(const FunctionSpecialization* spec);
+	virtual void OnStaticMemberReferenced(const ScopeBinding& binding);
 	virtual bool SwapUnevaluatedOperand(bool active);
 	virtual void OnMemberSignatureBegin(Scope* class_scope);
 	virtual void OnMemberSignatureEnd();

@@ -309,6 +309,23 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	case SB_VARIABLE:
 	case SB_PARAMETER:
 	{
+		// PA19: a non-type template parameter has no object behind it;
+		// every use folds to its converted constant value (14.1p4).
+		if (binding->no_object)
+		{
+			if (!binding->has_value)
+				throw runtime_error(binding->name +
+				                    " is a dependent value parameter");
+			value.node = MakeSemNode(SN_LITERAL);
+			value.node->token = RenderConstValue(binding->value);
+			value.node->type = RemoveTopCv(binding->type);
+			value.node->category = VC_PRVALUE;
+			value.node->has_value = true;
+			value.node->value = binding->value;
+			value.type = value.node->type;
+			value.category = VC_PRVALUE;
+			return value;
+		}
 		// A constant static member named through a qualified-id folds
 		// like an enumerator (9.4.2p4 constant initializer).
 		if (member_class && binding->has_value)
@@ -371,6 +388,9 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		throw runtime_error(binding->name +
 		                    " does not name a value in an expression");
 	}
+	if (binding->kind == SB_VARIABLE && !binding->has_value &&
+	    binding->owner && binding->owner->kind == SCOPE_CLASS)
+		host_.OnStaticMemberReferenced(*binding);
 	value.node = MakeSemNode(SN_ID_EXPRESSION);
 	value.node->name = written;
 	value.node->type = value.type;

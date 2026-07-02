@@ -372,6 +372,8 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 	bool is_const = false;
 	bool is_volatile = false;
 	TopCv(info.type, is_const, is_volatile);
+	if (binding->has_value && is_const)
+		info.folded_const = true;
 	if (item.weak_def)
 		info.weak = true;
 	else if (item.is_static_decl ||
@@ -876,6 +878,12 @@ string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
 	if (RemoveTopCv(inner)->kind == TK_CLASS)
 		// Class objects zero-fill statically; construction runs in
 		// @__cppgm_init.
+		return "global @" + info.low_name + GlobalMetadata(info) +
+			" = {\n  zero " + to_string(TypeSize(info.type)) + "\n}";
+	if (RemoveTopCv(info.type)->kind == TK_ENUM && info.folded_const)
+		// An enumeration constant object: every read folds to the
+		// recorded value, so the storage keeps the structured zero
+		// image (the checked references pin this shape).
 		return "global @" + info.low_name + GlobalMetadata(info) +
 			" = {\n  zero " + to_string(TypeSize(info.type)) + "\n}";
 	if (IsReferenceType(info.type))

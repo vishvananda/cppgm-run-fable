@@ -29,14 +29,31 @@ enum ETemplateKind
 	TMPL_FUNCTION
 };
 
-// One type-parameter of a template head (the PA18 subset: type
-// parameters only, optionally defaulted).
+// One parameter of a template head: a type parameter or a PA19
+// integral non-type (value) parameter, optionally defaulted, and
+// optionally a pack.
+enum ETemplateParamKind
+{
+	TPK_TYPE,
+	TPK_VALUE
+};
+
 struct TemplateParam
 {
-	TemplateParam() : default_type(0) {}
+	TemplateParam()
+		: kind(TPK_TYPE), pack(false), default_type(0), source(0),
+		  default_expr(0)
+	{}
 
+	ETemplateParamKind kind;
+	bool pack;
 	string name;                   // empty for unnamed parameters
-	const AstTypeId* default_type; // null when no default
+	const AstTypeId* default_type; // TPK_TYPE: null when no default
+	// TPK_VALUE: the parameter's AST (the declared type composes on
+	// demand - it may reference earlier parameters, `template<class T,
+	// T v>`) and the default expression when present.
+	const AstTemplateParameter* source;
+	const AstExpr* default_expr;
 };
 
 struct TemplateInfo;
@@ -59,6 +76,11 @@ struct ClassSpecialization
 	ScopeBinding self;
 	bool instantiated;   // pattern body bound (set before member binding
 	                     // so current-instantiation uses resolve here)
+	// PA19 14.7.1: static-data-member definitions instantiate on
+	// demand (odr-use of the member, or definition of an object of
+	// this specialization); set once an object definition demanded
+	// them all so later-registered definitions instantiate on sight.
+	bool statics_demanded = false;
 	// Indices into owner->member_defs already instantiated for this
 	// specialization.
 	map<size_t, bool> members_done;

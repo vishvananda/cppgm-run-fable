@@ -878,7 +878,9 @@ void DeclBinder::RecordConstantValue(ScopeBinding& binding,
 {
 	if (!init || binding.has_value)
 		return;
-	if (!binding.type->is_const || !IsIntegralType(binding.type))
+	bool is_enum = binding.type->kind == TK_ENUM;
+	if (!binding.type->is_const ||
+	    (!IsIntegralType(binding.type) && !is_enum))
 		return;
 	const AstExpr* expr = 0;
 	if (init->kind == INIT_EQ)
@@ -890,8 +892,9 @@ void DeclBinder::RecordConstantValue(ScopeBinding& binding,
 	try
 	{
 		ConstValue value = EvaluateConstExpr(*expr, *this);
-		binding.value =
-			ConvertConstValue(value, binding.type->fundamental);
+		binding.value = ConvertConstValue(
+			value, is_enum ? binding.type->named->enum_underlying
+			               : binding.type->fundamental);
 		binding.has_value = true;
 	}
 	catch (const std::exception&)
@@ -1172,7 +1175,14 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 		}
 	}
 
-	Scope* scope = model_.CreateScope(SCOPE_CLASS, name, current_);
+	// PA19: a template specialization's member scope carries the
+	// specialization spelling ("Box<int>") from the start, so every
+	// name derived from it (destructor names, vtable slot keys, scope
+	// paths) is stable across the whole bind.
+	const string& scope_name =
+		info->spec_template && !info->is_template_anchor ? info->name
+		                                                 : name;
+	Scope* scope = model_.CreateScope(SCOPE_CLASS, scope_name, current_);
 	model_.SetMemberScope(info, scope);
 	OnClassOpened(decl, info, scope);
 	if (!decl.bases.empty())

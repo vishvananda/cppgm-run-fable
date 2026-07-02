@@ -469,11 +469,26 @@ string FunctionLowerer::PointerStep(const string& base,
                                     const TypePtr& element, bool negative)
 {
 	unsigned long long size = TypeSize(RemoveTopCv(element));
-	string offset = count.text;
+	string counted = count.text;
+	// An 8-byte unsigned count re-reads as the signed index type
+	// (both spell i64; the reference pins the conversion copy).
+	if (!count.imm_int && count.type)
+	{
+		TypePtr bare = RemoveTopCv(StripRef(count.type));
+		if (bare->kind == TK_FUNDAMENTAL &&
+		    IsIntegralFundamental(bare->fundamental) &&
+		    !IsSignedIntegralFundamental(bare->fundamental) &&
+		    TypeSize(bare) == 8)
+		{
+			counted = NewTemp();
+			Emit(counted + " = copy i64 " + count.text);
+		}
+	}
+	string offset = counted;
 	if (size != 1)
 	{
 		offset = NewTemp();
-		Emit(offset + " = binary mul i64 " + count.text + ", " +
+		Emit(offset + " = binary mul i64 " + counted + ", " +
 		     to_string(size));
 	}
 	if (negative)

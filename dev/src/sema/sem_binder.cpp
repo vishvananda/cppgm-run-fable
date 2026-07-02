@@ -440,7 +440,12 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 	while (var_bare->kind == TK_ARRAY)
 		var_bare = var_bare->target;
 	if (var_bare->kind == TK_CLASS)
+	{
 		EnsureTypeCompleteness(var_bare->named);
+		// PA19: an object of a specialization type makes its static
+		// -data-member definitions emittable.
+		DemandSpecializationStatics(var_bare->named);
+	}
 	SemNode* item = AppendItem(SN_VARIABLE);
 	item->name = binding.name;
 	item->type = binding.type;
@@ -487,6 +492,18 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 		return;
 	}
 	SemValue value = analyzer_.Analyze(*expr);
+	// 8.5.2: an array of matching character type initializes from a
+	// string literal; the code units (with the terminator) initialize
+	// the elements like a braced list, and an omitted bound completes
+	// from the literal's length.
+	if (binding.type->kind == TK_ARRAY && value.node &&
+	    value.node->is_string_literal)
+	{
+		item.children.push_back(
+			StringLiteralArrayInit(binding, *value.node, value.type));
+		item.type = binding.type;
+		return;
+	}
 	if (init->kind == INIT_PAREN)
 	{
 		// 8.5p15: direct-initialization admits explicit conversion
@@ -500,6 +517,51 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	else
 		analyzer_.CopyInitialize(value, binding.type, "initialization");
 	item.children.push_back(std::move(value.node));
+}
+
+// The synthesized element list of a string-literal array initializer:
+// one literal per code unit (the lowering then reuses the ordinary
+// braced array-initialization path). Completes an unknown bound on
+// the binding.
+SemNodePtr SemBinder::StringLiteralArrayInit(ScopeBinding& binding,
+                                             const SemNode& literal,
+                                             const TypePtr& literal_type)
+{
+	TypePtr element = RemoveTopCv(binding.type->target);
+	TypePtr source_element = RemoveTopCv(literal_type->target);
+	if (element->kind != TK_FUNDAMENTAL ||
+	    source_element->kind != TK_FUNDAMENTAL ||
+	    element->fundamental != source_element->fundamental)
+		throw runtime_error("string literal does not match the array "
+		                    "element type");
+	unsigned long long length = literal_type->bound;
+	if (!binding.type->bound_known)
+		binding.type = MakeArrayType(binding.type->target, true, length);
+	else if (binding.type->bound < length)
+		throw runtime_error("string literal exceeds the array bound");
+	EFundamentalType ft = element->fundamental;
+	size_t unit = (size_t)TypeSize(element);
+	SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+	list->type = binding.type;
+	list->category = VC_PRVALUE;
+	for (unsigned long long i = 0; i < length; i++)
+	{
+		unsigned long long bits = 0;
+		for (size_t b = 0; b < unit; b++)
+			bits |= (unsigned long long)(unsigned char)
+				literal.string_bytes[i * unit + b] << (8 * b);
+		if (IsSignedIntegralFundamental(ft) && unit < 8 &&
+		    (bits >> (unit * 8 - 1)) & 1)
+			bits |= ~0ull << (unit * 8);
+		SemNodePtr item = MakeSemNode(SN_LITERAL);
+		item->type = element;
+		item->category = VC_PRVALUE;
+		item->has_value = true;
+		item->value = ConstValue(ft, bits);
+		item->token = RenderConstValue(item->value);
+		list->children.push_back(std::move(item));
+	}
+	return list;
 }
 
 const string& SemBinder::EnsureDefaultConstructor(const TypePtr& type,

@@ -79,8 +79,8 @@ struct FunctionSpecialization;
 struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
-	                 no_object(false), owner(0), home(0),
-	                 c_linkage(false), access(MA_PUBLIC),
+	                 no_object(false), param_index(-1), owner(0),
+	                 home(0), c_linkage(false), access(MA_PUBLIC),
 	                 is_mutable(false), is_thread_local(false),
 	                 templ(0), fn_self_spec(0) {}
 
@@ -91,8 +91,11 @@ struct ScopeBinding
 	bool has_value;  // SB_ENUMERATOR and constant SB_VARIABLE
 	// PA19: a constant binding with no object behind it (a non-type
 	// template parameter): every use folds to `value`; odr-use
-	// (address, reference binding) is ill-formed.
+	// (address, reference binding) is ill-formed. In an abstract
+	// pattern scope the binding has no value yet and `param_index`
+	// names its template-parameter slot instead (-1 otherwise).
 	bool no_object;
+	int param_index;
 	ConstValue value;
 	// The scope the binding was declared in (stamped by AddBinding; a
 	// using-declaration import keeps the original owner). Powers the

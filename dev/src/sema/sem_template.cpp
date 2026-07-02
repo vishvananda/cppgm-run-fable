@@ -102,25 +102,6 @@ SemBinder::InstantiationContext::~InstantiationContext()
 
 // --- capture --------------------------------------------------------------
 
-void SemBinder::CollectTemplateParams(const AstDecl& decl,
-                                      vector<TemplateParam>& params)
-{
-	for (size_t i = 0; i < decl.template_params.size(); i++)
-	{
-		const AstTemplateParameter& parameter = decl.template_params[i];
-		if (parameter.kind != TP_TYPE)
-			throw OutsideBoundary("non-type or template template "
-			                      "parameter");
-		if (parameter.pack)
-			throw OutsideBoundary("template parameter pack");
-		TemplateParam param;
-		param.name = parameter.name;
-		if (parameter.has_default_type)
-			param.default_type = parameter.default_type.get();
-		params.push_back(param);
-	}
-}
-
 // Whether a declarator carries a parameter clause (declares a
 // function) at any nesting level.
 static bool DeclaratorHasParameterClause(const AstDeclarator& declarator)
@@ -292,11 +273,19 @@ void SemBinder::CaptureClassTemplate(const AstDecl& decl,
 		// definition's parameter names win (positional identity).
 		for (size_t i = 0; i < params.size(); i++)
 		{
-			if (params[i].default_type && tmpl->params[i].default_type)
+			if (params[i].kind != tmpl->params[i].kind)
+				throw runtime_error("template parameter kind of " +
+				                    name + " disagrees with its "
+				                    "declaration");
+			if ((params[i].default_type &&
+			     tmpl->params[i].default_type) ||
+			    (params[i].default_expr && tmpl->params[i].default_expr))
 				throw runtime_error("template parameter redefines a "
 				                    "default argument");
 			if (!params[i].default_type)
 				params[i].default_type = tmpl->params[i].default_type;
+			if (!params[i].default_expr)
+				params[i].default_expr = tmpl->params[i].default_expr;
 		}
 		tmpl->params = params;
 	}
@@ -408,84 +397,6 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 }
 
 // --- template-id resolution ------------------------------------------------
-
-vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
-	TemplateInfo& tmpl, const AstNamePart& part)
-{
-	vector<TemplateArg> args;
-	for (size_t i = 0; i < part.arguments.size(); i++)
-	{
-		const AstTemplateArgument& argument = part.arguments[i];
-		if (argument.pack)
-			throw OutsideBoundary("pack-expansion template argument");
-		if (!argument.is_type || !argument.type)
-			throw OutsideBoundary("non-type template argument");
-		args.push_back(
-			TemplateArg(builder_.ResolveTypeId(*argument.type)));
-	}
-	if (args.size() > tmpl.params.size())
-		throw runtime_error("too many template arguments for " +
-		                    tmpl.name);
-	if (args.size() < tmpl.params.size())
-	{
-		// Defaults resolve in the template's declaring scope with the
-		// earlier parameters bound to the resolved arguments (14.1).
-		Scope* partial = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
-		                                    tmpl.declaring);
-		for (size_t i = 0; i < args.size(); i++)
-			BindParamAlias(*partial, tmpl.params[i], args[i]);
-		for (size_t k = args.size(); k < tmpl.params.size(); k++)
-		{
-			if (!tmpl.params[k].default_type)
-				throw runtime_error("too few template arguments for " +
-				                    tmpl.name);
-			Scope* saved = current_;
-			current_ = partial;
-			TypePtr resolved;
-			try
-			{
-				resolved = builder_.ResolveTypeId(
-					*tmpl.params[k].default_type);
-			}
-			catch (...)
-			{
-				current_ = saved;
-				throw;
-			}
-			current_ = saved;
-			args.push_back(TemplateArg(resolved));
-			BindParamAlias(*partial, tmpl.params[k], args.back());
-		}
-	}
-	return args;
-}
-
-// Binds one parameter name to its argument in an alias scope: type
-// arguments as type aliases, value arguments as objectless constant
-// variables (reads fold; LookupConstant sees the value).
-void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
-                               const TemplateArg& arg)
-{
-	if (param.name.empty())
-		return;
-	ScopeBinding alias;
-	if (!arg.is_value)
-	{
-		alias.kind = SB_TYPE_ALIAS;
-		alias.name = param.name;
-		alias.type = arg.type;
-	}
-	else
-	{
-		alias.kind = SB_VARIABLE;
-		alias.name = param.name;
-		alias.type = MakeCvQualifiedType(arg.type, true, false);
-		alias.has_value = true;
-		alias.value = ConstValue(arg.value_type, arg.value_bits);
-		alias.no_object = true;
-	}
-	AddBinding(scope, alias);
-}
 
 const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 	const AstNamePart& part, Scope* prefix)
@@ -721,6 +632,38 @@ void SemBinder::CheckMemberDefinitionAgainstPattern(
 		                    " changes the exception specification");
 }
 
+// Whether a registered member definition defines a static data member
+// (an object, not a function/class/special member): those instantiate
+// on demand (14.7.1p8), not eagerly with the other members.
+static bool MemberDefIsStaticData(const AstDecl& decl)
+{
+	if (!decl.inner || decl.inner->kind != DK_SIMPLE)
+		return false;
+	const AstDecl& inner = *decl.inner;
+	if (inner.declarators.size() != 1 || !inner.declarators[0].declarator)
+		return false;
+	return !DeclaratorHasParameterClause(
+		*inner.declarators[0].declarator);
+}
+
+// The terminal declared name of a member definition (empty when it
+// has none).
+static string MemberDefName(const AstDecl& decl)
+{
+	const AstDeclarator* declarator = 0;
+	if (decl.inner->kind == DK_SIMPLE &&
+	    decl.inner->declarators.size() == 1)
+		declarator = decl.inner->declarators[0].declarator.get();
+	else if (decl.inner->declarator)
+		declarator = decl.inner->declarator.get();
+	if (!declarator)
+		return string();
+	const AstName* id = declarator->IdName();
+	if (!id || id->parts.empty())
+		return string();
+	return id->parts.back().identifier;
+}
+
 void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 {
 	for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
@@ -737,9 +680,88 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 		{
 			if (spec.members_done.count(i))
 				continue;
+			if (MemberDefIsStaticData(*tmpl.member_defs[i]) &&
+			    !spec.statics_demanded)
+				continue;
 			spec.members_done[i] = true;
 			InstantiateMemberDefinition(tmpl, spec, i);
 		}
+	}
+}
+
+// Instantiates the pending static-data-member definitions of `spec`
+// (all of them, or just those declaring `name`).
+void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
+                                         ClassSpecialization& spec,
+                                         const string* name)
+{
+	if (!spec.instantiated || !spec.entity->complete)
+		return;
+	for (size_t i = 0; i < tmpl.member_defs.size(); i++)
+	{
+		if (spec.members_done.count(i))
+			continue;
+		const AstDecl& decl = *tmpl.member_defs[i];
+		if (!MemberDefIsStaticData(decl))
+			continue;
+		if (name && MemberDefName(decl) != *name)
+			continue;
+		spec.members_done[i] = true;
+		InstantiateMemberDefinition(tmpl, spec, i);
+	}
+}
+
+// The class-template specialization record owning `entity` (null when
+// the entity is not an instantiated specialization).
+ClassSpecialization* SemBinder::FindSpecializationRecord(
+	const NamedTypeInfo* entity)
+{
+	if (!entity || !entity->spec_template || entity->is_template_anchor)
+		return 0;
+	TemplateInfo& tmpl =
+		*const_cast<TemplateInfo*>(entity->spec_template);
+	map<string, unique_ptr<ClassSpecialization>>::iterator found =
+		tmpl.class_specs.find(TemplateArgumentKey(entity->spec_args));
+	if (found == tmpl.class_specs.end())
+		return 0;
+	return found->second.get();
+}
+
+// Definition of an object of a specialization type: its static-data
+// -member definitions become emittable (the checked references pin
+// this demand shape; constant-context reads alone leave no storage).
+void SemBinder::DemandSpecializationStatics(const NamedTypeInfo* entity)
+{
+	ClassSpecialization* spec = FindSpecializationRecord(entity);
+	if (!spec || spec->statics_demanded)
+		return;
+	spec->statics_demanded = true;
+	InstantiateStaticMembers(
+		*const_cast<TemplateInfo*>(entity->spec_template), *spec, 0);
+}
+
+// A non-folding reference to a static data member: instantiate its
+// registered out-of-class definition (14.7.1p8 odr-use demand). The
+// owning specialization is found from the member's declaring scope
+// chain (the member may live in a nested class of the
+// specialization).
+void SemBinder::OnStaticMemberReferenced(const ScopeBinding& binding)
+{
+	if (in_unevaluated_operand_)
+		return;
+	for (const Scope* scope = binding.owner; scope;
+	     scope = scope->parent)
+	{
+		if (scope->kind != SCOPE_CLASS || !scope->entity)
+			continue;
+		ClassSpecialization* spec =
+			FindSpecializationRecord(scope->entity);
+		if (!spec)
+			continue;
+		InstantiateStaticMembers(
+			*const_cast<TemplateInfo*>(scope->entity->spec_template),
+			*spec, &binding.name);
+		return;
 	}
 }
 

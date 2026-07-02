@@ -269,6 +269,11 @@ SemValue SemExprAnalyzer::AnalyzeStaticMemberValue(
 	const ScopeBinding& binding, const string& written)
 {
 	SemValue value;
+	// A member without a recorded constant demands its registered
+	// out-of-class definition first: the definition may carry the
+	// in-TU constant that lets this read fold (9.4.2p2 with 14.7.1p8).
+	if (!binding.has_value)
+		host_.OnStaticMemberReferenced(binding);
 	if (binding.has_value)
 	{
 		// Constant static members fold like enumerators.

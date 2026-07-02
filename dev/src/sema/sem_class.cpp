@@ -249,7 +249,12 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	}
 	if (part.kind != NP_IDENTIFIER)
 		throw OutsideBoundary("conversion function");
-	if (part.identifier != cls->members->name)
+	// Inside an instantiated specialization the declared name is the
+	// template's ("Box") while the member scope carries the
+	// specialization spelling ("Box<int>").
+	if (part.identifier != cls->members->name &&
+	    !(cls->entity && cls->entity->spec_template &&
+	      part.identifier == cls->entity->spec_template->name))
 		throw runtime_error("special member does not name its class");
 	bool is_dtor = part.tilde;
 	bool is_explicit = false;

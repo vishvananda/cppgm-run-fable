@@ -119,6 +119,13 @@ struct ISemExprHost
 	// Marks an unevaluated operand (3.2p2: no odr-use inside); returns
 	// the previous state for restoring.
 	virtual bool SwapUnevaluatedOperand(bool active) = 0;
+	// PA19 14.7.1: a non-folding reference to a static data member of
+	// a class-template specialization - the host instantiates the
+	// member's registered out-of-class definition on this demand.
+	virtual void OnStaticMemberReferenced(const ScopeBinding& binding)
+	{
+		(void)binding;
+	}
 	virtual ~ISemExprHost() {}
 };
 

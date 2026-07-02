@@ -357,9 +357,20 @@ bool SemBinder::ComposeFunctionPattern(
 		if (params[i].name.empty())
 			continue;
 		ScopeBinding binding;
-		binding.kind = SB_TYPE;
 		binding.name = params[i].name;
-		binding.type = PlaceholderType(i);
+		if (params[i].kind == TPK_TYPE)
+		{
+			binding.kind = SB_TYPE;
+			binding.type = PlaceholderType(i);
+		}
+		else
+		{
+			// An abstract value parameter: uses of the name inside the
+			// pattern signature become value-parameter slots.
+			binding.kind = SB_VARIABLE;
+			binding.no_object = true;
+			binding.param_index = (int)i;
+		}
 		AddBinding(*scope, binding);
 	}
 	const AstDeclarator* declarator = inner.kind == DK_FUNCTION
@@ -488,12 +499,25 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		{
 			const AstTemplateArgument& argument =
 				explicit_part->arguments[i];
-			if (argument.pack || !argument.is_type || !argument.type)
+			if (argument.pack)
 				return 0;
+			const TemplateParam& param = tmpl.params[i];
 			try
 			{
-				bound[i] = TemplateArg(
-					builder_.ResolveTypeId(*argument.type));
+				if (param.kind == TPK_TYPE)
+				{
+					if (!argument.is_type || !argument.type)
+						return 0;
+					bound[i] = TemplateArg(
+						builder_.ResolveTypeId(*argument.type));
+				}
+				else
+				{
+					Scope* partial =
+						MakeArgumentAliasScope(tmpl, bound);
+					bound[i] = ResolveValueArgument(
+						argument, ValueParamType(param, partial));
+				}
 			}
 			catch (const std::exception&)
 			{
@@ -549,15 +573,21 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	{
 		if (ArgBound(bound[i]))
 			continue;
-		if (!tmpl.params[i].default_type)
+		const TemplateParam& param = tmpl.params[i];
+		if (!param.default_type && !param.default_expr)
 			return 0;
 		Scope* partial = MakeArgumentAliasScope(tmpl, bound);
 		Scope* saved = current_;
 		current_ = partial;
 		try
 		{
-			bound[i] = TemplateArg(builder_.ResolveTypeId(
-				*tmpl.params[i].default_type));
+			if (param.kind == TPK_TYPE)
+				bound[i] = TemplateArg(builder_.ResolveTypeId(
+					*param.default_type));
+			else
+				bound[i] = ResolveDefaultValueExpr(
+					*param.default_expr,
+					ValueParamType(param, partial));
 		}
 		catch (const std::exception&)
 		{

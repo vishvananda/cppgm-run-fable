@@ -934,6 +934,13 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	if (!member || member->kind != SB_VARIABLE)
 		throw runtime_error(name + " is not a declared object");
 	member->type = MergeRedeclaredType(member->type, composed.type);
+	// 9.4.2p2: the initializer of a static data member is in the scope
+	// of its class - unqualified names there (member typedefs,
+	// constants) resolve through the member scope.
+	Scope* init_scope = declaring->kind == SCOPE_CLASS &&
+		declarator.init ? declaring : current_;
+	Scope* saved_scope = current_;
+	current_ = init_scope;
 	// PA18: the instantiated definition's constant value folds at
 	// later uses within this translation unit (the checked outputs
 	// pin the fold), and the object emits weak (14.7.1).
@@ -951,7 +958,17 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->is_extern_decl = declaring->kind == SCOPE_NAMESPACE;
 	item->weak_def = instantiating_;
-	AttachObjectLifetime(*item, *member, declarator.init.get(), specs);
+	try
+	{
+		AttachObjectLifetime(*item, *member, declarator.init.get(),
+		                     specs);
+	}
+	catch (...)
+	{
+		current_ = saved_scope;
+		throw;
+	}
+	current_ = saved_scope;
 	// 9.4.2p3: a storage definition without an initializer keeps the
 	// constant in-class initializer as the object's value.
 	if (!declarator.init && member->has_value && item->children.empty())

@@ -787,19 +787,18 @@ string LowerScopeKey(const Scope* scope)
 
 string LowerSanitizeName(const string& name)
 {
-	// Spaces drop ("operator new" -> "operatornew"); other non-word
-	// characters become underscores ("operator==" -> "operator__",
-	// "~C" -> "_C").
+	// Every non-word character (including spaces) becomes an
+	// underscore ("operator==" -> "operator__", "~C" -> "_C",
+	// "Box<int, 7>" -> "Box_int__7_"): the checked references pin the
+	// space-as-underscore form for specialization scope names, and
+	// function-symbol spellings canonicalize in comparison anyway.
 	string out;
 	for (size_t i = 0; i < name.size(); i++)
 	{
 		char c = name[i];
 		bool word = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 			(c >= '0' && c <= '9') || c == '_';
-		if (word)
-			out += c;
-		else if (c != ' ')
-			out += '_';
+		out += word ? c : '_';
 	}
 	return out;
 }
