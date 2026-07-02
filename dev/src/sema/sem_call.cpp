@@ -75,8 +75,14 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 		}
 		if (binding->kind == SB_FUNCTION)
 		{
-			if (plain && !paren_callee && binding->home &&
-			    binding->home->kind == SCOPE_NAMESPACE)
+			// 3.4.2p3: namespace-scope functions keep argument-dependent
+			// lookup active, including through a block-scope
+			// using-declaration (the import keeps its declaring owner).
+			if (plain && !paren_callee &&
+			    ((binding->home &&
+			      binding->home->kind == SCOPE_NAMESPACE) ||
+			     (binding->owner &&
+			      binding->owner->kind == SCOPE_NAMESPACE)))
 				return AnalyzeAdlCall(
 					expr, callee->name.parts[0].identifier,
 					vector<const ScopeBinding*>(1, binding));

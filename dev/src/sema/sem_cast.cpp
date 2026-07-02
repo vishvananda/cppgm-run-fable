@@ -192,6 +192,19 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	// 5.2.3p2: T() value-initializes; the supported scalar subset dumps
 	// as a zero literal.
 	TypePtr to = RemoveTopCv(dest);
+	if (to->kind == TK_POINTER || IsNullPtrType(to))
+	{
+		// 8.5p8: a value-initialized pointer is null.
+		SemValue value;
+		value.type = to;
+		value.category = VC_PRVALUE;
+		value.node = MakeSemNode(SN_LITERAL);
+		value.node->token = "0";
+		value.node->type = to;
+		value.node->category = VC_PRVALUE;
+		value.node->null_pointer = true;
+		return value;
+	}
 	if (!IsIntegralType(to) && to->kind != TK_ENUM)
 		throw OutsideBoundary("value-initialization form");
 	SemValue value;

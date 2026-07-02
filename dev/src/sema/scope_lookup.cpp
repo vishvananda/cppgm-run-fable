@@ -169,6 +169,15 @@ void MergeFound(const ScopeBinding* candidate, const ScopeBinding*& result,
 		                           candidate->name);
 }
 
+// Defined below (3.4.3.2p2 qualified search); the directive walk
+// reuses it so names surfaced into a nominated namespace by its own
+// directives (notably inline member namespaces, 7.3.1p9/7.3.4p4) are
+// visible through an outer directive as well.
+const ScopeBinding* QualifiedNamespaceSearch(const Scope& scope,
+                                             const string& name,
+                                             EScopeLookupFilter filter,
+                                             set<const Scope*>& visited);
+
 }  // namespace
 
 const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
@@ -200,9 +209,10 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 		{
 			if (closure[i].anchor != scope)
 				continue;
-			const ScopeBinding* member =
-				FindOwnBinding(*closure[i].nominated, name);
-			if (member && BindingPassesFilter(*member, filter))
+			set<const Scope*> visited;
+			const ScopeBinding* member = QualifiedNamespaceSearch(
+				*closure[i].nominated, name, filter, visited);
+			if (member)
 				MergeFound(member, found, functions);
 		}
 		if (found && !functions.empty())

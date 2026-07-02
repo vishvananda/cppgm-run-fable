@@ -188,10 +188,11 @@ LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
 	value.type = NodeType(node);
 	if (node.null_pointer && value.type->kind == TK_POINTER)
 	{
-		// A null pointer constant the semantics retyped: the canonical
-		// spelling is the immediate 0.
+		// A null pointer constant the semantics retyped keeps the
+		// immediate 0; a value-initialized pointer prvalue spells the
+		// immediate nullptr.
 		value.imm_null = true;
-		value.text = "0";
+		value.text = node.has_value ? "0" : "nullptr";
 		return value;
 	}
 	if (node.null_pointer && IsNullPtrType(value.type))
