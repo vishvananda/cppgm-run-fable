@@ -1125,6 +1125,28 @@ TypePtr SemBinder::CurrentThisType()
 	return method_.this_type;
 }
 
+// 5.1.1p3: within a member function declarator (notably a
+// trailing-return decltype), members of the class resolve through an
+// implicit `this` of the (possibly still-open) class.
+void SemBinder::OnMemberSignatureBegin(Scope* class_scope)
+{
+	signature_contexts_.push_back(method_);
+	method_ = MethodContext();
+	const NamedTypeInfo* entity = model_.ScopeEntity(class_scope);
+	if (!entity)
+		return;
+	method_.cls = unit_.classes.Find(entity);
+	method_.fn_owner = class_scope;
+	method_.this_type = MakePointerType(MakeNamedType(TK_CLASS, entity),
+	                                    false, false);
+}
+
+void SemBinder::OnMemberSignatureEnd()
+{
+	method_ = signature_contexts_.back();
+	signature_contexts_.pop_back();
+}
+
 void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
                                   const string& what,
                                   const NamedTypeInfo* naming)

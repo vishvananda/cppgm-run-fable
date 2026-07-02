@@ -913,6 +913,9 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	}
 	Scope* saved_compose = current_;
 	current_ = compose_scope;
+	bool member_signature = compose_scope->kind == SCOPE_CLASS;
+	if (member_signature)
+		OnMemberSignatureBegin(compose_scope);
 	DeclaratorInfo composed;
 	try
 	{
@@ -921,9 +924,13 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	}
 	catch (...)
 	{
+		if (member_signature)
+			OnMemberSignatureEnd();
 		current_ = saved_compose;
 		throw;
 	}
+	if (member_signature)
+		OnMemberSignatureEnd();
 	current_ = saved_compose;
 	if (!composed.id || composed.id->parts.empty())
 		throw OutsideBoundary("function definition declarator");
@@ -1025,6 +1032,15 @@ void DeclBinder::OnTypeAliasBound(const string& name, const TypePtr& type)
 {
 	(void)name;
 	(void)type;
+}
+
+void DeclBinder::OnMemberSignatureBegin(Scope* class_scope)
+{
+	(void)class_scope;
+}
+
+void DeclBinder::OnMemberSignatureEnd()
+{
 }
 
 void DeclBinder::OnVariableBound(ScopeBinding& binding,

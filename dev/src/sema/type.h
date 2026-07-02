@@ -195,6 +195,8 @@ TypePtr MakeMemberPointerType(const NamedTypeInfo* cls,
 
 // cv applied through a typedef-name or specifier-seq: redistributes
 // onto array element types and is silently dropped on references.
+TypePtr MakeFunctionCvQualifiedType(const TypePtr& type, bool add_const,
+                                    bool add_volatile);
 TypePtr MakeCvQualifiedType(const TypePtr& type, bool add_const,
                             bool add_volatile);
 

@@ -191,6 +191,12 @@ TypePtr MakeCvQualifiedType(const TypePtr& type, bool add_const,
 		return type;
 	if (IsReferenceType(type))
 		return type;
+	if (type->kind == TK_FUNCTION)
+		// 8.3.5p6: cv-qualifiers reaching a function type through a
+		// typedef or template type argument are ignored (a member
+		// function's own cv-suffix applies via
+		// MakeFunctionCvQualifiedType).
+		return type;
 	Type qualified = *type;
 	if (type->kind == TK_ARRAY)
 		qualified.target = MakeCvQualifiedType(type->target, add_const,
@@ -200,6 +206,20 @@ TypePtr MakeCvQualifiedType(const TypePtr& type, bool add_const,
 		qualified.is_const = qualified.is_const || add_const;
 		qualified.is_volatile = qualified.is_volatile || add_volatile;
 	}
+	return make_shared<Type>(qualified);
+}
+
+// The cv-qualifier-seq of a member function declarator (8.3.5p6):
+// unlike typedef- or template-carried cv, it qualifies the function
+// type itself.
+TypePtr MakeFunctionCvQualifiedType(const TypePtr& type, bool add_const,
+                                    bool add_volatile)
+{
+	if (!add_const && !add_volatile)
+		return type;
+	Type qualified = *type;
+	qualified.is_const = qualified.is_const || add_const;
+	qualified.is_volatile = qualified.is_volatile || add_volatile;
 	return make_shared<Type>(qualified);
 }
 

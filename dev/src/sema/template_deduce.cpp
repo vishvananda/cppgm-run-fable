@@ -859,7 +859,10 @@ void SemBinder::OnParameterComposed(const string& name,
 	ScopeBinding binding;
 	binding.kind = SB_PARAMETER;
 	binding.name = name;
-	binding.type = type;
+	// 8.3.5p5: an array- or function-typed parameter declares the
+	// adjusted pointer object.
+	binding.type = type->kind == TK_ARRAY || type->kind == TK_FUNCTION
+		? AdjustParameterType(type) : type;
 	AddBinding(*param_capture_scope_, binding);
 }
 

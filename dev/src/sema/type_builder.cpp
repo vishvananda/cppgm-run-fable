@@ -243,7 +243,8 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		// 8.3.5p6: trailing cv-qualifiers and the ref-qualifier belong
 		// to the function type (member functions; the binder rejects
 		// them elsewhere).
-		out.type = MakeCvQualifiedType(out.type, fn_const, fn_volatile);
+		out.type = MakeFunctionCvQualifiedType(out.type, fn_const,
+		                                       fn_volatile);
 		if (fn_ref)
 			out.type = MakeRefQualifiedType(out.type, fn_ref);
 		out.declares_function = true;

@@ -94,6 +94,10 @@ protected:
 
 	// --- declaration events (PA12 dump recording; no-ops in PA11) ---
 	virtual void OnTypeAliasBound(const string& name, const TypePtr& type);
+	// A member function declarator composes with an implicit-this
+	// context (5.1.1p3: a trailing-return decltype may name members).
+	virtual void OnMemberSignatureBegin(Scope* class_scope);
+	virtual void OnMemberSignatureEnd();
 	virtual void OnVariableBound(ScopeBinding& binding,
 	                             const AstInitializer* init,
 	                             const DeclSpecifierInfo& specs);

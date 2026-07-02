@@ -473,6 +473,8 @@ private:
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;
 	MethodContext method_;
+	// Saved method contexts around member-signature composition.
+	vector<MethodContext> signature_contexts_;
 	bool in_bit_field_;
 
 	// --- PA18 template state (sem_template.cpp / template_deduce.cpp) ---
@@ -518,6 +520,8 @@ public:
 	                                  size_t argc);
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target);
+	virtual void OnMemberSignatureBegin(Scope* class_scope);
+	virtual void OnMemberSignatureEnd();
 	virtual void OnParameterComposed(const string& name,
 	                                 const TypePtr& type);
 };
