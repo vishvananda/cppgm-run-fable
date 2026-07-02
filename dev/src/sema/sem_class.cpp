@@ -389,6 +389,8 @@ void SemBinder::BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
 	conv.type = composed.type;
 	conv.is_explicit = is_explicit;
 	conv.access = current_access_;
+	if (decl.kind == DK_SPECIAL_MEMBER_DEFINITION)
+		conv.decl = &decl;
 	cls.conversions.push_back(conv);
 	if (!defined)
 		return;

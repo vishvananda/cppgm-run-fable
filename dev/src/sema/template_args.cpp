@@ -49,6 +49,27 @@ const AstName* PlainExprName(const AstExpr& expr)
 	return inner->kind == EK_ID ? &inner->name : 0;
 }
 
+// 14.3: `bool(B::value)` parses as a function type-id; when the
+// parameter wants a value it re-reads as a functional cast of the
+// "parameter" name. Returns the operand name when the type-id has
+// exactly that shape.
+const AstName* FunctionalCastOperandName(const AstTypeId& type_id)
+{
+	if (!type_id.declarator || type_id.declarator->items.size() != 1)
+		return 0;
+	const AstDeclaratorItem& item = type_id.declarator->items[0];
+	if (item.kind != DI_PARAMS || !item.params ||
+	    item.params->parameters.size() != 1 || item.params->variadic)
+		return 0;
+	const AstParameter& parameter = item.params->parameters[0];
+	if (parameter.declarator && !parameter.declarator->Empty())
+		return 0;
+	if (parameter.specifiers.size() != 1 ||
+	    parameter.specifiers[0].kind != SPEC_TYPE_NAME)
+		return 0;
+	return &parameter.specifiers[0].name;
+}
+
 }  // namespace
 
 void SemBinder::CollectTemplateParams(const AstDecl& decl,
@@ -163,12 +184,17 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 {
 	const AstExpr* expr = argument.is_type ? 0 : argument.expr.get();
 	const AstName* name = 0;
+	const AstName* cast_operand = 0;
 	if (argument.is_type)
 	{
 		name = BareTypeIdName(*argument.type);
 		if (!name)
-			throw runtime_error("template argument does not form a "
-			                    "constant value");
+		{
+			cast_operand = FunctionalCastOperandName(*argument.type);
+			if (!cast_operand)
+				throw runtime_error("template argument does not form "
+				                    "a constant value");
+		}
 	}
 	TemplateArg arg;
 	arg.is_value = true;
@@ -177,8 +203,22 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 	{
 		try
 		{
-			ConstValue value = expr ? EvaluateConstExpr(*expr, *this)
-			                        : LookupConstant(*name);
+			ConstValue value;
+			if (expr)
+				value = EvaluateConstExpr(*expr, *this);
+			else if (name)
+				value = LookupConstant(*name);
+			else
+			{
+				// The functional-cast re-read: the target may be a
+				// keyword type (spelled through the specifier seq).
+				value = LookupConstant(*cast_operand);
+				DeclSpecifierInfo target_specs =
+					builder_.ProcessSpecifiers(argument.type->specifiers,
+					                           false);
+				value = ConvertConstValue(
+					value, ValueTargetFundamental(target_specs.type));
+			}
 			value = ConvertConstValue(
 				value, ValueTargetFundamental(param_type));
 			arg.value_type = value.type;
@@ -352,6 +392,73 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 			BindParamAlias(*partial, param, args.back());
 	}
 	return args;
+}
+
+// The single returned expression of an in-class function body, or
+// null when the body has any other shape.
+static const AstExpr* SingleReturnExpr(const AstDecl* decl)
+{
+	if (!decl || !decl->body || decl->body->kind != SK_COMPOUND ||
+	    decl->body->items.size() != 1)
+		return 0;
+	const AstStmt& stmt = *decl->body->items[0];
+	if (stmt.kind != SK_RETURN || !stmt.expr)
+		return 0;
+	return stmt.expr.get();
+}
+
+// The restricted constexpr-conversion evaluation behind `B{}` in a
+// constant context: a conversion function of B (or a base) to an
+// integral type whose body is a single return of a constant
+// expression, evaluated in its class scope. The temporary's own state
+// cannot influence the result within this subset - a body that reads
+// the object fails the inner evaluation and falls out of the subset
+// naturally.
+bool SemBinder::TryClassConversionConstant(const AstName& name,
+                                           ConstValue& out)
+{
+	TypePtr type = TryResolveTypeFromName(name);
+	if (!type || type->kind != TK_CLASS)
+		return false;
+	EnsureTypeCompleteness(type->named);
+	for (const NamedTypeInfo* entity = type->named; entity;
+	     entity = entity->base_entity)
+	{
+		const ClassInfo* cls = unit_.classes.Find(entity);
+		if (!cls)
+			continue;
+		for (size_t i = 0; i < cls->conversions.size(); i++)
+		{
+			const ClassConversion& conv = cls->conversions[i];
+			if (!conv.decl)
+				continue;
+			TypePtr result = RemoveTopCv(conv.result);
+			if (!IsIntegralType(result) && result->kind != TK_ENUM)
+				continue;
+			const AstExpr* returned = SingleReturnExpr(conv.decl);
+			if (!returned)
+				continue;
+			Scope* saved = current_;
+			current_ = cls->members;
+			try
+			{
+				ConstValue value = EvaluateConstExpr(*returned, *this);
+				out = ConvertConstValue(
+					value,
+					result->kind == TK_ENUM
+						? result->named->enum_underlying
+						: result->fundamental);
+			}
+			catch (const std::exception&)
+			{
+				current_ = saved;
+				continue;
+			}
+			current_ = saved;
+			return true;
+		}
+	}
+	return false;
 }
 
 // One defaulted value argument: evaluated in the (already swapped-in)

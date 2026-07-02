@@ -557,6 +557,10 @@ public:
 	// IConstExprContext (const_expr.h): the analyzer classifies the
 	// unevaluated sizeof operand (5.3.3p1).
 	virtual TypePtr TryAnalyzeExpressionType(const AstExpr& expr);
+	// PA19 restricted constexpr conversion (`B{}` as a constant):
+	// template_args.cpp.
+	virtual bool TryClassConversionConstant(const AstName& name,
+	                                        ConstValue& out);
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
 		TemplateInfo& tmpl, const vector<SemValue>& args,

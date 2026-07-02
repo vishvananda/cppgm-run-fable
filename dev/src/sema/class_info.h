@@ -101,13 +101,16 @@ struct ClassCtor
 // member scope under its canonical "operator <type>" name.
 struct ClassConversion
 {
-	ClassConversion() : is_explicit(false), access(MA_PUBLIC) {}
+	ClassConversion() : is_explicit(false), access(MA_PUBLIC), decl(0) {}
 
 	string name;     // canonical member-scope binding name
 	TypePtr result;  // conversion-type-id
 	TypePtr type;    // declared function type (cv on the node)
 	bool is_explicit;
 	EMemberAccess access;
+	// PA19: the declaring AST when defined in-class; the restricted
+	// constant evaluator reads a single-return body from it.
+	const struct AstDecl* decl;
 };
 
 // PA17: one vtable slot (10.3). Slots inherit position from the base

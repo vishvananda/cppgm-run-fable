@@ -335,6 +335,33 @@ const AstName* UnparenthesizedIdName(const AstExpr& expr)
 	return inner->kind == EK_ID ? &inner->name : 0;
 }
 
+// The parenthesized sizeof operand resolved expression-first; an
+// index chain over a type-name (`Elem<int>[2]`) semantically re-reads
+// as an array type-id (5.3.3 disambiguation over the array form).
+TypePtr TryArrayTypeFromSubscript(const AstExpr& expr,
+                                  IConstExprContext& context)
+{
+	const AstExpr* inner = &expr;
+	while (inner->kind == EK_PAREN)
+		inner = inner->operands[0].get();
+	std::vector<unsigned long long> bounds;
+	while (inner->kind == EK_SUBSCRIPT && inner->operands.size() == 2)
+	{
+		bounds.push_back(
+			EvaluateConstExpr(*inner->operands[1], context).bits);
+		inner = inner->operands[0].get();
+	}
+	if (bounds.empty() || inner->kind != EK_ID)
+		return TypePtr();
+	TypePtr element = context.TryResolveTypeFromName(inner->name);
+	if (!element)
+		return TypePtr();
+	TypePtr type = element;
+	for (size_t i = 0; i < bounds.size(); i++)
+		type = MakeArrayType(type, true, bounds[i]);
+	return type;
+}
+
 ConstValue EvaluateSizeofExpr(const AstExpr& expr,
                               IConstExprContext& context)
 {
@@ -347,6 +374,19 @@ ConstValue EvaluateSizeofExpr(const AstExpr& expr,
 		{
 			context.RequireCompleteForLayout(named);
 			return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(named));
+		}
+	}
+	if (expr.sizeof_paren && !expr.operands.empty())
+	{
+		TypePtr array = TryArrayTypeFromSubscript(*expr.operands[0],
+		                                          context);
+		if (array)
+		{
+			TypePtr element = array;
+			while (element->kind == TK_ARRAY)
+				element = element->target;
+			context.RequireCompleteForLayout(element);
+			return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(array));
 		}
 	}
 	// 5.3.3p1: sizeof over an unevaluated expression operand.
@@ -395,21 +435,44 @@ ConstValue EvaluateCall(const AstExpr& expr, IConstExprContext& context)
 {
 	const AstExpr* callee = expr.operands.empty()
 		? 0 : expr.operands[0].get();
-	if (callee && callee->kind == EK_ID && expr.arguments.size() == 1)
+	if (callee && callee->kind == EK_ID && expr.arguments.size() <= 1)
 	{
 		TypePtr named = context.TryResolveTypeFromName(callee->name);
-		if (named)
+		if (named && expr.arguments.size() == 1)
 		{
 			EFundamentalType target;
 			if (IsIntegralType(named))
 				target = named->fundamental;
 			else if (named->kind == TK_ENUM)
 				target = named->named->enum_underlying;
+			else if (named->kind == TK_CLASS)
+			{
+				ConstValue out;
+				if (context.TryClassConversionConstant(callee->name,
+				                                       out))
+					return out;
+				throw OutsideSubset("class temporary value");
+			}
 			else
 				throw OutsideSubset("functional cast to a "
 				                    "non-integral type");
 			return ConvertConstValue(
 				EvaluateConstExpr(*expr.arguments[0], context), target);
+		}
+		if (named)
+		{
+			// Zero-argument value-initialization: integral targets are
+			// zero; a class temporary's value comes through its
+			// constant conversion function (`B{}` / `B()`).
+			if (IsIntegralType(named))
+				return ConstValue(named->fundamental, 0);
+			if (named->kind == TK_ENUM)
+				return ConstValue(named->named->enum_underlying, 0);
+			ConstValue out;
+			if (named->kind == TK_CLASS &&
+			    context.TryClassConversionConstant(callee->name, out))
+				return out;
+			throw OutsideSubset("class temporary value");
 		}
 	}
 	return EvaluateGnuAlignof(expr, context);
@@ -485,6 +548,30 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	}
 	case EK_SIZEOF_EXPR:
 		return EvaluateSizeofExpr(expr, context);
+	case EK_SUBSCRIPT:
+	{
+		// 5.19-adjacent: an element read of a string literal folds to
+		// the code unit (the terminator included).
+		if (expr.operands.size() != 2)
+			throw OutsideSubset("subscript form");
+		const AstExpr* base = expr.operands[0].get();
+		while (base->kind == EK_PAREN)
+			base = base->operands[0].get();
+		if (base->kind != EK_LITERAL ||
+		    base->literal_kind != PTK_LITERAL_ARRAY ||
+		    !IsIntegralFundamental(base->literal_type))
+			throw OutsideSubset("subscript of a non-literal");
+		unsigned long long index =
+			EvaluateConstExpr(*expr.operands[1], context).bits;
+		size_t unit = WidthBits(base->literal_type) / 8;
+		if (index >= base->literal_elements)
+			throw runtime_error("string literal index out of range");
+		unsigned long long bits = 0;
+		for (size_t b = 0; b < unit; b++)
+			bits |= (unsigned long long)(unsigned char)
+				base->literal_data[index * unit + b] << (8 * b);
+		return Normalize(base->literal_type, bits);
+	}
 	case EK_CALL:
 		return EvaluateCall(expr, context);
 	case EK_TYPE_TRAIT:

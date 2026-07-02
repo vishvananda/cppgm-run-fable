@@ -33,6 +33,17 @@ struct IConstExprContext
 		(void)expr;
 		return TypePtr();
 	}
+	// PA19: the constant value of a class-typed functional cast
+	// (`B{}` / `B(x)`) through a conversion function whose body is a
+	// single return of a constant expression. False when the name is
+	// not such a class or no conversion of the subset applies.
+	virtual bool TryClassConversionConstant(const AstName& name,
+	                                        ConstValue& out)
+	{
+		(void)name;
+		(void)out;
+		return false;
+	}
 	virtual ~IConstExprContext() {}
 };
 
