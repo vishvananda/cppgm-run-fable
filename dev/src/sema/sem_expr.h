@@ -235,6 +235,10 @@ private:
 	                               const string& written);
 	SemValue AnalyzeMemberCall(const AstExpr& expr,
 	                           const AstExpr& callee);
+	// PA17: the class named by a qualified member-call name's prefix
+	// (`d.Base::f()`), checked to be the object's class or a base.
+	const NamedTypeInfo* ResolveMemberQualifier(
+		const AstName& name, const NamedTypeInfo* object_entity);
 	// PA17: `qualified` suppresses dynamic dispatch (10.3p15 explicit
 	// scope qualification calls the named function directly).
 	SemValue AnalyzeMethodCall(SemValue object, const ScopeBinding& binding,

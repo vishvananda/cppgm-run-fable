@@ -485,6 +485,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	if (callee.op == OP_ARROW)
 		object = DereferenceObject(std::move(object));
 	string name;
+	bool qualified = false;
 	const AstNamePart& last = callee.name.parts.back();
 	if (callee.name.IsPlainIdentifier())
 		name = callee.name.parts[0].identifier;
@@ -497,12 +498,24 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		// canonical member name.
 		name = "operator " + DescribeType(
 			host_.ResolveCastTypeId(*last.conversion_type));
+	else if (last.kind == NP_IDENTIFIER)
+	{
+		// PA17 10.3p15: explicit scope qualification (`d.Base::f()`)
+		// names the function to call; the call is direct, without
+		// virtual dispatch.
+		name = last.identifier;
+		qualified = true;
+	}
 	else
 		throw OutsideBoundary("member name form");
 	if (object.type->kind != TK_CLASS)
 		throw runtime_error("member call on a non-class value");
+	const NamedTypeInfo* lookup_entity = object.type->named;
+	if (qualified)
+		lookup_entity = ResolveMemberQualifier(callee.name,
+		                                       object.type->named);
 	const ScopeBinding* member =
-		FindMemberBinding(host_.Model(), object.type->named, name);
+		FindMemberBinding(host_.Model(), lookup_entity, name);
 	if (!member)
 		throw runtime_error("no member named " + name);
 	if (member->kind == SB_VARIABLE)
@@ -536,7 +549,36 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	if (!host_.InClassContextOrFriend(object.type->named))
 		host_.CheckMemberAccess(member->home, member->access, name,
 		                        object.type->named);
-	return AnalyzeMethodCall(std::move(object), *member, expr.arguments);
+	return AnalyzeMethodCall(std::move(object), *member, expr.arguments,
+	                         qualified);
+}
+
+// The class named by the qualifier of a qualified member-call name
+// (`d.Base::f()`): it must resolve to the object's class or one of its
+// bases. The qualifier resolves against the enclosing scope (the
+// class-scope leg of 3.4.5p4 stays outside the subset and fails here).
+const NamedTypeInfo* SemExprAnalyzer::ResolveMemberQualifier(
+	const AstName& name, const NamedTypeInfo* object_entity)
+{
+	AstName prefix;
+	prefix.global_scope = name.global_scope;
+	for (size_t i = 0; i + 1 < name.parts.size(); i++)
+	{
+		if (name.parts[i].kind != NP_IDENTIFIER || name.parts[i].tilde)
+			throw OutsideBoundary("member name form");
+		AstNamePart part;
+		part.kind = NP_IDENTIFIER;
+		part.identifier = name.parts[i].identifier;
+		prefix.parts.push_back(std::move(part));
+	}
+	TypePtr named = host_.TryResolveCalleeType(prefix);
+	if (!named || RemoveTopCv(named)->kind != TK_CLASS)
+		throw runtime_error("member qualifier does not name a class");
+	const NamedTypeInfo* entity = RemoveTopCv(named)->named;
+	if (BaseClassDistance(object_entity, entity) < 0)
+		throw runtime_error("member qualifier does not name the "
+		                    "object's class or a base class");
+	return entity;
 }
 
 // Overload resolution of a member function call with an implicit

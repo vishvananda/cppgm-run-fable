@@ -62,6 +62,10 @@ struct NamedTypeInfo
 	// name (the PA14 mangler walks these instead of parsing `display`).
 	const Scope* scope;
 	string name;
+	// PA17: the declared class-key spelling ("struct"/"class"/"union"),
+	// recorded at declaration so downstream consumers (the RTTI low
+	// names) do not parse `display`. Empty for non-class entities.
+	string class_key;
 	bool complete;
 	bool is_union;   // classes
 	// Enumeration facts (7.2): scoped-ness and the (PA11 int-fixed)

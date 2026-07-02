@@ -446,6 +446,12 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 	Scope* declaring = ResolvePrefixScope(id);
 	if (declaring->kind != SCOPE_CLASS)
 		throw OutsideBoundary("qualified special member scope");
+	// 7.1.2p5: `virtual` appears only on the in-class declaration; the
+	// out-of-class definition cannot respell it.
+	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
+		if (decl.member_specifiers[i].keyword == KW_VIRTUAL)
+			throw runtime_error("virtual on an out-of-class special "
+			                    "member definition");
 	const AstNamePart& part = id.parts.back();
 	const NamedTypeInfo* entity = model_.ScopeEntity(declaring);
 	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;

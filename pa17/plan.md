@@ -103,6 +103,8 @@ metadata and `alias object` lines, and enforces vtable slot order).
 - [x] Sema: vpointer actions, dispatch classification, layout/triviality facts
 - [x] Lowering: vtable/RTTI emission, dispatch, deleting entries, delete path
 - [x] pa17 suite green (22/22); through-pa17 green (1174/1174); file audit clean
+- [x] Audit pass (see `audit.md`): virtual-delete gating fix, qualified
+  member-access calls, virt-specifier placement checks, typed class-key fact
 
 ## Notes from implementation
 
@@ -117,3 +119,63 @@ metadata and `alias object` lines, and enforces vtable slot order).
   subobject like reference arguments already did.
 - Introducing a vpointer over a non-empty non-polymorphic base would need
   base-pointer adjustment and stays outside the boundary (rejected).
+- Explicit destructor calls lower direct (no vpointer dispatch); the oracle
+  pins this shape (`400-explicit-virtual-destructor-call-nonvirtual` calls
+  `this->~Derived()` and the ref names the entry directly).
+
+## Architecture Review
+
+As built, the implementation matches the planned ownership split; the audit
+(see `audit.md`) closed four gaps but moved no boundaries:
+
+- **Sema owns every polymorphism fact.** `ClassInfo` carries the typed slot
+  model (`vslots` with kind/owner/type/pure/final, `dtor_slot`,
+  `is_polymorphic`, `declares_virtual`, key-function identity); slots build
+  at declaration time in `sem_virtual.cpp` (10.3p2 matching, 10.3p7
+  covariant returns, override/final diagnostics), the layout pre-scan
+  reserves the vpointer before the first field, and the triviality/effects
+  queries key off `is_polymorphic`/`dtor_virtual`. Dispatch is decided
+  during expression analysis: `SN_CALLEE::vtable_slot >= 0` is the one
+  direct-vs-virtual fact, set for unqualified calls to virtual members and
+  for virtual-destructor scalar deletes, left `-1` for qualified names
+  (both the implicit-`this` `Base::f()` form and the member-access
+  `d.Base::f()` form) and explicit destructor calls.
+- **Lowering consumes facts; it does not rediscover them.** `lower_expr`
+  spells the two/three-instruction vpointer load sequence for slot-marked
+  callees; `lower_vtable.cpp` renders demanded vtables (slot order straight
+  from `vslots`), the RTTI chain, typeinfo-name bytes, and the
+  `__cxa_pure_virtual` stand-in; `lower_unit` resolves strong/weak/declare
+  from the key-function facts sema recorded (`key_defined_in_tu`). The one
+  lowering-side lookup — the deleting epilogue's `operator delete` — reads
+  the implicitly-declared global deallocation function through the typed
+  scope model (sema seeds it in every unit; operator-delete overloading is
+  outside the subset).
+- **Class-key spelling is a recorded fact.** `NamedTypeInfo::class_key` is
+  stamped from the AST class-key at entity creation; the RTTI low names
+  (`__rtti_struct_X`) consume it instead of parsing `display` (audit fix).
+- **Demand-driven emission stays monotonic.** Vtables emit only when
+  referenced (vpointer stores) or key-anchored; `Write()` alternates vtable
+  rendering with function lowering to a fixpoint because slot functions can
+  demand further vtables. Non-polymorphic inputs take none of these paths,
+  so PA16-and-earlier outputs are unchanged (through-pa17 suite green).
+
+## Final Architecture Review
+
+Post-audit state. The four audit findings are fixed in place, not deferred:
+scalar `delete` of a virtual-destructor class always dispatches through the
+deleting slot (the `NeedsDestruction` gate had skipped both dispatch and
+destruction for effect-free chains like `virtual ~B() = default;`);
+virt-specifiers and `virtual` are rejected outside class-body member
+function declarations (PA16 rejected them everywhere, so silent acceptance
+— including a fabricated slotless vtable for `virtual int x;` — was a
+weakened check); qualified member-access calls (`d.Base::f()`,
+`p->Base::f()`) resolve the qualifier, require same-class-or-base, and call
+directly per 10.3p15; and the class-key string parse is gone. Ownership
+after the audit: dispatch, slots, layout, key functions, and virt-specifier
+legality in sema; rendering, demand, binding strength, and name mangling in
+lowering; no stringly facts cross the boundary (slot indexes, class
+records, and typed entries do). Suites: pa17 22/22, through-pa17 1174/1174,
+file audit clean (`sem_class.cpp` at 1452 of the 1500 cap; the new logic
+lives in `sem_virtual.cpp` and `lower_vtable.cpp`). Handoff to PA18 is
+clean: templates can layer on the completed procedural/object/polymorphic
+model without touching the vtable path.

@@ -665,6 +665,14 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 		BindTypeAlias(name, composed.type);
 		return;
 	}
+	// 7.1.2p5 / 9.2: `virtual` and the virt-specifiers belong to member
+	// function declarations inside a class body (the PA17 binder checks
+	// their meaning there).
+	if ((composed.type->kind != TK_FUNCTION ||
+	     current_->kind != SCOPE_CLASS) &&
+	    (specs.is_virtual || composed.has_override || composed.has_final))
+		throw runtime_error("virtual declaration outside a class "
+		                    "member function");
 	if (composed.type->kind == TK_FUNCTION)
 	{
 		// 8.4.3: `= delete` is a deleted definition; `= default` is a
@@ -845,6 +853,12 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	if ((composed.type->is_const || composed.type->is_volatile) &&
 	    declaring->kind != SCOPE_CLASS)
 		throw runtime_error("cv-qualified non-member function");
+	// 7.1.2p5 / 9.2: only a member function defined inside its class
+	// body may spell `virtual` or a virt-specifier; out-of-class and
+	// namespace-scope definitions cannot respell them.
+	if ((declaring != current_ || declaring->kind != SCOPE_CLASS) &&
+	    (specs.is_virtual || composed.has_override || composed.has_final))
+		throw runtime_error("virtual definition outside a class body");
 	Scope* saved = current_;
 	current_ = declaring;
 	ScopeBinding& binding = BindFunctionName(name, composed.type, false);
@@ -1149,6 +1163,7 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 			TypeDisplayName(decl.class_key_spelling, name), current_,
 			name);
 		info->is_union = is_union;
+		info->class_key = decl.class_key_spelling;
 		type = MakeNamedType(TK_CLASS, info);
 		if (!anonymous)
 		{
@@ -1213,6 +1228,7 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
 		TypeDisplayName(decl.class_key_spelling, name), current_, name);
 	info->is_union = is_union;
+	info->class_key = decl.class_key_spelling;
 	TypePtr type = MakeNamedType(TK_CLASS, info);
 	ScopeBinding binding;
 	binding.kind = SB_TYPE;

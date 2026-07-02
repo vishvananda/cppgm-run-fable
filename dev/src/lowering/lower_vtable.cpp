@@ -14,18 +14,6 @@ using std::to_string;
 // functions (including the deleting destructor entries) and the RTTI
 // chain of the class and its bases.
 
-namespace {
-
-// The class-key spelling of an entity ("struct C" -> "struct").
-string ClassKeyString(const NamedTypeInfo* entity)
-{
-	size_t space = entity->display.find(' ');
-	return space == string::npos ? entity->display
-	                             : entity->display.substr(0, space);
-}
-
-}  // namespace
-
 const ClassInfo* LowerProgram::MethodClass(const TypePtr& adjusted) const
 {
 	if (adjusted->parameters.empty() ||
@@ -85,7 +73,7 @@ string LowerProgram::RttiRef(const ClassInfo* cls)
 		rtti_names_.find(cls);
 	if (found != rtti_names_.end())
 		return "@" + found->second;
-	string tail = ClassKeyString(cls->entity) + "_" +
+	string tail = cls->entity->class_key + "_" +
 		LowerScopePath(cls->members->parent) +
 		LowerSanitizeName(cls->members->name);
 	string encoding = MangleClassTypeEncoding(cls->entity);
