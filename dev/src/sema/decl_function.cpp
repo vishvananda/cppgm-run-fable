@@ -107,6 +107,7 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 		OnFunctionDeclared(binding, composed.type, &specs, &composed,
 		                   false);
 	Scope* scope = model_.CreateScope(SCOPE_FUNCTION, name, declaring);
+	scope->fn_type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		const ParameterInfo& parameter = composed.parameters[i];

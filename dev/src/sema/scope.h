@@ -165,6 +165,10 @@ struct Scope
 	// SetMemberScope; null for non-member scopes). The lowering's
 	// symbol mangling reads the entity's template identity from here.
 	const NamedTypeInfo* entity;
+	// The composed type of a SCOPE_FUNCTION body scope (null on
+	// synthesized helper scopes). Local-entity mangling (5.1.7) needs
+	// the owning overload's identity, which a name lookup cannot give.
+	TypePtr fn_type;
 
 	vector<ScopeBinding> bindings;      // first-binding (print) order
 	map<string, size_t> binding_index;  // name -> bindings position

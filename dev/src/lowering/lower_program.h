@@ -160,6 +160,14 @@ public:
 	// PA17: the "@name" spelling of a polymorphic class's vtable
 	// (demand-marks it for emission; lower_vtable.cpp).
 	string VTableRef(const ClassInfo* cls);
+	// PA18 reference-parity fold (lower_expr.cpp BranchOnValue): a
+	// branch on this namespace-scope pointer-to-function object may
+	// spell the object's address only when that is provably
+	// truth-equivalent to the stored value - single unit, dynamic init
+	// stores a named entity's address, no write/alias of the object
+	// anywhere, and no call runs before the init store.
+	bool BranchSpellsFnPointerAddress(const Scope* scope,
+	                                  const string& name);
 
 private:
 	void CollectItem(const SemNode& item);
@@ -228,6 +236,9 @@ private:
 	map<string, size_t> string_index_;    // element|bytes -> index
 	set<string> symbols_;                 // taken top-level names
 	bool has_main_;
+	// The added units, for whole-program scans (branch-fold analysis).
+	vector<const SemUnit*> units_;
+	map<string, bool> branch_folds_;  // qualified key -> cached verdict
 	// PA15: demand-emitted member/friend/special definitions, keyed by
 	// MemberDefinitionKey; lifetime helper state.
 	map<string, const SemNode*> member_defs_;

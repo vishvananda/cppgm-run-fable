@@ -138,11 +138,16 @@ void FunctionLowerer::BranchOnValue(const SemNode& node,
                                     const string& false_label)
 {
 	// Reference parity: a branch on a namespace-scope
-	// pointer-to-function object spells the object's address.
+	// pointer-to-function object spells the object's address - but
+	// only when the program proves the stored value non-null and
+	// unaliased (the address is truth-equivalent then); otherwise the
+	// value loads like any other condition.
 	if (node.kind == SN_ID_EXPRESSION && node.entity_scope &&
 	    node.entity_scope->kind == SCOPE_NAMESPACE &&
 	    node.type && RemoveTopCv(node.type)->kind == TK_POINTER &&
-	    RemoveTopCv(node.type)->target->kind == TK_FUNCTION)
+	    RemoveTopCv(node.type)->target->kind == TK_FUNCTION &&
+	    program_.BranchSpellsFnPointerAddress(node.entity_scope,
+	                                          node.entity_name))
 	{
 		string address = NewTemp();
 		Emit(address + " = addr " +

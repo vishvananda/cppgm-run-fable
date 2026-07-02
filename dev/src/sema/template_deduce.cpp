@@ -643,6 +643,7 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 		                    " has no definition");
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, spec.name,
 	                                     spec.param_scope);
+	fn_scope->fn_type = spec.type;
 	InstantiationContext context(*this, fn_scope, true);
 	param_capture_scope_ = fn_scope;
 	// Pre-bind the parameters so the trailing-return decltype (which

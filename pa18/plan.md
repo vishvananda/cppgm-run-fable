@@ -194,11 +194,14 @@ operator candidate sweep finds `fn_templates`:
    alias scope, emitting a weak `SN_FUNCTION_DEFINITION` into
    `SemUnit.deferred` under its specialization identity. Declarations
    without a visible definition at the first use: record the pending
-   call; a later definition in the TU must instantiate then (tests
-   with forward-declared templates defined later). Simplest correct
-   order: keep a worklist of needed-but-undefined specializations,
-   flushed when the template's definition is captured and at
-   end-of-TU (error there if still undefined and odr-used).
+   odr-use; a later definition in the TU instantiates then (tests
+   with forward-declared templates defined later). A specialization
+   still undefined at end-of-TU is *not* an error (14.7.1: no
+   diagnostic required; the checked-in compile-pass fixtures call
+   declared-only templates) — the lowering emits an ordinary external
+   `declare function` for it. Bodies instantiate on odr-use only
+   (3.2p2: unevaluated operands do not odr-use), never for losing
+   candidates.
 6. Function address contexts (`&f` with target type;
    `100-overloaded-function-address-context`) — deduce against the
    target function type for the template members of the overload set.
@@ -345,11 +348,103 @@ stage requires it.
   `instantiating_ && selected.defaulted`); the lowering demands the
   registered synthesized body from the trivial-copy action.
 - Empty-object copies: a member-addressed trivial-copy action prints
-  only the member (destination) address; an argument/temporary copy
-  still evaluates the source lvalue and its base-adjust hop, and only
-  the `copyobj` is skipped.
+  only the member (destination) address when the source is
+  effect-free; a side-effecting source (mem-initializer `e(*get())`)
+  still evaluates, and an argument/temporary copy always evaluates
+  the source lvalue and its base-adjust hop. Only the `copyobj` is
+  skipped.
 - Branching on a namespace-scope pointer-to-function object spells
-  the object's address (fixture-pinned reference presentation).
+  the object's address only when that is provably truth-equivalent
+  to the loaded value (single unit, dynamic init stores a named
+  entity's address, no write/alias anywhere, no call before the init
+  store — `LowerProgram::BranchSpellsFnPointerAddress`); every other
+  such branch loads the value. The pinned fixture satisfies the
+  proof; the unproven general case must not inherit its shape.
 - Value-initialized pointer prvalues spell the immediate `nullptr`;
   retyped integer zeros keep the immediate `0`; the `nullptr` keyword
   materializes through `copy ptr nullptr`.
+
+## Architecture Review
+
+Written during the post-completion audit (loop 40), grounded in the
+implementation at `9daaaa4ee` and revised by the audit fixes.
+
+- **Ownership held.** Template identity is typed end to end:
+  `TemplateInfo*`/`FunctionSpecialization*`/`spec_template`/`spec_args`
+  flow from capture through instantiation into lowering; the mangler
+  and scope keys consume those facts (no name-string parsing for
+  semantics anywhere on the new surface). Cache keys embed entity
+  pointers and are never printed; entity-name spellings are
+  presentation, made collision-free by qualifying argument spellings
+  at their source (`template_info.cpp`), not by patching consumers.
+  The one duplicated fact found (scope→entity held in both
+  `Scope::entity` and a model map) was collapsed to the scope field.
+- **Instantiation model corrected.** As built, bodies instantiated
+  eagerly for every deduced candidate, which forced a catch-all that
+  silently dropped failing candidates (de-facto SFINAE, explicitly out
+  of scope) and could leave a cache entry claiming a body it never
+  emitted. The audit moved body instantiation to odr-use (analyzer
+  hook at the winner stamp points), made substitution failures hard
+  errors per this plan, and taught unevaluated operands not to
+  odr-use. The end-of-TU "undefined and odr-used is an error" rule
+  this plan originally prescribed was wrong against the checked-in
+  oracle and is corrected above.
+- **Re-entrancy discipline.** `InstantiationContext` is the single
+  save/restore point; the audit added the four fields the original
+  set missed (`instantiating_`, `param_capture_scope_`,
+  `bf_units_written_`, `in_unevaluated_operand_`) after finding real
+  leak scenarios for two of them, and moved the bodies out of the
+  header. The manual save/try/catch/restore dances at five call
+  sites collapsed into the RAII type.
+- **Fixture-derived rules.** Each reference-parity rule was audited
+  against the "general property, not test shape" bar: emptiness from
+  layout, user-providedness from the standard's definition, zero-tail
+  split from element type, TLS from storage class — all general. Two
+  were not and were narrowed/repaired: the function-pointer branch
+  fold now requires a whole-program non-null/no-alias proof, and the
+  member-addressed empty-copy skip preserves side-effecting sources.
+  One (`!cls->base` ctor-entry pairing) turned out to be the correct
+  alias-unit rule and is now documented with its discriminating
+  witness.
+- **Performance.** No hot-path scans over all templates or
+  specializations: candidates ride per-name `fn_templates`, patterns
+  compose lazily and cache, specialization lookup is one key build +
+  map probe, and the lowering demand sweep keeps its rescan-floor
+  O(1)-per-flip behavior. The branch-fold proof is a whole-program
+  walk but runs at most once per queried pointer name (rare shape,
+  cached). Known small costs (linear Itanium substitution tables,
+  per-symbol component re-rendering, explicit-instantiation rescans
+  bounded by directive count) are recorded in the audit as accepted.
+
+## Final Architecture Review
+
+Post-fix state (audit loop 40 exit): 1367/1367 through-pa18, file
+audit clean (two non-fatal declaration-weight warnings, one
+pre-existing, both explained in `audit.md`).
+
+- The compiler path is genuine end to end: capture → typed
+  deduction/unification (14.8.2 subset with partial ordering) →
+  re-binding instantiation through the ordinary PA11-PA17 machinery →
+  ordinary LowIR lowering. No interpreter, trampoline, template
+  binary, embedded payload, fallback success path, or test-shape gate
+  exists on the surface; unsupported forms throw
+  `OutsideBoundary`/`OutsideSubset` and fail the compile.
+- Lookup and overload resolution follow the spec shapes they claim:
+  7.3.4p4 directive transitivity anchors at the outer site, 13.3.3
+  tie-breakers run in order (conversions, then non-template, then
+  14.5.6.2 partial ordering) with a verification pass, and
+  13.3.3.2p3 ranks qualification conversions by cv-signature subset.
+- Multi-unit identity is name-keyed exactly where names are
+  program-unique (typed `ArgSpellingIsGlobal` guard for
+  specializations over local/unnamed entities) and pointer-keyed
+  elsewhere, so the PA14+ multi-file contract survives PA18's
+  local-class collision fixes; function-local entity mangling takes
+  the owning overload's composed type from its body scope
+  (`Scope::fn_type`) instead of a first-overload name lookup.
+- Handoff to PA19 (non-type parameters, explicit specialization,
+  constant-expression arguments): the capture/registry model has one
+  place to add argument kinds (`TemplateParam`,
+  `ResolveTemplateArgumentList`, `TemplateArgumentKey/Spelling`,
+  deduction's `bound` vector), and the odr-use-driven instantiation
+  seam (`OnSpecializationOdrUsed`) is where explicit-specialization
+  selection will hook without re-touching call sites.

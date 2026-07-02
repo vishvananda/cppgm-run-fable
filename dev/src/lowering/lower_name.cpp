@@ -427,16 +427,21 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 {
 	string fn_object;
 	const Scope* declaring = fn_scope->parent;
-	const ScopeBinding* fn_binding =
-		declaring ? FindOwnBinding(*declaring, fn_scope->name) : 0;
-	if (fn_binding && declaring->kind == SCOPE_CLASS)
-		fn_object = MangleMemberFunctionObjectName(
-			declaring, fn_scope->name, fn_binding->type, "");
-	else if (fn_binding)
-		fn_object = MangleFunctionObjectName(declaring, fn_scope->name,
-		                                     fn_binding->type);
-	else
+	// The body scope carries its own composed type; a name lookup
+	// would find only the first overload of the name.
+	TypePtr fn_type = fn_scope->fn_type;
+	if (!fn_type && declaring)
+		if (const ScopeBinding* fn_binding =
+		        FindOwnBinding(*declaring, fn_scope->name))
+			fn_type = fn_binding->type;
+	if (!fn_type || !declaring)
 		throw OutsideBoundary("local entity mangling context");
+	if (declaring->kind == SCOPE_CLASS)
+		fn_object = MangleMemberFunctionObjectName(
+			declaring, fn_scope->name, fn_type, "");
+	else
+		fn_object = MangleFunctionObjectName(declaring, fn_scope->name,
+		                                     fn_type);
 	// The encoding is the object name without its _Z prefix.
 	string fn_encoding = fn_object.compare(0, 2, "_Z") == 0
 		? fn_object.substr(2) : fn_object;
@@ -621,6 +626,79 @@ string LowerScopePath(const Scope* scope)
 	return path;
 }
 
+// Whether a namespace/class scope sits inside a function body (any
+// non-namespace/class/template-params container on the way up).
+static bool ScopeIsFunctionLocal(const Scope* scope)
+{
+	for (const Scope* up = scope->parent; up; up = up->parent)
+	{
+		if (up->kind == SCOPE_NAMESPACE)
+			return false;
+		if (up->kind != SCOPE_CLASS &&
+		    up->kind != SCOPE_TEMPLATE_PARAMS)
+			return true;
+	}
+	return false;
+}
+
+// Whether a template-argument type names (recursively) only named
+// namespace/class-scoped entities, so its spelling is unique
+// program-wide. Local classes in different functions can share a
+// spelling (`Maker::Piece`), so specializations over them must not
+// key by name.
+static bool ArgSpellingIsGlobal(const TypePtr& type)
+{
+	if (!type)
+		return false;
+	switch (type->kind)
+	{
+	case TK_FUNDAMENTAL:
+		return true;
+	case TK_POINTER:
+	case TK_LVALUE_REFERENCE:
+	case TK_RVALUE_REFERENCE:
+	case TK_ARRAY:
+		return ArgSpellingIsGlobal(type->target);
+	case TK_CLASS:
+	case TK_ENUM:
+	{
+		const NamedTypeInfo* named = type->named;
+		if (!named || named->name.empty())
+			return false;
+		for (const Scope* up = named->scope; up && up->parent;
+		     up = up->parent)
+		{
+			if (up->kind == SCOPE_TEMPLATE_PARAMS)
+				continue;
+			if (up->kind != SCOPE_NAMESPACE && up->kind != SCOPE_CLASS)
+				return false;
+			if (up->name.empty())
+				return false;  // unnamed namespace: per-unit identity
+		}
+		for (size_t i = 0; i < named->spec_args.size(); i++)
+			if (!ArgSpellingIsGlobal(named->spec_args[i]))
+				return false;
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+// Whether a scope component's name is a program-wide identity: named,
+// not function-local, and (for specializations) spelled over globally
+// unique argument names.
+static bool ScopeNameIsGlobal(const Scope* scope)
+{
+	if (scope->name.empty() || ScopeIsFunctionLocal(scope))
+		return false;
+	if (scope->entity)
+		for (size_t i = 0; i < scope->entity->spec_args.size(); i++)
+			if (!ArgSpellingIsGlobal(scope->entity->spec_args[i]))
+				return false;
+	return true;
+}
+
 string LowerScopeKey(const Scope* scope)
 {
 	string key;
@@ -628,9 +706,19 @@ string LowerScopeKey(const Scope* scope)
 	{
 		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
 			continue;
-		// Identity keys carry the scope object: same-named entities in
-		// different contexts (local classes, their specializations)
-		// stay distinct. Keys are internal; names render elsewhere.
+		// Globally named scopes key by name, so the same entity
+		// declared in several translation units merges onto one entry
+		// (specialization scope names carry their qualified argument
+		// spellings). Unnamed scopes, function-local classes, and
+		// specializations over local names carry the scope object
+		// instead: same-named locals in different functions must stay
+		// distinct, and unnamed namespaces are per-unit by definition.
+		// Keys are internal; names render elsewhere.
+		if (ScopeNameIsGlobal(scope))
+		{
+			key = scope->name + "::" + key;
+			continue;
+		}
 		char tagged[48];
 		snprintf(tagged, sizeof(tagged), "%s#%p", scope->name.c_str(),
 		         (const void*)scope);

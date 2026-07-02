@@ -26,6 +26,35 @@ TypePtr StripRef(const TypePtr& type)
 	return IsReferenceType(type) ? type->target : type;
 }
 
+// Whether evaluating this expression can have observable effects
+// (calls, stores, allocation); pure address chains are elidable.
+bool ExprHasSideEffects(const SemNode& node)
+{
+	switch (node.kind)
+	{
+	case SN_CALL_EXPRESSION:
+	case SN_ASSIGNMENT_EXPRESSION:
+	case SN_CONSTRUCTOR_ACTION:
+	case SN_DESTRUCTOR_ACTION:
+	case SN_NEW_INIT:
+	case SN_NEW_ARRAY:
+	case SN_DELETE_EXPRESSION:
+	case SN_DELETE_ARRAY:
+	case SN_POSTFIX_EXPRESSION:
+		return true;
+	case SN_UNARY_EXPRESSION:
+		if (node.op == OP_INC || node.op == OP_DEC)
+			return true;
+		break;
+	default:
+		break;
+	}
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (ExprHasSideEffects(*node.children[i]))
+			return true;
+	return false;
+}
+
 // The unsigned mask of `width` bits.
 unsigned long long BitMask(unsigned long long width)
 {
@@ -436,7 +465,13 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	bool empty = cls_type->named->class_record &&
 		cls_type->named->class_record->is_empty;
 	if (empty && member_addressed)
+	{
+		// Only an effect-free source elides; a side-effecting source
+		// lvalue (`e(*get())` in a mem-initializer) must evaluate.
+		if (ExprHasSideEffects(source))
+			LowerAddressExpr(source);
 		return;
+	}
 	string src = LowerAddressExpr(source);
 	// A derived source adjusts to the copied base subobject.
 	TypePtr source_type = RemoveTopCv(StripRef(source.type));

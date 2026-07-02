@@ -405,6 +405,7 @@ Scope* SemBinder::MakeSpecialMemberScope(const string& name,
 {
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, name,
 	                                     cls.members);
+	fn_scope->fn_type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		const ParameterInfo& parameter = composed.parameters[i];
@@ -708,6 +709,7 @@ void SemBinder::BindFriendFunction(const AstDecl& decl, ClassInfo& cls)
 		// class's lexical scope once the outermost class completes.
 		Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, name,
 		                                     cls.members);
+		fn_scope->fn_type = composed.type;
 		for (size_t i = 0; i < composed.parameters.size(); i++)
 		{
 			const ParameterInfo& parameter = composed.parameters[i];
