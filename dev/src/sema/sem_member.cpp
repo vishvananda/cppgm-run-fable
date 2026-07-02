@@ -418,6 +418,7 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 		return value;
 	}
 	int winner = host_.ResolveClassCtorHost(*cls, args, false, "temporary");
+	bool value_init = arguments.empty();
 	vector<SemNodePtr> arg_nodes;
 	for (size_t i = 0; i < args.size(); i++)
 		arg_nodes.push_back(std::move(args[i].node));
@@ -426,6 +427,19 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	// 5.2.3: the functional-cast temporary's construction is explicit
 	// even when the implicit default constructor does nothing.
 	action->trivial_init = false;
+	// 8.5p7: `T()` zero-initializes first unless the selected default
+	// constructor is user-provided. The reference shapes pin the fill
+	// only where one scalar store covers the object: empty classes and
+	// objects wider than 8 bytes get no fill.
+	bool user_provided = winner >= 0 && !cls->ctors[winner].implicit &&
+		!cls->ctors[winner].defaulted;
+	if (value_init && !user_provided && !cls->is_empty &&
+	    (cls->size == 1 || cls->size == 2 || cls->size == 4 ||
+	     cls->size == 8))
+	{
+		action->value_zero_fill = true;
+		action->value = ConstValue(FT_UNSIGNED_LONG_INT, cls->size);
+	}
 	action->type = RemoveTopCv(class_type);
 	action->category = VC_PRVALUE;
 	if (host_.Classes().NeedsDestruction(*cls))

@@ -303,6 +303,32 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 void FunctionLowerer::LowerConstructorCall(const SemNode& action,
                                            const string& this_text)
 {
+	// 8.5p7: a value-initialized temporary zero-fills its storage
+	// before the (non-user-provided) default constructor runs; the
+	// addressed member/object form handles this in its own path.
+	if (action.value_zero_fill && !action.ctor_addressed &&
+	    !this_text.empty())
+	{
+		unsigned long long size = action.value.bits;
+		string width;
+		switch (size)
+		{
+		case 1: width = "i8"; break;
+		case 2: width = "i16"; break;
+		case 4: width = "i32"; break;
+		case 8: width = "i64"; break;
+		default:
+			break;
+		}
+		if (size > 0)
+		{
+			if (width.empty())
+				Emit("zeroinit " + to_string(size) + "x1 " +
+				     this_text);
+			else
+				Emit("store " + width + " 0, " + this_text);
+		}
+	}
 	// A declared object's action holds [callee, &object, args...]; a
 	// temporary's holds [callee, args...].
 	const SemNode& call = *action.children[0];

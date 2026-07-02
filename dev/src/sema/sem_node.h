@@ -194,6 +194,10 @@ struct SemNode
 	// SN_CONSTRUCTOR_ACTION: the implicit default constructor does
 	// nothing, so default-initialization emits no call.
 	bool trivial_init;
+	// PA19 SN_CONSTRUCTOR_ACTION (unaddressed temporaries): 8.5p7
+	// value-initialization zero-fills `value.bits` bytes of the target
+	// before the (non-user-provided) default constructor runs.
+	bool value_zero_fill = false;
 	// A synthesized subobject constructor action whose whole chain does
 	// nothing: the callee is still demanded (emitted on use) but the
 	// call itself is not printed.
