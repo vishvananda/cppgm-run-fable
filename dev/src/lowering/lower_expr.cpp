@@ -137,6 +137,22 @@ void FunctionLowerer::BranchOnValue(const SemNode& node,
                                     const string& true_label,
                                     const string& false_label)
 {
+	// Reference parity: a branch on a namespace-scope
+	// pointer-to-function object spells the object's address.
+	if (node.kind == SN_ID_EXPRESSION && node.entity_scope &&
+	    node.entity_scope->kind == SCOPE_NAMESPACE &&
+	    node.type && RemoveTopCv(node.type)->kind == TK_POINTER &&
+	    RemoveTopCv(node.type)->target->kind == TK_FUNCTION)
+	{
+		string address = NewTemp();
+		Emit(address + " = addr " +
+		     program_.GlobalRef(node.entity_scope, node.entity_name));
+		ReferenceLabel(true_label);
+		ReferenceLabel(false_label);
+		Terminate("branch " + address + ", ^" + true_label + ", ^" +
+		          false_label);
+		return;
+	}
 	LowerValue truth = MaterializeTruth(LowerValueExpr(node));
 	ReferenceLabel(true_label);
 	ReferenceLabel(false_label);
@@ -833,6 +849,17 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		if (alias != address_aliases_.end())
 			return alias->second;
 		const ScopeBinding* binding = EntityBinding(node);
+		// PA18: a function-template specialization has no scope
+		// binding; its identity rides on the node.
+		if (!binding && node.fn_spec)
+		{
+			string name = program_.FunctionRef(
+				node.entity_scope, node.entity_name, node.type,
+				node.fn_spec);
+			string temp = NewTemp();
+			Emit(temp + " = addr " + name);
+			return temp;
+		}
 		if (!binding)
 			throw runtime_error("unresolved lvalue " + node.name);
 		if (binding->kind == SB_FUNCTION)

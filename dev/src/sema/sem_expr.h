@@ -289,12 +289,17 @@ private:
 	                              EValueCategory& category);
 	SemValue AnalyzeSubscript(const AstExpr& expr);
 	SemValue AnalyzeMember(const AstExpr& expr);
+	SemValue AnalyzeCastToReference(const TypePtr& dest, SemValue value,
+	                                ETokenType op);
 	SemValue AnalyzeCastTo(const TypePtr& dest, const AstExpr& operand,
 	                       bool has_anno, ETokenType op,
 	                       const string& op_spelling);
 	SemValue AnalyzeFunctionalCast(const TypePtr& dest,
 	                               const vector<AstExprPtr>& arguments);
 	SemValue AnalyzeSizeof(const AstExpr& expr);
+	void FillFunctionSetValue(const ScopeBinding& binding,
+	                          const NamedTypeInfo* member_class,
+	                          SemValue& value);
 	SemValue CallResult(const TypePtr& function_type);
 	// PA16: copy/move-initialization of a by-value class destination
 	// (call arguments, declared objects, return values): resolves the

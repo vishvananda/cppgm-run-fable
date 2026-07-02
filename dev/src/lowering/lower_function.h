@@ -77,6 +77,7 @@ private:
 	// --- shared state helpers (lower_function.cpp) ---
 	string Header() const;
 	void EmitParameterStores();
+	void LowerStaticGuard(const SemNode& node);
 	string NewTemp();
 	string NewLabel(const string& prefix);
 	void OpenBlock(const string& label);

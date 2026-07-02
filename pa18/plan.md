@@ -307,17 +307,27 @@ stage requires it.
       instantiated definitions and static members.
 - [x] Trailing-return decltype over the parameters (8.3.5p2 ordering)
       during substitution and body instantiation.
-- [ ] Full pa18 suite green through `make test-report-through-pa18`.
-      Current state: 1335/1367 through-tests, zero earlier-stage
-      regressions. The remaining 32 are a long tail: xvalue
-      reference-member init, inherited constructors through
-      alias-named bases, move-only by-value elision,
-      variable-template-shaped inputs, several LowIR shape/ordering
-      nuances (tls init ordering, temporary slot naming,
-      immediate-conversion folds), and ambiguous-overload rankings
-      that need 14.5.6.2-adjacent tie-breaks.
+- [x] Full pa18 suite green through `make test-report-through-pa18`:
+      1367/1367 (193/193 pa18), file audit clean. Final round added:
+      partial-ordering tie-break (14.5.6.2 subset over the deduction
+      patterns), qualification-conversion sub-rank (13.3.3.2p3),
+      xvalue reference-member binding, member-signature `this`
+      context (5.1.1p3 trailing-return decltype), out-of-class member
+      instantiation through pattern names/class-scope declarator
+      lookup, TLS first-use guarded init (`__tls_guard` +
+      `__tls_init`), Itanium local-name mangling (`Z<fn>E<name>`),
+      braced-init-list returns, derived-to-base reference casts,
+      poisoned instantiated member bodies (ill-formed only when
+      demanded, 14.7.1), `using Alias::Alias` constructor
+      inheritance, `decltype(x)::member` qualifiers, `sizeof(expr)`
+      over unevaluated operands, variable-template parse-and-ignore,
+      inline-namespace directive lookup, and several fixture-pinned
+      lowering shapes (per-element aggregate zero tails, folded
+      narrowing immediate conversions, 8.5p7 zero-fill skip,
+      empty-copy source-evaluation rules, instantiated ctor C1/C2
+      pairing for baseless specializations).
 
-### Fixture-derived lowering rules (current focus)
+### Fixture-derived lowering rules (reference parity notes)
 
 - Local scalar-array aggregate tails: the reference stores each
   value-initialized tail element individually (`store i32 0` per
@@ -334,3 +344,12 @@ stage requires it.
   (`MakeConstructorCall` trivial path → `EnsureSpecialCtor` when
   `instantiating_ && selected.defaulted`); the lowering demands the
   registered synthesized body from the trivial-copy action.
+- Empty-object copies: a member-addressed trivial-copy action prints
+  only the member (destination) address; an argument/temporary copy
+  still evaluates the source lvalue and its base-adjust hop, and only
+  the `copyobj` is skipped.
+- Branching on a namespace-scope pointer-to-function object spells
+  the object's address (fixture-pinned reference presentation).
+- Value-initialized pointer prvalues spell the immediate `nullptr`;
+  retyped integer zeros keep the immediate `0`; the `nullptr` keyword
+  materializes through `copy ptr nullptr`.

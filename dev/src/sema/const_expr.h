@@ -25,6 +25,14 @@ struct IConstExprContext
 	// PA18: completes a deferred member-class definition before a
 	// sizeof/alignof reads its layout (no-op outside templates).
 	virtual void RequireCompleteForLayout(const TypePtr& type) {}
+	// PA18: the type of an unevaluated operand (5.3.3p1 sizeof over a
+	// general expression); null when the context cannot analyze
+	// expressions or the operand is ill-formed.
+	virtual TypePtr TryAnalyzeExpressionType(const AstExpr& expr)
+	{
+		(void)expr;
+		return TypePtr();
+	}
 	virtual ~IConstExprContext() {}
 };
 

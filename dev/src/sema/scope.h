@@ -75,13 +75,14 @@ enum EMemberAccess
 };
 
 struct TemplateInfo;
+struct FunctionSpecialization;
 
 struct ScopeBinding
 {
 	ScopeBinding() : kind(SB_VARIABLE), target(0), has_value(false),
 	                 owner(0), home(0), c_linkage(false),
 	                 access(MA_PUBLIC), is_mutable(false),
-	                 is_thread_local(false), templ(0) {}
+	                 is_thread_local(false), templ(0), fn_self_spec(0) {}
 
 	EScopeBindingKind kind;
 	string name;
@@ -139,6 +140,9 @@ struct ScopeBinding
 	// imports copy the binding and carry them along).
 	TemplateInfo* templ;
 	vector<TemplateInfo*> fn_templates;
+	// PA18: set on a FunctionSpecialization's own `self` binding so an
+	// explicit template-id id-expression carries its identity.
+	const FunctionSpecialization* fn_self_spec;
 };
 
 struct Scope

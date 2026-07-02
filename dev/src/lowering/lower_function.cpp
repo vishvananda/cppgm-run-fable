@@ -414,27 +414,8 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		return;
 	}
 	case SN_STATIC_GUARD:
-	{
-		// Once-only construction behind an i64 guard global.
-		string guard = "@" + node.name;
-		string loaded = NewTemp();
-		Emit(loaded + " = load i64 " + guard);
-		string set = NewTemp();
-		Emit(set + " = cmp ne i64 " + loaded + ", 0");
-		string run_label = NewLabel("local_static_ctor_run");
-		string done_label = NewLabel("local_static_ctor_done");
-		ReferenceLabel(run_label);
-		ReferenceLabel(done_label);
-		Terminate("branch " + set + ", ^" + done_label + ", ^" +
-		          run_label);
-		OpenBlock(run_label);
-		for (size_t i = 0; i < node.children.size(); i++)
-			LowerStatement(*node.children[i]);
-		Emit("store i64 1, " + guard);
-		Terminate("jump ^" + done_label);
-		OpenBlock(done_label);
+		LowerStaticGuard(node);
 		return;
-	}
 	case SN_DELETE_EXPRESSION:
 	case SN_DELETE_ARRAY:
 		LowerDelete(node);
@@ -584,6 +565,27 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 	Emit("store " + LowerSlotType(declared) + " " + value + ", $" +
 	     slot);
 	EndFullExpression();
+}
+
+// Once-only construction behind an i64 guard global.
+void FunctionLowerer::LowerStaticGuard(const SemNode& node)
+{
+	string guard = "@" + node.name;
+	string loaded = NewTemp();
+	Emit(loaded + " = load i64 " + guard);
+	string set = NewTemp();
+	Emit(set + " = cmp ne i64 " + loaded + ", 0");
+	string run_label = NewLabel("local_static_ctor_run");
+	string done_label = NewLabel("local_static_ctor_done");
+	ReferenceLabel(run_label);
+	ReferenceLabel(done_label);
+	Terminate("branch " + set + ", ^" + done_label + ", ^" + run_label);
+	OpenBlock(run_label);
+	for (size_t i = 0; i < node.children.size(); i++)
+		LowerStatement(*node.children[i]);
+	Emit("store i64 1, " + guard);
+	Terminate("jump ^" + done_label);
+	OpenBlock(done_label);
 }
 
 void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,

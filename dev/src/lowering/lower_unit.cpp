@@ -757,7 +757,8 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 		const ClassInfo* cls = MethodClass(info.type);
 		bool comdat_pair = cls &&
 			((cls->is_polymorphic && cls->dtor_virtual) ||
-			 (cls->entity && cls->entity->spec_template));
+			 (cls->entity && cls->entity->spec_template &&
+			  !cls->base));
 		if (comdat_pair)
 			DemandFunction(MemberFunctionEntry(
 				info.scope, info.name, info.type,
@@ -974,6 +975,29 @@ void LowerProgram::BuildLifetimeHelpers()
 	}
 }
 
+// Thread-local objects expose their access wrapper (the backend's
+// TLS entry point).
+void LowerProgram::AppendTlsWrapperDeclares(vector<string>& declares)
+{
+	for (size_t i = 0; i < globals_.size(); i++)
+	{
+		const LowGlobalInfo& info = globals_[i];
+		if (!info.is_thread_local || (!info.defined && !info.used))
+			continue;
+		string object = info.object_name;
+		if (object.compare(0, 2, "_Z") == 0)
+			object = "_ZTW" + object.substr(2);
+		string meta = info.internal ? "binding=internal"
+		                            : "binding=strong";
+		if (!object.empty())
+			meta += ", object=" + object;
+		declares.push_back(
+			"declare function @" + info.low_name +
+			"__tls_wrapper() -> ptr [" + meta +
+			", tls_for=@" + info.low_name + "]");
+	}
+}
+
 // PA17 polymorphic emission: external declares, the pure-virtual
 // stand-in, RTTI records, and the vtable definitions merge into the
 // declare-global, declare-function, and global output phases.
@@ -1029,25 +1053,7 @@ void LowerProgram::Write(ostream& out)
 			continue;
 		sections[1].push_back(RenderFunctionDeclare(info));
 	}
-	// Thread-local objects expose their access wrapper (the backend's
-	// TLS entry point).
-	for (size_t i = 0; i < globals_.size(); i++)
-	{
-		const LowGlobalInfo& info = globals_[i];
-		if (!info.is_thread_local || (!info.defined && !info.used))
-			continue;
-		string object = info.object_name;
-		if (object.compare(0, 2, "_Z") == 0)
-			object = "_ZTW" + object.substr(2);
-		string meta = info.internal ? "binding=internal"
-		                            : "binding=strong";
-		if (!object.empty())
-			meta += ", object=" + object;
-		sections[1].push_back(
-			"declare function @" + info.low_name +
-			"__tls_wrapper() -> ptr [" + meta +
-			", tls_for=@" + info.low_name + "]");
-	}
+	AppendTlsWrapperDeclares(sections[1]);
 	for (size_t i = 0; i < strings_.size(); i++)
 	{
 		string body;

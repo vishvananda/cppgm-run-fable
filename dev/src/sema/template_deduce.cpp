@@ -618,6 +618,7 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->self.kind = SB_FUNCTION;
 	spec->self.name = spec->name;
 	spec->self.type = composed.type;
+	spec->self.fn_self_spec = spec;
 	// The alias scope is the specialization's identity scope: the
 	// lowering keys the definition and its call sites on it, and the
 	// canonical-name walk skips it up to the declaring namespace.

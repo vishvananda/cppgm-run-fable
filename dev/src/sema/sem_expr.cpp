@@ -352,26 +352,8 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		break;
 	}
 	case SB_FUNCTION:
-	{
-		value.function_set = true;
-		if (binding->type)
-		{
-			value.overloads.push_back(binding->type);
-			for (size_t i = 0; i < binding->overloads.size(); i++)
-				value.overloads.push_back(binding->overloads[i]);
-		}
-		value.fn_templates = binding->fn_templates;
-		value.overload_specs.resize(value.overloads.size(), 0);
-		value.fn_owner = binding->owner;
-		value.fn_name = binding->name;
-		value.category = VC_LVALUE;
-		value.member_class = member_class;
-		value.member_type = binding->type;
-		value.type = member_class
-			? ThisAdjustedType(member_class, binding->type)
-			: binding->type;
+		FillFunctionSetValue(*binding, member_class, value);
 		break;
-	}
 	case SB_ENUMERATOR:
 	{
 		// Enumerators dump as value literals of their enumeration type.
@@ -395,7 +377,36 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	value.node->category = value.category;
 	value.node->entity_scope = binding->owner;
 	value.node->entity_name = binding->name;
+	value.node->fn_spec = binding->fn_self_spec;
 	return value;
+}
+
+// An id-expression naming a function overload set (possibly one
+// deduced specialization): the set's facts ride on the value until a
+// call or a target type selects one member.
+void SemExprAnalyzer::FillFunctionSetValue(const ScopeBinding& binding,
+                                           const NamedTypeInfo* member_class,
+                                           SemValue& value)
+{
+	value.function_set = true;
+	if (binding.type)
+	{
+		value.overloads.push_back(binding.type);
+		for (size_t i = 0; i < binding.overloads.size(); i++)
+			value.overloads.push_back(binding.overloads[i]);
+	}
+	value.fn_templates = binding.fn_templates;
+	value.overload_specs.resize(value.overloads.size(), 0);
+	if (binding.fn_self_spec && !value.overload_specs.empty())
+		value.overload_specs[0] = binding.fn_self_spec;
+	value.fn_owner = binding.owner;
+	value.fn_name = binding.name;
+	value.category = VC_LVALUE;
+	value.member_class = member_class;
+	value.member_type = binding.type;
+	value.type = member_class
+		? ThisAdjustedType(member_class, binding.type)
+		: binding.type;
 }
 
 SemValue SemExprAnalyzer::CallResult(const TypePtr& function_type)

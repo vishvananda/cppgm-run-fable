@@ -181,6 +181,7 @@ private:
 	void DemandFunction(LowFunctionInfo& info);
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();
+	void AppendTlsWrapperDeclares(vector<string>& declares);
 	// A thread-local object's first-use guard global and internal
 	// `__tls_init` function built from its construction actions.
 	void BuildTlsGuardedInit(size_t global_index,

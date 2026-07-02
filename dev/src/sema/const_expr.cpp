@@ -344,6 +344,20 @@ ConstValue EvaluateSizeofExpr(const AstExpr& expr,
 			return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(named));
 		}
 	}
+	// 5.3.3p1: sizeof over an unevaluated expression operand.
+	if (!expr.operands.empty())
+	{
+		TypePtr analyzed =
+			context.TryAnalyzeExpressionType(*expr.operands[0]);
+		if (analyzed)
+		{
+			if (IsReferenceType(analyzed))
+				analyzed = analyzed->target;
+			context.RequireCompleteForLayout(analyzed);
+			return ConstValue(FT_UNSIGNED_LONG_INT,
+			                  TypeSize(RemoveTopCv(analyzed)));
+		}
+	}
 	throw OutsideSubset("sizeof of an expression");
 }
 

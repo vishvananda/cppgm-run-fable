@@ -225,6 +225,9 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.trivial_copy = node.trivial_copy;
 	out.ctor_addressed = node.ctor_addressed;
 	out.synthesized = node.synthesized;
+	out.fn_spec = node.fn_spec;
+	out.weak_def = node.weak_def;
+	out.instantiation_error = node.instantiation_error;
 	if (node.result_dtor)
 		out.result_dtor = CloneSemNode(*node.result_dtor);
 	for (size_t i = 0; i < node.children.size(); i++)

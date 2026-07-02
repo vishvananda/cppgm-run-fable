@@ -211,6 +211,21 @@ bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 	}
 }
 
+TypePtr SemBinder::TryAnalyzeExpressionType(const AstExpr& expr)
+{
+	try
+	{
+		SemValue value = analyzer_.Analyze(expr);
+		if (value.function_set || !value.type)
+			return TypePtr();
+		return value.type;
+	}
+	catch (const std::exception&)
+	{
+		return TypePtr();
+	}
+}
+
 TypePtr SemBinder::ResolveDecltype(const AstExpr& expr)
 {
 	// 7.1.6.2p4: an unparenthesized id-expression yields the declared

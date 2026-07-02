@@ -58,6 +58,72 @@ bool SimilarTypes(const TypePtr& a, const TypePtr& b)
 
 }  // namespace
 
+// 5.2.9p2-p4 / 5.2.11: a cast to reference type adjusts the operand's
+// category and printed type; no cast node is dumped. const_cast
+// accepts the 5.2.11 similar types.
+SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
+                                                 SemValue value,
+                                                 ETokenType op)
+{
+	const TypePtr& referee = dest->target;
+	bool compatible = op == KW_CONST_CAST
+		? SimilarTypes(referee, value.type)
+		: TypeEquals(RemoveTopCv(referee), RemoveTopCv(value.type));
+	if (!value.function_set && !compatible &&
+	    op != KW_CONST_CAST &&
+	    (dest->kind == TK_RVALUE_REFERENCE ||
+	     (referee->is_const && !referee->is_volatile)))
+	{
+		// 5.2.9p4: the cast direct-initializes a temporary bound
+		// to the reference.
+		ImplicitConversion conv = ClassifyConversionEx(
+			MakeConversionSource(value), RemoveTopCv(referee), true);
+		if (conv.viable &&
+		    (conv.user_ctor >= 0 || conv.conv_index >= 0))
+		{
+			ApplyConversion(value, conv, RemoveTopCv(referee));
+			value.category = dest->kind == TK_RVALUE_REFERENCE
+				? VC_XVALUE : VC_LVALUE;
+			return value;
+		}
+	}
+	if (!value.function_set && !compatible && op != KW_CONST_CAST)
+	{
+		// 5.2.9p2: a cast to a (no less cv-qualified) base
+		// reference views the base-class subobject.
+		TypePtr from = RemoveTopCv(value.type);
+		TypePtr to = RemoveTopCv(referee);
+		int hops = from->kind == TK_CLASS && to->kind == TK_CLASS
+			? BaseClassDistance(from->named, to->named) : -1;
+		if (hops > 0)
+		{
+			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+			adjusted->type = to;
+			adjusted->category = value.category == VC_PRVALUE
+				? VC_XVALUE : value.category;
+			adjusted->base_hops = hops;
+			adjusted->children.push_back(std::move(value.node));
+			value.node = std::move(adjusted);
+			value.type = to;
+			value.category = dest->kind == TK_RVALUE_REFERENCE
+				? VC_XVALUE : VC_LVALUE;
+			return value;
+		}
+	}
+	if (value.function_set || !compatible)
+		throw OutsideBoundary("reference cast form");
+	if (dest->kind == TK_LVALUE_REFERENCE &&
+	    value.category != VC_LVALUE)
+		throw runtime_error("lvalue reference cast of an rvalue");
+	value.category = dest->kind == TK_RVALUE_REFERENCE
+		? VC_XVALUE : VC_LVALUE;
+	value.type = referee;
+	value.node->category = value.category;
+	value.node->type = dest;
+	value.null_pointer_literal = false;
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
                                         const AstExpr& operand,
                                         bool has_anno, ETokenType op,
@@ -65,68 +131,7 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 {
 	SemValue value = Analyze(operand);
 	if (IsReferenceType(dest))
-	{
-		// 5.2.9p3: a cast to reference type adjusts the operand's
-		// category and printed type; no cast node is dumped.
-		// const_cast accepts the 5.2.11 similar types.
-		const TypePtr& referee = dest->target;
-		bool compatible = op == KW_CONST_CAST
-			? SimilarTypes(referee, value.type)
-			: TypeEquals(RemoveTopCv(referee), RemoveTopCv(value.type));
-		if (!value.function_set && !compatible &&
-		    op != KW_CONST_CAST &&
-		    (dest->kind == TK_RVALUE_REFERENCE ||
-		     (referee->is_const && !referee->is_volatile)))
-		{
-			// 5.2.9p4: the cast direct-initializes a temporary bound
-			// to the reference.
-			ImplicitConversion conv = ClassifyConversionEx(
-				MakeConversionSource(value), RemoveTopCv(referee), true);
-			if (conv.viable &&
-			    (conv.user_ctor >= 0 || conv.conv_index >= 0))
-			{
-				ApplyConversion(value, conv, RemoveTopCv(referee));
-				value.category = dest->kind == TK_RVALUE_REFERENCE
-					? VC_XVALUE : VC_LVALUE;
-				return value;
-			}
-		}
-		if (!value.function_set && !compatible && op != KW_CONST_CAST)
-		{
-			// 5.2.9p2: a cast to a (no less cv-qualified) base
-			// reference views the base-class subobject.
-			TypePtr from = RemoveTopCv(value.type);
-			TypePtr to = RemoveTopCv(referee);
-			int hops = from->kind == TK_CLASS && to->kind == TK_CLASS
-				? BaseClassDistance(from->named, to->named) : -1;
-			if (hops > 0)
-			{
-				SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
-				adjusted->type = to;
-				adjusted->category = value.category == VC_PRVALUE
-					? VC_XVALUE : value.category;
-				adjusted->base_hops = hops;
-				adjusted->children.push_back(std::move(value.node));
-				value.node = std::move(adjusted);
-				value.type = to;
-				value.category = dest->kind == TK_RVALUE_REFERENCE
-					? VC_XVALUE : VC_LVALUE;
-				return value;
-			}
-		}
-		if (value.function_set || !compatible)
-			throw OutsideBoundary("reference cast form");
-		if (dest->kind == TK_LVALUE_REFERENCE &&
-		    value.category != VC_LVALUE)
-			throw runtime_error("lvalue reference cast of an rvalue");
-		value.category = dest->kind == TK_RVALUE_REFERENCE
-			? VC_XVALUE : VC_LVALUE;
-		value.type = referee;
-		value.node->category = value.category;
-		value.node->type = dest;
-		value.null_pointer_literal = false;
-		return value;
-	}
+		return AnalyzeCastToReference(dest, std::move(value), op);
 	if (value.function_set && value.overloads.size() > 1)
 		throw OutsideBoundary("cast of an overloaded name");
 	TypePtr to = RemoveTopCv(dest);

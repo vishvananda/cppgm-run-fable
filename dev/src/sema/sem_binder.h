@@ -507,6 +507,9 @@ private:
 	std::map<const NamedTypeInfo*, PendingClassDefinition> pending_classes_;
 
 public:
+	// IConstExprContext (const_expr.h): the analyzer classifies the
+	// unevaluated sizeof operand (5.3.3p1).
+	virtual TypePtr TryAnalyzeExpressionType(const AstExpr& expr);
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
 		TemplateInfo& tmpl, const vector<SemValue>& args,
