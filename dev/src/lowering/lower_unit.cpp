@@ -176,7 +176,8 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 	const ScopeBinding* binding = FindOwnBinding(*item.entity_scope,
 	                                             item.entity_name);
 	info.type = binding->type;  // redeclarations may complete bounds
-	bool defines = !item.children.empty() || !item.is_extern_decl;
+	bool defines = !item.children.empty() || !item.is_extern_decl ||
+		item.weak_def;
 	if (defines && !info.defined)
 	{
 		info.defined = true;
@@ -185,9 +186,11 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 	bool is_const = false;
 	bool is_volatile = false;
 	TopCv(info.type, is_const, is_volatile);
-	if (item.is_static_decl ||
-	    LowerInUnnamedNamespace(item.entity_scope) ||
-	    (is_const && !item.is_extern_decl))
+	if (item.weak_def)
+		info.weak = true;
+	else if (item.is_static_decl ||
+	         LowerInUnnamedNamespace(item.entity_scope) ||
+	         (is_const && !item.is_extern_decl))
 		info.internal = true;
 	if (item.is_thread_local_decl)
 		info.is_thread_local = true;
@@ -558,7 +561,8 @@ string LowerProgram::StringLiteralRef(const SemNode& node)
 
 string LowerProgram::GlobalMetadata(const LowGlobalInfo& info) const
 {
-	string meta = info.internal ? "binding=internal" : "binding=strong";
+	string meta = info.weak ? "binding=weak"
+		: info.internal ? "binding=internal" : "binding=strong";
 	if (!info.object_name.empty())
 		meta += ", object=" + info.object_name;
 	if (info.is_thread_local)

@@ -27,7 +27,7 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  inline_def(false), needs_dtor(false), trivial_init(false),
 	  elided(false), bf_plain_store(false), synth_copy(false),
 	  trivial_copy(false), ctor_addressed(false), synthesized(false),
-	  fn_spec(0)
+	  fn_spec(0), weak_def(false)
 {
 }
 

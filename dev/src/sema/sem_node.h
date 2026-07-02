@@ -219,6 +219,9 @@ struct SemNode
 	// specialization: its identity record (the lowering mangles the
 	// object name from the pattern signature and argument list).
 	const FunctionSpecialization* fn_spec;
+	// PA18 SN_VARIABLE: an instantiated static-data-member definition
+	// (14.7.1): emits weak with external linkage.
+	bool weak_def;
 	// SN_CALL_EXPRESSION / SN_CONDITIONAL_EXPRESSION with needs_dtor:
 	// the resolved destructor action for the materialized result
 	// temporary (12.2), pinned by the binder so the lowering never

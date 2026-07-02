@@ -80,6 +80,9 @@ struct LowGlobalInfo
 	bool defined;
 	bool used;
 	bool internal;
+	// PA18: an instantiated static-data-member definition (weak,
+	// external).
+	bool weak = false;
 	bool is_thread_local;
 	bool c_linkage;
 	const SemNode* node;  // defining SN_VARIABLE (init children)

@@ -309,6 +309,10 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	case SB_VARIABLE:
 	case SB_PARAMETER:
 	{
+		// A constant static member named through a qualified-id folds
+		// like an enumerator (9.4.2p4 constant initializer).
+		if (member_class && binding->has_value)
+			return AnalyzeStaticMemberValue(*binding, written);
 		// 5p5: the expression type is the declared type with references
 		// stripped; the result is an lvalue either way.
 		TypePtr declared = binding->type;

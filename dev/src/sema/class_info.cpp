@@ -153,6 +153,22 @@ bool ClassRegistry::DestructionHasEffects(const ClassInfo& info) const
 	return FactStore(info, CF_DESTRUCTION_EFFECTS, value);
 }
 
+// PA18: whether the entity is (or is nested inside) an instantiated
+// class-template specialization.
+static bool EntityInInstantiation(const NamedTypeInfo* entity)
+{
+	if (!entity)
+		return false;
+	if (entity->spec_template && !entity->is_template_anchor)
+		return true;
+	for (const Scope* scope = entity->scope; scope;
+	     scope = scope->parent)
+		if (scope->entity && scope->entity->spec_template &&
+		    !scope->entity->is_template_anchor)
+			return true;
+	return false;
+}
+
 bool ClassRegistry::DefaultConstructionHasEffects(const ClassInfo& info) const
 {
 	bool value;
@@ -191,7 +207,12 @@ bool ClassRegistry::ComputeDefaultConstructionEffects(
 		if (!found->defaulted)
 		{
 			// Default arguments evaluate per call; an unseen
-			// definition may do anything.
+			// definition may do anything. PA18: an instantiated user
+			// constructor keeps its call (the reference outputs pin
+			// point-of-instantiation ordering, where the body is not
+			// yet analyzed when the enclosing constructor lowers).
+			if (EntityInInstantiation(info.entity))
+				return true;
 			if (!found->type->parameters.empty())
 				return true;
 			if (!found->definition ||

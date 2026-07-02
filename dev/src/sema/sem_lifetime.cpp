@@ -934,6 +934,11 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	if (!member || member->kind != SB_VARIABLE)
 		throw runtime_error(name + " is not a declared object");
 	member->type = MergeRedeclaredType(member->type, composed.type);
+	// PA18: the instantiated definition's constant value folds at
+	// later uses within this translation unit (the checked outputs
+	// pin the fold), and the object emits weak (14.7.1).
+	if (instantiating_ && declarator.init)
+		RecordConstantValue(*member, declarator.init.get());
 	// The definition emits like a namespace-scope object owned by the
 	// declaring scope. A qualified definition completes an earlier
 	// (extern) declaration, so const-ness does not make it internal.
@@ -945,7 +950,20 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->is_static_decl = specs.is_static;
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->is_extern_decl = declaring->kind == SCOPE_NAMESPACE;
+	item->weak_def = instantiating_;
 	AttachObjectLifetime(*item, *member, declarator.init.get(), specs);
+	// 9.4.2p3: a storage definition without an initializer keeps the
+	// constant in-class initializer as the object's value.
+	if (!declarator.init && member->has_value && item->children.empty())
+	{
+		SemNodePtr constant = MakeSemNode(SN_LITERAL);
+		constant->token = RenderConstValue(member->value);
+		constant->type = RemoveTopCv(member->type);
+		constant->category = VC_PRVALUE;
+		constant->has_value = true;
+		constant->value = member->value;
+		item->children.push_back(std::move(constant));
+	}
 }
 
 // 6.8p1 disambiguation with name lookup: `begin(a);` is only a
