@@ -222,6 +222,19 @@ LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
 LowerValue FunctionLowerer::LowerIdValue(const SemNode& node)
 {
 	const ScopeBinding* binding = EntityBinding(node);
+	// PA18: a function-template specialization has no scope binding;
+	// its identity rides on the node.
+	if (!binding && node.fn_spec)
+	{
+		LowerValue value;
+		value.type = NodeType(node);
+		string name = program_.FunctionRef(node.entity_scope,
+		                                   node.entity_name, node.type,
+		                                   node.fn_spec);
+		value.text = NewTemp();
+		Emit(value.text + " = addr " + name);
+		return value;
+	}
 	if (!binding)
 		throw runtime_error("unresolved id-expression " + node.name);
 	LowerValue value;

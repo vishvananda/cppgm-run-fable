@@ -342,9 +342,14 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	case SB_FUNCTION:
 	{
 		value.function_set = true;
-		value.overloads.push_back(binding->type);
-		for (size_t i = 0; i < binding->overloads.size(); i++)
-			value.overloads.push_back(binding->overloads[i]);
+		if (binding->type)
+		{
+			value.overloads.push_back(binding->type);
+			for (size_t i = 0; i < binding->overloads.size(); i++)
+				value.overloads.push_back(binding->overloads[i]);
+		}
+		value.fn_templates = binding->fn_templates;
+		value.overload_specs.resize(value.overloads.size(), 0);
 		value.fn_owner = binding->owner;
 		value.fn_name = binding->name;
 		value.category = VC_LVALUE;
@@ -509,9 +514,35 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		// 13.4: the target type picked one overload; the id-expression
 		// node now shows the selected function's type.
 		value.type = value.overloads[conv.selected_overload];
+		if (!value.node)
+		{
+			// A member-access function set carries no expression node;
+			// the selected (static) member synthesizes its
+			// id-expression here.
+			value.node = MakeSemNode(SN_ID_EXPRESSION);
+			value.node->category = value.category;
+			if (value.member_fn)
+			{
+				value.node->name = value.member_fn->name;
+				value.node->entity_scope = value.member_fn->owner;
+				value.node->entity_name = value.member_fn->name;
+			}
+		}
 		value.node->type = value.type;
+		// A deduced specialization re-targets the node's identity.
+		if ((size_t)conv.selected_overload < value.overload_specs.size())
+			if (const FunctionSpecialization* spec =
+			        value.overload_specs[conv.selected_overload])
+			{
+				value.node->entity_scope = spec->self.owner;
+				value.node->entity_name = spec->self.name;
+				value.node->fn_spec = spec;
+				value.fn_owner = spec->self.owner;
+				value.fn_name = spec->self.name;
+			}
 		value.function_set = false;
 		value.overloads.clear();
+		value.overload_specs.clear();
 	}
 	if (conv.null_to_pointer)
 	{
@@ -584,6 +615,7 @@ void SemExprAnalyzer::WrapClassValueInit(SemValue& value, const TypePtr& bare)
 void SemExprAnalyzer::CopyInitialize(SemValue& value, const TypePtr& dest,
                                      const char* what)
 {
+	AddTargetDeducedOverloads(value, dest);
 	ImplicitConversion conv =
 		ClassifyConversion(MakeConversionSource(value), dest);
 	if (!conv.viable)
@@ -788,6 +820,24 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 			candidates.push_back(deduced[i].declared);
 			specs.push_back(deduced[i].spec);
 		}
+	}
+	// PA18 13.4: overloaded/template arguments deduce against every
+	// candidate's parameter types before ranking.
+	bool augmented = false;
+	for (size_t c = 0; c < candidates.size(); c++)
+		for (size_t i = 0;
+		     i < args.size() && i < candidates[c]->parameters.size(); i++)
+			if (args[i].function_set && !args[i].fn_templates.empty())
+			{
+				AddTargetDeducedOverloads(
+					args[i], candidates[c]->parameters[i]);
+				augmented = true;
+			}
+	if (augmented)
+	{
+		sources.clear();
+		for (size_t i = 0; i < args.size(); i++)
+			sources.push_back(MakeConversionSource(args[i]));
 	}
 	// 8.3.6: trailing default arguments lower each candidate's minimum
 	// call arity.

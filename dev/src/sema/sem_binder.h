@@ -261,6 +261,9 @@ private:
 		const AstNamePart& part, Scope* prefix);
 	void CaptureClassTemplate(const AstDecl& decl, const AstDecl& inner,
 	                          bool definition);
+	bool QualifierIsNamespacePath(const AstName& name);
+	void CaptureQualifiedClassTemplate(const AstDecl& decl,
+	                                   const AstDecl& inner);
 	void CaptureFunctionTemplate(const AstDecl& decl,
 	                             const AstDecl& inner);
 	// Collects the type-parameter list of a template head (throws on
@@ -493,6 +496,8 @@ public:
 		TemplateInfo& tmpl, const vector<SemValue>& args);
 	virtual Scope* SwapLookupScope(Scope* scope);
 	virtual void RequireCompleteType(const NamedTypeInfo* info);
+	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
+		TemplateInfo& tmpl, const TypePtr& target);
 };
 
 // Saved-and-cleared binder state around one instantiation: the

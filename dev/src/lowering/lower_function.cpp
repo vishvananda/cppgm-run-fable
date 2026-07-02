@@ -731,7 +731,25 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 	}
 	if (IsReferenceType(return_type_))
 	{
-		string address = LowerAddressExpr(value);
+		string address;
+		TypePtr value_bare =
+			value.type ? RemoveTopCv(value.type) : TypePtr();
+		if (value.category == VC_PRVALUE && value_bare &&
+		    !IsReferenceType(value.type) &&
+		    value_bare->kind != TK_CLASS)
+		{
+			// 12.2: the returned reference binds a materialized
+			// temporary of the full-expression.
+			LowerValue scalar = LowerValueExpr(value);
+			TypePtr bare = value_bare;
+			string slot = AddMatSlot("retref", LowerSlotType(bare));
+			Emit("store " + LowerValueType(bare) + " " + scalar.text +
+			     ", $" + slot);
+			address = NewTemp();
+			Emit(address + " = addr $" + slot);
+		}
+		else
+			address = LowerAddressExpr(value);
 		TypePtr source = value.type;
 		if (IsReferenceType(source))
 			source = source->target;

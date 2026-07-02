@@ -99,6 +99,10 @@ struct ISemExprHost
 	// PA18: completes a deferred member-class definition when the
 	// context requires the complete type (14.7.1p1).
 	virtual void RequireCompleteType(const NamedTypeInfo* info) = 0;
+	// PA18 13.4p2: deduce `tmpl` against a target function type (null
+	// when deduction fails).
+	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
+		TemplateInfo& tmpl, const TypePtr& target) = 0;
 	virtual ~ISemExprHost() {}
 };
 
@@ -121,6 +125,12 @@ struct SemValue
 	// target-directed, 13.4).
 	bool function_set;
 	vector<TypePtr> overloads;
+	// PA18: the function templates declared under the name (target
+	// -directed uses deduce against the destination type, 13.4p2) and,
+	// per overload entry, the specialization it came from (null for
+	// ordinary overloads).
+	vector<TemplateInfo*> fn_templates;
+	vector<const FunctionSpecialization*> overload_specs;
 	const Scope* fn_owner;  // declaring scope (canonical callee name)
 	string fn_name;
 	// Set when the id names a class member: the class entity and the
@@ -296,6 +306,9 @@ private:
 	                              const vector<SemValue>& args,
 	                              vector<OperatorCandidate>& out,
 	                              std::set<const void*>& seen);
+	// PA18 13.4p2: extends a target-directed function set with the
+	// specializations deduced from the destination type.
+	void AddTargetDeducedOverloads(SemValue& value, const TypePtr& dest);
 	static bool OperatorOperand(const SemValue& value);
 	bool TryBinaryOperator(const string& spelling, SemValue& lhs,
 	                       SemValue& rhs, SemValue& result);

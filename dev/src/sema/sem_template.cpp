@@ -89,6 +89,30 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 		}
 		if (inner.class_name.parts.size() > 1)
 		{
+			// A namespace-qualified plain name defines a forward
+			// -declared class template in its home namespace; a
+			// template-id prefix defines a member of a class template.
+			if (inner.class_name.parts.back().kind == NP_IDENTIFIER &&
+			    QualifierIsNamespacePath(inner.class_name))
+			{
+				Scope* declaring = ResolvePrefixScope(inner.class_name);
+				if (declaring->kind != SCOPE_NAMESPACE)
+					throw OutsideBoundary("qualified template "
+					                      "definition scope");
+				Scope* saved = current_;
+				current_ = declaring;
+				try
+				{
+					CaptureQualifiedClassTemplate(decl, inner);
+				}
+				catch (...)
+				{
+					current_ = saved;
+					throw;
+				}
+				current_ = saved;
+				return;
+			}
 			RegisterTemplateMember(decl, inner.class_name);
 			return;
 		}
@@ -137,10 +161,40 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 	}
 }
 
+// True when every non-terminal component of `name` is a plain
+// identifier naming a namespace from the current context.
+bool SemBinder::QualifierIsNamespacePath(const AstName& name)
+{
+	Scope* scope = name.global_scope ? model_.global() : 0;
+	for (size_t i = 0; i + 1 < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		if (part.kind != NP_IDENTIFIER || part.tilde)
+			return false;
+		const ScopeBinding* found = scope
+			? QualifiedLookup(*scope, part.identifier, SLF_SCOPE_NAMES)
+			: UnqualifiedLookup(current_, part.identifier,
+			                    SLF_SCOPE_NAMES);
+		if (!found || (found->kind != SB_NAMESPACE &&
+		               found->kind != SB_NAMESPACE_ALIAS))
+			return false;
+		scope = found->target;
+	}
+	return true;
+}
+
+// The qualified-definition form: the template name binds through the
+// terminal component (the prefix scope is already `current_`).
+void SemBinder::CaptureQualifiedClassTemplate(const AstDecl& decl,
+                                              const AstDecl& inner)
+{
+	CaptureClassTemplate(decl, inner, true);
+}
+
 void SemBinder::CaptureClassTemplate(const AstDecl& decl,
                                      const AstDecl& inner, bool definition)
 {
-	const string& name = inner.class_name.parts[0].identifier;
+	const string& name = inner.class_name.parts.back().identifier;
 	vector<TemplateParam> params;
 	CollectTemplateParams(decl, params);
 	TemplateInfo* tmpl = 0;
@@ -651,6 +705,28 @@ void SemBinder::BindClassDeclaration(const AstDecl& decl)
 	// qualified member-class template definition).
 	if (decl.has_name && decl.class_name.parts.size() > 1)
 	{
+		// A namespace-qualified pattern name inside its own
+		// instantiation resolves through the injected alias-scope
+		// binding.
+		if (instantiating_ &&
+		    decl.class_name.parts.back().kind == NP_IDENTIFIER &&
+		    FindOwnBinding(*current_,
+		                   decl.class_name.parts.back().identifier))
+		{
+			bool saved_allow = allow_qualified_class_name_;
+			allow_qualified_class_name_ = true;
+			try
+			{
+				BindClass(decl, true);
+			}
+			catch (...)
+			{
+				allow_qualified_class_name_ = saved_allow;
+				throw;
+			}
+			allow_qualified_class_name_ = saved_allow;
+			return;
+		}
 		Scope* declaring = ResolvePrefixScope(decl.class_name);
 		if (declaring->kind != SCOPE_CLASS)
 			throw OutsideBoundary("qualified class definition scope");

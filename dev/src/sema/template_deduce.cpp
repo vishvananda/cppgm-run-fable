@@ -641,3 +641,25 @@ void SemBinder::RequireCompleteType(const NamedTypeInfo* info)
 {
 	EnsureTypeCompleteness(info);
 }
+
+const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
+	TemplateInfo& tmpl, const TypePtr& target)
+{
+	EnsureFunctionPattern(tmpl);
+	if (!tmpl.pattern || !target || target->kind != TK_FUNCTION)
+		return 0;
+	vector<TypePtr> bound(tmpl.params.size());
+	if (!DeduceFromType(tmpl.pattern, target, bound))
+		return 0;
+	for (size_t i = 0; i < bound.size(); i++)
+		if (!bound[i])
+			return 0;
+	try
+	{
+		return EnsureFunctionSpecialization(tmpl, bound);
+	}
+	catch (const std::exception&)
+	{
+		return 0;
+	}
+}

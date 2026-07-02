@@ -131,7 +131,8 @@ public:
 	string GlobalRef(const Scope* scope, const string& name);
 	// The "@name" spelling of the (scope, name, type) overload.
 	string FunctionRef(const Scope* scope, const string& name,
-	                   const TypePtr& type);
+	                   const TypePtr& type,
+	                   const FunctionSpecialization* spec = 0);
 	// The "@name" spelling of a method / constructor / destructor
 	// callee node (PA15: demand-marks the weak definition).
 	string MemberFunctionRef(const SemNode& callee);

@@ -416,9 +416,10 @@ string LowerProgram::GlobalRef(const Scope* scope, const string& name)
 }
 
 string LowerProgram::FunctionRef(const Scope* scope, const string& name,
-                                 const TypePtr& type)
+                                 const TypePtr& type,
+                                 const FunctionSpecialization* spec)
 {
-	LowFunctionInfo& info = FunctionEntry(scope, name, type);
+	LowFunctionInfo& info = FunctionEntry(scope, name, type, spec);
 	DemandFunction(info);
 	return "@" + info.low_name;
 }

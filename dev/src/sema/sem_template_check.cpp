@@ -22,11 +22,17 @@ namespace {
 
 struct BodyNames
 {
+	BodyNames() : give_up(false) {}
+
 	// Names any unqualified id may legitimately mean without lookup:
 	// template parameters, members of the (possibly current) class,
 	// parameters, and every name declared anywhere in the walked body.
 	set<string> params;
 	set<string> known;
+	// A body-level using-directive or using-declaration makes local
+	// visibility unknowable here; ids stop being collected (the
+	// parameter-shadow check still runs).
+	bool give_up;
 };
 
 void CollectDeclaratorName(const AstDeclarator* declarator,
@@ -121,6 +127,12 @@ void WalkLocalDecl(const AstDecl* decl, BodyNames& names,
 			WalkLocalDecl(decl->members[i].get(), names, ids);
 		return;
 	}
+	if (decl->kind == DK_USING_DIRECTIVE ||
+	    decl->kind == DK_USING_DECLARATION)
+	{
+		names.give_up = true;
+		return;
+	}
 	if (decl->kind != DK_SIMPLE)
 		return;
 	for (size_t i = 0; i < decl->declarators.size(); i++)
@@ -203,6 +215,10 @@ void CollectClassMemberNames(const AstDecl& pattern, BodyNames& names)
 			    member.class_name.IsPlainIdentifier())
 				names.known.insert(
 					member.class_name.parts[0].identifier);
+			else if (!member.has_name)
+				// 9.5p5: anonymous-union members inject into the
+				// enclosing class.
+				CollectClassMemberNames(member, names);
 			break;
 		case DK_ENUM:
 			if (!member.name.empty())
@@ -240,6 +256,8 @@ void CheckBody(const AstDecl& definition, BodyNames names,
 		if (init.init && init.init->expr)
 			WalkExpr(init.init->expr.get(), names, ids);
 	}
+	if (names.give_up)
+		return;
 	for (size_t i = 0; i < ids.size(); i++)
 	{
 		const string& name = ids[i]->name.parts[0].identifier;

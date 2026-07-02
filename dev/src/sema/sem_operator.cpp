@@ -87,6 +87,8 @@ const Scope* InnermostNamespace(const Scope* scope)
 void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
                                  vector<const Scope*>& out)
 {
+	if (!type)
+		return;  // a template-only overload set has no operand type
 	switch (type->kind)
 	{
 	case TK_CLASS:
@@ -96,6 +98,11 @@ void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
 			const Scope* ns = InnermostNamespace(entity->scope);
 			if (ns)
 				out.push_back(ns);
+			// 3.4.2p2: a class-template specialization associates the
+			// namespaces of its template arguments too.
+			for (size_t i = 0; i < entity->spec_args.size(); i++)
+				CollectAssociatedNamespaces(model, entity->spec_args[i],
+				                            out);
 		}
 		return;
 	case TK_ENUM:
@@ -177,6 +184,33 @@ void SemExprAnalyzer::AppendTemplateCandidates(
 		candidate.declared = spec->type;
 		candidate.spec = spec;
 		out.push_back(candidate);
+	}
+}
+
+// PA18 13.4p2: a function set used against a function-typed target
+// gains the specializations its templates deduce from that target.
+void SemExprAnalyzer::AddTargetDeducedOverloads(SemValue& value,
+                                                const TypePtr& dest)
+{
+	if (!value.function_set || value.fn_templates.empty())
+		return;
+	TypePtr target = RemoveTopCv(dest);
+	if (target->kind == TK_POINTER ||
+	    target->kind == TK_LVALUE_REFERENCE ||
+	    target->kind == TK_RVALUE_REFERENCE)
+		target = target->target;
+	if (target->kind != TK_FUNCTION)
+		return;
+	value.overload_specs.resize(value.overloads.size(), 0);
+	for (size_t t = 0; t < value.fn_templates.size(); t++)
+	{
+		const FunctionSpecialization* spec =
+			host_.DeduceFunctionTemplateFromTarget(
+				*value.fn_templates[t], target);
+		if (!spec)
+			continue;
+		value.overloads.push_back(spec->type);
+		value.overload_specs.push_back(spec);
 	}
 }
 
@@ -272,6 +306,26 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	}
 	if (candidates.empty())
 		throw runtime_error("undeclared name " + name);
+	// PA18 13.4: overloaded/template arguments deduce against every
+	// candidate's parameter types before ranking.
+	bool augmented = false;
+	for (size_t c = 0; c < candidates.size(); c++)
+	{
+		const TypePtr& fn = candidates[c].declared;
+		for (size_t i = 0;
+		     i < args.size() && i < fn->parameters.size(); i++)
+			if (args[i].function_set && !args[i].fn_templates.empty())
+			{
+				AddTargetDeducedOverloads(args[i], fn->parameters[i]);
+				augmented = true;
+			}
+	}
+	if (augmented)
+	{
+		sources.clear();
+		for (size_t i = 0; i < args.size(); i++)
+			sources.push_back(MakeConversionSource(args[i]));
+	}
 	vector<TypePtr> ranking;
 	vector<size_t> min_arity;
 	for (size_t c = 0; c < candidates.size(); c++)
