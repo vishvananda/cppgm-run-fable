@@ -490,7 +490,13 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 	}
 	if (part.kind != NP_IDENTIFIER)
 		throw OutsideBoundary("qualified special member name");
-	if (part.identifier != declaring->name)
+	// An instantiated member definition spells the pattern name
+	// ("Box") while the specialization's member scope is renamed to
+	// the specialization spelling ("Box<int>").
+	bool names_class = part.identifier == declaring->name ||
+		(entity->spec_template &&
+		 part.identifier == entity->spec_template->name);
+	if (!names_class)
 		throw runtime_error("special member does not name its class");
 	if (part.tilde)
 	{
@@ -956,6 +962,10 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 		if (body.out_of_class && !instantiating_)
 			// A source-owned constructor prints unconditionally.
 			node->inline_def = false;
+		else if (body.out_of_class)
+			// An instantiated out-of-class constructor/destructor
+			// emits weak and on demand, like an in-class one (14.7.1).
+			node->inline_def = true;
 		unit_.deferred.push_back(std::move(item));
 	}
 }

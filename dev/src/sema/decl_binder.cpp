@@ -898,8 +898,33 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 		builder_.ProcessSpecifiers(decl.specifiers, true);
 	if (specs.is_typedef)
 		throw runtime_error("typedef on a function definition");
-	DeclaratorInfo composed =
-		builder_.ComposeDeclarator(decl.declarator.get(), specs.type);
+	// 3.4.3p3/8.3.5: names in the declarator after a qualified
+	// declarator-id (parameters, trailing return type) resolve in the
+	// named class's scope.
+	Scope* compose_scope = current_;
+	const AstName* declared_id =
+		decl.declarator ? decl.declarator->IdName() : 0;
+	if (declared_id &&
+	    (declared_id->parts.size() > 1 || declared_id->global_scope))
+	{
+		Scope* prefix = ResolvePrefixScope(*declared_id);
+		if (prefix && prefix->kind == SCOPE_CLASS)
+			compose_scope = prefix;
+	}
+	Scope* saved_compose = current_;
+	current_ = compose_scope;
+	DeclaratorInfo composed;
+	try
+	{
+		composed = builder_.ComposeDeclarator(decl.declarator.get(),
+		                                      specs.type);
+	}
+	catch (...)
+	{
+		current_ = saved_compose;
+		throw;
+	}
+	current_ = saved_compose;
 	if (!composed.id || composed.id->parts.empty())
 		throw OutsideBoundary("function definition declarator");
 	if (!composed.declares_function || composed.type->kind != TK_FUNCTION)

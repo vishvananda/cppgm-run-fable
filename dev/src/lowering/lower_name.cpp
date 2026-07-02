@@ -539,9 +539,19 @@ string LowerScopePath(const Scope* scope)
 {
 	vector<string> parts;
 	for (; scope && scope->parent; scope = scope->parent)
-		if ((scope->kind == SCOPE_NAMESPACE ||
-		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
-			parts.insert(parts.begin(), scope->name);
+	{
+		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
+			continue;
+		if (scope->name.empty())
+		{
+			// 7.3.1.1: the unnamed namespace spells its ABI-style
+			// placeholder component.
+			if (scope->kind == SCOPE_NAMESPACE)
+				parts.insert(parts.begin(), "_GLOBAL__N_1");
+			continue;
+		}
+		parts.insert(parts.begin(), scope->name);
+	}
 	string path;
 	// PA18: specialization scopes spell their argument list
 	// ("Box<int>"); the symbol characters sanitize per component.
