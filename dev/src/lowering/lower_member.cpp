@@ -438,8 +438,6 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	if (empty && member_addressed)
 		return;
 	string src = LowerAddressExpr(source);
-	if (empty)
-		return;
 	// A derived source adjusts to the copied base subobject.
 	TypePtr source_type = RemoveTopCv(StripRef(source.type));
 	if (source_type->kind == TK_CLASS)
@@ -447,6 +445,8 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 		src = AdjustToBase(
 			src, BaseClassDistance(source_type->named, cls_type->named));
 	}
+	if (empty)
+		return;
 	Emit("copyobj " + to_string(TypeSize(cls_type)) + "x" +
 	     to_string(TypeAlignment(cls_type)) + " " + src + ", " + dst);
 }
