@@ -6,6 +6,7 @@
 #include "lowering/lower_function.h"
 #include "lowering/lower_name.h"
 #include "lowering/lower_types.h"
+#include "sema/const_eval.h"
 #include "sema/const_expr.h"
 
 using std::runtime_error;
@@ -307,6 +308,9 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		info.weak = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
+		info.friend_def = item.entity_scope &&
+			item.entity_scope->kind == SCOPE_NAMESPACE &&
+			!item.is_constexpr_fn;
 	}
 }
 
@@ -575,9 +579,17 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 		info.defined = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
-		// 7.1.2p4: inline definitions emit weak, on demand.
+		// 7.1.2p4: inline definitions emit weak, on demand. Inline
+		// (non-constexpr) bodies keep the conservative demand sweep;
+		// constexpr bodies used only in constant expressions must not
+		// propagate demand.
 		if (item.inline_def)
+		{
 			info.weak = true;
+			info.friend_def = item.entity_scope &&
+				item.entity_scope->kind == SCOPE_NAMESPACE &&
+				!item.is_constexpr_fn;
+		}
 	}
 }
 
@@ -830,7 +842,19 @@ string LowerProgram::RenderScalarInit(const LowGlobalInfo& info)
 		return RenderConstValue(ConvertConstValue(value.ival,
 		                                          ValueFund(info.type)));
 	case LC_FLOAT:
-		return FloatInitToken(info.type, value);
+	{
+		// Scalar float initializers render numerically (the reference
+		// presentation); structured array items keep source tokens.
+		long double parsed = 0;
+		if (!DecodeFloatLiteral(value.float_token, parsed))
+			return FloatInitToken(info.type, value);
+		EFundamentalType fund = info.type->fundamental;
+		if (fund == FT_FLOAT)
+			parsed = (float)parsed;
+		else if (fund == FT_DOUBLE)
+			parsed = (double)parsed;
+		return RenderFloatConstant(parsed, fund);
+	}
 	case LC_NULL:
 		// A null-pointer initializer spells the immediate zero.
 		return "0";
@@ -1003,8 +1027,7 @@ void LowerProgram::LowerUsedFunctions()
 				LowFunctionInfo& info = functions_[i];
 				if (!info.defined || !info.body_text.empty())
 					continue;
-				bool friend_body = phase > 0 && info.scope &&
-					info.scope->kind == SCOPE_NAMESPACE;
+				bool friend_body = phase > 0 && info.friend_def;
 				if (info.weak && !info.used && !friend_body)
 					continue;
 				FunctionLowerer lowerer(*this, *info.definition, info);

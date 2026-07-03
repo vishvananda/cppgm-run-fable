@@ -503,6 +503,37 @@ ConstValue ConvertConstValue(const ConstValue& value, EFundamentalType to)
 	return Normalize(to, value.bits);
 }
 
+ConstValue ConstIntPromote(const ConstValue& value)
+{
+	return Promote(value);
+}
+
+ConstValue ConstIntBinary(ETokenType op, const ConstValue& lhs,
+                          const ConstValue& rhs)
+{
+	if (op == OP_LSHIFT || op == OP_RSHIFT)
+		return EvaluateShift(op, lhs, rhs);
+	return EvaluateArithmetic(op, lhs, rhs);
+}
+
+ConstValue ConstIntUnary(ETokenType op, const ConstValue& operand)
+{
+	ConstValue promoted = Promote(operand);
+	switch (op)
+	{
+	case OP_PLUS:
+		return promoted;
+	case OP_MINUS:
+		return Normalize(promoted.type, 0 - promoted.bits);
+	case OP_COMPL:
+		return Normalize(promoted.type, ~promoted.bits);
+	case OP_LNOT:
+		return MakeBool(!ConstValueIsNonZero(operand));
+	default:
+		throw OutsideSubset("unary operator");
+	}
+}
+
 bool ConstValueIsNonZero(const ConstValue& value)
 {
 	return value.bits != 0;

@@ -123,6 +123,7 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	binding.fn_inline_def.resize(count, false);
 	binding.fn_adl_only.resize(count, false);
 	binding.fn_unwind_no.resize(count, false);
+	binding.fn_noexcept_decl.resize(count, false);
 	binding.fn_owner.resize(count, 0);
 	if (binding.home)
 		binding.fn_owner[index] = binding.home;
@@ -143,7 +144,10 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	if (inline_def)
 		binding.fn_inline_def[index] = true;
 	if (composed.noexcept_simple)
+	{
 		binding.fn_unwind_no[index] = true;
+		binding.fn_noexcept_decl[index] = true;
+	}
 	// 8.3.6p4: later declarations may add default arguments.
 	vector<const AstExpr*>& defaults = binding.fn_defaults[index];
 	defaults.resize(composed.parameters.size(), 0);
@@ -355,7 +359,16 @@ TypePtr DeclBinder::DeclaredEntityType(const AstName& name,
 
 unsigned long long DeclBinder::EvaluateArrayBound(const AstExpr& expr)
 {
-	ConstValue value = EvaluateConstExpr(expr, *this);
+	ConstValue value;
+	try
+	{
+		value = EvaluateConstExpr(expr, *this);
+	}
+	catch (...)
+	{
+		if (!TryFullConstant(expr, value))
+			throw;
+	}
 	if (IsSignedIntegralFundamental(value.type) &&
 	    (long long)value.bits < 0)
 		throw runtime_error("negative array bound");
@@ -671,6 +684,7 @@ void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
 		own.fn_inline_def.resize(count, false);
 		own.fn_adl_only.resize(count, false);
 		own.fn_unwind_no.resize(count, false);
+		own.fn_noexcept_decl.resize(count, false);
 		own.fn_owner.resize(count, 0);
 		size_t at = count - 1;
 		own.fn_access[at] = current_access_;
@@ -687,12 +701,26 @@ void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
 			own.fn_inline_def[at] = imported.fn_inline_def[i];
 		if (i < imported.fn_unwind_no.size())
 			own.fn_unwind_no[at] = imported.fn_unwind_no[i];
+		if (i < imported.fn_noexcept_decl.size())
+			own.fn_noexcept_decl[at] = imported.fn_noexcept_decl[i];
 	}
 }
 
 void DeclBinder::BindStaticAssert(const AstDecl& decl)
 {
-	if (!ConstValueIsNonZero(EvaluateConstExpr(*decl.assert_expr, *this)))
+	ConstValue value;
+	try
+	{
+		value = EvaluateConstExpr(*decl.assert_expr, *this);
+	}
+	catch (...)
+	{
+		// Outside the PA11 subset: the full PA20 engine evaluates the
+		// analyzed condition (constexpr calls, object values).
+		if (!TryFullConstant(*decl.assert_expr, value))
+			throw;
+	}
+	if (!ConstValueIsNonZero(value))
 		throw runtime_error("static_assert failed " + decl.message);
 }
 
@@ -891,7 +919,16 @@ void DeclBinder::RecordConstantValue(ScopeBinding& binding,
 		return;
 	try
 	{
-		ConstValue value = EvaluateConstExpr(*expr, *this);
+		ConstValue value;
+		try
+		{
+			value = EvaluateConstExpr(*expr, *this);
+		}
+		catch (...)
+		{
+			if (!TryFullConstant(*expr, value))
+				throw;
+		}
 		binding.value = ConvertConstValue(
 			value, is_enum ? binding.type->named->enum_underlying
 			               : binding.type->fundamental);

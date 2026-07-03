@@ -718,6 +718,9 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	if (winner < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[winner])
 		callee->unwind_no = true;
+	if (winner < binding.fn_noexcept_decl.size() &&
+	    binding.fn_noexcept_decl[winner])
+		callee->noexcept_decl = true;
 	// PA17 dynamic dispatch: an unqualified call to a virtual member
 	// dispatches through the static class's vtable slot (10.3p6); the
 	// dynamic callee may not be the statically selected one.
@@ -822,6 +825,9 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 	if (winner < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[winner])
 		callee->unwind_no = true;
+	if (winner < binding.fn_noexcept_decl.size() &&
+	    binding.fn_noexcept_decl[winner])
+		callee->noexcept_decl = true;
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));
@@ -914,6 +920,9 @@ SemValue SemExprAnalyzer::AnalyzeStringUdl(const AstExpr& expr)
 	if (winner < binding->fn_unwind_no.size() &&
 	    binding->fn_unwind_no[winner])
 		callee->unwind_no = true;
+	if (winner < binding->fn_noexcept_decl.size() &&
+	    binding->fn_noexcept_decl[winner])
+		callee->noexcept_decl = true;
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));

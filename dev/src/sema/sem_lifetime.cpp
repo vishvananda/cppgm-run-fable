@@ -750,11 +750,24 @@ void SemBinder::AppendElidedObjectInit(SemNode& item,
 	SemNode& call = *action->children[0];
 	// The explicit-temporary marking does not survive elision into a
 	// namespace-scope object: with no observable construction work the
-	// reference emits no dynamic initializer for it.
+	// reference emits no dynamic initializer for it. A user-declared
+	// (defaulted) default constructor selected for the elided init is
+	// still odr-used (3.2p3): its synthesized body emits, call-free.
 	if (binding.owner && binding.owner->kind == SCOPE_NAMESPACE &&
 	    call.children.size() == 1 && !cls.has_user_ctor &&
 	    !unit_.classes.NeedsConstruction(cls))
-		action->trivial_init = true;
+	{
+		bool declared_default = false;
+		for (size_t i = 0; i < cls.ctors.size(); i++)
+			if (cls.ctors[i].kind == CK_ORDINARY &&
+			    !cls.ctors[i].implicit &&
+			    cls.ctors[i].type->parameters.empty())
+				declared_default = true;
+		if (declared_default)
+			action->elided = true;
+		else
+			action->trivial_init = true;
+	}
 	call.children.insert(call.children.begin() + 1,
 	                     AddressOfNode(VariableObjectExpr(binding)));
 	action->ctor_addressed = true;
@@ -1004,6 +1017,11 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 		constant->value = member->value;
 		item->children.push_back(std::move(constant));
 	}
+	// PA20: an object-valued static member definition (9.4.2p3 storage
+	// for an in-class constexpr initializer, or a defining braced
+	// initializer) evaluates for the constant store and the image
+	// emission of weak definitions.
+	FinishConstexprObject(*item, *member, specs.is_constexpr);
 }
 
 // 6.8p1 disambiguation with name lookup: `begin(a);` is only a

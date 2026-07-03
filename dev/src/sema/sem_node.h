@@ -1,11 +1,14 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <ostream>
 #include <string>
 #include <vector>
 
+using std::map;
 using std::ostream;
+using std::shared_ptr;
 using std::string;
 using std::unique_ptr;
 using std::vector;
@@ -155,6 +158,11 @@ struct SemNode
 	bool has_value;       // decoded constant: literals, enumerator uses,
 	                      // sizeof results, folded case values
 	ConstValue value;
+	// PA20: a folded floating constant (constexpr initializers); the
+	// token is the canonical unsuffixed decimal the global-initializer
+	// rendering emits.
+	bool has_float = false;
+	string float_token;
 	bool null_pointer;    // null pointer literal (possibly retyped)
 	bool is_string_literal;
 	string string_bytes;  // string literal object representation
@@ -164,6 +172,10 @@ struct SemNode
 	bool is_thread_local_decl;
 	bool c_linkage;
 	bool unwind_no;       // simple noexcept marking on the declarator
+	// PA20 SN_CALLEE: the declared (or, for implicit members, the
+	// implicit) exception specification is non-throwing; the noexcept
+	// operator walk reads this instead of the derived `unwind_no`.
+	bool noexcept_decl = false;
 
 	// --- PA15 object-model facts (never printed by the PA12 dump) ---
 	// SN_MEMBER_EXPRESSION: resolved layout of the named field. The
@@ -231,6 +243,9 @@ struct SemNode
 	// SN_FUNCTION_DEFINITION: a compiler-synthesized special-member
 	// body (implicit/defaulted); emitted only when directly called.
 	bool synthesized;
+	// PA20 SN_FUNCTION_DEFINITION: declared constexpr (7.1.5); the
+	// constant engine only runs constexpr or synthesized bodies.
+	bool is_constexpr_fn = false;
 	// PA18 SN_FUNCTION_DEFINITION / SN_CALLEE of a function-template
 	// specialization: its identity record (the lowering mangles the
 	// object name from the pattern signature and argument list).
@@ -252,6 +267,8 @@ SemNodePtr MakeSemNode(ESemNodeKind kind);
 // the synthesized init/fini helper bodies).
 SemNodePtr CloneSemNode(const SemNode& node);
 
+struct ConstObject;
+
 // One translation unit's dump: the declaration-order items plus the
 // implicit member functions synthesized while analyzing them (printed
 // after the items, in first-need order).
@@ -259,6 +276,11 @@ struct SemUnit
 {
 	vector<SemNodePtr> items;
 	vector<SemNodePtr> synthesized;
+	// PA20: evaluated constant images of object-valued constexpr
+	// definitions, keyed by their SN_VARIABLE item. The lowering emits
+	// weak static-member definitions from the image (flattened items)
+	// instead of dynamic initialization.
+	map<const SemNode*, shared_ptr<const ConstObject>> const_images;
 	// PA15: class metadata and the demand-emitted definitions (in-class
 	// methods, hidden friends, constructors/destructors). Deferred
 	// definitions are emitted by the lowering only when referenced, in

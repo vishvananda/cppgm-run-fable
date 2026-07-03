@@ -354,8 +354,12 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		if (binding->no_object)
 			return FoldObjectlessConstant(*binding);
 		// A constant static member named through a qualified-id folds
-		// like an enumerator (9.4.2p4 constant initializer).
-		if (member_class && binding->has_value)
+		// like an enumerator (9.4.2p4 constant initializer). A
+		// decltype-scoped qualified-id reads the entity itself (the
+		// reference resolution keeps the odr-use).
+		if (member_class && binding->has_value &&
+		    (expr.name.parts.empty() ||
+		     expr.name.parts[0].kind != NP_DECLTYPE))
 			return AnalyzeStaticMemberValue(*binding, written);
 		// 5.3.1p3: only non-static data members carry the member
 		// -pointer facts; a static member behaves as an ordinary
@@ -610,6 +614,9 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 			if (index < binding->fn_unwind_no.size() &&
 			    binding->fn_unwind_no[index])
 				callee->unwind_no = true;
+			if (index < binding->fn_noexcept_decl.size() &&
+			    binding->fn_noexcept_decl[index])
+				callee->noexcept_decl = true;
 		}
 		out.node->children.push_back(std::move(callee));
 		out.node->children.push_back(

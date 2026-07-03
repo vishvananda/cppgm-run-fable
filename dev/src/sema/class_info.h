@@ -75,7 +75,11 @@ struct ClassCtor
 	bool is_explicit;
 	bool deleted;
 	bool defaulted;
-	bool unwind_no;  // simple-noexcept declarator
+	// Non-throwing facts: `unwind_no` merges the declared
+	// specification with the derived body fact; `noexcept_decl` keeps
+	// only the declared specification (the noexcept operator, 5.3.7).
+	bool unwind_no;
+	bool noexcept_decl = false;
 	// The defining DK_SPECIAL_MEMBER_DEFINITION (mem-initializers and
 	// body), or null for declaration-only / defaulted constructors.
 	const AstDecl* definition;

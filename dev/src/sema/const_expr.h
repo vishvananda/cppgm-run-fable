@@ -54,3 +54,12 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context);
 ConstValue ConvertConstValue(const ConstValue& value, EFundamentalType to);
 
 bool ConstValueIsNonZero(const ConstValue& value);
+
+// PA20 engine reuse: the clause 5 integral operators over typed
+// constant values (usual arithmetic conversions applied; shifts
+// range-checked; division by zero throws). The unary form covers
+// +, -, ~, and !.
+ConstValue ConstIntPromote(const ConstValue& value);
+ConstValue ConstIntBinary(ETokenType op, const ConstValue& lhs,
+                          const ConstValue& rhs);
+ConstValue ConstIntUnary(ETokenType op, const ConstValue& operand);

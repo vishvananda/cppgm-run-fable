@@ -4,6 +4,7 @@
 #include <set>
 
 #include "sema/class_info.h"
+#include "sema/const_eval.h"
 #include "sema/decl_binder.h"
 #include "sema/sem_expr.h"
 #include "sema/sem_node.h"
@@ -29,6 +30,8 @@ public:
 	virtual TypePtr TryResolveCalleeType(const AstName& name);
 	virtual TypePtr ResolveCastTypeId(const AstTypeId& type_id);
 	virtual bool TryEvaluateConstant(const AstExpr& expr, ConstValue& value);
+	// PA20: analyzed-tree constant evaluation (the DeclBinder seam).
+	virtual bool TryFullConstant(const AstExpr& expr, ConstValue& out);
 	virtual const ScopeBinding* ResolveBuiltinFunction(const string& name);
 	virtual ClassRegistry& Classes();
 	virtual const ClassInfo* CurrentClass();
@@ -123,6 +126,13 @@ private:
 	// --- initialization and implicit constructors ---
 	void AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	                         const AstInitializer* init);
+	// PA20: evaluates a constexpr (or engine-foldable const) object's
+	// analyzed initializer: records scalar values on the binding,
+	// stamps folded initializers for the lowering, stores object
+	// images for later constant reads, and enforces 7.1.5p9 (a
+	// constexpr object requires a constant initializer).
+	void FinishConstexprObject(SemNode& item, ScopeBinding& binding,
+	                           bool is_constexpr);
 	// 8.5.2: the synthesized per-code-unit element list of a string
 	// -literal array initializer.
 	SemNodePtr StringLiteralArrayInit(ScopeBinding& binding,
@@ -140,6 +150,10 @@ private:
 	void RecordMemberField(ScopeBinding& binding,
 	                       const AstInitializer* init,
 	                       const DeclSpecifierInfo& specs);
+	// PA20: bound completion and constant evaluation of an
+	// object-valued static member's in-class braced initializer.
+	void RecordStaticMemberObject(ScopeBinding& binding,
+	                              const AstInitializer* init);
 	void BindFriendFunction(const AstDecl& decl, ClassInfo& cls);
 	// PA16: a conversion-function member declaration (12.3.2).
 	void BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
@@ -316,6 +330,10 @@ private:
 	                                 const TypePtr& param_type);
 	TemplateArg ResolveDefaultValueExpr(const AstExpr& expr,
 	                                    const TypePtr& param_type);
+	// PA20: the engine evaluates a converted constant expression
+	// toward an integral/enum parameter type (5.19p3, 14.3.2).
+	bool TryFullValueArgument(const AstExpr& expr,
+	                          const TypePtr& param_type, ConstValue& out);
 	// The lazily-created binding scope over the already-resolved
 	// leading arguments.
 	Scope* EnsureArgBindingScope(TemplateInfo& tmpl,
@@ -577,6 +595,9 @@ private:
 
 	SemUnit& unit_;
 	SemExprAnalyzer analyzer_;
+	// PA20 constant engine: evaluated constexpr objects and function
+	// bodies over the analyzed trees.
+	ConstEvalEngine engine_;
 	// The open container chain; items append to the innermost node (or
 	// the unit when empty).
 	vector<SemNode*> parents_;

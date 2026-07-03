@@ -289,6 +289,17 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 		}
 		catch (const std::exception&)
 		{
+			// PA20: the full engine covers constexpr calls, object
+			// values, and class-to-integral constant conversions.
+			ConstValue value;
+			if (expr && TryFullValueArgument(*expr, param_type, value))
+			{
+				value = ConvertConstValue(
+					value, ValueTargetFundamental(param_type));
+				arg.value_type = value.type;
+				arg.value_bits = value.bits;
+				return arg;
+			}
 			if (!InAbstractTemplateContext())
 				throw;
 		}
@@ -599,6 +610,34 @@ static const AstExpr* SingleReturnExpr(const AstDecl* decl)
 	return stmt.expr.get();
 }
 
+// PA20: the full engine evaluates a converted constant expression
+// (5.19p3) toward an integral/enum template-parameter type. Class
+// operands convert through their (constexpr) conversion functions;
+// non-constexpr conversions fail, which 14.3.2 requires.
+bool SemBinder::TryFullValueArgument(const AstExpr& expr,
+                                     const TypePtr& param_type,
+                                     ConstValue& out)
+{
+	if (InAbstractTemplateContext())
+		return false;
+	try
+	{
+		SemValue value = analyzer_.Analyze(expr);
+		if (value.type && RemoveTopCv(value.type)->kind == TK_CLASS)
+			analyzer_.CopyInitialize(value, RemoveTopCv(param_type),
+			                         "template argument");
+		EvalValue result = engine_.EvaluateScalar(*value.node);
+		if (result.kind != EvalValue::EV_INT)
+			return false;
+		out = result.ival;
+		return true;
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
+}
+
 // The restricted constexpr-conversion evaluation behind `B{}` in a
 // constant context: a conversion function of B (or a base) to an
 // integral type whose body is a single return of a constant
@@ -623,6 +662,20 @@ bool SemBinder::TryClassConversionConstant(const AstName& name,
 		{
 			const ClassConversion& conv = cls->conversions[i];
 			if (!conv.decl)
+				continue;
+			// PA20 14.3.2/5.19: only a constexpr conversion function
+			// produces a converted constant expression.
+			bool declared_constexpr = false;
+			for (size_t s = 0; s < conv.decl->specifiers.size(); s++)
+				if (conv.decl->specifiers[s].kind == SPEC_KEYWORD &&
+				    conv.decl->specifiers[s].keyword == KW_CONSTEXPR)
+					declared_constexpr = true;
+			for (size_t s = 0; s < conv.decl->member_specifiers.size();
+			     s++)
+				if (conv.decl->member_specifiers[s].keyword ==
+				    KW_CONSTEXPR)
+					declared_constexpr = true;
+			if (!declared_constexpr)
 				continue;
 			TypePtr result = RemoveTopCv(conv.result);
 			if (!IsIntegralType(result) && result->kind != TK_ENUM)
@@ -674,6 +727,15 @@ TemplateArg SemBinder::ResolveDefaultValueExpr(const AstExpr& expr,
 		}
 		catch (const std::exception&)
 		{
+			ConstValue value;
+			if (TryFullValueArgument(expr, param_type, value))
+			{
+				value = ConvertConstValue(
+					value, ValueTargetFundamental(param_type));
+				arg.value_type = value.type;
+				arg.value_bits = value.bits;
+				return arg;
+			}
 			if (!InAbstractTemplateContext())
 				throw;
 		}

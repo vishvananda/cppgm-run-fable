@@ -327,6 +327,8 @@ private:
 	SemValue AnalyzeFunctionalCast(const TypePtr& dest,
 	                               const vector<AstExprPtr>& arguments);
 	SemValue AnalyzeSizeof(const AstExpr& expr);
+	// PA20 5.3.7: noexcept(expression) over resolved unwind facts.
+	SemValue AnalyzeNoexcept(const AstExpr& expr);
 	void FillFunctionSetValue(const ScopeBinding& binding,
 	                          const NamedTypeInfo* member_class,
 	                          SemValue& value);

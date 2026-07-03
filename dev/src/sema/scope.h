@@ -145,7 +145,12 @@ struct ScopeBinding
 	vector<bool> fn_static;      // static member function
 	vector<bool> fn_inline_def;  // defined in-class: weak, demand-emitted
 	vector<bool> fn_adl_only;    // hidden friend: visible to ADL only
-	vector<bool> fn_unwind_no;   // simple-noexcept declarator
+	// Non-throwing facts per overload. `fn_unwind_no` merges the
+	// declared specification with the derived body fact (unwind-region
+	// elision); `fn_noexcept_decl` keeps only the declared
+	// specification, which the noexcept operator reads (5.3.7).
+	vector<bool> fn_unwind_no;
+	vector<bool> fn_noexcept_decl;
 	// PA16: explicitly-defaulted special member functions (8.4.2); the
 	// binder synthesizes their definitions like the implicit ones.
 	vector<bool> fn_defaulted;

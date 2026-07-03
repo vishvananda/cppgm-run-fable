@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+#include "sema/const_eval.h"
+
 using std::runtime_error;
 
 // PA12 explicit conversions: cast expressions (5.2.9/5.2.10/5.2.11
@@ -275,9 +277,45 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	return value;
 }
 
+// 5.3.7: noexcept(expression) folds from the resolved unwind facts of
+// the unevaluated operand - false iff it contains a potentially
+// -evaluated call to a callee without a non-throwing specification.
+SemValue SemExprAnalyzer::AnalyzeNoexcept(const AstExpr& expr)
+{
+	if (expr.is_type_operand || expr.operands.empty())
+		throw OutsideBoundary("noexcept operand form");
+	bool saved = host_.SwapUnevaluatedOperand(true);
+	SemValue operand;
+	try
+	{
+		operand = Analyze(*expr.operands[0]);
+	}
+	catch (...)
+	{
+		host_.SwapUnevaluatedOperand(saved);
+		throw;
+	}
+	host_.SwapUnevaluatedOperand(saved);
+	bool no_throw = !SemTreeMayThrow(*operand.node) &&
+		(!operand.node->result_dtor ||
+		 !SemTreeMayThrow(*operand.node->result_dtor));
+	SemValue value;
+	value.type = MakeFundamentalType(FT_BOOL);
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_LITERAL);
+	value.node->type = value.type;
+	value.node->category = VC_PRVALUE;
+	value.node->has_value = true;
+	value.node->value = ConstValue(FT_BOOL, no_throw ? 1 : 0);
+	value.node->token = no_throw ? "true" : "false";
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 {
 	bool alignment = expr.kind == EK_TYPE_TRAIT;
+	if (alignment && expr.op == KW_NOEXCEPT)
+		return AnalyzeNoexcept(expr);
 	if (alignment && expr.op != KW_ALIGNOF)
 		throw OutsideBoundary("type trait expression");
 	TypePtr operand_type;

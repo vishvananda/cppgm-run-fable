@@ -60,6 +60,10 @@ struct LowFunctionInfo
 	// PA18 14.7.2p8: emitted because an explicit instantiation
 	// definition names its class (`object_root=yes`).
 	bool object_root = false;
+	// PA20: a hidden-friend definition (deferred, namespace scope):
+	// its references count as semantic demand, so its body lowers even
+	// unused. Weak constexpr/inline namespace functions do not.
+	bool friend_def = false;
 	const SemNode* definition;
 	size_t index;        // position in functions_ (demand rescan key)
 	string body_text;    // lowered definition text

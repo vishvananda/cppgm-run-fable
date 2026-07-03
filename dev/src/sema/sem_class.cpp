@@ -142,6 +142,51 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	BeginClassLayout(*cls);
 }
 
+// PA20 9.4.2: an object-valued (array or class) static data member
+// with an in-class braced initializer completes its bound and
+// evaluates into the constant store, so class-scope sizeof, member
+// constant expressions, and the eventual storage definition all read
+// the same typed value.
+void SemBinder::RecordStaticMemberObject(ScopeBinding& binding,
+                                         const AstInitializer* init)
+{
+	if (!init || binding.has_value || InAbstractTemplateContext())
+		return;
+	if (IsReferenceType(binding.type))
+		return;
+	TypePtr bare = RemoveTopCv(binding.type);
+	if (bare->kind != TK_ARRAY && bare->kind != TK_CLASS)
+		return;
+	const AstExpr* braced = 0;
+	if (init->kind == INIT_BRACED)
+		braced = init->expr.get();
+	else if (init->kind == INIT_EQ && init->expr->kind == EK_BRACED)
+		braced = init->expr.get();
+	if (!braced)
+		return;
+	SemNode holder(SN_VARIABLE);
+	try
+	{
+		TypePtr completed = binding.type;
+		holder.children.push_back(
+			analyzer_.AnalyzeBracedInit(*braced, completed));
+		binding.type = completed;
+	}
+	catch (const std::exception&)
+	{
+		return;  // outside the analyzed braced subset
+	}
+	try
+	{
+		engine_.EvaluateVariableInit(holder, binding.type,
+		                             binding.owner, binding.name);
+	}
+	catch (const std::exception&)
+	{
+		// Not constant: uses in constant expressions diagnose there.
+	}
+}
+
 void SemBinder::RecordMemberField(ScopeBinding& binding,
                                   const AstInitializer* init,
                                   const DeclSpecifierInfo& specs)
@@ -153,6 +198,7 @@ void SemBinder::RecordMemberField(ScopeBinding& binding,
 	{
 		if (specs.is_mutable)
 			throw runtime_error("static member declared mutable");
+		RecordStaticMemberObject(binding, init);
 		return;  // static data members are not fields
 	}
 	if (in_bit_field_)
@@ -365,6 +411,7 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	ctor.deleted = deleted;
 	ctor.defaulted = defaulted;
 	ctor.unwind_no = composed.noexcept_simple;
+	ctor.noexcept_decl = composed.noexcept_simple;
 	ctor.definition = defined ? &decl : 0;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		ctor.defaults.push_back(composed.parameters[i].default_arg);
@@ -1201,6 +1248,11 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	TypePtr ctor_type;
 	bool callee_unwind_no = false;
 	bool trivial_transfer = false;
+	// 5.3.7: a user-provided constructor's noexcept fact is its
+	// declared specification; implicit/defaulted members report their
+	// implicit (computed) specification.
+	bool user_provided = false;
+	bool declared_noexcept = false;
 	if (ctor_index < 0)
 	{
 		EnsureImplicitDefaultCtor(cls);
@@ -1213,6 +1265,19 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 		const ClassCtor& selected = cls.ctors[ctor_index];
 		ctor_type = selected.type;
 		callee_unwind_no = selected.unwind_no;
+		user_provided = selected.definition != 0 && !selected.defaulted;
+		declared_noexcept = selected.noexcept_decl;
+		if (selected.kind == CK_ORDINARY && !selected.definition &&
+		    selected.defaulted && selected.type->parameters.empty() &&
+		    !cls.has_user_ctor)
+		{
+			// 12.1p6: an explicitly-defaulted default constructor is
+			// implicitly defined when odr-used; the implicit body
+			// serves it and carries the implicit exception fact.
+			EnsureImplicitDefaultCtor(cls);
+			callee_unwind_no = callee_unwind_no ||
+				cls.implicit_ctor_unwind_no;
+		}
 		if (selected.inherited_base)
 			EnsureInheritedCtor(cls, ctor_index);
 		else if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
@@ -1266,6 +1331,8 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	callee->is_method = true;
 	callee->special = action->special;
 	callee->unwind_no = callee_unwind_no;
+	callee->noexcept_decl = user_provided ? declared_noexcept
+	                                      : callee_unwind_no;
 	call->children.push_back(std::move(callee));
 	if (address)
 	{
@@ -1308,6 +1375,7 @@ SemNodePtr SemBinder::MakeDestructorCall(const ClassInfo& cls,
 	callee->special = action->special;
 	callee->unwind_no = cls.has_user_dtor ? cls.dtor_unwind_no
 	                                      : cls.implicit_dtor_unwind_no;
+	callee->noexcept_decl = callee->unwind_no;
 	call->children.push_back(std::move(callee));
 	if (address)
 		call->children.push_back(std::move(address));

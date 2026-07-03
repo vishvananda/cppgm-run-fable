@@ -854,6 +854,7 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->self.fn_inline_def.resize(1, false);
 	spec->self.fn_adl_only.resize(1, false);
 	spec->self.fn_unwind_no.resize(1, composed.noexcept_simple);
+	spec->self.fn_noexcept_decl.resize(1, composed.noexcept_simple);
 	spec->self.fn_owner.resize(1, spec->param_scope);
 	vector<const AstExpr*>& defaults = spec->self.fn_defaults[0];
 	defaults.resize(composed.parameters.size(), 0);
@@ -924,6 +925,16 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// unless declared inline (7.1.2); instantiated bodies stay weak.
 	item->inline_def = !spec.explicit_def || spec.explicit_inline;
 	item->fn_spec = &spec;
+	// 7.1.5: constexpr on the pattern (or explicit-specialization)
+	// declaration makes the instantiated body engine-evaluable and
+	// implicitly inline.
+	for (size_t i = 0; i < inner.specifiers.size(); i++)
+		if (inner.specifiers[i].kind == SPEC_KEYWORD &&
+		    inner.specifiers[i].keyword == KW_CONSTEXPR)
+		{
+			item->is_constexpr_fn = true;
+			item->inline_def = true;
+		}
 	// Slot names follow the first declaration (the primary pattern);
 	// an explicit definition's renamed parameters redirect their body
 	// bindings onto the primary-named slots.

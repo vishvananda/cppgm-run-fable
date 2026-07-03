@@ -312,6 +312,7 @@ void SemBinder::DeclareImplicitAssign(ClassInfo& cls, bool is_move,
 	binding->fn_inline_def.resize(index + 1, false);
 	binding->fn_adl_only.resize(index + 1, false);
 	binding->fn_unwind_no.resize(index + 1, false);
+	binding->fn_noexcept_decl.resize(index + 1, false);
 	if (is_move)
 		cls.move_assign_index = (int)index;
 	else
@@ -785,6 +786,10 @@ void SemBinder::BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
 		cls.copy_assign_unwind_no = !may_throw;
 	if (overload_index < binding->fn_unwind_no.size())
 		binding->fn_unwind_no[overload_index] = !may_throw;
+	// An implicitly declared assignment's computed fact is its
+	// implicit exception specification (15.4p14).
+	if (overload_index < binding->fn_noexcept_decl.size())
+		binding->fn_noexcept_decl[overload_index] = !may_throw;
 	if (out_of_class)
 		// A source-owned defaulted definition prints unconditionally.
 		AppendItem(std::move(item));

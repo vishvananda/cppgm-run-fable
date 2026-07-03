@@ -38,7 +38,7 @@ bool SameParameterList(const Type& a, const Type& b)
 }  // namespace
 
 SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
-	: DeclBinder(model), unit_(unit), analyzer_(*this),
+	: DeclBinder(model), unit_(unit), analyzer_(*this), engine_(unit),
 	  local_types_(0), pending_local_type_(false), in_bit_field_(false),
 	  instantiating_(false), instantiation_depth_(0),
 	  in_implicit_type_context_(false), in_unevaluated_operand_(false),
@@ -74,6 +74,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 		alloc.fn_inline_def.resize(1, false);
 		alloc.fn_adl_only.resize(1, false);
 		alloc.fn_unwind_no.resize(1, false);
+		alloc.fn_noexcept_decl.resize(1, false);
 		AddBinding(*model.global(), alloc);
 		ScopeBinding dealloc;
 		dealloc.kind = SB_FUNCTION;
@@ -88,6 +89,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 		dealloc.fn_inline_def.resize(1, false);
 		dealloc.fn_adl_only.resize(1, false);
 		dealloc.fn_unwind_no.resize(1, true);
+		dealloc.fn_noexcept_decl.resize(1, true);
 		AddBinding(*model.global(), dealloc);
 	}
 }
@@ -196,6 +198,7 @@ const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
 	binding.fn_inline_def.resize(1, false);
 	binding.fn_adl_only.resize(1, false);
 	binding.fn_unwind_no.resize(1, true);
+	binding.fn_noexcept_decl.resize(1, true);
 	return &AddBinding(*model_.global(), binding);
 }
 
@@ -205,6 +208,48 @@ bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 	{
 		value = EvaluateConstExpr(expr, *this);
 		return true;
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
+}
+
+bool SemBinder::TryFullConstant(const AstExpr& expr, ConstValue& out)
+{
+	// Abstract pattern contexts keep dependent expressions dependent;
+	// they resolve at instantiation.
+	if (InAbstractTemplateContext())
+		return false;
+	try
+	{
+		SemValue value = analyzer_.Analyze(expr);
+		// A class-typed constant condition converts contextually.
+		if (value.type && RemoveTopCv(value.type)->kind == TK_CLASS)
+			analyzer_.RequireContextualBool(value, "constant expression");
+		EvalValue result;
+		try
+		{
+			result = engine_.EvaluateScalar(*value.node);
+		}
+		catch (const std::exception& error)
+		{
+			if (getenv("CPPGM_CONST_EVAL_DEBUG"))
+				fprintf(stderr, "const-eval: %s\n", error.what());
+			throw;
+		}
+		switch (result.kind)
+		{
+		case EvalValue::EV_INT:
+			out = result.ival;
+			return true;
+		case EvalValue::EV_PTR:
+			out = ConstValue(FT_BOOL, result.ptr.IsNull() ? 0 : 1);
+			return true;
+		default:
+			out = ConstValue(FT_BOOL, result.fval != 0 ? 1 : 0);
+			return true;
+		}
 	}
 	catch (const std::exception&)
 	{
@@ -348,6 +393,24 @@ ScopeBinding& SemBinder::BindFunctionName(const string& name,
 	ScopeBinding* existing = FindOwnBinding(*current_, name);
 	if (!existing)
 		return DeclBinder::BindFunctionName(name, type, allow_block);
+	if (existing->kind == SB_TYPE &&
+	    (current_->kind == SCOPE_NAMESPACE ||
+	     (allow_block && current_->kind == SCOPE_BLOCK)))
+	{
+		// 3.3.10p2: a function declared in the same scope hides the
+		// class/enumeration name. The entity record stays alive
+		// through the types already composed over it; only the plain
+		// name now resolves to the function.
+		ScopeBinding fresh;
+		fresh.kind = SB_FUNCTION;
+		fresh.name = name;
+		fresh.type = type;
+		fresh.access = existing->access;
+		fresh.owner = existing->owner;
+		fresh.home = existing->home;
+		*existing = fresh;
+		return *existing;
+	}
 	if (existing->kind != SB_FUNCTION ||
 	    (current_->kind != SCOPE_NAMESPACE &&
 	     current_->kind != SCOPE_CLASS &&
@@ -456,6 +519,95 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->c_linkage = in_c_linkage_;
 	AttachObjectLifetime(*item, binding, init, specs);
+	FinishConstexprObject(*item, binding, specs.is_constexpr);
+}
+
+void SemBinder::FinishConstexprObject(SemNode& item, ScopeBinding& binding,
+                                      bool is_constexpr)
+{
+	// Abstract pattern contexts resolve at instantiation.
+	if (InAbstractTemplateContext())
+		return;
+	// The integral fast path already recorded the value.
+	if (binding.has_value)
+	{
+		if (is_constexpr && !item.children.empty())
+			ConstEvalEngine::StampScalar(*item.children[0],
+			                             binding.value);
+		return;
+	}
+	// Only const objects have compile-time values; mutable ones must
+	// never enter the constant store.
+	bool is_const = false;
+	bool is_volatile = false;
+	TopCv(binding.type, is_const, is_volatile);
+	if (!is_constexpr && (!is_const || is_volatile))
+		return;
+	TypePtr bare = RemoveTopCv(binding.type);
+	bool is_ref = IsReferenceType(binding.type);
+	if (is_ref && !is_constexpr)
+		return;
+	bool object_valued = !is_ref && (bare->kind == TK_ARRAY ||
+	                                 bare->kind == TK_CLASS);
+	if (item.children.empty() && item.is_extern_decl)
+		return;  // a declaration of an object defined elsewhere
+	try
+	{
+		if (object_valued || is_ref)
+		{
+			// A storage definition without its own initializer (9.4.2p3)
+			// reuses the in-class evaluated image.
+			ConstObjectPtr image;
+			if (item.children.empty())
+				image = engine_.FindObject(binding.owner, binding.name);
+			if (!image)
+				image = engine_.EvaluateVariableInit(
+					item, binding.type, binding.owner, binding.name);
+			if (item.weak_def && object_valued)
+				unit_.const_images[&item] =
+					shared_ptr<const ConstObject>(image);
+			return;
+		}
+		if (item.children.empty())
+		{
+			if (is_constexpr)
+				throw runtime_error("constexpr variable " +
+				                    binding.name +
+				                    " requires an initializer");
+			return;
+		}
+		EvalValue value = engine_.EvaluateScalar(*item.children[0]);
+		if (value.kind == EvalValue::EV_INT)
+		{
+			bool is_enum = bare->kind == TK_ENUM;
+			binding.value = ConvertConstValue(
+				value.ival,
+				is_enum ? bare->named->enum_underlying
+				        : bare->fundamental);
+			binding.has_value = true;
+			if (is_constexpr)
+				ConstEvalEngine::StampScalar(*item.children[0],
+				                             binding.value);
+			return;
+		}
+		if (value.kind == EvalValue::EV_FLOAT)
+		{
+			SemNode& child = *item.children[0];
+			child.has_float = true;
+			child.float_token =
+				RenderFloatConstant(value.fval, bare->fundamental);
+		}
+		// Keep the evaluated one-scalar image so constant reads
+		// (float comparisons, pointer truthiness) resolve.
+		engine_.StoreScalarObject(binding.owner, binding.name,
+		                          bare, value);
+	}
+	catch (const std::exception& error)
+	{
+		if (is_constexpr)
+			throw runtime_error("constexpr variable " + binding.name +
+			                    ": " + error.what());
+	}
 }
 
 void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
@@ -714,11 +866,17 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	item->entity_scope = declaring;
 	item->entity_name = name;
 	item->unwind_no = composed.noexcept_simple;
-	// 7.1.2p4: an inline function emits weak and only where used.
+	// 7.1.2p4: an inline function emits weak and only where used;
+	// 7.1.5p2: constexpr functions are implicitly inline.
 	for (size_t i = 0; i < decl.specifiers.size(); i++)
 		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
-		    decl.specifiers[i].keyword == KW_INLINE)
+		    (decl.specifiers[i].keyword == KW_INLINE ||
+		     decl.specifiers[i].keyword == KW_CONSTEXPR))
+		{
 			item->inline_def = true;
+			if (decl.specifiers[i].keyword == KW_CONSTEXPR)
+				item->is_constexpr_fn = true;
+		}
 	if (const ScopeBinding* fn = FindOwnBinding(*declaring, name))
 		item->c_linkage = fn->c_linkage;
 	for (size_t i = 0; i < composed.parameters.size(); i++)

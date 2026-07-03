@@ -55,6 +55,17 @@ protected:
 	void MergeImportedOverloads(ScopeBinding& own,
 	                            const ScopeBinding& imported);
 	void BindStaticAssert(const AstDecl& decl);
+	// PA20: full constant evaluation over the analyzed tree of the
+	// derived binder, tried when the PA11 subset evaluator fails.
+	// Integral results pass through; pointer/floating results reduce
+	// to their bool truth (condition contexts). False when the
+	// expression is not a constant of the engine's subset.
+	virtual bool TryFullConstant(const AstExpr& expr, ConstValue& out)
+	{
+		(void)expr;
+		(void)out;
+		return false;
+	}
 	virtual void BindSimpleDeclaration(const AstDecl& decl);
 	void BindInitDeclarator(const DeclSpecifierInfo& specs,
 	                        const AstInitDeclarator& declarator);

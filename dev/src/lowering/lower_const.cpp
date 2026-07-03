@@ -190,6 +190,14 @@ bool EvaluateLowerConst(const SemNode& node, LowerConst& out)
 		out.string_node = &node;
 		return true;
 	}
+	if (node.has_float)
+	{
+		// PA20: a folded floating constant stamped by the binder.
+		out.kind = LC_FLOAT;
+		out.float_token = node.float_token;
+		out.float_type = RemoveTopCv(node.type);
+		return true;
+	}
 	if (node.has_value)
 	{
 		out.kind = LC_INT;

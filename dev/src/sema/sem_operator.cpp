@@ -412,6 +412,9 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;
+	if (chosen.index < binding.fn_noexcept_decl.size() &&
+	    binding.fn_noexcept_decl[chosen.index])
+		callee->noexcept_decl = true;
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));
@@ -572,6 +575,9 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;
+	if (chosen.index < binding.fn_noexcept_decl.size() &&
+	    binding.fn_noexcept_decl[chosen.index])
+		callee->noexcept_decl = true;
 	result.node->children.push_back(std::move(callee));
 	if (chosen.is_member)
 	{

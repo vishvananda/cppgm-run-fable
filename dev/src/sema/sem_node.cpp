@@ -225,6 +225,10 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.trivial_copy = node.trivial_copy;
 	out.ctor_addressed = node.ctor_addressed;
 	out.synthesized = node.synthesized;
+	out.is_constexpr_fn = node.is_constexpr_fn;
+	out.has_float = node.has_float;
+	out.float_token = node.float_token;
+	out.noexcept_decl = node.noexcept_decl;
 	out.fn_spec = node.fn_spec;
 	out.weak_def = node.weak_def;
 	out.instantiation_error = node.instantiation_error;
