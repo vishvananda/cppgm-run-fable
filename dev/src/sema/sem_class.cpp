@@ -142,12 +142,14 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	BeginClassLayout(*cls);
 }
 
-// PA20 9.4.2: an object-valued (array or class) static data member
-// with an in-class initializer completes its bound and evaluates into
-// the constant store, so class-scope sizeof, member constant
-// expressions, and the eventual storage definition all read the same
-// typed value. The analyzed actions land in a discarded holder; only
-// the completed binding type and the evaluated image persist.
+// PA20 9.4.2: a static data member with an in-class initializer
+// evaluates into the constant store, so class-scope sizeof, member
+// constant expressions, and the eventual storage definition all read
+// the same typed value. Object-valued (array or class) members also
+// complete their bound; non-integral scalars (floats, pointers) gain
+// their only constant identity here (the integral fast path records
+// `has_value` before this runs). The analyzed initializer persists in
+// `member_image_inits_` for the storage definition.
 void SemBinder::RecordStaticMemberObject(ScopeBinding& binding,
                                          const AstInitializer* init,
                                          const DeclSpecifierInfo& specs)
@@ -156,12 +158,16 @@ void SemBinder::RecordStaticMemberObject(ScopeBinding& binding,
 		return;
 	if (IsReferenceType(binding.type))
 		return;
-	TypePtr bare = RemoveTopCv(binding.type);
-	if (bare->kind != TK_ARRAY && bare->kind != TK_CLASS)
+	// Only const objects have compile-time values; a mutable static
+	// member must never enter the constant store.
+	bool is_const = false;
+	bool is_volatile = false;
+	TopCv(binding.type, is_const, is_volatile);
+	if (!specs.is_constexpr && (!is_const || is_volatile))
 		return;
 	// A deferred nested member-class definition (14.7.1p1) completes
 	// before the elements analyze.
-	TypePtr element = bare;
+	TypePtr element = RemoveTopCv(binding.type);
 	while (element->kind == TK_ARRAY)
 		element = RemoveTopCv(element->target);
 	if (element->kind == TK_CLASS)

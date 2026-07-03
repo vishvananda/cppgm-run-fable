@@ -1015,23 +1015,53 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 		throw;
 	}
 	current_ = saved_scope;
-	// 9.4.2p3: a storage definition without an initializer keeps the
-	// constant in-class initializer as the object's value.
-	if (!declarator.init && member->has_value && item->children.empty())
-	{
-		SemNodePtr constant = MakeSemNode(SN_LITERAL);
-		constant->token = RenderConstValue(member->value);
-		constant->type = RemoveTopCv(member->type);
-		constant->category = VC_PRVALUE;
-		constant->has_value = true;
-		constant->value = member->value;
-		item->children.push_back(std::move(constant));
-	}
+	AdoptInClassInitializer(*item, *member, !declarator.init,
+	                        inclass_object);
 	// PA20: an object-valued static member definition (9.4.2p3 storage
 	// for an in-class constexpr initializer, or a defining braced
 	// initializer) evaluates for the constant store and the image
 	// emission of weak definitions.
 	FinishConstexprObject(*item, *member, specs.is_constexpr);
+}
+
+// 9.4.2p3: a storage definition without its own initializer keeps the
+// constant in-class initializer as the object's value: integral
+// constants as a folded literal, other scalars (floats, pointers) as
+// the analyzed in-class initializer so the definition renders the
+// constant instead of a zero image. Object-valued members keep empty
+// children (the evaluated image backs their emission).
+void SemBinder::AdoptInClassInitializer(SemNode& item,
+                                        const ScopeBinding& member,
+                                        bool initializer_less,
+                                        bool inclass_object)
+{
+	if (!initializer_less || !item.children.empty())
+		return;
+	if (member.has_value)
+	{
+		SemNodePtr constant = MakeSemNode(SN_LITERAL);
+		constant->token = RenderConstValue(member.value);
+		constant->type = RemoveTopCv(member.type);
+		constant->category = VC_PRVALUE;
+		constant->has_value = true;
+		constant->value = member.value;
+		item.children.push_back(std::move(constant));
+		return;
+	}
+	if (!inclass_object)
+		return;
+	TypePtr bare = RemoveTopCv(member.type);
+	if (bare->kind == TK_ARRAY || bare->kind == TK_CLASS ||
+	    IsReferenceType(member.type))
+		return;
+	std::map<std::pair<const void*, string>,
+	         SemNodePtr>::const_iterator held =
+		member_image_inits_.find(std::pair<const void*, string>(
+			member.owner, member.name));
+	if (held == member_image_inits_.end() || !held->second)
+		return;
+	for (size_t i = 0; i < held->second->children.size(); i++)
+		item.children.push_back(CloneSemNode(*held->second->children[i]));
 }
 
 // 6.8p1 disambiguation with name lookup: `begin(a);` is only a

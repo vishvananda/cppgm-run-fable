@@ -97,6 +97,11 @@ struct LowGlobalInfo
 	// definition; weak (static-member) definitions and initializer-less
 	// storage definitions emit their flattened items from it.
 	shared_ptr<const struct ConstObject> image;
+	// Image render attempt, made before the init actions are dropped
+	// (0 untried / 1 rendered into image_text / 2 unrenderable, the
+	// dynamic-init paths take over).
+	int image_state = 0;
+	string image_text;
 	bool is_thread_local;
 	bool c_linkage;
 	const SemNode* node;  // defining SN_VARIABLE (init children)
@@ -176,6 +181,13 @@ public:
 	// PA20: the same rule for the dropped initialization actions of an
 	// image-backed constant definition.
 	void DemandImageInitCallees(const SemNode& item);
+	// The analyzed in-class actions behind an initializer-less storage
+	// definition (9.4.2p3), or null.
+	const SemNode* ImageInitActions(const SemNode* node) const;
+	// Handles an image-backed definition whose image renders (demands
+	// the odr-used constructors, drops the actions); false when the
+	// definition must initialize dynamically.
+	bool TryImageBackedInit(LowGlobalInfo& info);
 	// PA18: a trivial copy/move lowered as a raw object copy still
 	// demands the synthesized weak definition when sema built one (a
 	// user-defaulted member odr-used inside an instantiated body).
@@ -239,7 +251,7 @@ private:
 	                       bool ref, SemNode& init_def);
 	void LowerHelper(LowFunctionInfo& info, const SemNode& definition);
 	string UniqueSymbol(const string& base);
-	string RenderGlobal(const LowGlobalInfo& info);
+	string RenderGlobal(LowGlobalInfo& info);
 	string RenderScalarInit(const LowGlobalInfo& info);
 	string RenderArrayItems(const LowGlobalInfo& info);
 	// --- PA20 evaluated-image emission ---
@@ -247,6 +259,10 @@ private:
 	// constant image (weak static-member definitions and
 	// initializer-less storage definitions).
 	bool ImageBacked(const LowGlobalInfo& info) const;
+	// Attempts (once) to render the image into info.image_text; false
+	// means the ordinary zero/dynamic-init paths must initialize the
+	// object. BuildLifetimeHelpers asks before dropping init actions.
+	bool EnsureImageText(LowGlobalInfo& info);
 	// Renders the flattened typed items of the image into `out`; false
 	// when a value form cannot render (engine-internal pointers,
 	// bit-fields), letting the zero/dynamic paths take over.

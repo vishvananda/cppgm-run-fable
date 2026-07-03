@@ -50,6 +50,7 @@ ConstObjectPtr ConstEvalEngine::StringObject(const SemNode& node)
 	object->type = node.type;
 	object->bytes.assign(node.string_bytes.begin(),
 	                     node.string_bytes.end());
+	object->literal_node = &node;
 	string_objects_[&node] = object;
 	return object;
 }
@@ -199,46 +200,61 @@ ConstPointer ConstEvalEngine::SubscriptAddress(const SemNode& node)
 	return base;
 }
 
+// The address of a named entity: frame slot, evaluated store object
+// (with its symbolic identity when the object also has runtime
+// storage), or the symbolic address of a runtime global.
+ConstPointer ConstEvalEngine::IdAddress(const SemNode& node)
+{
+	Frame* frame = CurrentFrame();
+	pair<const void*, string> key(node.entity_scope, node.entity_name);
+	if (frame)
+	{
+		map<pair<const void*, string>, ConstPointer>::const_iterator
+			found = frame->slots.find(key);
+		if (found != frame->slots.end())
+			return found->second;
+	}
+	ConstObjectPtr stored = FindObject(node.entity_scope,
+	                                   node.entity_name);
+	if (stored)
+	{
+		ConstPointer address;
+		address.object = stored;
+		// A namespace- or class-scope object also has runtime storage:
+		// keep the symbolic identity beside the evaluated image so
+		// emitted constant images can reference the global.
+		const Scope* owner = (const Scope*)node.entity_scope;
+		if (owner && (owner->kind == SCOPE_NAMESPACE ||
+		              owner->kind == SCOPE_CLASS))
+		{
+			address.sym_scope = owner;
+			address.sym_name = node.entity_name;
+		}
+		return address;
+	}
+	// A folded constant read (enumerators, recorded const ints) has no
+	// object; only its value is usable.
+	if (node.has_value)
+		throw NotConstant("address of a folded constant");
+	// The address of a runtime global is an address constant.
+	if (node.entity_scope &&
+	    ((const Scope*)node.entity_scope)->kind == SCOPE_NAMESPACE)
+	{
+		ConstPointer address;
+		address.sym_scope = node.entity_scope;
+		address.sym_name = node.entity_name;
+		return address;
+	}
+	throw NotConstant("read of a non-constant object");
+}
+
 ConstPointer ConstEvalEngine::EvalLValue(const SemNode& node)
 {
 	Step();
 	switch (node.kind)
 	{
 	case SN_ID_EXPRESSION:
-	{
-		Frame* frame = CurrentFrame();
-		pair<const void*, string> key(node.entity_scope,
-		                              node.entity_name);
-		if (frame)
-		{
-			map<pair<const void*, string>, ConstPointer>::const_iterator
-				found = frame->slots.find(key);
-			if (found != frame->slots.end())
-				return found->second;
-		}
-		ConstObjectPtr stored = FindObject(node.entity_scope,
-		                                   node.entity_name);
-		if (stored)
-		{
-			ConstPointer address;
-			address.object = stored;
-			return address;
-		}
-		// A folded constant read (enumerators, recorded const ints)
-		// has no object; only its value is usable.
-		if (node.has_value)
-			throw NotConstant("address of a folded constant");
-		// The address of a runtime global is an address constant.
-		if (node.entity_scope &&
-		    ((const Scope*)node.entity_scope)->kind == SCOPE_NAMESPACE)
-		{
-			ConstPointer address;
-			address.sym_scope = node.entity_scope;
-			address.sym_name = node.entity_name;
-			return address;
-		}
-		throw NotConstant("read of a non-constant object");
-	}
+		return IdAddress(node);
 	case SN_MEMBER_EXPRESSION:
 		return MemberAddress(node);
 	case SN_SUBSCRIPT_EXPRESSION:
@@ -376,7 +392,9 @@ EvalValue ConstEvalEngine::EvalPointerBinary(const SemNode& node,
 		    rhs.kind == EvalValue::EV_PTR)
 		{
 			if (lhs.ptr.object != rhs.ptr.object ||
-			    lhs.ptr.sym_scope || rhs.ptr.sym_scope)
+			    lhs.ptr.sym_scope != rhs.ptr.sym_scope ||
+			    lhs.ptr.sym_name != rhs.ptr.sym_name ||
+			    (!lhs.ptr.object && !lhs.ptr.sym_scope))
 				throw NotConstant("difference of unrelated pointers");
 			TypePtr element =
 				RemoveTopCv(RemoveTopCv(lhs.type)->target);

@@ -220,3 +220,79 @@ narrow entry API (evaluate expression / initializer, constant-object
 store, body registry). Template machinery consumes it through the
 same fallback used by ordinary code, so PA21/PA22 can extend the
 template model without touching evaluation again.
+
+## Architecture Review
+
+The implementation landed close to this plan:
+
+- `sema/const_eval.{h,cpp}` + `const_eval_expr.cpp` +
+  `const_eval_stmt.cpp` hold the engine exactly as sketched: the
+  ConstObject/ConstPointer/EvalValue value model, byte images with
+  symbolic pointer slots, RAII frames, the incremental body registry
+  keyed like the lowering (fn_spec identity first, then
+  (scope,name) + TypeEquals), and the constexpr-body gate
+  (`is_constexpr_fn || synthesized`) that rejects the non-constexpr
+  conversion NTTP fixture through the general rule.
+- The binder seam is the planned single virtual
+  (`DeclBinder::TryFullConstant`), with the PA11 AST evaluator kept
+  as the primary path at every fallback site (static_assert, array
+  bounds, enumerators, template value arguments/defaults,
+  const-integral initializers). Constexpr variables evaluate in
+  `FinishConstexprObject` (hard error per 7.1.5p9); constexpr
+  functions join `inline` in weak/demand emission at all three
+  body-construction sites.
+- `noexcept(expr)` folds over a new declared-spec channel
+  (`fn_noexcept_decl` / `SemNode.noexcept_decl`) kept separate from
+  the derived unwind facts, as planned.
+- Lowering: scalar folds ride `has_value`/`has_float`; weak and
+  initializer-less member definitions emit flattened images
+  (`lower_global.cpp`, split out of `lower_unit.cpp`); local statics
+  hoist under token-span names with the guard shape from the plan.
+
+Deviations found and resolved during the audit (details in
+`audit.md`): the image-emission path originally decided
+"drop the dynamic init" independently of whether the image could
+actually render, silently zero-filling objects whose images held
+string-literal or offset address constants; and the plan's "engine
+writes has_value back for integral scalars" did not initially cover
+non-integral scalar static members, leaving float/pointer member
+constants unreadable. Both were architectural gaps in the seam
+between the engine's value model and the LowIR presentation, fixed by
+giving ConstPointer/ConstObject enough identity (symbolic
+scope/name, literal back-pointer) for the renderer, making the
+render attempt precede the drop decision, and routing scalar members
+through the same holder evaluation as object members.
+
+## Final Architecture Review
+
+After the audit fixes the layer boundaries hold:
+
+- **Engine owns values.** All compile-time storage lives in
+  engine-owned ConstObjects; the store is keyed by (scope, name);
+  `ScopeBinding.has_value` remains the integral fast path. Pointer
+  values carry both the evaluated object and, when the target has
+  runtime storage, its symbolic identity — one value, two views, so
+  evaluation (reads through the object) and presentation (symbolic
+  LowIR references with byte offsets) never re-derive each other's
+  facts.
+- **Sema stamps, lowering renders.** The binder stamps folded
+  scalars (`has_value`, `has_float`), constant images
+  (`const_images`), and the analyzed in-class actions
+  (`const_image_inits`); the lowering consumes them without
+  re-parsing. The image-vs-dynamic decision is made once
+  (`TryImageBackedInit` -> `EnsureImageText`, cached), and every
+  non-renderable case keeps real initialization actions — there is no
+  success path that loses semantics.
+- **One constexpr gate.** Bodies are engine-callable iff stamped
+  `is_constexpr_fn` (all body-construction sites: free functions,
+  members, instantiations) or compiler-synthesized; 14.3.2/5.19
+  converted-constant checks reuse it.
+- **Performance shape.** Registry scans are incremental; store and
+  registry lookups are map-based; images flatten in one layout-order
+  walk per global; the function-lowering rescan floor is untouched.
+  No quadratic hot paths were introduced by PA20 or the audit.
+
+Handoff stands as planned: PA21/PA22 consume the engine through
+`TryFullConstant`/`TryFullValueArgument` and the constant store; the
+evaluation layer needs no further extension for the template-model
+work.

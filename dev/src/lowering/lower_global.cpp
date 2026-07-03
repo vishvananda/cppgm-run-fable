@@ -206,12 +206,21 @@ bool LowerProgram::AppendImageScalar(const ConstObject& image,
 			image.ptr_slots.find(offset);
 		if (slot == image.ptr_slots.end())
 			out += "  zero 8\n";  // null pointer slot
-		else if (slot->second.sym_scope)
-			out += "  ptr addr " +
-				GlobalRef(slot->second.sym_scope,
-				          slot->second.sym_name) + "\n";
 		else
-			return false;  // engine-internal object address
+		{
+			const ConstPointer& value = slot->second;
+			string symbol;
+			if (value.sym_scope)
+				symbol = GlobalRef(value.sym_scope, value.sym_name);
+			else if (value.object && value.object->literal_node)
+				symbol = StringLiteralRef(*value.object->literal_node);
+			else
+				return false;  // engine-internal object address
+			out += "  ptr addr " + symbol;
+			if (value.offset)
+				out += " + " + to_string(value.offset);
+			out += "\n";
+		}
 		covered = offset + 8;
 		return true;
 	}
@@ -325,24 +334,35 @@ bool LowerProgram::TryRenderImageItems(const ConstObject& image,
 	return AppendImageScalar(image, bare, offset, covered, out);
 }
 
-string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
+// One attempt per global, made before BuildLifetimeHelpers decides
+// whether the definition keeps its dynamic-init actions.
+bool LowerProgram::EnsureImageText(LowGlobalInfo& info)
 {
-	if (ImageBacked(info))
+	if (info.image_state == 0)
 	{
 		string items;
 		unsigned long long covered = 0;
-		if (TryRenderImageItems(*info.image, info.type, 0, covered,
-		                        items))
+		bool rendered = TryRenderImageItems(*info.image, info.type, 0,
+		                                    covered, items);
+		if (rendered)
 		{
 			unsigned long long size = TypeSize(RemoveTopCv(info.type));
 			if (covered < size)
 				items += "  zero " + to_string(size - covered) + "\n";
 			if (items.empty())
 				items = "  zero " + to_string(size) + "\n";
-			return "global @" + info.low_name + GlobalMetadata(info) +
-				" = {\n" + items + "}";
+			info.image_text = items;
 		}
+		info.image_state = rendered ? 1 : 2;
 	}
+	return info.image_state == 1;
+}
+
+string LowerProgram::RenderGlobal(LowGlobalInfo& info)
+{
+	if (ImageBacked(info) && EnsureImageText(info))
+		return "global @" + info.low_name + GlobalMetadata(info) +
+			" = {\n" + info.image_text + "}";
 	TypePtr inner = info.type;
 	while (inner->kind == TK_ARRAY)
 		inner = inner->target;

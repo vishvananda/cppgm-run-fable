@@ -732,6 +732,34 @@ void LowerProgram::DemandElidedCtor(const SemNode& callee)
 		DemandTreeCallees(*info.definition);
 }
 
+// PA20: the analyzed in-class initialization actions behind an
+// initializer-less storage definition (9.4.2p3), or null.
+const SemNode* LowerProgram::ImageInitActions(const SemNode* node) const
+{
+	for (size_t u = 0; u < units_.size(); u++)
+	{
+		map<const SemNode*, SemNodePtr>::const_iterator actions =
+			units_[u]->const_image_inits.find(node);
+		if (actions != units_[u]->const_image_inits.end())
+			return actions->second.get();
+	}
+	return 0;
+}
+
+// PA20: an image-backed definition whose image renders emits the
+// constant value statically and drops its initialization actions; the
+// constructors those actions selected stay odr-used (3.2p3). False
+// when the definition must initialize dynamically.
+bool LowerProgram::TryImageBackedInit(LowGlobalInfo& info)
+{
+	if (!ImageBacked(info) || !EnsureImageText(info))
+		return false;
+	DemandImageInitCallees(*info.node);
+	if (const SemNode* held = ImageInitActions(info.node))
+		DemandImageInitCallees(*held);
+	return true;
+}
+
 // PA20: an image-backed definition drops its initialization actions,
 // but the constructors those actions selected are still odr-used
 // (3.2p3): user-provided bodies emit; synthesized bodies only
@@ -1068,22 +1096,13 @@ void LowerProgram::BuildLifetimeHelpers()
 		while (inner->kind == TK_ARRAY)
 			inner = inner->target;
 		bool is_class = RemoveTopCv(inner)->kind == TK_CLASS;
-		// PA20: an image-backed definition already carries its constant
-		// value; no initialization actions run for it, but the
-		// constructors they selected stay odr-used.
-		if (ImageBacked(info))
-		{
-			DemandImageInitCallees(*info.node);
-			for (size_t u = 0; u < units_.size(); u++)
-			{
-				map<const SemNode*, SemNodePtr>::const_iterator
-					actions =
-					units_[u]->const_image_inits.find(info.node);
-				if (actions != units_[u]->const_image_inits.end())
-					DemandImageInitCallees(*actions->second);
-			}
+		// PA20: an image-backed definition whose image renders carries
+		// its constant value statically; no initialization actions run
+		// for it, but the constructors they selected stay odr-used. An
+		// unrenderable image (engine-internal addresses, bit-fields)
+		// falls through and initializes dynamically.
+		if (TryImageBackedInit(info))
 			continue;
-		}
 		// PA18: a weak (instantiated static member) object does not by
 		// itself anchor the init helper; a thread-local object
 		// constructs behind its own first-use guard, not in the
@@ -1091,7 +1110,14 @@ void LowerProgram::BuildLifetimeHelpers()
 		bool tls_dynamic = info.is_thread_local && is_class;
 		if (is_class && !info.weak && !tls_dynamic)
 			any_class_object = true;
-		const SemNode& item = *info.node;
+		// PA20: an initializer-less storage definition (9.4.2p3) whose
+		// image cannot render initializes dynamically from the analyzed
+		// in-class actions instead.
+		const SemNode* action_item = info.node;
+		if (action_item->children.empty())
+			if (const SemNode* held = ImageInitActions(info.node))
+				action_item = held;
+		const SemNode& item = *action_item;
 		vector<SemNodePtr> tls_actions;
 		for (size_t j = 0; j < item.children.size(); j++)
 		{

@@ -11,16 +11,6 @@ using std::runtime_error;
 // completes, 9.2p2), the shared function-node builder, and the
 // per-body analysis context.
 
-namespace {
-
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA15 assignment boundary");
-}
-
-}  // namespace
-
 // --- member function bodies ---------------------------------------------
 
 void SemBinder::BindMemberFunctionBody(const AstDecl& decl,

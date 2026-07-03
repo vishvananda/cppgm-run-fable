@@ -51,11 +51,14 @@ struct ConstPointer
 // travels symbolically in `ptr_slots`).
 struct ConstObject
 {
-	ConstObject() {}
+	ConstObject() : literal_node(0) {}
 
 	TypePtr type;
 	vector<unsigned char> bytes;
 	map<unsigned long long, ConstPointer> ptr_slots;
+	// The SN_LITERAL this object evaluates (string literals): image
+	// slots addressing it render as references to the emitted literal.
+	const SemNode* literal_node;
 };
 
 // One evaluated rvalue.
@@ -180,6 +183,7 @@ private:
 	                     const TypePtr& type);
 	void EvalEffect(const SemNode& node);
 	EvalValue EvalId(const SemNode& node);
+	ConstPointer IdAddress(const SemNode& node);
 	EvalValue EvalLiteral(const SemNode& node);
 	EvalValue EvalUnary(const SemNode& node);
 	EvalValue EvalBinary(const SemNode& node);

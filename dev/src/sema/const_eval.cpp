@@ -17,7 +17,6 @@ using std::runtime_error;
 namespace {
 
 const long long kStepLimit = 1 << 22;
-const int kDepthLimit = 512;
 
 runtime_error NotConstant(const string& what)
 {

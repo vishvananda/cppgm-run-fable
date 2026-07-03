@@ -133,6 +133,13 @@ private:
 	// constexpr object requires a constant initializer).
 	void FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 	                           bool is_constexpr);
+	// 9.4.2p3: an initializer-less storage definition adopts the
+	// member's constant in-class initializer (folded literal or the
+	// analyzed scalar initializer) as its rendered value.
+	void AdoptInClassInitializer(SemNode& item,
+	                             const ScopeBinding& member,
+	                             bool initializer_less,
+	                             bool inclass_object);
 	// 8.5.2: the synthesized per-code-unit element list of a string
 	// -literal array initializer.
 	SemNodePtr StringLiteralArrayInit(ScopeBinding& binding,

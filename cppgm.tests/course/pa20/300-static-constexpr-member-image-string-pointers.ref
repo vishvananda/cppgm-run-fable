@@ -1,0 +1,81 @@
+global @__strlit__1 [binding=internal] = {
+  i8 111
+  i8 110
+  i8 101
+  i8 0
+}
+global @__strlit__2 [binding=internal] = {
+  i8 116
+  i8 119
+  i8 111
+  i8 0
+}
+global @Tables_int___rows [binding=weak, object=_ZN6TablesIiE4rowsE] = {
+  i32 1
+  zero 4
+  ptr addr @__strlit__1
+  i32 2
+  zero 4
+  ptr addr @__strlit__2
+}
+
+function @rows() -> ptr [binding=strong, object=_Z4rowsv] {
+  block ^entry:
+    %t1 = addr @Tables_int___rows
+    %t2 = unary decay ptr %t1
+    return ptr %t2
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $cond__1 : i32
+
+  block ^entry:
+    %t1 = call ptr @rows()
+    %t2 = binary mul i64 1, 16
+    %t3 = index i8 [projection=array_element] %t1, %t2
+    %t4 = index i8 [projection=field] %t3, 0
+    %t5 = load i32 %t4
+    %t6 = call ptr @rows()
+    %t7 = binary mul i64 0, 16
+    %t8 = index i8 [projection=array_element] %t6, %t7
+    %t9 = index i8 [projection=field] %t8, 8
+    %t10 = load ptr %t9
+    %t11 = index i8 [projection=array_element] %t10, 0
+    %t12 = load i8 %t11
+    %t13 = convert sext i32 i8 %t12
+    %t14 = binary add i32 %t5, %t13
+    %t15 = binary add i32 2, 111
+    %t16 = cmp eq i32 %t14, %t15
+    branch %t16, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t17 = load i32 $cond__1
+    return i32 %t17
+}
+function @Entry__Entry(%this : ptr, %i : i32, %n : ptr) -> void [binding=weak, object=_ZN5EntryC1EiPKc] {
+  slot $this : ptr
+  slot $i : i32
+  slot $n : ptr
+
+  block ^entry:
+    store ptr %this, $this
+    store i32 %i, $i
+    store ptr %n, $n
+    %t1 = load i32 $i
+    %t2 = load ptr $this
+    %t3 = index i8 [projection=field] %t2, 0
+    store i32 %t1, %t3
+    %t4 = load ptr $n
+    %t5 = load ptr $this
+    %t6 = index i8 [projection=field] %t5, 8
+    store ptr %t4, %t6
+    return void
+}
+alias object _ZN5EntryC2EiPKc = @Entry__Entry
