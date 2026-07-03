@@ -121,6 +121,18 @@ AstMemberSpecifier::AstMemberSpecifier()
 {
 }
 
+bool DeclHasConstexpr(const AstDecl& decl)
+{
+	for (size_t i = 0; i < decl.specifiers.size(); i++)
+		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
+		    decl.specifiers[i].keyword == KW_CONSTEXPR)
+			return true;
+	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
+		if (decl.member_specifiers[i].keyword == KW_CONSTEXPR)
+			return true;
+	return false;
+}
+
 AstDecl::AstDecl(EDeclKind kind_in)
 	: kind(kind_in), begin_token(0), end_token(0),
 	  inline_namespace(false), unnamed(false),

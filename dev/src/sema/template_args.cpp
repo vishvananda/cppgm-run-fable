@@ -665,17 +665,7 @@ bool SemBinder::TryClassConversionConstant(const AstName& name,
 				continue;
 			// PA20 14.3.2/5.19: only a constexpr conversion function
 			// produces a converted constant expression.
-			bool declared_constexpr = false;
-			for (size_t s = 0; s < conv.decl->specifiers.size(); s++)
-				if (conv.decl->specifiers[s].kind == SPEC_KEYWORD &&
-				    conv.decl->specifiers[s].keyword == KW_CONSTEXPR)
-					declared_constexpr = true;
-			for (size_t s = 0; s < conv.decl->member_specifiers.size();
-			     s++)
-				if (conv.decl->member_specifiers[s].keyword ==
-				    KW_CONSTEXPR)
-					declared_constexpr = true;
-			if (!declared_constexpr)
+			if (!DeclHasConstexpr(*conv.decl))
 				continue;
 			TypePtr result = RemoveTopCv(conv.result);
 			if (!IsIntegralType(result) && result->kind != TK_ENUM)

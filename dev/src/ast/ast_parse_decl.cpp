@@ -284,6 +284,7 @@ AstDeclPtr AstParser::ParseSimpleDeclaration()
 		for (;;)
 		{
 			AstInitDeclarator init_declarator;
+			init_declarator.begin_token = pos_;
 			if (!ParseDeclarator(init_declarator.declarator, true))
 			{
 				Restore(state);

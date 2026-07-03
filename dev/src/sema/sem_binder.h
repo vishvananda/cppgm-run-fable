@@ -151,9 +151,10 @@ private:
 	                       const AstInitializer* init,
 	                       const DeclSpecifierInfo& specs);
 	// PA20: bound completion and constant evaluation of an
-	// object-valued static member's in-class braced initializer.
+	// object-valued static member's in-class initializer.
 	void RecordStaticMemberObject(ScopeBinding& binding,
-	                              const AstInitializer* init);
+	                              const AstInitializer* init,
+	                              const DeclSpecifierInfo& specs);
 	void BindFriendFunction(const AstDecl& decl, ClassInfo& cls);
 	// PA16: a conversion-function member declaration (12.3.2).
 	void BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
@@ -498,6 +499,11 @@ private:
 		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	void InstantiateFunctionBody(TemplateInfo& tmpl,
 	                             FunctionSpecialization& spec);
+	// An explicit specialization's renamed parameters redirect onto
+	// the primary declaration's slot names.
+	void RedirectExplicitSlotNames(const AstDeclarator& primary,
+	                               Scope* fn_scope,
+	                               vector<string>& slot_names);
 	void InstantiatePendingFunctions(TemplateInfo& tmpl);
 	// Pre-binds the declared parameters into the capture scope so a
 	// trailing-return decltype (which composes before the clause,
@@ -598,6 +604,12 @@ private:
 	// PA20 constant engine: evaluated constexpr objects and function
 	// bodies over the analyzed trees.
 	ConstEvalEngine engine_;
+	// The analyzed in-class initialization actions of object-valued
+	// static members, keyed like the constant store; the member's
+	// storage definition hands them to the lowering for odr-use
+	// tracking (SemUnit::const_image_inits).
+	std::map<std::pair<const void*, string>, SemNodePtr>
+		member_image_inits_;
 	// The open container chain; items append to the innermost node (or
 	// the unit when empty).
 	vector<SemNode*> parents_;

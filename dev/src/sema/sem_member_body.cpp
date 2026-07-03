@@ -222,22 +222,12 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	SemNodePtr item = BuildFunctionNode(body, special);
 	SemNode* node = item.get();
 	// 7.1.5: a constexpr member/friend body is engine-evaluable and
-	// implicitly inline (weak, demand-emitted). Ordinary declarations
-	// carry the keyword in the specifier-seq, special members in the
-	// member-specifier list.
-	for (size_t i = 0; i < body.decl->specifiers.size(); i++)
-		if (body.decl->specifiers[i].kind == SPEC_KEYWORD &&
-		    body.decl->specifiers[i].keyword == KW_CONSTEXPR)
-		{
-			node->is_constexpr_fn = true;
-			node->inline_def = true;
-		}
-	for (size_t i = 0; i < body.decl->member_specifiers.size(); i++)
-		if (body.decl->member_specifiers[i].keyword == KW_CONSTEXPR)
-		{
-			node->is_constexpr_fn = true;
-			node->inline_def = true;
-		}
+	// implicitly inline (weak, demand-emitted).
+	if (DeclHasConstexpr(*body.decl))
+	{
+		node->is_constexpr_fn = true;
+		node->inline_def = true;
+	}
 
 	Scope* saved_scope = current_;
 	EMemberAccess saved_access = current_access_;

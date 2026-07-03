@@ -143,12 +143,14 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 }
 
 // PA20 9.4.2: an object-valued (array or class) static data member
-// with an in-class braced initializer completes its bound and
-// evaluates into the constant store, so class-scope sizeof, member
-// constant expressions, and the eventual storage definition all read
-// the same typed value.
+// with an in-class initializer completes its bound and evaluates into
+// the constant store, so class-scope sizeof, member constant
+// expressions, and the eventual storage definition all read the same
+// typed value. The analyzed actions land in a discarded holder; only
+// the completed binding type and the evaluated image persist.
 void SemBinder::RecordStaticMemberObject(ScopeBinding& binding,
-                                         const AstInitializer* init)
+                                         const AstInitializer* init,
+                                         const DeclSpecifierInfo& specs)
 {
 	if (!init || binding.has_value || InAbstractTemplateContext())
 		return;
@@ -157,29 +159,34 @@ void SemBinder::RecordStaticMemberObject(ScopeBinding& binding,
 	TypePtr bare = RemoveTopCv(binding.type);
 	if (bare->kind != TK_ARRAY && bare->kind != TK_CLASS)
 		return;
-	const AstExpr* braced = 0;
-	if (init->kind == INIT_BRACED)
-		braced = init->expr.get();
-	else if (init->kind == INIT_EQ && init->expr->kind == EK_BRACED)
-		braced = init->expr.get();
-	if (!braced)
-		return;
-	SemNode holder(SN_VARIABLE);
+	// A deferred nested member-class definition (14.7.1p1) completes
+	// before the elements analyze.
+	TypePtr element = bare;
+	while (element->kind == TK_ARRAY)
+		element = RemoveTopCv(element->target);
+	if (element->kind == TK_CLASS)
+		EnsureTypeCompleteness(element->named);
+	SemNodePtr holder = MakeSemNode(SN_VARIABLE);
+	holder->name = binding.name;
+	holder->type = binding.type;
+	holder->entity_scope = binding.owner;
+	holder->entity_name = binding.name;
 	try
 	{
-		TypePtr completed = binding.type;
-		holder.children.push_back(
-			analyzer_.AnalyzeBracedInit(*braced, completed));
-		binding.type = completed;
+		AttachObjectLifetime(*holder, binding, init, specs);
 	}
 	catch (const std::exception&)
 	{
-		return;  // outside the analyzed braced subset
+		return;  // outside the analyzed initializer subset
 	}
 	try
 	{
-		engine_.EvaluateVariableInit(holder, binding.type,
+		engine_.EvaluateVariableInit(*holder, binding.type,
 		                             binding.owner, binding.name);
+		// The analyzed actions persist for the storage definition's
+		// odr-use tracking (3.2p3 over dropped constant init).
+		member_image_inits_[std::pair<const void*, string>(
+			binding.owner, binding.name)] = std::move(holder);
 	}
 	catch (const std::exception&)
 	{
@@ -198,7 +205,7 @@ void SemBinder::RecordMemberField(ScopeBinding& binding,
 	{
 		if (specs.is_mutable)
 			throw runtime_error("static member declared mutable");
-		RecordStaticMemberObject(binding, init);
+		RecordStaticMemberObject(binding, init, specs);
 		return;  // static data members are not fields
 	}
 	if (in_bit_field_)

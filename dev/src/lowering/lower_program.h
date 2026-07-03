@@ -93,6 +93,10 @@ struct LowGlobalInfo
 	// PA19: the binding carries a recorded constant value, so every
 	// read folds and the stored image is unobservable.
 	bool folded_const = false;
+	// PA20: the evaluated constant image of an object-valued constexpr
+	// definition; weak (static-member) definitions and initializer-less
+	// storage definitions emit their flattened items from it.
+	shared_ptr<const struct ConstObject> image;
 	bool is_thread_local;
 	bool c_linkage;
 	const SemNode* node;  // defining SN_VARIABLE (init children)
@@ -151,6 +155,15 @@ public:
 	// Registers a namespace-scope object declaration (also used for
 	// block-scope extern declarations naming the global entity).
 	void RegisterGlobal(const SemNode& item);
+	// --- PA20 function-local statics ---
+	// Whether (scope, name) already resolves to a registered global.
+	bool HasGlobal(const Scope* scope, const string& name) const;
+	// Hoists a local static to an internal global under its block
+	// -scope entity key.
+	LowGlobalInfo& RegisterLocalStatic(const SemNode& item,
+	                                   const string& base_name);
+	// The i64 first-use guard global beside `object_name`.
+	string LocalStaticGuard(const string& object_name);
 	// PA15: a lowered function registered an automatic-object cleanup;
 	// the unwind runtime declares are emitted once.
 	void RequireEhRuntime();
@@ -160,6 +173,9 @@ public:
 	// odr-used; user-provided definitions reached through synthesized
 	// bodies must be emitted even though the call itself is dropped.
 	void DemandElidedCtor(const SemNode& callee);
+	// PA20: the same rule for the dropped initialization actions of an
+	// image-backed constant definition.
+	void DemandImageInitCallees(const SemNode& item);
 	// PA18: a trivial copy/move lowered as a raw object copy still
 	// demands the synthesized weak definition when sema built one (a
 	// user-defaulted member odr-used inside an instantiated body).
@@ -226,6 +242,24 @@ private:
 	string RenderGlobal(const LowGlobalInfo& info);
 	string RenderScalarInit(const LowGlobalInfo& info);
 	string RenderArrayItems(const LowGlobalInfo& info);
+	// --- PA20 evaluated-image emission ---
+	// Whether the definition's initial value comes from its evaluated
+	// constant image (weak static-member definitions and
+	// initializer-less storage definitions).
+	bool ImageBacked(const LowGlobalInfo& info) const;
+	// Renders the flattened typed items of the image into `out`; false
+	// when a value form cannot render (engine-internal pointers,
+	// bit-fields), letting the zero/dynamic paths take over.
+	bool TryRenderImageItems(const struct ConstObject& image,
+	                         const TypePtr& type,
+	                         unsigned long long offset,
+	                         unsigned long long& covered, string& out);
+	bool AppendImageScalar(const struct ConstObject& image,
+	                       const TypePtr& type,
+	                       unsigned long long offset,
+	                       unsigned long long& covered, string& out);
+	// The class record of `entity` across the added units.
+	const ClassInfo* ProgramClass(const NamedTypeInfo* entity) const;
 	string RenderConstItem(const struct LowerConst& value,
 	                       const TypePtr& type, bool& is_zero_item);
 	string RenderAddress(const struct LowerConst& value);

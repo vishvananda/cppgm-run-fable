@@ -69,6 +69,11 @@ protected:
 	virtual void BindSimpleDeclaration(const AstDecl& decl);
 	void BindInitDeclarator(const DeclSpecifierInfo& specs,
 	                        const AstInitDeclarator& declarator);
+	// PA20: the terminal token span of the init-declarator being
+	// bound (declarator begin through the terminating semicolon); the
+	// deterministic local-static object names derive from it.
+	size_t current_declarator_begin_token_ = 0;
+	size_t current_decl_end_token_ = 0;
 	void BindTypeAlias(const string& name, const TypePtr& type);
 	void BindVariable(const string& name, const TypePtr& type,
 	                  const AstInitializer* init,

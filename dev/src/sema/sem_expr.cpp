@@ -1380,6 +1380,29 @@ SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(const AstExpr& braced,
 {
 	if (dest->kind != TK_ARRAY)
 		throw OutsideBoundary("braced initialization form");
+	// PA20: a multi-dimensional array initializes element-wise from
+	// fully braced sub-lists (8.5.1p11 without brace elision).
+	if (RemoveTopCv(dest->target)->kind == TK_ARRAY)
+	{
+		if (!dest->bound_known)
+			dest = MakeArrayType(dest->target, true,
+			                     braced.arguments.size());
+		if (braced.arguments.size() > dest->bound)
+			throw runtime_error("too many braced initializers");
+		SemNodePtr node = MakeSemNode(SN_BRACED_INIT_LIST);
+		node->type = dest;
+		node->category = VC_LVALUE;
+		for (size_t i = 0; i < braced.arguments.size(); i++)
+		{
+			const AstExpr& element = *braced.arguments[i];
+			if (element.kind != EK_BRACED)
+				throw OutsideBoundary("array-of-array element form");
+			TypePtr element_type = dest->target;
+			node->children.push_back(
+				AnalyzeBracedInit(element, element_type));
+		}
+		return node;
+	}
 	// Pack expansions among the elements resolve before the bound
 	// completes (8.5.1p4 over the expanded list).
 	vector<SemValue> elements;

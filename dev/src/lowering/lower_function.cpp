@@ -1,5 +1,7 @@
 #include "lowering/lower_function.h"
 
+#include "lowering/lower_const.h"
+
 #include <stdexcept>
 
 #include "lowering/lower_types.h"
@@ -491,10 +493,144 @@ void FunctionLowerer::LowerLocalDeclaration(const SemNode& node)
 	}
 }
 
+// PA20 function-local statics: the object hoists to an internal
+// global named from the declarator's token span. A non-class scalar
+// with a constant initializer keeps its static image; every other
+// form initializes at the declaration point behind an i64 first-use
+// guard (the reference shape).
+void FunctionLowerer::LowerLocalStatic(const SemNode& node)
+{
+	if (node.needs_dtor)
+		throw OutsideBoundary("function-local static with a destructor");
+	string base_name = "__local_static__" + info_.low_name + "__" +
+		node.entity_name + "__tokens" +
+		to_string(node.decl_begin_token) + "_" +
+		to_string(node.decl_end_token);
+	LowGlobalInfo& info = program_.RegisterLocalStatic(node, base_name);
+	const TypePtr& declared = node.type;
+	TypePtr inner = declared;
+	while (inner->kind == TK_ARRAY)
+		inner = inner->target;
+	bool needs_guard = IsReferenceType(declared) ||
+		declared->kind == TK_ARRAY ||
+		RemoveTopCv(inner)->kind == TK_CLASS;
+	if (!needs_guard)
+	{
+		LowerConst constant;
+		if (node.children.empty() ||
+		    EvaluateLowerConst(*node.children[0], constant))
+			return;
+	}
+	// Scalars and references zero-fill statically and store at first
+	// use; arrays and class objects keep whatever image renders and
+	// re-run their initialization actions behind the guard.
+	if (declared->kind != TK_ARRAY &&
+	    RemoveTopCv(inner)->kind != TK_CLASS)
+		info.dynamic_init = true;
+	string guard_ref = "@" + program_.LocalStaticGuard(info.low_name);
+	string ready = NewLabel("local_static_ready");
+	string init_label = NewLabel("local_static_init");
+	string flag = NewTemp();
+	Emit(flag + " = load i64 " + guard_ref);
+	string test = NewTemp();
+	Emit(test + " = cmp ne i64 " + flag + ", 0");
+	ReferenceLabel(ready);
+	ReferenceLabel(init_label);
+	Terminate("branch " + test + ", ^" + ready + ", ^" + init_label);
+	OpenBlock(init_label);
+	string base = NewTemp();
+	Emit(base + " = addr @" + info.low_name);
+	LowerLocalStaticInit(node, base);
+	Emit("store i64 1, " + guard_ref);
+	ReferenceLabel(ready);
+	Terminate("jump ^" + ready);
+	OpenBlock(ready);
+}
+
+void FunctionLowerer::LowerLocalStaticInit(const SemNode& node,
+                                           const string& base)
+{
+	const TypePtr& declared = node.type;
+	if (IsReferenceType(declared))
+	{
+		string address = LowerAddressExpr(*node.children[0]);
+		Emit("store ptr " + address + ", " + base);
+		return;
+	}
+	TypePtr bare = RemoveTopCv(declared);
+	if (bare->kind == TK_ARRAY && !node.children.empty() &&
+	    node.children[0]->kind == SN_BRACED_INIT_LIST)
+	{
+		// Flat element stores at immediate byte offsets off the base.
+		const SemNode& braced = *node.children[0];
+		TypePtr element = RemoveTopCv(bare->target);
+		unsigned long long stride = TypeSize(element);
+		for (size_t i = 0; i < braced.children.size(); i++)
+		{
+			string target = base;
+			if (i > 0)
+			{
+				target = NewTemp();
+				Emit(target + " = index i8 " + base + ", " +
+				     to_string(i * stride));
+			}
+			string value = LowerValueAs(*braced.children[i], element,
+			                            LCC_INIT);
+			Emit("store " + LowerValueType(element) + " " + value +
+			     ", " + target);
+		}
+		return;
+	}
+	// Class objects and class arrays: constructor calls address the
+	// base at immediate element offsets; member-wise aggregate stores
+	// lower as ordinary statements.
+	unsigned long long stride = bare->kind == TK_ARRAY
+		? TypeSize(RemoveTopCv(bare->target)) : 0;
+	size_t element = 0;
+	for (size_t i = 0; i < node.children.size(); i++)
+	{
+		const SemNode& child = *node.children[i];
+		if (child.kind == SN_CONSTRUCTOR_ACTION)
+		{
+			unsigned long long offset = element * stride;
+			element++;
+			if (child.trivial_init || child.elided)
+				continue;
+			string target = base;
+			if (offset)
+			{
+				target = NewTemp();
+				Emit(target + " = index i8 " + base + ", " +
+				     to_string(offset));
+			}
+			bool saved = in_lifetime_action_;
+			in_lifetime_action_ = true;
+			LowerConstructorCall(child, target);
+			in_lifetime_action_ = saved;
+			continue;
+		}
+		if (child.kind == SN_EXPRESSION_STATEMENT)
+		{
+			LowerStatement(child);
+			continue;
+		}
+		if (child.kind == SN_DESTRUCTOR_ACTION)
+			continue;
+		// The scalar initializer value.
+		TypePtr value_type = RemoveTopCv(declared);
+		string value = LowerValueAs(child, value_type, LCC_INIT);
+		Emit("store " + LowerValueType(value_type) + " " + value +
+		     ", " + base);
+	}
+}
+
 void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 {
 	if (node.is_static_decl)
-		throw OutsideBoundary("function-local static object");
+	{
+		LowerLocalStatic(node);
+		return;
+	}
 	if (node.is_extern_decl && node.children.empty())
 	{
 		// A block-scope extern declaration names the namespace-scope

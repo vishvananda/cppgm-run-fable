@@ -760,6 +760,10 @@ void DeclBinder::BindSimpleDeclaration(const AstDecl& decl)
 			throw runtime_error("declaration declares nothing");
 		return;
 	}
+	// PA20: the deterministic local-static object names derive from
+	// the init-declarator's terminal token span (begin through the
+	// terminating semicolon).
+	current_decl_end_token_ = decl.end_token ? decl.end_token - 1 : 0;
 	for (size_t i = 0; i < decl.declarators.size(); i++)
 		BindInitDeclarator(specs, decl.declarators[i]);
 }
@@ -767,6 +771,7 @@ void DeclBinder::BindSimpleDeclaration(const AstDecl& decl)
 void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
                                     const AstInitDeclarator& declarator)
 {
+	current_declarator_begin_token_ = declarator.begin_token;
 	DeclaratorInfo composed =
 		builder_.ComposeDeclarator(declarator.declarator.get(), specs.type);
 	if (!composed.id)

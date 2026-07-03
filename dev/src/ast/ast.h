@@ -32,8 +32,13 @@ enum EDeclKind
 
 struct AstInitDeclarator
 {
+	AstInitDeclarator() : begin_token(0) {}
+
 	AstDeclaratorPtr declarator;
 	AstInitializerPtr init;  // null when absent
+	// PA6-terminal index of the declarator's first token (PA20: the
+	// deterministic local-static object names derive from it).
+	size_t begin_token;
 };
 
 struct AstEnumerator
@@ -96,6 +101,11 @@ struct AstMemberSpecifier
 	ETokenType keyword;
 	std::string spelling;
 };
+
+// PA20 7.1.5: whether a declaration spells `constexpr` (ordinary
+// declarations carry it in the specifier-seq, special members in the
+// member-specifier list).
+bool DeclHasConstexpr(const struct AstDecl& decl);
 
 struct AstDecl
 {

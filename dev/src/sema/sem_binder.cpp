@@ -227,17 +227,7 @@ bool SemBinder::TryFullConstant(const AstExpr& expr, ConstValue& out)
 		// A class-typed constant condition converts contextually.
 		if (value.type && RemoveTopCv(value.type)->kind == TK_CLASS)
 			analyzer_.RequireContextualBool(value, "constant expression");
-		EvalValue result;
-		try
-		{
-			result = engine_.EvaluateScalar(*value.node);
-		}
-		catch (const std::exception& error)
-		{
-			if (getenv("CPPGM_CONST_EVAL_DEBUG"))
-				fprintf(stderr, "const-eval: %s\n", error.what());
-			throw;
-		}
+		EvalValue result = engine_.EvaluateScalar(*value.node);
 		switch (result.kind)
 		{
 		case EvalValue::EV_INT:
@@ -518,6 +508,8 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 	item->is_extern_decl = specs.is_extern;
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->c_linkage = in_c_linkage_;
+	item->decl_begin_token = current_declarator_begin_token_;
+	item->decl_end_token = current_decl_end_token_;
 	AttachObjectLifetime(*item, binding, init, specs);
 	FinishConstexprObject(*item, binding, specs.is_constexpr);
 }
@@ -559,13 +551,36 @@ void SemBinder::FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 			// reuses the in-class evaluated image.
 			ConstObjectPtr image;
 			if (item.children.empty())
+			{
+				// A storage definition without its own initializer
+				// (9.4.2p3) reuses the in-class evaluated image; a
+				// missing image means the in-class initializer did
+				// not evaluate, not that the object is zero.
 				image = engine_.FindObject(binding.owner, binding.name);
+				if (!image)
+					throw runtime_error(
+						"in-class initializer of " + binding.name +
+						" is not a constant expression");
+			}
 			if (!image)
 				image = engine_.EvaluateVariableInit(
 					item, binding.type, binding.owner, binding.name);
-			if (item.weak_def && object_valued)
+			// The lowering emits weak and initializer-less definitions
+			// from the image; ordinary dynamic-init items ignore it.
+			if (object_valued)
+			{
 				unit_.const_images[&item] =
 					shared_ptr<const ConstObject>(image);
+				std::map<std::pair<const void*, string>,
+				         SemNodePtr>::iterator actions =
+					member_image_inits_.find(
+						std::pair<const void*, string>(binding.owner,
+						                               binding.name));
+				if (actions != member_image_inits_.end() &&
+				    actions->second)
+					unit_.const_image_inits[&item] =
+						std::move(actions->second);
+			}
 			return;
 		}
 		if (item.children.empty())
@@ -870,13 +885,13 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	// 7.1.5p2: constexpr functions are implicitly inline.
 	for (size_t i = 0; i < decl.specifiers.size(); i++)
 		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
-		    (decl.specifiers[i].keyword == KW_INLINE ||
-		     decl.specifiers[i].keyword == KW_CONSTEXPR))
-		{
+		    decl.specifiers[i].keyword == KW_INLINE)
 			item->inline_def = true;
-			if (decl.specifiers[i].keyword == KW_CONSTEXPR)
-				item->is_constexpr_fn = true;
-		}
+	if (DeclHasConstexpr(decl))
+	{
+		item->is_constexpr_fn = true;
+		item->inline_def = true;
+	}
 	if (const ScopeBinding* fn = FindOwnBinding(*declaring, name))
 		item->c_linkage = fn->c_linkage;
 	for (size_t i = 0; i < composed.parameters.size(); i++)

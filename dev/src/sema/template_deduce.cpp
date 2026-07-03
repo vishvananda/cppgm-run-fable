@@ -928,13 +928,11 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// 7.1.5: constexpr on the pattern (or explicit-specialization)
 	// declaration makes the instantiated body engine-evaluable and
 	// implicitly inline.
-	for (size_t i = 0; i < inner.specifiers.size(); i++)
-		if (inner.specifiers[i].kind == SPEC_KEYWORD &&
-		    inner.specifiers[i].keyword == KW_CONSTEXPR)
-		{
-			item->is_constexpr_fn = true;
-			item->inline_def = true;
-		}
+	if (DeclHasConstexpr(inner))
+	{
+		item->is_constexpr_fn = true;
+		item->inline_def = true;
+	}
 	// Slot names follow the first declaration (the primary pattern);
 	// an explicit definition's renamed parameters redirect their body
 	// bindings onto the primary-named slots.
@@ -943,37 +941,8 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 		slot_names[i] = composed.parameters[i].name;
 	if (spec.explicit_def && tmpl.pattern_decl &&
 	    tmpl.pattern_decl->declarator)
-	{
-		const AstParameterClause* primary_clause =
-			FunctionParameterClause(*tmpl.pattern_decl->declarator);
-		for (size_t i = 0;
-		     primary_clause && i < primary_clause->parameters.size() &&
-		     i < slot_names.size(); i++)
-		{
-			const AstDeclarator* pd =
-				primary_clause->parameters[i].declarator.get();
-			const AstName* pid = pd ? pd->IdName() : 0;
-			if (!pid || !pid->IsPlainIdentifier())
-				continue;
-			const string& primary_name = pid->parts[0].identifier;
-			if (primary_name.empty() || primary_name == slot_names[i])
-				continue;
-			if (!slot_names[i].empty())
-				if (ScopeBinding* redirect =
-				        FindOwnBinding(*fn_scope, slot_names[i]))
-				{
-					redirect->pack_element_name = primary_name;
-					// The lowering resolves the slot's own binding
-					// by its primary name.
-					ScopeBinding slot_binding;
-					slot_binding.kind = SB_PARAMETER;
-					slot_binding.name = primary_name;
-					slot_binding.type = redirect->type;
-					AddBinding(*fn_scope, slot_binding);
-				}
-			slot_names[i] = primary_name;
-		}
-	}
+		RedirectExplicitSlotNames(*tmpl.pattern_decl->declarator,
+		                          fn_scope, slot_names);
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		SemNodePtr parameter = MakeSemNode(SN_PARAMETER);
@@ -1006,6 +975,42 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 		unit_.deferred.push_back(std::move(item));
 	else
 		unit_.items.push_back(std::move(item));
+}
+
+// An explicit specialization's renamed parameters redirect their
+// body bindings onto the primary declaration's slot names (the
+// lowering resolves slots by the primary spelling).
+void SemBinder::RedirectExplicitSlotNames(const AstDeclarator& primary,
+                                          Scope* fn_scope,
+                                          vector<string>& slot_names)
+{
+	const AstParameterClause* primary_clause =
+		FunctionParameterClause(primary);
+	for (size_t i = 0;
+	     primary_clause && i < primary_clause->parameters.size() &&
+	     i < slot_names.size(); i++)
+	{
+		const AstDeclarator* pd =
+			primary_clause->parameters[i].declarator.get();
+		const AstName* pid = pd ? pd->IdName() : 0;
+		if (!pid || !pid->IsPlainIdentifier())
+			continue;
+		const string& primary_name = pid->parts[0].identifier;
+		if (primary_name.empty() || primary_name == slot_names[i])
+			continue;
+		if (!slot_names[i].empty())
+			if (ScopeBinding* redirect =
+			        FindOwnBinding(*fn_scope, slot_names[i]))
+			{
+				redirect->pack_element_name = primary_name;
+				ScopeBinding slot_binding;
+				slot_binding.kind = SB_PARAMETER;
+				slot_binding.name = primary_name;
+				slot_binding.type = redirect->type;
+				AddBinding(*fn_scope, slot_binding);
+			}
+		slot_names[i] = primary_name;
+	}
 }
 
 void SemBinder::PreBindDeclaredParameters(const AstDeclarator* declarator)

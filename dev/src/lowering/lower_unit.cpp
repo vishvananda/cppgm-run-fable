@@ -1,5 +1,6 @@
 #include "lowering/lower_program.h"
 
+#include <cstring>
 #include <stdexcept>
 
 #include "lowering/lower_const.h"
@@ -26,27 +27,14 @@ string QualifiedKey(const Scope* scope, const string& name)
 	return LowerScopeKey(scope) + name;
 }
 
-// The fundamental value space of an integral or enumeration type.
-EFundamentalType ValueFund(const TypePtr& type)
+// PA20: the per-scope identity of a function-local static (the plain
+// key collapses block scopes so block-scope extern declarations reach
+// their namespace entities; hoisted statics must stay distinct).
+string LocalStaticKey(const Scope* scope, const string& name)
 {
-	if (type->kind == TK_ENUM)
-		return type->named->enum_underlying;
-	return type->fundamental;
-}
-
-// Floating global initializers keep the literal spelling; the type
-// suffix follows the destination type.
-string FloatInitToken(const TypePtr& type, const LowerConst& value)
-{
-	string token = value.float_token;
-	char last = token.empty() ? 0 : token[token.size() - 1];
-	bool suffixed = last == 'f' || last == 'F' || last == 'l' ||
-		last == 'L';
-	if (!suffixed && type->fundamental == FT_FLOAT)
-		token += "f";
-	else if (!suffixed && type->fundamental == FT_LONG_DOUBLE)
-		token += "L";
-	return token;
+	char suffix[32];
+	std::snprintf(suffix, sizeof(suffix), "#%p", (const void*)scope);
+	return QualifiedKey(scope, name) + suffix;
 }
 
 // --- branch-fold analysis (BranchSpellsFnPointerAddress) --------------------
@@ -359,6 +347,52 @@ LowGlobalInfo& LowerProgram::GlobalEntry(const Scope* scope,
 	return globals_.back();
 }
 
+// PA20: whether a (block-scope) entity resolved to a hoisted
+// function-local static.
+bool LowerProgram::HasGlobal(const Scope* scope, const string& name) const
+{
+	return global_index_.count(LocalStaticKey(scope, name)) > 0;
+}
+
+// PA20: hoists a function-local static object to an internal global
+// under its per-scope key, named from the declarator's token span
+// (the reference presentation).
+LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
+                                                 const string& base_name)
+{
+	string key = LocalStaticKey(item.entity_scope, item.entity_name);
+	map<string, size_t>::iterator found = global_index_.find(key);
+	if (found != global_index_.end())
+		return globals_[found->second];
+	LowGlobalInfo info;
+	info.defined = true;
+	info.internal = true;
+	info.node = &item;
+	info.type = item.type;
+	info.low_name = UniqueSymbol(base_name);
+	global_index_[key] = globals_.size();
+	globals_.push_back(info);
+	return globals_.back();
+}
+
+// The i64 first-use guard beside a dynamically initialized
+// function-local static; returns its symbol.
+string LowerProgram::LocalStaticGuard(const string& object_name)
+{
+	string key = "#local_static_guard#" + object_name;
+	map<string, size_t>::iterator found = global_index_.find(key);
+	if (found != global_index_.end())
+		return globals_[found->second].low_name;
+	LowGlobalInfo guard;
+	guard.type = MakeFundamentalType(FT_LONG_INT);
+	guard.low_name = UniqueSymbol(object_name + "__guard");
+	guard.internal = true;
+	guard.defined = true;
+	global_index_[key] = globals_.size();
+	globals_.push_back(guard);
+	return globals_.back().low_name;
+}
+
 void LowerProgram::RegisterGlobal(const SemNode& item)
 {
 	LowGlobalInfo& info = GlobalEntry(item.entity_scope,
@@ -372,6 +406,16 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 	{
 		info.defined = true;
 		info.node = &item;
+		// PA20: the sema-evaluated constant image of an object-valued
+		// constexpr definition.
+		for (size_t u = 0; u < units_.size() && !info.image; u++)
+		{
+			map<const SemNode*,
+			    shared_ptr<const ConstObject>>::const_iterator found =
+				units_[u]->const_images.find(&item);
+			if (found != units_[u]->const_images.end())
+				info.image = found->second;
+		}
 	}
 	bool is_const = false;
 	bool is_volatile = false;
@@ -613,6 +657,14 @@ string LowerProgram::UniqueSymbol(const string& base)
 
 string LowerProgram::GlobalRef(const Scope* scope, const string& name)
 {
+	// A hoisted function-local static shadows the collapsed key.
+	map<string, size_t>::iterator local =
+		global_index_.find(LocalStaticKey(scope, name));
+	if (local != global_index_.end())
+	{
+		globals_[local->second].used = true;
+		return "@" + globals_[local->second].low_name;
+	}
 	LowGlobalInfo& info = GlobalEntry(scope, name);
 	info.used = true;
 	return "@" + info.low_name;
@@ -678,6 +730,36 @@ void LowerProgram::DemandElidedCtor(const SemNode& callee)
 	if (info.definition && info.definition->synthesized &&
 	    demanded_trees_.insert(info.definition).second)
 		DemandTreeCallees(*info.definition);
+}
+
+// PA20: an image-backed definition drops its initialization actions,
+// but the constructors those actions selected are still odr-used
+// (3.2p3): user-provided bodies emit; synthesized bodies only
+// propagate the demand into the members they use.
+void LowerProgram::DemandImageInitCallees(const SemNode& item)
+{
+	for (size_t i = 0; i < item.children.size(); i++)
+	{
+		const SemNode& action = *item.children[i];
+		if (action.kind != SN_CONSTRUCTOR_ACTION ||
+		    action.children.empty() ||
+		    action.children[0]->kind != SN_CALL_EXPRESSION ||
+		    action.children[0]->children.empty())
+			continue;
+		const SemNode& callee = *action.children[0]->children[0];
+		if (callee.kind != SN_CALLEE || !callee.entity_scope)
+			continue;
+		const char* code = callee.special == SF_CONSTRUCTOR_BASE
+			? "C2" : "C1";
+		LowFunctionInfo& info = MemberFunctionEntry(
+			callee.entity_scope, callee.entity_name, callee.type,
+			code);
+		if (info.defined && info.definition &&
+		    !info.definition->synthesized)
+			DemandFunction(info);
+		else
+			DemandElidedCtor(callee);
+	}
 }
 
 void LowerProgram::DemandTrivialCtorBody(const SemNode& callee)
@@ -771,154 +853,6 @@ string LowerProgram::StringLiteralRef(const SemNode& node)
 	string_index_[key] = strings_.size();
 	strings_.push_back(literal);
 	return "@" + strings_.back().low_name;
-}
-
-// --- rendering -------------------------------------------------------------
-
-string LowerProgram::GlobalMetadata(const LowGlobalInfo& info) const
-{
-	string meta = info.weak ? "binding=weak"
-		: info.internal ? "binding=internal" : "binding=strong";
-	if (!info.object_name.empty())
-		meta += ", object=" + info.object_name;
-	if (info.is_thread_local)
-		meta += ", storage=thread_local";
-	return " [" + meta + "]";
-}
-
-string LowerProgram::RenderAddress(const LowerConst& value)
-{
-	string symbol;
-	if (value.kind == LC_STRING)
-		symbol = StringLiteralRef(*value.string_node);
-	else if (value.entity_type->kind == TK_FUNCTION)
-		symbol = FunctionRef(value.entity_scope, value.entity_name,
-		                     value.entity_type);
-	else
-		symbol = GlobalRef(value.entity_scope, value.entity_name);
-	string text = "addr " + symbol;
-	if (value.kind == LC_ADDR && value.offset)
-	{
-		if (value.offset < 0)
-			throw OutsideBoundary("negative address offset");
-		text += " + " + to_string(value.offset);
-	}
-	return text;
-}
-
-// One structured data item; `is_zero_item` marks null pointers, which
-// spell as zero fill.
-string LowerProgram::RenderConstItem(const LowerConst& value,
-                                     const TypePtr& type,
-                                     bool& is_zero_item)
-{
-	is_zero_item = false;
-	if (value.kind == LC_NULL)
-	{
-		is_zero_item = true;
-		return "zero " + to_string(TypeSize(type));
-	}
-	if (value.kind == LC_INT)
-		return LowerValueType(type) + " " +
-			RenderConstValue(ConvertConstValue(value.ival,
-			                                   ValueFund(type)));
-	if (value.kind == LC_FLOAT)
-		return LowerValueType(type) + " " + FloatInitToken(type, value);
-	if (value.offset)
-		throw OutsideBoundary("structured address item offset");
-	return "ptr " + RenderAddress(value);
-}
-
-string LowerProgram::RenderScalarInit(const LowGlobalInfo& info)
-{
-	if (!info.node || info.node->children.empty() || info.dynamic_init)
-		return "zero";
-	LowerConst value;
-	if (!EvaluateLowerConst(*info.node->children[0], value))
-		throw OutsideBoundary("non-constant global initializer");
-	switch (value.kind)
-	{
-	case LC_INT:
-		return RenderConstValue(ConvertConstValue(value.ival,
-		                                          ValueFund(info.type)));
-	case LC_FLOAT:
-	{
-		// Scalar float initializers render numerically (the reference
-		// presentation); structured array items keep source tokens.
-		long double parsed = 0;
-		if (!DecodeFloatLiteral(value.float_token, parsed))
-			return FloatInitToken(info.type, value);
-		EFundamentalType fund = info.type->fundamental;
-		if (fund == FT_FLOAT)
-			parsed = (float)parsed;
-		else if (fund == FT_DOUBLE)
-			parsed = (double)parsed;
-		return RenderFloatConstant(parsed, fund);
-	}
-	case LC_NULL:
-		// A null-pointer initializer spells the immediate zero.
-		return "0";
-	case LC_ADDR:
-	case LC_STRING:
-		return RenderAddress(value);
-	}
-	throw OutsideBoundary("global initializer");
-}
-
-string LowerProgram::RenderArrayItems(const LowGlobalInfo& info)
-{
-	const TypePtr& array = info.type;
-	TypePtr element = RemoveTopCv(array->target);
-	unsigned long long element_size = TypeSize(element);
-	const SemNode* braced = 0;
-	if (info.node && !info.node->children.empty())
-	{
-		braced = info.node->children[0].get();
-		if (braced->kind != SN_BRACED_INIT_LIST)
-			throw OutsideBoundary("global array initializer form");
-	}
-	size_t written = braced ? braced->children.size() : 0;
-	string body;
-	for (size_t i = 0; i < written; i++)
-	{
-		LowerConst value;
-		if (!EvaluateLowerConst(*braced->children[i], value))
-			throw OutsideBoundary("non-constant array element");
-		bool is_zero_item = false;
-		body += "  " + RenderConstItem(value, element, is_zero_item) +
-			"\n";
-	}
-	if (array->bound > written)
-		body += "  zero " +
-			to_string((array->bound - written) * element_size) + "\n";
-	return body;
-}
-
-string LowerProgram::RenderGlobal(const LowGlobalInfo& info)
-{
-	TypePtr inner = info.type;
-	while (inner->kind == TK_ARRAY)
-		inner = inner->target;
-	if (RemoveTopCv(inner)->kind == TK_CLASS)
-		// Class objects zero-fill statically; construction runs in
-		// @__cppgm_init.
-		return "global @" + info.low_name + GlobalMetadata(info) +
-			" = {\n  zero " + to_string(TypeSize(info.type)) + "\n}";
-	if (RemoveTopCv(info.type)->kind == TK_ENUM && info.folded_const)
-		// An enumeration constant object: every read folds to the
-		// recorded value, so the storage keeps the structured zero
-		// image (the checked references pin this shape).
-		return "global @" + info.low_name + GlobalMetadata(info) +
-			" = {\n  zero " + to_string(TypeSize(info.type)) + "\n}";
-	if (IsReferenceType(info.type))
-		return "global @" + info.low_name + " : ptr" +
-			GlobalMetadata(info) + " = " + RenderScalarInit(info);
-	if (info.type->kind == TK_ARRAY)
-		return "global @" + info.low_name + GlobalMetadata(info) +
-			" = {\n" + RenderArrayItems(info) + "}";
-	return "global @" + info.low_name + " : " +
-		LowerValueType(info.type) + GlobalMetadata(info) + " = " +
-		RenderScalarInit(info);
 }
 
 // Demand-marks a function entry. A flip behind the sweep below re-arms
@@ -1134,6 +1068,22 @@ void LowerProgram::BuildLifetimeHelpers()
 		while (inner->kind == TK_ARRAY)
 			inner = inner->target;
 		bool is_class = RemoveTopCv(inner)->kind == TK_CLASS;
+		// PA20: an image-backed definition already carries its constant
+		// value; no initialization actions run for it, but the
+		// constructors they selected stay odr-used.
+		if (ImageBacked(info))
+		{
+			DemandImageInitCallees(*info.node);
+			for (size_t u = 0; u < units_.size(); u++)
+			{
+				map<const SemNode*, SemNodePtr>::const_iterator
+					actions =
+					units_[u]->const_image_inits.find(info.node);
+				if (actions != units_[u]->const_image_inits.end())
+					DemandImageInitCallees(*actions->second);
+			}
+			continue;
+		}
 		// PA18: a weak (instantiated static member) object does not by
 		// itself anchor the init helper; a thread-local object
 		// constructs behind its own first-use guard, not in the
@@ -1269,6 +1219,11 @@ void LowerProgram::Write(ostream& out)
 	// alternate to a fixpoint.
 	while (RenderPendingVTables())
 		LowerUsedFunctions();
+	// PA20: function-local statics register while their enclosing
+	// bodies lower; render whatever the first pass missed.
+	for (size_t i = 0; i < globals_.size(); i++)
+		if (globals_[i].defined && globals_[i].init_text.empty())
+			globals_[i].init_text = RenderGlobal(globals_[i]);
 
 	vector<string> sections[5];
 	for (size_t i = 0; i < globals_.size(); i++)

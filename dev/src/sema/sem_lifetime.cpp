@@ -969,7 +969,11 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	ScopeBinding* member = FindOwnBinding(*declaring, name);
 	if (!member || member->kind != SB_VARIABLE)
 		throw runtime_error(name + " is not a declared object");
-	member->type = MergeRedeclaredType(member->type, composed.type);
+	// 7.1.5p9: a constexpr object definition declares a const object.
+	TypePtr defined_type = composed.type;
+	if (specs.is_constexpr)
+		defined_type = MakeCvQualifiedType(defined_type, true, false);
+	member->type = MergeRedeclaredType(member->type, defined_type);
 	// 9.4.2p2: the initializer of a static data member is in the scope
 	// of its class - unqualified names there (member typedefs,
 	// constants) resolve through the member scope.
@@ -994,10 +998,16 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->is_extern_decl = declaring->kind == SCOPE_NAMESPACE;
 	item->weak_def = instantiating_;
+	// 9.4.2p3: a storage definition without its own initializer keeps
+	// the evaluated in-class value; synthesizing default-construction
+	// here would shadow it.
+	bool inclass_object = !declarator.init &&
+		engine_.FindObject(declaring, name) != 0;
 	try
 	{
-		AttachObjectLifetime(*item, *member, declarator.init.get(),
-		                     specs);
+		if (!inclass_object)
+			AttachObjectLifetime(*item, *member, declarator.init.get(),
+			                     specs);
 	}
 	catch (...)
 	{

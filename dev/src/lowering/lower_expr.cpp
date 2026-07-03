@@ -280,7 +280,8 @@ LowerValue FunctionLowerer::LowerIdValue(const SemNode& node)
 		return value;
 	}
 	bool global = node.entity_scope->kind == SCOPE_NAMESPACE ||
-		node.entity_scope->kind == SCOPE_CLASS;
+		node.entity_scope->kind == SCOPE_CLASS ||
+		program_.HasGlobal(node.entity_scope, node.entity_name);
 	string storage = global
 		? program_.GlobalRef(node.entity_scope, node.entity_name)
 		: "$" + SlotRef(node.entity_scope, node.entity_name);
@@ -744,7 +745,8 @@ string FunctionLowerer::DirectStorage(const SemNode& node)
 	    binding->type->kind == TK_ARRAY)
 		return "";
 	if (node.entity_scope->kind == SCOPE_NAMESPACE ||
-	    node.entity_scope->kind == SCOPE_CLASS)
+	    node.entity_scope->kind == SCOPE_CLASS ||
+	    program_.HasGlobal(node.entity_scope, node.entity_name))
 		return program_.GlobalRef(node.entity_scope, node.entity_name);
 	return "$" + SlotRef(node.entity_scope, node.entity_name);
 }
@@ -901,7 +903,8 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 			return temp;
 		}
 		bool global = node.entity_scope->kind == SCOPE_NAMESPACE ||
-			node.entity_scope->kind == SCOPE_CLASS;
+			node.entity_scope->kind == SCOPE_CLASS ||
+			program_.HasGlobal(node.entity_scope, node.entity_name);
 		string storage = global
 			? program_.GlobalRef(node.entity_scope, node.entity_name)
 			: "$" + SlotRef(node.entity_scope, node.entity_name);
@@ -917,7 +920,10 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		string base = LowerPointerOperand(*node.children[0]);
 		LowerValue index = LowerValueExpr(*node.children[1]);
 		TypePtr element = NodeType(node);
-		if (element->kind == TK_CLASS)
+		// Class and array elements index by scaled bytes (the inner
+		// dimension of a multi-dimensional array indexes off the
+		// element address directly).
+		if (element->kind == TK_CLASS || element->kind == TK_ARRAY)
 			return ClassArrayElement(base, index, element);
 		string temp = NewTemp();
 		Emit(temp + " = index " + LowerValueType(element) +

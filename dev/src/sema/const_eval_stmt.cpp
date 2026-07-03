@@ -194,7 +194,13 @@ void ConstEvalEngine::EvalConstructorAction(const SemNode& node,
 		args_at = 2;
 	}
 	else if (dest)
+	{
 		target = *dest;
+		// An aggregate-array element action carries its element byte
+		// offset in `value` (the zero-fill form uses ctor_addressed).
+		if (node.has_value && !node.value_zero_fill)
+			target.offset += node.value.bits;
+	}
 	else
 	{
 		TypePtr type = dest_type ? dest_type

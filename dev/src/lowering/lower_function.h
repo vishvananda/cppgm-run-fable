@@ -102,6 +102,11 @@ private:
 	void LowerStatement(const SemNode& node);
 	void LowerLocalDeclaration(const SemNode& node);
 	void LowerLocalVariable(const SemNode& node);
+	// PA20 function-local statics: the hoisted internal global, the
+	// constant-init shortcut, and the first-use guard around the
+	// declaration-point initialization.
+	void LowerLocalStatic(const SemNode& node);
+	void LowerLocalStaticInit(const SemNode& node, const string& base);
 	void LowerLocalArrayInit(const SemNode& node, const string& slot,
 	                         const TypePtr& array);
 	void LowerReturn(const SemNode& node);

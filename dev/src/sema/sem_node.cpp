@@ -228,6 +228,8 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.is_constexpr_fn = node.is_constexpr_fn;
 	out.has_float = node.has_float;
 	out.float_token = node.float_token;
+	out.decl_begin_token = node.decl_begin_token;
+	out.decl_end_token = node.decl_end_token;
 	out.noexcept_decl = node.noexcept_decl;
 	out.fn_spec = node.fn_spec;
 	out.weak_def = node.weak_def;

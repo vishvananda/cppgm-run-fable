@@ -163,6 +163,11 @@ struct SemNode
 	// rendering emits.
 	bool has_float = false;
 	string float_token;
+	// PA20 SN_VARIABLE: the init-declarator's terminal token span
+	// (begin through the terminating semicolon); the deterministic
+	// local-static object names derive from it.
+	size_t decl_begin_token = 0;
+	size_t decl_end_token = 0;
 	bool null_pointer;    // null pointer literal (possibly retyped)
 	bool is_string_literal;
 	string string_bytes;  // string literal object representation
@@ -281,6 +286,10 @@ struct SemUnit
 	// weak static-member definitions from the image (flattened items)
 	// instead of dynamic initialization.
 	map<const SemNode*, shared_ptr<const ConstObject>> const_images;
+	// The analyzed in-class initialization actions behind an
+	// image-backed definition: dropped from emission, but their
+	// selected constructors stay odr-used (3.2p3).
+	map<const SemNode*, SemNodePtr> const_image_inits;
 	// PA15: class metadata and the demand-emitted definitions (in-class
 	// methods, hidden friends, constructors/destructors). Deferred
 	// definitions are emitted by the lowering only when referenced, in
