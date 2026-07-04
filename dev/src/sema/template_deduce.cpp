@@ -1354,7 +1354,19 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	}
 	current_return_ = composed.type->target;
 	parents_.push_back(node);
-	BindStatement(*inner.body);
+	try
+	{
+		BindStatement(*inner.body);
+	}
+	catch (...)
+	{
+		// A failed instantiation leaves no trace: a poisoning caller
+		// (an eagerly bound sibling body) may retry later, and the
+		// odr-use that triggered this bind dies with it.
+		spec.body_emitted = false;
+		spec.odr_used = false;
+		throw;
+	}
 	parents_.pop_back();
 
 	bool may_throw = false;

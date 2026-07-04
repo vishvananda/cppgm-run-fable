@@ -1102,7 +1102,11 @@ void LowerProgram::LowerUsedFunctions()
 				if (!info.defined || !info.body_text.empty() ||
 				    info.extern_suppressed)
 					continue;
-				bool friend_body = phase > 0 && info.friend_def;
+				// A poisoned instantiated friend body only lowers on
+				// real demand (its stored error reports then).
+				bool friend_body = phase > 0 && info.friend_def &&
+					(!info.definition ||
+					 info.definition->instantiation_error.empty());
 				if (info.weak && !info.used && !friend_body)
 					continue;
 				FunctionLowerer lowerer(*this, *info.definition, info);
