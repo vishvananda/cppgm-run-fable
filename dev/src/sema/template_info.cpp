@@ -196,6 +196,19 @@ string ArgSpelling(const TypePtr& type)
 	case TK_ARRAY:
 		return cv + ArgSpelling(type->target) + "[" +
 			(type->bound_known ? to_string(type->bound) : string()) + "]";
+	case TK_FUNCTION:
+	{
+		string parameters;
+		for (size_t i = 0; i < type->parameters.size(); i++)
+		{
+			if (i > 0)
+				parameters += ", ";
+			parameters += ArgSpelling(type->parameters[i]);
+		}
+		if (type->variadic)
+			parameters += type->parameters.empty() ? "..." : ", ...";
+		return cv + ArgSpelling(type->target) + "(" + parameters + ")";
+	}
 	default:
 		return cv + DescribeType(type);
 	}

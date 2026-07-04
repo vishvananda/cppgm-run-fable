@@ -652,6 +652,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	if (chosen.index < binding.fn_noexcept_decl.size() &&
 	    binding.fn_noexcept_decl[chosen.index])
 		callee->noexcept_decl = true;
+	result.node->from_operator = true;
 	result.node->children.push_back(std::move(callee));
 	AppendOperatorOperands(chosen.is_member, member_owner, operands,
 	                       *result.node);

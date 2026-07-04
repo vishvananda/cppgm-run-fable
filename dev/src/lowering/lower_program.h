@@ -275,11 +275,13 @@ private:
 	bool TryRenderImageItems(const struct ConstObject& image,
 	                         const TypePtr& type,
 	                         unsigned long long offset,
-	                         unsigned long long& covered, string& out);
+	                         unsigned long long& covered, string& out,
+	                         bool in_class = false);
 	bool AppendImageScalar(const struct ConstObject& image,
 	                       const TypePtr& type,
 	                       unsigned long long offset,
-	                       unsigned long long& covered, string& out);
+	                       unsigned long long& covered, string& out,
+	                       bool in_class);
 	// The class record of `entity` across the added units.
 	const ClassInfo* ProgramClass(const NamedTypeInfo* entity) const;
 	string RenderConstItem(const struct LowerConst& value,

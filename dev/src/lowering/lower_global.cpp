@@ -197,7 +197,7 @@ bool LowerProgram::AppendImageScalar(const ConstObject& image,
                                      const TypePtr& type,
                                      unsigned long long offset,
                                      unsigned long long& covered,
-                                     string& out)
+                                     string& out, bool in_class)
 {
 	TypePtr bare = RemoveTopCv(type);
 	if (bare->kind == TK_POINTER)
@@ -210,6 +210,11 @@ bool LowerProgram::AppendImageScalar(const ConstObject& image,
 		{
 			const ConstPointer& value = slot->second;
 			string symbol;
+			if (value.sym_fn_type && in_class)
+				// The checked references render function addresses in
+				// array images, but a class image holding one
+				// zero-fills and initializes dynamically.
+				return false;
 			if (value.sym_fn_type)
 				symbol = FunctionRef(value.sym_scope, value.sym_name,
 				                     value.sym_fn_type,
@@ -271,7 +276,7 @@ bool LowerProgram::TryRenderImageItems(const ConstObject& image,
                                        const TypePtr& type,
                                        unsigned long long offset,
                                        unsigned long long& covered,
-                                       string& out)
+                                       string& out, bool in_class)
 {
 	TypePtr bare = RemoveTopCv(type);
 	if (bare->kind == TK_ARRAY)
@@ -283,7 +288,7 @@ bool LowerProgram::TryRenderImageItems(const ConstObject& image,
 		{
 			unsigned long long at = offset + i * stride;
 			if (!TryRenderImageItems(image, bare->target, at, covered,
-			                         out))
+			                         out, in_class))
 				return false;
 			if (covered < at + stride)
 			{
@@ -324,7 +329,7 @@ bool LowerProgram::TryRenderImageItems(const ConstObject& image,
 					covered = at;
 				}
 				if (!TryRenderImageItems(image, field.type, at,
-				                         covered, out))
+				                         covered, out, true))
 					return false;
 			}
 		}
@@ -335,7 +340,7 @@ bool LowerProgram::TryRenderImageItems(const ConstObject& image,
 		out += "  zero " + to_string(offset - covered) + "\n";
 		covered = offset;
 	}
-	return AppendImageScalar(image, bare, offset, covered, out);
+	return AppendImageScalar(image, bare, offset, covered, out, in_class);
 }
 
 // One attempt per global, made before BuildLifetimeHelpers decides

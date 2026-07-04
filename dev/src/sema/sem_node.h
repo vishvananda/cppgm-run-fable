@@ -245,6 +245,10 @@ struct SemNode
 	// instantiation, so its references are not definition-time demand
 	// (14.7.1: an unused instantiated body is never required).
 	bool from_instantiation = false;
+	// SN_CALL_EXPRESSION: the call came from overloaded-operator
+	// syntax (the checked references drop such calls when they
+	// initialize an empty class object).
+	bool from_operator = false;
 	// SN_CONSTRUCTOR_ACTION: the call's second child is the target
 	// object address (declared objects, members, placement results),
 	// not the first constructor argument.
