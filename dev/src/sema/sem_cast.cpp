@@ -111,6 +111,20 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 				? VC_XVALUE : VC_LVALUE;
 			return value;
 		}
+		// 5.2.9p2/p11 with op != KW_CONST_CAST: a downcast reference
+		// static_cast views the derived object (the single
+		// -inheritance base sits at offset 0, so no adjustment).
+		int down = from->kind == TK_CLASS && to->kind == TK_CLASS
+			? BaseClassDistance(to->named, from->named) : -1;
+		if (down > 0 && op == KW_STATIC_CAST)
+		{
+			value.type = to;
+			if (value.node)
+				value.node->type = to;
+			value.category = dest->kind == TK_RVALUE_REFERENCE
+				? VC_XVALUE : VC_LVALUE;
+			return value;
+		}
 	}
 	if (value.function_set || !compatible)
 		throw OutsideBoundary("reference cast form");
