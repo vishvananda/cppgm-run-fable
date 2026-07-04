@@ -691,6 +691,37 @@ void SemBinder::SubstituteSlotArg(const TemplateArg& slot,
 	else if (slot.is_value && slot.value_param >= 0 &&
 	         (size_t)slot.value_param < bound.size())
 		arg = bound[slot.value_param];
+	else if (slot.is_value && slot.dependent_value)
+	{
+		// A dependent value expression (`!!Property::template v<T>`)
+		// re-evaluates under the deduced bindings; an evaluation
+		// failure propagates so the match check can reject.
+		Scope* saved = current_;
+		current_ = alias_scope;
+		try
+		{
+			ConstValue value;
+			try
+			{
+				value = EvaluateConstExpr(*slot.dependent_value, *this);
+			}
+			catch (const std::exception&)
+			{
+				if (!TryFullConstant(*slot.dependent_value, value))
+					throw;
+			}
+			arg.value_type = value.type;
+			arg.value_bits = value.bits;
+			arg.value_param = -1;
+			arg.dependent_value = 0;
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+	}
 	out.push_back(arg);
 }
 
