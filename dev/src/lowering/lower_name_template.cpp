@@ -1,6 +1,7 @@
 #include "lowering/lower_name.h"
 
 #include <stdexcept>
+#include <cstdio>
 #include <vector>
 
 #include "ast/ast.h"
@@ -350,6 +351,76 @@ void ApplyWrittenOps(const vector<string>& ops, Substitutions& subs,
 	}
 }
 
+string MangleWrittenParameter(const AstParameter& parameter, bool is_pack,
+                              Substitutions& subs);
+
+// Whether a written parameter spells its own `...` expansion.
+bool WrittenParameterIsPack(const AstParameter& parameter)
+{
+	if (!parameter.declarator)
+		return false;
+	for (size_t i = 0; i < parameter.declarator->items.size(); i++)
+		if (parameter.declarator->items[i].kind == DI_PACK)
+			return true;
+	return false;
+}
+
+// A written declarator over the base type: prefix pointer/reference/cv
+// marks apply to the base; one parameter clause wraps it as a function
+// type (`F <return> <parameters> E`, a substitution candidate), with a
+// nested declarator's marks (the `(*)` of a pointer-to-function)
+// applying after the wrap.
+void ApplyWrittenDeclarator(const AstDeclarator& declarator,
+                            Substitutions& subs, string& body,
+                            string& key)
+{
+	vector<string> prefix;
+	const AstParameterClause* clause = 0;
+	vector<string> tail;
+	for (size_t i = 0; i < declarator.items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator.items[i];
+		if (item.kind == DI_ID || item.kind == DI_PACK)
+			continue;
+		if (item.kind == DI_PTR || item.kind == DI_CV)
+		{
+			if (clause)
+				throw OutsideBoundary("mangled dependent type form");
+			if (item.kind == DI_PTR)
+				prefix.push_back(item.spelling == "*"
+				                     ? "P"
+				                     : item.spelling == "&" ? "R" : "O");
+			else
+				prefix.push_back(item.spelling == "volatile" ? "V"
+				                                             : "K");
+		}
+		else if (item.kind == DI_PARAMS && item.params && !clause)
+			clause = item.params.get();
+		else if (item.kind == DI_NESTED && item.nested && tail.empty())
+			tail = WrittenOps(*item.nested);
+		else
+			throw OutsideBoundary("mangled dependent type form");
+	}
+	ApplyWrittenOps(prefix, subs, body, key);
+	if (!clause)
+	{
+		ApplyWrittenOps(tail, subs, body, key);
+		return;
+	}
+	string params;
+	for (size_t p = 0; p < clause->parameters.size(); p++)
+		params += MangleWrittenParameter(
+			clause->parameters[p],
+			WrittenParameterIsPack(clause->parameters[p]), subs);
+	if (clause->parameters.empty())
+		params = "v";
+	if (clause->variadic)
+		params += "z";
+	key = "F(" + params + ")->" + key;
+	body = MangleSubstitutable(key, "F" + body + params + "E", subs);
+	ApplyWrittenOps(tail, subs, body, key);
+}
+
 string MangleWrittenTypeId(const AstTypeId& id, Substitutions& subs,
                            string* key_out)
 {
@@ -357,7 +428,7 @@ string MangleWrittenTypeId(const AstTypeId& id, Substitutions& subs,
 	string body = MangleWrittenBase(TypeSpecifiers(id.specifiers), true,
 	                                subs, key);
 	if (id.declarator)
-		ApplyWrittenOps(WrittenOps(*id.declarator), subs, body, key);
+		ApplyWrittenDeclarator(*id.declarator, subs, body, key);
 	if (key_out)
 		*key_out = key;
 	return body;
