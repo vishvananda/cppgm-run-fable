@@ -58,6 +58,30 @@ void SemBinder::AppendAggregateInit(const ClassInfo& cls,
 		throw runtime_error("too many initializers for aggregate");
 }
 
+// A work-free member-class temporary retargeted onto the member
+// itself (copy elision): a declared-default constructor stays odr
+// -used (elided), a fully implicit one drops (trivial_init).
+SemNodePtr SemBinder::ElideMemberTemporary(const ClassInfo& member_cls,
+                                           SemNodePtr action,
+                                           SemNodePtr member)
+{
+	SemNode& call = *action->children[0];
+	bool declared_default = false;
+	for (size_t i = 0; i < member_cls.ctors.size(); i++)
+		if (member_cls.ctors[i].kind == CK_ORDINARY &&
+		    !member_cls.ctors[i].implicit &&
+		    member_cls.ctors[i].type->parameters.empty())
+			declared_default = true;
+	if (declared_default)
+		action->elided = true;
+	else
+		action->trivial_init = true;
+	call.children.insert(call.children.begin() + 1,
+	                     AddressOfNode(std::move(member)));
+	action->ctor_addressed = true;
+	return action;
+}
+
 // 8.5.1 with brace elision: members initialize in declaration order
 // from `items`, a nested braced item initializes one subaggregate
 // fully, and a non-braced item starts an elided subaggregate that
@@ -121,22 +145,8 @@ size_t SemBinder::ConsumeAggregateClassItem(const ClassInfo& member_cls,
 		    !member_cls.has_user_ctor &&
 		    !unit_.classes.NeedsConstruction(member_cls))
 		{
-			SemNodePtr action = std::move(probe.node);
-			SemNode& call = *action->children[0];
-			bool declared_default = false;
-			for (size_t i = 0; i < member_cls.ctors.size(); i++)
-				if (member_cls.ctors[i].kind == CK_ORDINARY &&
-				    !member_cls.ctors[i].implicit &&
-				    member_cls.ctors[i].type->parameters.empty())
-					declared_default = true;
-			if (declared_default)
-				action->elided = true;
-			else
-				action->trivial_init = true;
-			call.children.insert(call.children.begin() + 1,
-			                     AddressOfNode(std::move(member)));
-			action->ctor_addressed = true;
-			out.push_back(std::move(action));
+			out.push_back(ElideMemberTemporary(
+				member_cls, std::move(probe.node), std::move(member)));
 			return at + 1;
 		}
 		if (probe_type->kind == TK_CLASS &&

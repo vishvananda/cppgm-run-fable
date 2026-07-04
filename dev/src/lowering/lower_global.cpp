@@ -51,6 +51,30 @@ string FloatInitToken(const TypePtr& type, const LowerConst& value)
 
 // --- rendering -------------------------------------------------------------
 
+// Thread-local objects expose their access wrapper (the backend's
+// TLS entry point).
+void LowerProgram::AppendTlsWrapperDeclares(vector<string>& declares)
+{
+	for (size_t i = 0; i < globals_.size(); i++)
+	{
+		const LowGlobalInfo& info = globals_[i];
+		if (!info.is_thread_local || (!info.defined && !info.used))
+			continue;
+		string object = info.object_name;
+		if (object.compare(0, 2, "_Z") == 0)
+			object = "_ZTW" + object.substr(2);
+		string meta = info.internal ? "binding=internal"
+		                            : "binding=strong";
+		if (!object.empty())
+			meta += ", object=" + object;
+		declares.push_back(
+			"declare function @" + info.low_name +
+			"__tls_wrapper() -> ptr [" + meta +
+			", tls_for=@" + info.low_name + "]");
+	}
+}
+
+
 string LowerProgram::GlobalMetadata(const LowGlobalInfo& info) const
 {
 	string meta = info.weak ? "binding=weak"

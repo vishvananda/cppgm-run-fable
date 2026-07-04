@@ -133,6 +133,28 @@ const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 	return slot.get();
 }
 
+// 14.5.4p5: a template-id friend (`operator+<>`) refers to a
+// specialization of an already-declared function template; it grants
+// access without declaring a new function (and never hides the
+// template from resolution).
+void SemBinder::BindTemplateIdFriend(Scope* target, const string& name,
+                                     const TypePtr& declared)
+{
+	const ScopeBinding* existing = UnqualifiedLookup(target, name,
+	                                                 SLF_ANY);
+	if (!existing || existing->kind != SB_FUNCTION ||
+	    existing->fn_templates.empty())
+		throw runtime_error("template-id friend matches no function "
+		                    "template");
+	const FunctionSpecialization* spec = 0;
+	for (size_t t = 0; !spec && t < existing->fn_templates.size(); t++)
+		spec = DeduceFunctionTemplateFromTarget(
+			*existing->fn_templates[t], declared);
+	if (!spec)
+		throw runtime_error("template-id friend matches no function "
+		                    "template");
+}
+
 void SemBinder::CaptureClassTemplate(const AstDecl& decl,
                                      const AstDecl& inner, bool definition)
 {

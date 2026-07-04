@@ -163,6 +163,10 @@ private:
 	                              const AstInitializer* init,
 	                              const DeclSpecifierInfo& specs);
 	void BindFriendFunction(const AstDecl& decl, ClassInfo& cls);
+	// 14.5.4p5: a template-id friend pins a specialization of an
+	// existing template instead of declaring a new function.
+	void BindTemplateIdFriend(Scope* target, const string& name,
+	                          const TypePtr& declared);
 	// PA16: a conversion-function member declaration (12.3.2).
 	void BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
 	                            const AstNamePart& part);
@@ -180,6 +184,11 @@ private:
 	                           ESpecialFunction special, SemNode& node);
 	void BindQualifiedSpecialMember(const AstDecl& decl,
 	                                const AstName& id);
+	void BindQualifiedSpecialMemberInner(const AstDecl& decl,
+	                                     const AstName& id,
+	                                     bool defaulted);
+	void BindQualifiedDestructor(const AstDecl& decl, Scope* declaring,
+	                             ClassInfo& cls, bool defaulted);
 	void BindQualifiedConversionFunction(const AstDecl& decl,
 	                                     const AstNamePart& part,
 	                                     Scope* declaring, ClassInfo& cls);
@@ -700,6 +709,10 @@ private:
 	                                 SemNodePtr member,
 	                                 const vector<AstExprPtr>& items,
 	                                 size_t at, vector<SemNodePtr>& out);
+	// A work-free member-class temporary retargeted onto the member
+	// (the pinned copy-elision shape).
+	SemNodePtr ElideMemberTemporary(const ClassInfo& member_cls,
+	                                SemNodePtr action, SemNodePtr member);
 	size_t ConsumeArrayItems(const ClassField& field,
 	                         const SemNode& member_proto,
 	                         const vector<AstExprPtr>& items,

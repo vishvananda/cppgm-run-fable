@@ -801,11 +801,18 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 		if (target.text.empty())
 			target.text = LowerAddressExpr(lhs);
 		target.type = type;
-		// A member lvalue recomputes its store address after the value
-		// (the canonical reference order).
-		return LowerCompoundAssignment(
-			node, target,
-			lhs.kind == SN_MEMBER_EXPRESSION ? &lhs : 0);
+		// A member lvalue (or a reference-bound name, whose address
+		// loads from its slot) recomputes its store address after the
+		// value (the canonical reference order).
+		const SemNode* recompute =
+			lhs.kind == SN_MEMBER_EXPRESSION ? &lhs : 0;
+		if (!recompute && lhs.kind == SN_ID_EXPRESSION)
+		{
+			const ScopeBinding* binding = EntityBinding(lhs);
+			if (binding && IsReferenceType(binding->type))
+				recompute = &lhs;
+		}
+		return LowerCompoundAssignment(node, target, recompute);
 	}
 	// 5.17 in the canonical reference order: the value computes before
 	// the store address.
@@ -839,7 +846,8 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 		result.text = PointerStep(old_value, count, type->target,
 		                          node.op == OP_MINUSASS);
 		Emit("store ptr " + result.text + ", " +
-		     (member_lhs ? MemberAddress(*member_lhs) : target.text));
+		     (member_lhs ? LowerAddressExpr(*member_lhs)
+		                 : target.text));
 		return result;
 	}
 	TypePtr common = IsCompoundShift(node.op)
@@ -860,7 +868,7 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 	back.type = common;
 	back = ConvertValue(back, type, LCC_OPERAND);
 	Emit("store " + type_text + " " + back.text + ", " +
-	     (member_lhs ? MemberAddress(*member_lhs) : target.text));
+	     (member_lhs ? LowerAddressExpr(*member_lhs) : target.text));
 	result.text = back.text;
 	return result;
 }

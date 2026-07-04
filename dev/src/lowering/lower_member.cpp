@@ -582,6 +582,30 @@ string FunctionLowerer::ClassArrayElement(const string& base,
 	return result;
 }
 
+// The checked references drop an overloaded-operator call that
+// initializes an empty class object (the callee stays odr-used and
+// prints on its ordinary terms; literal objects in the dropped
+// arguments still exist).
+bool FunctionLowerer::ElideEmptyOperatorInit(const SemNode& node,
+                                             const SemNode& child)
+{
+	if (child.kind != SN_CALL_EXPRESSION || !child.from_operator ||
+	    child.children.empty() ||
+	    child.children[0]->kind != SN_CALLEE ||
+	    RemoveTopCv(node.type)->kind != TK_CLASS ||
+	    !RemoveTopCv(node.type)->named->class_record ||
+	    !RemoveTopCv(node.type)->named->class_record->is_empty)
+		return false;
+	const SemNode& callee = *child.children[0];
+	if (callee.is_method || callee.special != SF_NONE)
+		program_.MemberFunctionRef(callee);
+	else
+		program_.FunctionRef(callee.entity_scope, callee.entity_name,
+		                     callee.type, callee.fn_spec);
+	RegisterDroppedLiterals(program_, child);
+	return true;
+}
+
 void FunctionLowerer::LowerClassLocal(const SemNode& node)
 {
 	const TypePtr& declared = node.type;
@@ -685,26 +709,8 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 			break;
 		case SN_CALL_EXPRESSION:
 		case SN_CONDITIONAL_EXPRESSION:
-			// The checked references drop an overloaded-operator call
-			// that initializes an empty class object (the callee
-			// stays odr-used and prints on its ordinary terms).
-			if (child.kind == SN_CALL_EXPRESSION && child.from_operator &&
-			    !child.children.empty() &&
-			    child.children[0]->kind == SN_CALLEE &&
-			    RemoveTopCv(node.type)->kind == TK_CLASS &&
-			    RemoveTopCv(node.type)->named->class_record &&
-			    RemoveTopCv(node.type)->named->class_record->is_empty)
-			{
-				const SemNode& callee = *child.children[0];
-				if (callee.is_method || callee.special != SF_NONE)
-					program_.MemberFunctionRef(callee);
-				else
-					program_.FunctionRef(callee.entity_scope,
-					                     callee.entity_name,
-					                     callee.type, callee.fn_spec);
-				RegisterDroppedLiterals(program_, child);
+			if (ElideEmptyOperatorInit(node, child))
 				break;
-			}
 			// A class prvalue initializer constructs the declared
 			// object directly (copy elision).
 			LowerClassInit(child, decl_address);

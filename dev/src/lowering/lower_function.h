@@ -213,6 +213,10 @@ private:
 	LowerValue LowerBitFieldAssignment(const SemNode& node);
 	LowerValue LowerMemberAssignment(const SemNode& node);
 	void LowerClassLocal(const SemNode& node);
+	// True when an empty-class local's operator-call initializer
+	// drops (the pinned reference shape); demands the callee.
+	bool ElideEmptyOperatorInit(const SemNode& node,
+	                            const SemNode& child);
 	void LowerConstructorCall(const SemNode& action,
 	                          const string& this_text);
 	// PA16: a trivial copy/move construction lowers as a raw object

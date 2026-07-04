@@ -122,6 +122,23 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 			object.node = ImplicitThisObject();
 			object.type = object.node->type;
 			object.category = VC_LVALUE;
+			// A qualified call adjusts to the named class first, then
+			// to the member's owner within it (the two-projection
+			// reference shape for `super::f()` chains).
+			int prefix_hops = qualified
+				? BaseClassDistance(RemoveTopCv(object.type)->named,
+				                    target) : 0;
+			if (prefix_hops > 0)
+			{
+				SemNodePtr adjusted =
+					MakeSemNode(SN_MEMBER_EXPRESSION);
+				adjusted->type = MakeNamedType(TK_CLASS, target);
+				adjusted->category = VC_LVALUE;
+				adjusted->base_hops = prefix_hops;
+				adjusted->children.push_back(std::move(object.node));
+				object.node = std::move(adjusted);
+				object.type = MakeNamedType(TK_CLASS, target);
+			}
 			return AnalyzeMethodCall(std::move(object), binding,
 			                         expr.arguments, qualified);
 		}

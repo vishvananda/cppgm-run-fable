@@ -19,6 +19,20 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA15 assignment boundary");
 }
 
+// Whether an out-of-class member definition spells `inline` (7.1.2p4:
+// weak, on-demand emission like an in-class definition).
+bool DeclSpellsInline(const AstDecl& decl)
+{
+	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
+		if (decl.member_specifiers[i].keyword == KW_INLINE)
+			return true;
+	for (size_t i = 0; i < decl.specifiers.size(); i++)
+		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
+		    decl.specifiers[i].keyword == KW_INLINE)
+			return true;
+	return false;
+}
+
 }  // namespace
 
 ClassInfo* SemBinder::OpenClass() const
@@ -583,6 +597,52 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		decl.special_init && decl.special_init->kind == INIT_DEFAULT;
 	if (decl.kind != DK_SPECIAL_MEMBER_DEFINITION && !defaulted)
 		throw OutsideBoundary("qualified special member declaration");
+	BindQualifiedSpecialMemberInner(decl, id, defaulted);
+}
+
+// Out-of-class destructor definition or `= default`.
+void SemBinder::BindQualifiedDestructor(const AstDecl& decl,
+                                        Scope* declaring, ClassInfo& cls,
+                                        bool defaulted)
+{
+	if (!cls.dtor_user_declared)
+		throw runtime_error("destructor definition matches no "
+		                    "declaration");
+	if (cls.dtor_definition)
+		throw runtime_error("redefinition of destructor");
+	if (defaulted)
+	{
+		// 8.4.3: defaulted outside the class behaves implicitly
+		// but emits as a source-owned strong definition.
+		cls.has_user_dtor = false;
+		InvalidateClassFacts();
+		EnsureImplicitDtor(cls, true);
+		return;
+	}
+	DeferredBody body;
+	body.decl = &decl;
+	body.composed.type = MakeFunctionType(
+		MakeFundamentalType(FT_VOID), vector<TypePtr>(), false);
+	body.name = "~" + declaring->name;
+	body.fn_scope = MakeSpecialMemberScope(body.name, body.composed,
+	                                       cls);
+	body.declaring = declaring;
+	body.cls = &cls;
+	body.out_of_class = true;
+	cls.dtor_definition = &decl;
+	cls.has_user_dtor = true;
+	InvalidateClassFacts();
+	// PA17: an out-of-class destructor definition anchors the
+	// vtable when the destructor is the class's key function.
+	if (cls.is_polymorphic && cls.key_is_dtor)
+		cls.key_defined_in_tu = true;
+	AnalyzeDeferredBody(body);
+}
+
+void SemBinder::BindQualifiedSpecialMemberInner(const AstDecl& decl,
+                                                const AstName& id,
+                                                bool defaulted)
+{
 	Scope* declaring = ResolvePrefixScope(id);
 	if (declaring->kind != SCOPE_CLASS)
 		throw OutsideBoundary("qualified special member scope");
@@ -616,39 +676,7 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 		throw runtime_error("special member does not name its class");
 	if (part.tilde)
 	{
-		// Out-of-class destructor definition or `= default`.
-		if (!cls->dtor_user_declared)
-			throw runtime_error("destructor definition matches no "
-			                    "declaration");
-		if (cls->dtor_definition)
-			throw runtime_error("redefinition of destructor");
-		if (defaulted)
-		{
-			// 8.4.3: defaulted outside the class behaves implicitly
-			// but emits as a source-owned strong definition.
-			cls->has_user_dtor = false;
-			InvalidateClassFacts();
-			EnsureImplicitDtor(*cls, true);
-			return;
-		}
-		DeferredBody body;
-		body.decl = &decl;
-		body.composed.type = MakeFunctionType(
-			MakeFundamentalType(FT_VOID), vector<TypePtr>(), false);
-		body.name = "~" + declaring->name;
-		body.fn_scope = MakeSpecialMemberScope(body.name,
-		                                       body.composed, *cls);
-		body.declaring = declaring;
-		body.cls = cls;
-		body.out_of_class = true;
-		cls->dtor_definition = &decl;
-		cls->has_user_dtor = true;
-		InvalidateClassFacts();
-		// PA17: an out-of-class destructor definition anchors the
-		// vtable when the destructor is the class's key function.
-		if (cls->is_polymorphic && cls->key_is_dtor)
-			cls->key_defined_in_tu = true;
-		AnalyzeDeferredBody(body);
+		BindQualifiedDestructor(decl, declaring, *cls, defaulted);
 		return;
 	}
 	// Parameters resolve against the class's lexical scope.
@@ -695,7 +723,9 @@ void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
 	body.fn_scope = MakeSpecialMemberScope(body.name, composed, *cls);
 	body.declaring = declaring;
 	body.cls = cls;
-	body.out_of_class = true;  // source-owned: both entries print
+	// Source-owned: both entries print - unless declared inline
+	// (weak, on demand).
+	body.out_of_class = !DeclSpellsInline(decl);
 	AnalyzeDeferredBody(body);
 }
 
@@ -824,24 +854,7 @@ void SemBinder::BindFriendFunction(const AstDecl& decl, ClassInfo& cls)
 	    (terminal.kind == NP_TEMPLATE_ID ||
 	     terminal.operator_template_id || !terminal.arguments.empty()))
 	{
-		// 14.5.4p5: a template-id friend refers to a specialization
-		// of an already-declared function template; it grants access
-		// without declaring a new function (and never hides the
-		// template from resolution).
-		const ScopeBinding* existing =
-			UnqualifiedLookup(target, name, SLF_ANY);
-		if (!existing || existing->kind != SB_FUNCTION ||
-		    existing->fn_templates.empty())
-			throw runtime_error("template-id friend matches no "
-			                    "function template");
-		const FunctionSpecialization* spec = 0;
-		for (size_t t = 0;
-		     !spec && t < existing->fn_templates.size(); t++)
-			spec = DeduceFunctionTemplateFromTarget(
-				*existing->fn_templates[t], composed.type);
-		if (!spec)
-			throw runtime_error("template-id friend matches no "
-			                    "function template");
+		BindTemplateIdFriend(target, name, composed.type);
 		return;
 	}
 	Scope* saved = current_;

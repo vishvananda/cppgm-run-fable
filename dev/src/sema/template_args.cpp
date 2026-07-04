@@ -680,8 +680,35 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 		if (is_expansion)
 		{
 			if (!param.pack)
-				throw OutsideBoundary("pack-expansion argument for a "
-				                      "non-pack parameter");
+			{
+				// 14.3p1 over a concrete expansion: the expanded
+				// elements fill successive fixed parameters (a
+				// pattern slot cannot).
+				vector<TemplateArg> expanded;
+				ExpandTemplateArgumentPack(tmpl, param, argument,
+				                           expanded, partial);
+				for (size_t k = 0; k < expanded.size(); k++)
+				{
+					if (cursor >= tmpl.params.size())
+						throw runtime_error("too many template "
+						                    "arguments for " +
+						                    tmpl.name);
+					if (expanded[k].pack_pattern)
+						throw OutsideBoundary(
+							"pack-expansion argument for a non-pack "
+							"parameter");
+					args.push_back(expanded[k]);
+					if (!tmpl.params[cursor].pack)
+					{
+						if (partial)
+							BindParamAlias(*partial,
+							               tmpl.params[cursor],
+							               args.back());
+						cursor++;
+					}
+				}
+				continue;
+			}
 			ExpandTemplateArgumentPack(tmpl, param, argument, args,
 			                           partial);
 		}

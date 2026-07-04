@@ -141,26 +141,29 @@ the existing PA14-PA20 lowering path.
 
 ## Status (2026-07-04)
 
-158/180 pa21 tests pass; through-pa20 fully green (1551/1551); file
-audit clean. Landed: the full member-template layer (member function /
-constructor / class / alias templates, out-of-class `template<..>
-template<..>` definitions, member-template calls and operators),
-alias templates (including as template-template arguments), template
--template parameters, friend templates with specialization-wide
-grants, explicit instantiation/extern-template semantics, explicit
-member specializations with stale-instantiation refresh, multi-pack
-partial specializations, dependent array bounds, function-type pack
-patterns, deferred pattern type slots with match-time substitution,
-deferred specialization bodies (14.7.1p4), and empty extra bases.
+COMPLETE: 180/180 pa21 tests pass; through-pa21 fully green
+(1731/1731); file audit clean.
 
-Remaining (22): LowIR shape mismatches around instantiated member
-bodies (store shapes, base-hop chains, local statics and constexpr
-fn-pointer arrays per specialization, hidden-friend emission order,
-extern-template-builtin rejection), dependent member-alias
-template-template replay, the missing-template-keyword rejection, the
-nested-member partial-specialization reference-reset pair, the
-cv-qualified wrapper partial ambiguity, the alias-nontype tuple_impl
-case, and the multi-argument array functional cast.
+Landed on top of the earlier member-template/alias/friend/explicit
+-instantiation work: template-template argument mangling (nested
+template names, `J..E` parameter-pack wrapping), array functional
+casts (`A{pack...}` temporaries with discarded-array materialization),
+the 14.2p4 dependent member template-id keyword check (definition-time
+sanity walk), the 13.5p6 operator-specialization operand check,
+extra-base call projections, weak hex-named local statics inside
+vague-linkage definitions, instantiated bodies never counting as
+definition-time demand (14.7.1), the fn-pointer image policy (class
+images go dynamic, array images stay static), C-style function-type
+argument spellings, the empty-class operator-init elision, work-free
+aggregate-member temporaries, direct call-result transfer in trivial
+copies, template-id friends (`operator+<>`) pinning existing template
+specializations, spec-identified template-id static calls,
+using-imported member templates with 7.3.3p15 hiding, alias pack-slot
+forwarding through substitution, folded static-member reads demanding
+weak storage outside instantiated bodies, qualified super-call
+two-stage base projections, reference-lvalue compound-assignment
+store re-derivation, inline out-of-class ctor weakness, and concrete
+pack expansions filling fixed template parameters (14.3p1).
 
 ## Validation
 
