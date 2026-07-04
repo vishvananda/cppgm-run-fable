@@ -1035,20 +1035,26 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 	// reference prints one definition carrying both symbols; a base
 	// makes them distinct definitions, each emitted on its own demand
 	// (witness: inherited-class-template-conversion-operator). PA23: a
-	// by-value class-typed parameter also splits the unit; the lone
-	// base entry emits by itself (the tag-constructor shape).
+	// demand fired from inside another specialization's own (non
+	// -synthesized) constructor body also stays a lone base entry;
+	// only source-owned and inheriting-constructor contexts drag the
+	// complete entry along.
 	if ((info.special_code == "C2" || info.special_code == "D2") &&
 	    info.defined && info.definition && !info.definition->synthesized)
 	{
 		const ClassInfo* cls = MethodClass(info.type);
-		bool value_class_param = false;
-		for (size_t p = 1; p < info.type->parameters.size(); p++)
-			if (RemoveTopCv(info.type->parameters[p])->kind == TK_CLASS)
-				value_class_param = true;
+		bool from_spec_ctor = lowering_context_ &&
+			(lowering_context_->special_code == "C1" ||
+			 lowering_context_->special_code == "C2") &&
+			lowering_context_->definition &&
+			!lowering_context_->definition->synthesized &&
+			!lowering_context_->fn_spec &&
+			lowering_context_->scope && lowering_context_->scope->entity &&
+			lowering_context_->scope->entity->spec_template;
 		bool comdat_pair = cls &&
 			((cls->is_polymorphic && cls->dtor_virtual) ||
 			 (cls->entity && cls->entity->spec_template &&
-			  !cls->base && !value_class_param));
+			  !cls->base && !from_spec_ctor));
 		// A constructor-template specialization's entries emit each
 		// on their own demand (witness: the inherited constructor
 		// -template forwarding references carry a lone C2).
@@ -1158,8 +1164,11 @@ void LowerProgram::LowerUsedFunctions()
 					 info.definition->instantiation_error.empty());
 				if (info.weak && !info.used && !friend_body)
 					continue;
+				const LowFunctionInfo* saved = lowering_context_;
+				lowering_context_ = &info;
 				FunctionLowerer lowerer(*this, *info.definition, info);
 				info.body_text = lowerer.Lower();
+				lowering_context_ = saved;
 			}
 		}
 	}
@@ -1170,8 +1179,11 @@ void LowerProgram::LowerHelper(LowFunctionInfo& info,
 {
 	info.definition = &definition;
 	info.defined = true;
+	const LowFunctionInfo* saved = lowering_context_;
+	lowering_context_ = &info;
 	FunctionLowerer lowerer(*this, definition, info);
 	info.body_text = lowerer.Lower();
+	lowering_context_ = saved;
 }
 
 // One dynamic global initializer: when the value (or referent

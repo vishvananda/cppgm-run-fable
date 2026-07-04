@@ -311,6 +311,10 @@ private:
 	// The lowest functions_ index whose demand flipped since the body
 	// sweep last passed it (rescans restart there, not from zero).
 	size_t lower_floor_;
+	// The function whose body is currently lowering (null between
+	// bodies): demands fired from inside it can consult their origin
+	// (the constructor-entry pairing rule keys on it).
+	const LowFunctionInfo* lowering_context_ = 0;
 	vector<SemNodePtr> helper_defs_;  // synthesized init/fini trees
 	// Synthesized definitions whose callees were already demand-walked
 	// (DemandTreeCallees); demand is monotonic, so once is enough.
