@@ -415,6 +415,9 @@ string ArgKey(const TemplateArg& arg)
 		return "vp" + to_string(arg.value_param);
 	if (arg.dependent_value)
 		return "vdep";
+	if (arg.entity_scope)
+		return "ven:" + LowerScopeKey(arg.entity_scope) +
+			arg.entity_name;
 	return "v" + TypeKey(arg.type) + ":" + to_string(arg.value_bits);
 }
 
@@ -467,6 +470,19 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 			? string("T_") : "T" + to_string(arg.value_param - 1) + "_";
 	if (arg.dependent_value)
 		return "L_DEPE";
+	// 5.1.6: an entity-valued argument spells `L <mangled-name> E`.
+	if (arg.entity_scope)
+	{
+		vector<NameComponent> parts =
+			ScopeComponents(arg.entity_scope);
+		string spelled;
+		for (size_t i = 0; i < parts.size(); i++)
+			spelled += SourceName(parts[i].name);
+		spelled += SourceName(arg.entity_name);
+		if (!parts.empty())
+			spelled = "N" + spelled + "E";
+		return "L_Z" + spelled + "E";
+	}
 	string code = MangleType(arg.type, subs);
 	string digits;
 	if (IsSignedIntegralFundamental(arg.value_type) &&

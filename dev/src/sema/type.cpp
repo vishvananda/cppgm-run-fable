@@ -329,6 +329,10 @@ bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
 		return false;
 	if (a.dependent_value)
 		return a.dependent_value == b.dependent_value;
+	// PA22 entity-valued arguments compare by entity identity.
+	if (a.entity_scope || b.entity_scope)
+		return a.entity_scope == b.entity_scope &&
+			a.entity_name == b.entity_name;
 	return TypeEquals(a.type, b.type) && a.value_bits == b.value_bits;
 }
 

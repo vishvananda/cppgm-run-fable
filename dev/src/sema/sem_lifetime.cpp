@@ -900,10 +900,31 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	vector<SemValue> values;
 	if (braced)
 		for (size_t i = 0; i < braced->arguments.size(); i++)
+		{
+			// A pack expansion contributes one value per element.
+			if (braced->arguments[i]->kind == EK_PACK_EXPANSION)
+			{
+				if (!ExpandPackExpression(
+				        *braced->arguments[i]->operands[0], values))
+					throw runtime_error("pack expansion outside an "
+					                    "expandable context");
+				continue;
+			}
 			values.push_back(analyzer_.Analyze(*braced->arguments[i]));
+		}
 	else
 		for (size_t i = 0; i < args.size(); i++)
+		{
+			if (args[i]->kind == EK_PACK_EXPANSION)
+			{
+				if (!ExpandPackExpression(*args[i]->operands[0],
+				                          values))
+					throw runtime_error("pack expansion outside an "
+					                    "expandable context");
+				continue;
+			}
 			values.push_back(analyzer_.Analyze(*args[i]));
+		}
 	if (copy_init && !braced && values.size() == 1 &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
 	    BaseClassDistance(RemoveTopCv(values[0].type)->named,

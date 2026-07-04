@@ -241,6 +241,10 @@ TypePtr SemBinder::ValueParamType(const TemplateParam& param,
 	if (IsIntegralType(type) || type->kind == TK_ENUM ||
 	    TypeIsDependent(type))
 		return type;
+	// PA22: reference (and pointer) parameters take entity addresses
+	// (14.3.2).
+	if (IsReferenceType(type) || type->kind == TK_POINTER)
+		return type;
 	throw OutsideBoundary("non-integral non-type template parameter");
 }
 
@@ -275,6 +279,36 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 	TemplateArg arg;
 	arg.is_value = true;
 	arg.type = param_type;
+	// 14.3.2: a reference/pointer parameter binds the address of a
+	// named entity with linkage; the argument spells the entity (with
+	// an optional & for the pointer form).
+	if (param_type &&
+	    (IsReferenceType(param_type) || param_type->kind == TK_POINTER))
+	{
+		const AstName* entity = name;
+		if (!entity && expr && expr->kind == EK_ID)
+			entity = &expr->name;
+		if (!entity && expr && expr->kind == EK_UNARY &&
+		    expr->op_spelling == "&" && !expr->operands.empty() &&
+		    expr->operands[0]->kind == EK_ID)
+			entity = &expr->operands[0]->name;
+		if (!entity)
+			throw runtime_error("template argument does not name an "
+			                    "entity with linkage");
+		const ScopeBinding* found = ResolveTerminal(*entity, SLF_ANY);
+		if (!found || found->kind != SB_VARIABLE || found->no_object ||
+		    !found->owner || found->owner->kind != SCOPE_NAMESPACE)
+			throw runtime_error("template argument does not name an "
+			                    "entity with linkage");
+		if (found->type &&
+		    !TypeEquals(RemoveTopCv(found->type),
+		                RemoveTopCv(param_type->target)))
+			throw runtime_error("template argument entity type "
+			                    "mismatch");
+		arg.entity_scope = found->owner;
+		arg.entity_name = found->name;
+		return arg;
+	}
 	if (!TypeIsDependent(param_type))
 	{
 		try
@@ -437,6 +471,18 @@ void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
 	{
 		alias.kind = SB_TYPE_ALIAS;
 		alias.type = arg.type;
+	}
+	else if (arg.entity_scope)
+	{
+		// PA22 entity-valued parameter (14.3.2): uses of the name are
+		// uses of the named entity (the reference form reads/writes
+		// the object directly; the alias resolves through the
+		// entity's own scope and name).
+		alias.kind = SB_VARIABLE;
+		alias.type = arg.type && IsReferenceType(arg.type)
+			? arg.type->target : arg.type;
+		alias.owner = arg.entity_scope;
+		alias.pack_element_name = arg.entity_name;
 	}
 	else
 	{

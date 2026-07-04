@@ -264,6 +264,16 @@ static void AppendArgKey(const TemplateArg& arg, string& out)
 		out += buffer;
 		return;
 	}
+	// PA22 entity-valued arguments key by entity identity.
+	if (arg.entity_scope)
+	{
+		char buffer[32];
+		snprintf(buffer, sizeof(buffer), "en%p:",
+		         (const void*)arg.entity_scope);
+		out += buffer;
+		out += arg.entity_name;
+		return;
+	}
 	out += "v";
 	AppendKey(arg.type, out);
 	out += ":" + to_string(arg.value_bits);
@@ -311,6 +321,9 @@ string TemplateArgumentKey(const vector<TemplateArg>& args)
 // Distinct values of one parameter cannot collide.
 static string ValueSpelling(const TemplateArg& arg)
 {
+	// PA22 entity-valued arguments spell the entity's name.
+	if (arg.entity_scope)
+		return arg.entity_name;
 	if (arg.type && arg.type->kind == TK_FUNDAMENTAL &&
 	    arg.type->fundamental == FT_BOOL)
 		return arg.value_bits ? "true" : "false";

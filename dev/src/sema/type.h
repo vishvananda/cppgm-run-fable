@@ -96,6 +96,12 @@ struct TemplateArg
 	// alias substitutions); matching re-resolves the type-id under the
 	// deduced bindings and compares.
 	const struct AstTypeId* dependent_type = 0;
+	// PA22 entity-valued arguments (14.3.2 reference/pointer forms
+	// over named entities with linkage): the declaring scope and name
+	// identify the entity; `type` keeps the parameter's declared type
+	// and `is_value` stays set.
+	const struct Scope* entity_scope = 0;
+	string entity_name;
 	// PA21 deduction slots only (never part of a specialization
 	// identity): a slot standing for a parameter pack accumulates its
 	// deduced element run; `pack_done` is set once one expansion
