@@ -395,13 +395,16 @@ bool AstParser::ParseIdExpressionName(AstName& name)
 		}
 		// PA21: an operator-function template-id
 		// (`operator+<int>`); the clause parse is speculative and the
-		// part keeps its operator identity (non-empty arguments mark
-		// the template-id form).
+		// part keeps its operator identity (`operator_template_id`
+		// marks the template-id form - `<>` leaves arguments empty).
 		if (part.kind == NP_OPERATOR_FUNCTION && AtSimple(OP_LT))
 		{
 			State clause_state = Save();
 			if (ParseTemplateArgumentClause(part))
+			{
 				part.kind = NP_OPERATOR_FUNCTION;
+				part.operator_template_id = true;
+			}
 			else
 			{
 				Restore(clause_state);

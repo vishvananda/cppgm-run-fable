@@ -819,6 +819,31 @@ void SemBinder::BindFriendFunction(const AstDecl& decl, ClassInfo& cls)
 	cls.friend_functions.push_back(std::make_pair(target, name));
 	if (qualified && decl.kind != DK_FUNCTION)
 		return;
+	const AstNamePart& terminal = composed.id->parts.back();
+	if (!qualified && decl.kind != DK_FUNCTION &&
+	    (terminal.kind == NP_TEMPLATE_ID ||
+	     terminal.operator_template_id || !terminal.arguments.empty()))
+	{
+		// 14.5.4p5: a template-id friend refers to a specialization
+		// of an already-declared function template; it grants access
+		// without declaring a new function (and never hides the
+		// template from resolution).
+		const ScopeBinding* existing =
+			UnqualifiedLookup(target, name, SLF_ANY);
+		if (!existing || existing->kind != SB_FUNCTION ||
+		    existing->fn_templates.empty())
+			throw runtime_error("template-id friend matches no "
+			                    "function template");
+		const FunctionSpecialization* spec = 0;
+		for (size_t t = 0;
+		     !spec && t < existing->fn_templates.size(); t++)
+			spec = DeduceFunctionTemplateFromTarget(
+				*existing->fn_templates[t], composed.type);
+		if (!spec)
+			throw runtime_error("template-id friend matches no "
+			                    "function template");
+		return;
+	}
 	Scope* saved = current_;
 	current_ = target;
 	EMemberAccess saved_access = current_access_;

@@ -26,6 +26,16 @@ TypePtr StripRef(const TypePtr& type)
 	return IsReferenceType(type) ? type->target : type;
 }
 
+// String-literal objects inside a dropped (elided) expression still
+// exist in the program image (the checked references emit them).
+void RegisterDroppedLiterals(LowerProgram& program, const SemNode& node)
+{
+	if (node.is_string_literal)
+		program.StringLiteralRef(node);
+	for (size_t i = 0; i < node.children.size(); i++)
+		RegisterDroppedLiterals(program, *node.children[i]);
+}
+
 // Whether evaluating this expression can have observable effects
 // (calls, stores, allocation); pure address chains are elidable.
 bool ExprHasSideEffects(const SemNode& node)
@@ -484,6 +494,15 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	else if (dst.empty())
 		throw OutsideBoundary("trivial copy without a destination");
 	const SemNode& source = *call.children[first_arg];
+	if (source.kind == SN_CALL_EXPRESSION && source.type &&
+	    !IsReferenceType(source.type) &&
+	    RemoveTopCv(source.type)->kind == TK_CLASS)
+	{
+		// A prvalue call result transfers straight into the
+		// destination (no intermediate temporary).
+		MaterializeClassResult(source, "tmpobj", dst);
+		return;
+	}
 	TypePtr cls_type = RemoveTopCv(action.type);
 	// An empty object has no bytes to transfer (the PA15 convention):
 	// a member-addressed action prints only the member address, while
@@ -683,6 +702,7 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 					program_.FunctionRef(callee.entity_scope,
 					                     callee.entity_name,
 					                     callee.type, callee.fn_spec);
+				RegisterDroppedLiterals(program_, child);
 				break;
 			}
 			// A class prvalue initializer constructs the declared

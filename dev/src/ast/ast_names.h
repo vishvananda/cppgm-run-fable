@@ -63,6 +63,10 @@ struct AstNamePart
 	std::string identifier;    // identifier / template-name / ud-suffix
 	bool tilde;                // destructor form ~identifier
 	bool template_keyword;     // preceded by the `template` keyword
+	// NP_OPERATOR_FUNCTION with a parsed template-argument clause
+	// (`operator+<>`): the empty clause leaves `arguments` empty, so
+	// the template-id form needs its own mark.
+	bool operator_template_id = false;
 	std::vector<AstTemplateArgument> arguments;  // NP_TEMPLATE_ID
 	std::string operator_text;                   // NP_OPERATOR_FUNCTION
 	AstTypeIdPtr conversion_type;                // NP_CONVERSION_FUNCTION

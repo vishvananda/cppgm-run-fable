@@ -110,6 +110,35 @@ size_t SemBinder::ConsumeAggregateClassItem(const ClassInfo& member_cls,
 		// elision consume items element-wise.
 		SemValue probe = analyzer_.Analyze(*element);
 		TypePtr probe_type = RemoveTopCv(probe.type);
+		// A work-free temporary of the member's own class elides into
+		// the member (the named-object elision above): no copy, no
+		// explicit value-fill (the pinned reference shape).
+		if (probe.node && probe.node->kind == SN_CONSTRUCTOR_ACTION &&
+		    probe_type->kind == TK_CLASS &&
+		    probe_type->named == member_cls.entity &&
+		    !probe.node->children.empty() &&
+		    probe.node->children[0]->children.size() == 1 &&
+		    !member_cls.has_user_ctor &&
+		    !unit_.classes.NeedsConstruction(member_cls))
+		{
+			SemNodePtr action = std::move(probe.node);
+			SemNode& call = *action->children[0];
+			bool declared_default = false;
+			for (size_t i = 0; i < member_cls.ctors.size(); i++)
+				if (member_cls.ctors[i].kind == CK_ORDINARY &&
+				    !member_cls.ctors[i].implicit &&
+				    member_cls.ctors[i].type->parameters.empty())
+					declared_default = true;
+			if (declared_default)
+				action->elided = true;
+			else
+				action->trivial_init = true;
+			call.children.insert(call.children.begin() + 1,
+			                     AddressOfNode(std::move(member)));
+			action->ctor_addressed = true;
+			out.push_back(std::move(action));
+			return at + 1;
+		}
 		if (probe_type->kind == TK_CLASS &&
 		    BaseClassDistance(probe_type->named, member_cls.entity) >= 0)
 		{
