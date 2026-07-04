@@ -1414,9 +1414,12 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 					*param.default_expr,
 					ValueParamType(param, partial));
 		}
-		catch (const std::exception&)
+		catch (const std::exception& error)
 		{
 			current_ = saved;
+			if (getenv("CPPGM_DEDUCE_DEBUG"))
+				fprintf(stderr, "DBG default %s: %s\n",
+				        tmpl.name.c_str(), error.what());
 			return 0;
 		}
 		current_ = saved;

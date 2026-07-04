@@ -429,6 +429,10 @@ private:
 	// toward an integral/enum parameter type (5.19p3, 14.3.2).
 	bool TryFullValueArgument(const AstExpr& expr,
 	                          const TypePtr& param_type, ConstValue& out);
+	// PA22: a `Check::ok()` value argument parsed as a function
+	// type-id re-reads as a zero-argument constexpr call.
+	bool EvaluateZeroArgConstantCall(const AstTypeId& type_id,
+	                                 ConstValue& out);
 	// The lazily-created binding scope over the already-resolved
 	// leading arguments.
 	Scope* EnsureArgBindingScope(TemplateInfo& tmpl,

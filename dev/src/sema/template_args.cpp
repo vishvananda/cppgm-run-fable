@@ -109,9 +109,17 @@ static void CollectParamList(
 			param.kind = TPK_VALUE;
 			param.source = &parameter;
 			if (parameter.declarator)
+			{
 				if (const AstName* id = parameter.declarator->IdName())
 					if (id->IsPlainIdentifier())
 						param.name = id->parts[0].identifier;
+				// A non-type pack spells its `...` inside the
+				// declarator (`int&... Refs`, unnamed forms included).
+				for (size_t d = 0;
+				     d < parameter.declarator->items.size(); d++)
+					if (parameter.declarator->items[d].kind == DI_PACK)
+						param.pack = true;
+			}
 			if (parameter.has_default_expr)
 				param.default_expr = parameter.default_expr.get();
 			break;
@@ -127,7 +135,7 @@ static void CollectParamList(
 			CollectParamList(parameter.template_params, param.tt_params);
 			break;
 		}
-		param.pack = parameter.pack;
+		param.pack = param.pack || parameter.pack;
 		params.push_back(param);
 	}
 }
@@ -271,9 +279,28 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 		if (!name)
 		{
 			cast_operand = FunctionalCastOperandName(*argument.type);
+			// `Check::ok()` parses as a function type-id; a value
+			// argument re-reads it as a zero-argument constant call.
 			if (!cast_operand)
+			{
+				ConstValue called;
+				if (!TypeIsDependent(param_type) &&
+				    (IsIntegralType(param_type) ||
+				     param_type->kind == TK_ENUM) &&
+				    EvaluateZeroArgConstantCall(*argument.type, called))
+				{
+					TemplateArg arg;
+					arg.is_value = true;
+					arg.type = param_type;
+					called = ConvertConstValue(
+						called, ValueTargetFundamental(param_type));
+					arg.value_type = called.type;
+					arg.value_bits = called.bits;
+					return arg;
+				}
 				throw runtime_error("template argument does not form "
 				                    "a constant value");
+			}
 		}
 	}
 	TemplateArg arg;
@@ -862,6 +889,77 @@ static const AstExpr* SingleReturnExpr(const AstDecl* decl)
 // (5.19p3) toward an integral/enum template-parameter type. Class
 // operands convert through their (constexpr) conversion functions;
 // non-constexpr conversions fail, which 14.3.2 requires.
+// `Check::ok()` in template-argument position parses as a function
+// type-id; the value re-read deduces the named static constexpr
+// member template with no arguments and evaluates its single-return
+// body under the specialization's argument scope.
+bool SemBinder::EvaluateZeroArgConstantCall(const AstTypeId& type_id,
+                                            ConstValue& out)
+{
+	if (type_id.specifiers.size() != 1 ||
+	    type_id.specifiers[0].kind != SPEC_TYPE_NAME ||
+	    !type_id.declarator)
+		return false;
+	const AstDeclarator& declarator = *type_id.declarator;
+	if (declarator.items.size() != 1 ||
+	    declarator.items[0].kind != DI_PARAMS ||
+	    !declarator.items[0].params ||
+	    !declarator.items[0].params->parameters.empty())
+		return false;
+	const AstName& callee = type_id.specifiers[0].name;
+	if (callee.parts.empty())
+		return false;
+	const ScopeBinding* binding = 0;
+	const NamedTypeInfo* member_class = 0;
+	try
+	{
+		binding = ResolveValue(callee, member_class);
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
+	if (!binding || binding->kind != SB_FUNCTION)
+		return false;
+	const AstNamePart* explicit_part =
+		callee.parts.back().kind == NP_TEMPLATE_ID
+			? &callee.parts.back() : 0;
+	for (size_t t = 0; t < binding->fn_templates.size(); t++)
+	{
+		const FunctionSpecialization* spec = DeduceFunctionTemplate(
+			*binding->fn_templates[t], vector<SemValue>(),
+			explicit_part);
+		if (!spec || !spec->owner || !spec->owner->pattern_decl)
+			continue;
+		if (!DeclHasConstexpr(*spec->owner->pattern_decl))
+			continue;
+		const AstExpr* ret = SingleReturnExpr(spec->owner->pattern_decl);
+		if (!ret)
+			return false;
+		Scope* saved = current_;
+		current_ = spec->param_scope;
+		bool evaluated = false;
+		try
+		{
+			out = EvaluateConstExpr(*ret, *this);
+			evaluated = true;
+		}
+		catch (const std::exception&)
+		{
+			try
+			{
+				evaluated = TryFullConstant(*ret, out);
+			}
+			catch (const std::exception&)
+			{
+			}
+		}
+		current_ = saved;
+		return evaluated;
+	}
+	return false;
+}
+
 bool SemBinder::TryFullValueArgument(const AstExpr& expr,
                                      const TypePtr& param_type,
                                      ConstValue& out)
