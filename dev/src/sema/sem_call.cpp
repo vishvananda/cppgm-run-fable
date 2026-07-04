@@ -102,6 +102,15 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
                                            const NamedTypeInfo* member_class,
                                            bool qualified)
 {
+	// An explicit template-id callee pre-binds the leading template
+	// parameters (14.8.1).
+	const AstNamePart* explicit_part = 0;
+	{
+		const AstExpr* callee = StripParens(expr.operands[0].get());
+		if (callee->kind == EK_ID && !callee->name.parts.empty() &&
+		    callee->name.parts.back().kind == NP_TEMPLATE_ID)
+			explicit_part = &callee->name.parts.back();
+	}
 	// A member function named without an object: bind the implicit
 	// *this when the context provides one; otherwise only static
 	// members are callable (9.3.1p3).
@@ -142,7 +151,7 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 			return AnalyzeMethodCall(std::move(object), binding,
 			                         expr.arguments, qualified);
 		}
-		return AnalyzeStaticMethodCall(expr, binding);
+		return AnalyzeStaticMethodCall(expr, binding, explicit_part);
 	}
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
@@ -158,15 +167,6 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	}
 	// PA18: deduced function-template specializations join after the
 	// ordinary overloads.
-	// An explicit template-id callee pre-binds the leading template
-	// parameters (14.8.1).
-	const AstNamePart* explicit_part = 0;
-	{
-		const AstExpr* callee = StripParens(expr.operands[0].get());
-		if (callee->kind == EK_ID && !callee->name.parts.empty() &&
-		    callee->name.parts.back().kind == NP_TEMPLATE_ID)
-			explicit_part = &callee->name.parts.back();
-	}
 	const size_t ordinary = candidates.size();
 	vector<const FunctionSpecialization*> specs(ordinary, (const FunctionSpecialization*)0);
 	{

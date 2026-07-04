@@ -625,13 +625,30 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		}
 		SemValue out = CallResult(fn.type);
 		SemNodePtr callee = MakeSemNode(SN_CALLEE);
-		callee->name = CanonicalQualifiedName(cls->members, fn.name);
-		callee->type = ThisAdjustedType(conv.conv_class, fn.type);
-		callee->entity_scope = cls->members;
-		callee->entity_name = fn.name;
-		callee->is_method = true;
-		if (const ScopeBinding* binding =
-		        FindOwnBinding(*cls->members, fn.name))
+		if (fn.spec)
+		{
+			// A deduced conversion-template specialization routes like
+			// a namespace-scope specialization (its own entry keyed on
+			// the argument alias scope), with the object address as
+			// the leading argument.
+			callee->name = CanonicalQualifiedName(fn.spec->self.owner,
+			                                      fn.spec->name);
+			callee->type = ThisAdjustedType(conv.conv_class, fn.type);
+			callee->entity_scope = fn.spec->self.owner;
+			callee->entity_name = fn.spec->name;
+			callee->fn_spec = fn.spec;
+			host_.OnSpecializationOdrUsed(fn.spec);
+		}
+		else
+		{
+			callee->name = CanonicalQualifiedName(cls->members, fn.name);
+			callee->type = ThisAdjustedType(conv.conv_class, fn.type);
+			callee->entity_scope = cls->members;
+			callee->entity_name = fn.name;
+			callee->is_method = true;
+		}
+		if (const ScopeBinding* binding = fn.spec
+		        ? 0 : FindOwnBinding(*cls->members, fn.name))
 		{
 			size_t index = 0;
 			for (size_t i = 0; i < binding->overloads.size(); i++)

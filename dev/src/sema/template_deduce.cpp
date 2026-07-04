@@ -1454,6 +1454,173 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	return spec;
 }
 
+// --- conversion-function templates (14.8.2.3) -------------------------------
+
+void SemBinder::DeduceConversionTemplates(const NamedTypeInfo* entity,
+                                          const TypePtr& dest)
+{
+	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
+	while (cls)
+	{
+		for (size_t t = 0; t < cls->conversion_templates.size(); t++)
+		{
+			try
+			{
+				DeduceOneConversionTemplate(
+					*cls->conversion_templates[t], dest, *cls);
+			}
+			catch (const std::exception&)
+			{
+				// 14.8.2p8: the template contributes no entry.
+			}
+		}
+		cls = cls->base ? unit_.classes.Find(cls->base->entity) : 0;
+	}
+}
+
+void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
+                                            const TypePtr& dest,
+                                            ClassInfo& cls)
+{
+	const AstDecl& inner = *tmpl.pattern_decl;
+	const AstName* id = inner.declarator ? inner.declarator->IdName() : 0;
+	if (!id || id->parts.empty() ||
+	    id->parts.back().kind != NP_CONVERSION_FUNCTION ||
+	    !id->parts.back().conversion_type)
+		throw OutsideBoundary("conversion template form");
+	const AstTypeId& conversion_type = *id->parts.back().conversion_type;
+	// The conversion-type-id composes with the parameters bound to
+	// the positional placeholders (the deduction pattern P).
+	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
+	                                  tmpl.declaring);
+	for (size_t i = 0; i < tmpl.params.size(); i++)
+	{
+		if (tmpl.params[i].name.empty())
+			continue;
+		ScopeBinding binding;
+		binding.name = tmpl.params[i].name;
+		if (tmpl.params[i].kind == TPK_TYPE)
+		{
+			binding.kind = SB_TYPE;
+			binding.type = PlaceholderType(i);
+		}
+		else if (tmpl.params[i].kind == TPK_TEMPLATE)
+		{
+			binding.kind = SB_CLASS_TEMPLATE;
+			binding.templ = TemplateParamPlaceholder(tmpl.params[i], i);
+		}
+		else
+		{
+			binding.kind = SB_VARIABLE;
+			binding.no_object = true;
+		}
+		binding.param_index = (int)i;
+		binding.is_pack = tmpl.params[i].pack;
+		AddBinding(*scope, binding);
+	}
+	TypePtr pattern;
+	{
+		Scope* saved = current_;
+		current_ = scope;
+		try
+		{
+			pattern = builder_.ResolveTypeId(conversion_type);
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+	}
+	// The abstract composition doubles as the mangling pattern.
+	if (!tmpl.conversion_pattern)
+		tmpl.conversion_pattern = pattern;
+	// 14.8.2.3p2-3: reference types deduce through their referees.
+	TypePtr a = dest;
+	if (IsReferenceType(pattern))
+		pattern = pattern->target;
+	if (IsReferenceType(a))
+		a = a->target;
+	vector<TemplateArg> bound(tmpl.params.size());
+	if (TypeIsDependent(pattern))
+	{
+		if (!DeduceFromType(RemoveTopCv(pattern), RemoveTopCv(a), bound,
+		                    false))
+			throw runtime_error("conversion deduction failed");
+	}
+	else if (!TypeEquals(RemoveTopCv(pattern), RemoveTopCv(a)))
+		throw runtime_error("conversion deduction failed");
+	// Unbound parameters fill from defaults; a hole fails deduction.
+	for (size_t i = 0; i < bound.size(); i++)
+	{
+		if (tmpl.params[i].pack || ArgBound(bound[i]))
+			continue;
+		const TemplateParam& param = tmpl.params[i];
+		if (!param.default_type && !param.default_expr)
+			throw runtime_error("conversion deduction incomplete");
+		Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+		Scope* saved = current_;
+		current_ = partial;
+		try
+		{
+			if (param.kind == TPK_TYPE)
+				bound[i] = TemplateArg(builder_.ResolveTypeId(
+					*param.default_type));
+			else
+				bound[i] = ResolveDefaultValueExpr(
+					*param.default_expr, ValueParamType(param, partial));
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+	}
+	FunctionSpecialization* spec = EnsureFunctionSpecialization(
+		tmpl, FlattenDeduced(tmpl.params, bound,
+		                     vector<TemplateArg>()));
+	// The special-member composition returned `void() cv`; the real
+	// result type composes under the specialization's argument scope.
+	if (IsVoidType(spec->type->target))
+	{
+		TypePtr result;
+		Scope* saved = current_;
+		current_ = spec->param_scope;
+		try
+		{
+			result = builder_.ResolveTypeId(conversion_type);
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+		Type fixed = *spec->type;
+		fixed.target = result;
+		spec->type = TypePtr(new Type(fixed));
+		spec->name = "operator " + DescribeType(result);
+		spec->self.type = spec->type;
+		spec->self.name = spec->name;
+	}
+	for (size_t i = 0; i < cls.conversions.size(); i++)
+		if (cls.conversions[i].spec == spec)
+			return;
+	ClassConversion conv;
+	conv.name = spec->name;
+	conv.result = spec->type->target;
+	conv.type = spec->type;
+	conv.is_explicit = false;
+	for (size_t i = 0; i < inner.member_specifiers.size(); i++)
+		if (inner.member_specifiers[i].keyword == KW_EXPLICIT)
+			conv.is_explicit = true;
+	conv.access = tmpl.member_access;
+	conv.spec = spec;
+	cls.conversions.push_back(conv);
+}
+
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
 	TemplateInfo& tmpl, const TypePtr& target)
 {

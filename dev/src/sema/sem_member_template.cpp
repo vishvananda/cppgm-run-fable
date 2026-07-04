@@ -143,6 +143,12 @@ void SemBinder::CaptureConstructorTemplate(const AstDecl& decl,
 	if (!cls || current_ != cls->members)
 		throw OutsideBoundary("constructor template scope");
 	const AstName* id = inner.declarator ? inner.declarator->IdName() : 0;
+	if (id && id->parts.size() == 1 &&
+	    id->parts[0].kind == NP_CONVERSION_FUNCTION)
+	{
+		CaptureConversionFunctionTemplate(decl, inner, *cls);
+		return;
+	}
 	if (!id || !id->IsPlainIdentifier())
 		throw OutsideBoundary("special member template form");
 	if (id->parts.back().tilde)
@@ -164,6 +170,31 @@ void SemBinder::CaptureConstructorTemplate(const AstDecl& decl,
 	// non-aggregate with user-provided construction.
 	cls->is_aggregate = false;
 	cls->has_user_ctor = true;
+}
+
+// A conversion-function template (14.8.2.3): recorded on the
+// ClassInfo; conversion classification deduces it against the
+// required destination type and synthesizes an ordinary
+// ClassConversion entry per deduced specialization.
+void SemBinder::CaptureConversionFunctionTemplate(const AstDecl& decl,
+                                                  const AstDecl& inner,
+                                                  ClassInfo& cls)
+{
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+	TemplateInfo* tmpl = unit_.templates.Create(
+		TMPL_FUNCTION, "operator @conversion", current_);
+	tmpl->params = params;
+	tmpl->decl = &decl;
+	tmpl->pattern_decl = &inner;
+	tmpl->has_definition =
+		inner.kind == DK_SPECIAL_MEMBER_DEFINITION && inner.body;
+	tmpl->member_of = cls.entity;
+	tmpl->member_access = current_access_;
+	tmpl->member_pattern = &decl;
+	const AstName* id = inner.declarator->IdName();
+	tmpl->conversion_type = id->parts.back().conversion_type.get();
+	cls.conversion_templates.push_back(tmpl);
 }
 
 // --- friend templates -----------------------------------------------------
@@ -299,14 +330,20 @@ void SemBinder::CaptureQualifiedMemberTemplate(const AstDecl& decl,
 				                    "unknown class");
 			vector<TemplateParam> params;
 			CollectTemplateParams(decl, params);
+			const AstName* sm_id =
+				inner.declarator ? inner.declarator->IdName() : 0;
+			bool conversion = sm_id && !sm_id->parts.empty() &&
+				sm_id->parts.back().kind == NP_CONVERSION_FUNCTION;
+			vector<TemplateInfo*>& pool = conversion
+				? cls->conversion_templates : cls->ctor_templates;
 			TemplateInfo* merged = 0;
-			for (size_t i = 0; i < cls->ctor_templates.size(); i++)
-				if (cls->ctor_templates[i]->params.size() ==
-				    params.size() && !cls->ctor_templates[i]->has_definition)
-					merged = cls->ctor_templates[i];
+			for (size_t i = 0; i < pool.size(); i++)
+				if (pool[i]->params.size() == params.size() &&
+				    !pool[i]->has_definition)
+					merged = pool[i];
 			if (!merged)
-				throw runtime_error("constructor template definition "
-				                    "matches no declaration");
+				throw runtime_error("special member template "
+				                    "definition matches no declaration");
 			merged->decl = &decl;
 			merged->pattern_decl = &inner;
 			merged->has_definition = inner.body != 0;

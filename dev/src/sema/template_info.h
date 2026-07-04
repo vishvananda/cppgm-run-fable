@@ -231,6 +231,12 @@ struct TemplateInfo
 	// PA21 alias templates: the aliased type-id AST (substitution
 	// target).
 	const AstTypeId* alias_type = 0;
+	// PA22 conversion-function templates: the conversion-type-id AST
+	// and its abstract composition (positional placeholder leaves),
+	// composed at first deduction; the mangler spells the terminal
+	// `cv <pattern>` and the return type from it.
+	const AstTypeId* conversion_type = 0;
+	TypePtr conversion_pattern;
 	// PA21 template-template placeholder: the enclosing template's
 	// parameter slot this pattern-scope template stands for (-1 for
 	// real templates).

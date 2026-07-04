@@ -1146,14 +1146,20 @@ string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 	string name_key = (prev.empty() ? string("T:") : prev + "::") +
 		tmpl.name;
 	subs.Add(name_key);
-	string terminal =
-		MangleTerminalName(tmpl.name, pattern->parameters.size() +
-		                              (member ? 1 : 0));
+	// A conversion-function template's terminal encodes `cv` with the
+	// abstract conversion pattern; the return type re-spells it.
+	string terminal = tmpl.conversion_pattern
+		? "cv" + MangleType(tmpl.conversion_pattern, subs)
+		: MangleTerminalName(tmpl.name, pattern->parameters.size() +
+		                                (member ? 1 : 0));
 	size_t pack_start;
 	size_t pack_end;
 	ArgsPackSpan(tmpl.params, spec.args.size(), pack_start, pack_end);
 	string targs = MangleArgList(spec.args, pack_start, pack_end, subs);
-	string result = MangleType(pattern->target, subs);
+	string result = MangleType(tmpl.conversion_pattern
+	                               ? tmpl.conversion_pattern
+	                               : pattern->target,
+	                           subs);
 	string params = MangleBareParameters(pattern, subs);
 	string encoding = terminal + "I" + targs + "E";
 	if (!parts.empty() || member)

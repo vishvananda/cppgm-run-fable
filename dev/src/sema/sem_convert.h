@@ -160,3 +160,12 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
 void SetConversionCompletionHook(void (*hook)(void* context,
                                               const NamedTypeInfo* info),
                                  void* context);
+
+// PA22 conversion-function templates (14.8.2.3): before a class
+// source's conversion functions are consulted, the binder deduces its
+// conversion templates against the destination, synthesizing ordinary
+// ClassConversion entries for the classification loop to rank.
+void SetConversionTemplateHook(void (*hook)(void* context,
+                                            const NamedTypeInfo* from,
+                                            const TypePtr& dest),
+                               void* context);

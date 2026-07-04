@@ -39,12 +39,20 @@ bool SameParameterList(const Type& a, const Type& b)
 
 namespace {
 
-// Trampoline for the conversion classification's completeness demand
-// (sem_convert has no binder dependency).
+// Trampolines for the conversion classification's completeness and
+// conversion-template demands (sem_convert has no binder dependency).
 void ConversionCompletionTrampoline(void* context,
                                     const NamedTypeInfo* info)
 {
 	static_cast<SemBinder*>(context)->RequireCompleteType(info);
+}
+
+void ConversionTemplateTrampoline(void* context,
+                                  const NamedTypeInfo* from,
+                                  const TypePtr& dest)
+{
+	static_cast<SemBinder*>(context)->DeduceConversionTemplates(from,
+	                                                            dest);
 }
 
 }  // namespace
@@ -57,6 +65,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	  param_capture_scope_(0)
 {
 	SetConversionCompletionHook(&ConversionCompletionTrampoline, this);
+	SetConversionTemplateHook(&ConversionTemplateTrampoline, this);
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.
 	ScopeBinding nullptr_alias;
@@ -110,6 +119,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 SemBinder::~SemBinder()
 {
 	SetConversionCompletionHook(0, 0);
+	SetConversionTemplateHook(0, 0);
 }
 
 // --- ISemExprHost ----------------------------------------------------------

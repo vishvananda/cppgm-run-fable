@@ -237,6 +237,10 @@ private:
 	int ResolveClassConstructor(const ClassInfo& cls,
 	                            vector<SemValue>& args, bool copy_init,
 	                            const char* what);
+	// 13.3.1.4 copy-initialization: converts a differing-class source
+	// through its conversion functions when no converting constructor
+	// is usable (true when the argument was converted in place).
+	bool TryCopyInitSourceConversion(const ClassInfo& cls, SemValue& arg);
 	// The synthesized implicit default constructor / destructor
 	// definitions, built on first demand into unit_.deferred (an
 	// out-of-class `= default` builds them as strong definitions).
@@ -319,6 +323,13 @@ private:
 	                                   const AstDecl& inner);
 	void CaptureConstructorTemplate(const AstDecl& decl,
 	                                const AstDecl& inner);
+	// A conversion-function template (14.8.2.3): recorded on the
+	// ClassInfo for destination-directed deduction.
+	void CaptureConversionFunctionTemplate(const AstDecl& decl,
+	                                       const AstDecl& inner,
+	                                       ClassInfo& cls);
+	void DeduceOneConversionTemplate(TemplateInfo& tmpl,
+	                                 const TypePtr& dest, ClassInfo& cls);
 	// A friend template declaration/definition inside a class (11.3):
 	// captures into the enclosing namespace, hidden until a matching
 	// namespace-scope declaration appears.
@@ -860,6 +871,12 @@ public:
 		const AstNamePart* explicit_part);
 	virtual Scope* SwapLookupScope(Scope* scope);
 	virtual void RequireCompleteType(const NamedTypeInfo* info);
+	// Deduces the source class's conversion-function templates (base
+	// chain included) against the required destination type; each
+	// success synthesizes an ordinary ClassConversion entry
+	// (template_deduce.cpp, reached through the sem_convert hook).
+	void DeduceConversionTemplates(const NamedTypeInfo* entity,
+	                               const TypePtr& dest);
 	// PA18 14.5.6.2 subset (template_deduce.cpp): partial ordering of
 	// two deduced candidates over the call's leading `argc` parameters.
 	virtual bool TemplateCandidateMoreSpecialized(

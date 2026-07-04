@@ -568,12 +568,25 @@ namespace {
 // implicit object binding selects among cv-qualified overloads; the
 // result then reaches `dest` through one standard conversion whose
 // rank orders competing user-defined sequences.
+// The active binder's conversion-template deduction entry point
+// (thread-local, like the completion hook above).
+thread_local void (*conversion_template_hook)(void*, const NamedTypeInfo*,
+                                              const TypePtr&) = 0;
+thread_local void* conversion_template_context = 0;
+
 ImplicitConversion ClassifySourceConversionFunction(
 	const ConversionSource& source, const TypePtr& dest, bool contextual)
 {
 	ImplicitConversion result;
 	TypePtr from = RemoveTopCv(source.type);
-	if (from->kind != TK_CLASS || !from->named->class_record)
+	if (from->kind != TK_CLASS)
+		return result;
+	// 14.8.2.3: conversion templates deduce against the destination
+	// before the declared conversions are ranked.
+	if (conversion_template_hook)
+		conversion_template_hook(conversion_template_context,
+		                         from->named, dest);
+	if (!from->named->class_record)
 		return result;
 	bool dest_bool = !IsReferenceType(dest) && IsBoolType(RemoveTopCv(dest));
 	ImplicitConversion best_object;
@@ -700,6 +713,15 @@ void SetConversionCompletionHook(void (*hook)(void* context,
 {
 	completion_hook = hook;
 	completion_context = context;
+}
+
+void SetConversionTemplateHook(void (*hook)(void* context,
+                                            const NamedTypeInfo* from,
+                                            const TypePtr& dest),
+                               void* context)
+{
+	conversion_template_hook = hook;
+	conversion_template_context = context;
 }
 
 ImplicitConversion ClassifyConversion(const ConversionSource& source,

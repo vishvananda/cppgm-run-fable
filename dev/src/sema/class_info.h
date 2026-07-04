@@ -117,7 +117,9 @@ struct ClassCtor
 // member scope under its canonical "operator <type>" name.
 struct ClassConversion
 {
-	ClassConversion() : is_explicit(false), access(MA_PUBLIC), decl(0) {}
+	ClassConversion()
+		: is_explicit(false), access(MA_PUBLIC), decl(0), spec(0)
+	{}
 
 	string name;     // canonical member-scope binding name
 	TypePtr result;  // conversion-type-id
@@ -127,6 +129,10 @@ struct ClassConversion
 	// PA19: the declaring AST when defined in-class; the restricted
 	// constant evaluator reads a single-return body from it.
 	const struct AstDecl* decl;
+	// PA22: the deduced conversion-template specialization behind a
+	// synthesized entry (null for declared conversion functions); the
+	// call site routes through its identity.
+	const struct FunctionSpecialization* spec;
 };
 
 // PA17: one vtable slot (10.3). Slots inherit position from the base
@@ -209,6 +215,10 @@ struct ClassInfo
 	// lists at construction sites; selected specializations synthesize
 	// ClassCtor entries).
 	vector<struct TemplateInfo*> ctor_templates;
+	// PA22: declared conversion-function templates (deduced against
+	// the required destination type at classification; selected
+	// specializations synthesize ClassConversion entries).
+	vector<struct TemplateInfo*> conversion_templates;
 	// PA16 conversion functions in declaration order (12.3.2).
 	vector<ClassConversion> conversions;
 

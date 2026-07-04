@@ -144,7 +144,16 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	spec.body_emitted = true;
 	const AstDecl& inner = spec.explicit_def ? *spec.explicit_def
 	                                         : *tmpl.pattern_decl;
-	if (inner.kind != DK_FUNCTION || !inner.body)
+	// PA22 conversion-function templates: the pattern is a special
+	// member whose result type is its conversion-type-id.
+	const AstName* special_id =
+		inner.kind == DK_SPECIAL_MEMBER_DEFINITION && inner.declarator
+			? inner.declarator->IdName() : 0;
+	const AstTypeId* conversion_type =
+		special_id && !special_id->parts.empty() &&
+		special_id->parts.back().kind == NP_CONVERSION_FUNCTION
+			? special_id->parts.back().conversion_type.get() : 0;
+	if ((inner.kind != DK_FUNCTION && !conversion_type) || !inner.body)
 		throw runtime_error("function template " + tmpl.name +
 		                    " has no definition");
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, spec.name,
@@ -166,8 +175,11 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// re-compose the declarator in this specialization's context.
 	PreBindDeclaredParameters(inner.declarator.get());
 	last_pack_param_ = PackParamRecord();
-	DeclSpecifierInfo specs =
-		builder_.ProcessSpecifiers(inner.specifiers, true);
+	DeclSpecifierInfo specs;
+	if (conversion_type)
+		specs.type = builder_.ResolveTypeId(*conversion_type);
+	else
+		specs = builder_.ProcessSpecifiers(inner.specifiers, true);
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
 		inner.declarator.get(), specs.type);
 	BindCapturedPackParameter(fn_scope);

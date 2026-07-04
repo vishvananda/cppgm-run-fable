@@ -1262,6 +1262,34 @@ bool SemBinder::DerivedToBaseClass(const TypePtr& from, const TypePtr& to)
 
 // --- constructor selection ------------------------------------------------
 
+// 13.3.1.4: in copy-initialization the source class's conversion
+// functions compete with the destination's converting constructors.
+// When no converting constructor is usable, a conversion function
+// yielding the destination converts the argument in place; the
+// copy/move construction from the converted value finishes the
+// initialization (elided for trivial copies by the lowering).
+bool SemBinder::TryCopyInitSourceConversion(const ClassInfo& cls,
+                                            SemValue& arg)
+{
+	TypePtr from = arg.type ? RemoveTopCv(arg.type) : TypePtr();
+	if (!from || from->kind != TK_CLASS || from->named == cls.entity)
+		return false;
+	TypePtr dest = MakeNamedType(TK_CLASS, cls.entity);
+	ImplicitConversion conv;
+	try
+	{
+		conv = ClassifyConversion(MakeConversionSource(arg), dest);
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
+	if (!conv.viable || conv.conv_index < 0 || !conv.conv_class)
+		return false;
+	analyzer_.ApplyConversion(arg, conv, dest);
+	return true;
+}
+
 int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
                                        vector<SemValue>& args,
                                        bool copy_init, const char* what)
@@ -1319,9 +1347,20 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 	for (size_t c = 0; c < positions.size(); c++)
 		specs[c] = cls.ctors[positions[c]].tmpl_spec;
 	SpecOverloadOrder order(*this, specs, args.size());
-	size_t winner = positions[SelectBestOverload(
-		candidates, sources, conversions, &min_arity, &is_template,
-		&order)];
+	size_t winner;
+	try
+	{
+		winner = positions[SelectBestOverload(
+			candidates, sources, conversions, &min_arity, &is_template,
+			&order)];
+	}
+	catch (const NoViableOverloadError&)
+	{
+		if (copy_init && args.size() == 1 &&
+		    TryCopyInitSourceConversion(cls, args[0]))
+			return ResolveClassConstructor(cls, args, copy_init, what);
+		throw;
+	}
 	// PA21: a selected constructor-template specialization's body
 	// instantiates at this first use (which may append further ctor
 	// entries; re-fetch the winner after).
@@ -1333,8 +1372,14 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		throw runtime_error(string("use of deleted constructor for ") +
 		                    what);
 	if (copy_init && ctor.is_explicit)
+	{
+		// 13.3.1.4: an explicit constructor is not a candidate here;
+		// the source class's conversion functions still are.
+		if (args.size() == 1 && TryCopyInitSourceConversion(cls, args[0]))
+			return ResolveClassConstructor(cls, args, copy_init, what);
 		throw runtime_error(string("explicit constructor selected by "
 		                           "copy-initialization for ") + what);
+	}
 	CheckMemberAccess(cls.members, ctor.access, "constructor");
 	const TypePtr& fn = ctor.type;
 	for (size_t i = 0; i < args.size(); i++)
