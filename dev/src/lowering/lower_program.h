@@ -60,6 +60,11 @@ struct LowFunctionInfo
 	// PA18 14.7.2p8: emitted because an explicit instantiation
 	// definition names its class (`object_root=yes`).
 	bool object_root = false;
+	// PA21 14.7.2p10: named by an `extern template` declaration - the
+	// strong definition lives in another translation unit, so local
+	// uses reference an external declare even though a weak body was
+	// instantiated.
+	bool extern_suppressed = false;
 	// PA20: a hidden-friend definition (deferred, namespace scope):
 	// its references count as semantic demand, so its body lowers even
 	// unused. Weak constexpr/inline namespace functions do not.

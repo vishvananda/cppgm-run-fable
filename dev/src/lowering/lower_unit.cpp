@@ -197,6 +197,28 @@ LowerProgram::LowerProgram()
 	symbols_.insert("main");
 }
 
+// The lowering entry type of a function-template specialization:
+// non-static member specializations key on the this-adjusted form
+// their instantiated body items carry.
+static TypePtr MemberSpecEntryType(const FunctionSpecialization& spec)
+{
+	const TemplateInfo* tmpl = spec.owner;
+	if (!tmpl || !tmpl->member_of || tmpl->member_static)
+		return spec.type;
+	TypePtr class_type = MakeNamedType(TK_CLASS, tmpl->member_of);
+	class_type = MakeCvQualifiedType(class_type, spec.type->is_const,
+	                                 spec.type->is_volatile);
+	vector<TypePtr> parameters;
+	parameters.push_back(MakePointerType(class_type, false, false));
+	for (size_t i = 0; i < spec.type->parameters.size(); i++)
+		parameters.push_back(spec.type->parameters[i]);
+	TypePtr adjusted = MakeFunctionType(spec.type->target, parameters,
+	                                    spec.type->variadic);
+	if (spec.type->ref_qual)
+		adjusted = MakeRefQualifiedType(adjusted, spec.type->ref_qual);
+	return adjusted;
+}
+
 void LowerProgram::AddUnit(const SemUnit& unit)
 {
 	units_.push_back(&unit);
@@ -238,6 +260,59 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 			info->object_root = true;
 			DemandFunction(*info);
 		}
+	}
+	// PA21 14.7.2: an explicit-instantiation definition naming one
+	// member of a specialization emits that member unconditionally.
+	for (size_t e = 0; e < unit.explicit_member_instantiations.size();
+	     e++)
+	{
+		const SemUnit::ExplicitMemberInstantiation& record =
+			unit.explicit_member_instantiations[e];
+		for (size_t i = 0; i < unit.deferred.size(); i++)
+		{
+			const SemNode& item = *unit.deferred[i];
+			if (item.kind != SN_FUNCTION_DEFINITION ||
+			    item.synthesized || item.special != SF_NONE ||
+			    item.entity_scope != record.scope ||
+			    item.entity_name != record.name)
+				continue;
+			LowFunctionInfo* info;
+			if (item.is_method)
+				info = &MemberFunctionEntry(item.entity_scope,
+				                            item.entity_name,
+				                            item.type, "");
+			else
+				info = &FunctionEntry(item.entity_scope,
+				                      item.entity_name, item.type,
+				                      item.fn_spec);
+			info->object_root = true;
+			DemandFunction(*info);
+		}
+	}
+	// PA21 14.7.2 function forms: explicit-instantiation definitions
+	// are unconditional emission roots; extern-template declarations
+	// suppress the local weak body in favor of an external declare.
+	for (size_t e = 0; e < unit.explicit_fn_instantiations.size(); e++)
+	{
+		const FunctionSpecialization* spec =
+			unit.explicit_fn_instantiations[e];
+		LowFunctionInfo& info = FunctionEntry(
+			spec->self.owner, spec->name,
+			MemberSpecEntryType(*spec), spec);
+		info.object_root = true;
+		info.extern_suppressed = false;
+		DemandFunction(info);
+	}
+	for (size_t e = 0; e < unit.extern_fn_suppressions.size(); e++)
+	{
+		const FunctionSpecialization* spec =
+			unit.extern_fn_suppressions[e];
+		if (spec->inst_definition)
+			continue;
+		LowFunctionInfo& info = FunctionEntry(
+			spec->self.owner, spec->name,
+			MemberSpecEntryType(*spec), spec);
+		info.extern_suppressed = true;
 	}
 	// PA17: a class whose key function is defined in this unit anchors
 	// its vtable here (emitted strong even without local construction).
@@ -1024,7 +1099,8 @@ void LowerProgram::LowerUsedFunctions()
 			for (size_t i = start; i < functions_.size(); i++)
 			{
 				LowFunctionInfo& info = functions_[i];
-				if (!info.defined || !info.body_text.empty())
+				if (!info.defined || !info.body_text.empty() ||
+				    info.extern_suppressed)
 					continue;
 				bool friend_body = phase > 0 && info.friend_def;
 				if (info.weak && !info.used && !friend_body)
@@ -1307,7 +1383,8 @@ void LowerProgram::Write(ostream& out)
 	for (size_t i = 0; i < functions_.size(); i++)
 	{
 		const LowFunctionInfo& info = functions_[i];
-		if (info.defined || !info.used || info.deleted)
+		if ((info.defined && !info.extern_suppressed) || !info.used ||
+		    info.deleted)
 			continue;
 		sections[1].push_back(RenderFunctionDeclare(info));
 	}

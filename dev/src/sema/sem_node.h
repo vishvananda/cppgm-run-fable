@@ -302,6 +302,21 @@ struct SemUnit
 	// 14.7.2p8).
 	TemplateRegistry templates;
 	vector<const NamedTypeInfo*> explicit_instantiations;
+	// PA21 14.7.2 function forms: explicit-instantiation definitions
+	// (emitted unconditionally as object roots) and extern-template
+	// declarations (declare-only; the strong definition lives in
+	// another translation unit).
+	vector<const FunctionSpecialization*> explicit_fn_instantiations;
+	vector<const FunctionSpecialization*> extern_fn_suppressions;
+	// PA21 14.7.2: explicit-instantiation definitions naming a single
+	// member of a class-template specialization (the member's
+	// instantiated definition emits unconditionally).
+	struct ExplicitMemberInstantiation
+	{
+		const Scope* scope;  // the specialization's member scope
+		string name;
+	};
+	vector<ExplicitMemberInstantiation> explicit_member_instantiations;
 };
 
 // Writes the `translation-unit` line and the tree below it.

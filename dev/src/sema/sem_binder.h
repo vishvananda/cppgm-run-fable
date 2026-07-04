@@ -584,7 +584,8 @@ private:
 	// specialization named by `part` over the templates of `binding`.
 	const ScopeBinding* ResolveFunctionTemplateId(
 		const ScopeBinding& binding, const AstNamePart& part);
-	void BindExplicitFunctionInstantiation(const AstDecl& inner);
+	void BindExplicitFunctionInstantiation(const AstDecl& inner,
+	                                       bool is_extern = false);
 	// Definition-time template sanity (sem_template_check.cpp):
 	// parameter-shadow errors throw; unresolved non-dependent names
 	// re-check at the end of the unit.

@@ -1232,6 +1232,7 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 	if (!decl.inner)
 		throw OutsideBoundary("explicit instantiation form");
 	const AstDecl& inner = *decl.inner;
+	bool is_extern = decl.extern_instantiation;
 	if (inner.kind == DK_CLASS_FORWARD)
 	{
 		const AstName& name = inner.class_name;
@@ -1247,15 +1248,43 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 		    binding->type->kind != TK_CLASS)
 			throw runtime_error("explicit instantiation does not name "
 			                    "a class specialization");
+		ClassSpecialization* spec =
+			FindSpecializationRecord(binding->type->named);
+		if (is_extern)
+		{
+			// An explicit-instantiation declaration suppresses local
+			// emission; a later definition emits on ordinary demand
+			// (the checked references pin this combination).
+			if (spec)
+				spec->extern_declared = true;
+			return;
+		}
 		if (!binding->type->named->complete)
 			throw runtime_error("explicit instantiation of an "
 			                    "undefined class template");
-		unit_.explicit_instantiations.push_back(binding->type->named);
+		if (!spec || !spec->extern_declared)
+			unit_.explicit_instantiations.push_back(binding->type->named);
 		return;
 	}
 	if (inner.kind == DK_SIMPLE)
 	{
-		BindExplicitFunctionInstantiation(inner);
+		BindExplicitFunctionInstantiation(inner, is_extern);
+		return;
+	}
+	if (inner.kind == DK_SPECIAL_MEMBER_DECLARATION ||
+	    inner.kind == DK_SPECIAL_MEMBER_DEFINITION)
+	{
+		// `extern template box<int>::box();`: naming the constructor
+		// instantiates the class; the demand-driven member emission
+		// already defers what the declaration form suppresses.
+		const AstName* id =
+			inner.declarator ? inner.declarator->IdName() : 0;
+		if (!id || id->parts.size() < 2)
+			throw OutsideBoundary("explicit instantiation form");
+		Scope* declaring = ResolvePrefixScope(*id);
+		if (!declaring || declaring->kind != SCOPE_CLASS)
+			throw runtime_error("explicit instantiation of a "
+			                    "non-member special member");
 		return;
 	}
 	throw OutsideBoundary("explicit instantiation form");

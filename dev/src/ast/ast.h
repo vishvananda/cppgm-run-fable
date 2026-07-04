@@ -185,4 +185,7 @@ struct AstDecl
 	bool has_parameter_list;
 	std::vector<AstTemplateParameter> template_params;
 	AstDeclPtr inner;  // templated declaration / instantiated declaration
+	// DK_EXPLICIT_INSTANTIATION: spelled `extern template` (14.7.2: an
+	// explicit instantiation declaration).
+	bool extern_instantiation;
 };

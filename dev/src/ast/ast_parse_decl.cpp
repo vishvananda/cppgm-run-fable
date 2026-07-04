@@ -215,16 +215,20 @@ AstDeclPtr AstParser::ParseLinkageSpecification()
 AstDeclPtr AstParser::ParseExplicitInstantiation()
 {
 	State state = Save();
-	MatchSimple(KW_EXTERN);  // 14.7.2: `extern` marks a declaration
+	bool is_extern = MatchSimple(KW_EXTERN);  // 14.7.2: a declaration
 	if (!MatchSimple(KW_TEMPLATE))
 	{
 		Restore(state);
 		return AstDeclPtr();
 	}
 	AstDeclPtr decl = MakeDecl(DK_EXPLICIT_INSTANTIATION);
+	decl->extern_instantiation = is_extern;
 	decl->inner = ParseClassDeclaration();
 	if (!decl->inner)
 		decl->inner = ParseSimpleDeclaration();
+	if (!decl->inner)
+		// `extern template box<int>::box();`: a special-member form.
+		decl->inner = ParseSpecialMember(false);
 	if (!decl->inner)
 	{
 		Restore(state);

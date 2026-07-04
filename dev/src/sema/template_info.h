@@ -96,6 +96,10 @@ struct ClassSpecialization
 	// this specialization); set once an object definition demanded
 	// them all so later-registered definitions instantiate on sight.
 	bool statics_demanded = false;
+	// PA21 14.7.2: named by an `extern template` declaration (a later
+	// explicit-instantiation definition emits on ordinary demand
+	// without the emission-root marking).
+	bool extern_declared = false;
 	// Indices into owner->member_defs already instantiated for this
 	// specialization.
 	map<size_t, bool> members_done;
@@ -129,6 +133,11 @@ struct FunctionSpecialization
 	// explicit definitions emit strong).
 	const AstDecl* explicit_def = 0;
 	bool explicit_inline = false;
+	// PA21 14.7.2: named by an `extern template` declaration (the
+	// definition lives elsewhere; local uses reference it) and/or an
+	// explicit-instantiation definition (emitted as an object root).
+	bool extern_suppressed = false;
+	bool inst_definition = false;
 };
 
 // PA19: one partial specialization of a class or variable template:

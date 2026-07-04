@@ -140,6 +140,6 @@ AstDecl::AstDecl(EDeclKind kind_in)
 	  enum_key(KW_CLASS), has_enum_base(false), enum_body(false),
 	  has_message(false),
 	  access(KW_PUBLIC), has_ctor_initializer(false),
-	  has_parameter_list(false)
+	  has_parameter_list(false), extern_instantiation(false)
 {
 }

@@ -1430,7 +1430,8 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 	return &resolved->self;
 }
 
-void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner)
+void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner,
+                                                  bool is_extern)
 {
 	// `template void f<int>(int);` / `template void f(int);`: resolve
 	// the declarator against the visible function templates.
@@ -1442,53 +1443,128 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner)
 		throw OutsideBoundary("explicit instantiation declarator");
 	const AstNamePart& terminal = id->parts.back();
 	if (terminal.kind != NP_IDENTIFIER &&
-	    terminal.kind != NP_TEMPLATE_ID)
+	    terminal.kind != NP_TEMPLATE_ID &&
+	    terminal.kind != NP_OPERATOR_FUNCTION)
 		throw OutsideBoundary("explicit instantiation name form");
+	const string terminal_name = terminal.kind == NP_TEMPLATE_ID
+		? terminal.identifier : DeclaredFunctionName(terminal);
 	// Resolve the (possibly qualified) name to its function binding.
 	Scope* prefix = 0;
 	if (id->parts.size() > 1 || id->global_scope)
 		prefix = ResolvePrefixScope(*id);
 	const ScopeBinding* binding = prefix
-		? QualifiedLookup(*prefix, terminal.identifier, SLF_ANY)
-		: UnqualifiedLookup(current_, terminal.identifier, SLF_ANY);
+		? QualifiedLookup(*prefix, terminal_name, SLF_ANY)
+		: UnqualifiedLookup(current_, terminal_name, SLF_ANY);
 	if (!binding || binding->kind != SB_FUNCTION)
 		throw runtime_error("explicit instantiation of a non-function");
-	if (terminal.kind == NP_TEMPLATE_ID)
+	// A member of a class-template specialization (`template int
+	// tester<int>::test();`): the member's already-instantiated
+	// definition becomes an unconditional emission root.
+	if (binding->fn_templates.empty() && prefix &&
+	    prefix->kind == SCOPE_CLASS)
 	{
-		// 14.7.2: the explicit instantiation demands the definition.
-		const ScopeBinding* named =
-			ResolveFunctionTemplateId(*binding, terminal);
-		if (named && named->fn_self_spec)
-			OnSpecializationOdrUsed(named->fn_self_spec);
+		if (is_extern)
+			return;
+		SemUnit::ExplicitMemberInstantiation record;
+		record.scope = prefix;
+		record.name = terminal_name;
+		unit_.explicit_member_instantiations.push_back(record);
 		return;
 	}
-	// Deduce the template arguments from the declared parameter types.
-	DeclSpecifierInfo specs =
-		builder_.ProcessSpecifiers(inner.specifiers, true);
-	DeclaratorInfo composed = builder_.ComposeDeclarator(
-		inner.declarators[0].declarator.get(), specs.type);
-	if (composed.type->kind != TK_FUNCTION)
-		throw runtime_error("explicit instantiation of a non-function");
-	for (size_t t = 0; t < binding->fn_templates.size(); t++)
+	// The declared signature disambiguates same-name templates whose
+	// explicit argument lists would both resolve.
+	TypePtr declared;
+	try
 	{
-		TemplateInfo& tmpl = *binding->fn_templates[t];
-		EnsureFunctionPattern(tmpl);
-		if (!tmpl.pattern)
-			continue;
-		vector<TemplateArg> bound(tmpl.params.size());
-		if (!DeduceFromType(tmpl.pattern, composed.type, bound))
-			continue;
-		bool complete = true;
-		for (size_t i = 0; i < bound.size(); i++)
-			if (!ArgBound(bound[i]))
-				complete = false;
-		if (!complete)
-			continue;
-		// 14.7.2: the explicit instantiation demands the definition.
-		OnSpecializationOdrUsed(EnsureFunctionSpecialization(tmpl, bound));
+		DeclSpecifierInfo specs =
+			builder_.ProcessSpecifiers(inner.specifiers, true);
+		DeclaratorInfo composed = builder_.ComposeDeclarator(
+			inner.declarators[0].declarator.get(), specs.type);
+		if (composed.type->kind == TK_FUNCTION)
+			declared = composed.type;
+	}
+	catch (const std::exception&)
+	{
+		declared = TypePtr();
+	}
+	const FunctionSpecialization* resolved = 0;
+	bool has_args = terminal.kind == NP_TEMPLATE_ID ||
+		!terminal.arguments.empty();
+	if (has_args)
+	{
+		for (size_t t = 0;
+		     t < binding->fn_templates.size() && !resolved; t++)
+		{
+			TemplateInfo& tmpl = *binding->fn_templates[t];
+			if (TemplatePackIndex(tmpl.params) < tmpl.params.size())
+				continue;
+			vector<TemplateArg> args;
+			try
+			{
+				args = ResolveTemplateArgumentList(tmpl, terminal);
+			}
+			catch (const std::exception&)
+			{
+				continue;
+			}
+			FunctionSpecialization* spec;
+			try
+			{
+				spec = EnsureFunctionSpecialization(tmpl, args);
+			}
+			catch (const std::exception&)
+			{
+				continue;
+			}
+			if (declared && !TypeEquals(spec->type, declared))
+				continue;
+			resolved = spec;
+		}
+	}
+	else
+	{
+		if (!declared)
+			throw runtime_error("explicit instantiation of a "
+			                    "non-function");
+		// Deduce the template arguments from the declared types.
+		for (size_t t = 0;
+		     t < binding->fn_templates.size() && !resolved; t++)
+		{
+			TemplateInfo& tmpl = *binding->fn_templates[t];
+			EnsureFunctionPattern(tmpl);
+			if (!tmpl.pattern)
+				continue;
+			vector<TemplateArg> bound(tmpl.params.size());
+			if (!DeduceFromType(tmpl.pattern, declared, bound))
+				continue;
+			bool complete = true;
+			for (size_t i = 0; i < bound.size(); i++)
+				if (!ArgBound(bound[i]))
+					complete = false;
+			if (!complete)
+				continue;
+			resolved = EnsureFunctionSpecialization(tmpl, bound);
+		}
+	}
+	if (!resolved)
+		throw runtime_error("explicit instantiation matches no template");
+	FunctionSpecialization& spec =
+		*const_cast<FunctionSpecialization*>(resolved);
+	if (is_extern)
+	{
+		// 14.7.2p10: the definition lives in another translation unit;
+		// local uses reference the strong external symbol.
+		spec.extern_suppressed = true;
+		unit_.extern_fn_suppressions.push_back(&spec);
 		return;
 	}
-	throw runtime_error("explicit instantiation matches no template");
+	// 14.7.2p8: the explicit-instantiation definition demands the body
+	// and emits it unconditionally (an emission root); it also lifts a
+	// preceding extern declaration's suppression.
+	spec.extern_suppressed = false;
+	spec.inst_definition = true;
+	OnSpecializationOdrUsed(&spec);
+	unit_.explicit_fn_instantiations.push_back(&spec);
 }
 
 void SemBinder::OnParameterComposed(const string& name,
