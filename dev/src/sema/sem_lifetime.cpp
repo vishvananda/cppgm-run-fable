@@ -843,6 +843,24 @@ bool SemBinder::ClassifyClassInitForm(const AstInitializer& init,
 	}
 }
 
+// The analyzed initializer arguments; a pack expansion contributes
+// one value per element.
+void SemBinder::AnalyzeInitArguments(const vector<const AstExpr*>& items,
+                                     vector<SemValue>& values)
+{
+	for (size_t i = 0; i < items.size(); i++)
+	{
+		if (items[i]->kind == EK_PACK_EXPANSION)
+		{
+			if (!ExpandPackExpression(*items[i]->operands[0], values))
+				throw runtime_error("pack expansion outside an "
+				                    "expandable context");
+			continue;
+		}
+		values.push_back(analyzer_.Analyze(*items[i]));
+	}
+}
+
 void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
                                       const AstInitializer* init,
                                       const ClassInfo& cls)
@@ -899,32 +917,14 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	}
 	vector<SemValue> values;
 	if (braced)
+	{
+		vector<const AstExpr*> items;
 		for (size_t i = 0; i < braced->arguments.size(); i++)
-		{
-			// A pack expansion contributes one value per element.
-			if (braced->arguments[i]->kind == EK_PACK_EXPANSION)
-			{
-				if (!ExpandPackExpression(
-				        *braced->arguments[i]->operands[0], values))
-					throw runtime_error("pack expansion outside an "
-					                    "expandable context");
-				continue;
-			}
-			values.push_back(analyzer_.Analyze(*braced->arguments[i]));
-		}
+			items.push_back(braced->arguments[i].get());
+		AnalyzeInitArguments(items, values);
+	}
 	else
-		for (size_t i = 0; i < args.size(); i++)
-		{
-			if (args[i]->kind == EK_PACK_EXPANSION)
-			{
-				if (!ExpandPackExpression(*args[i]->operands[0],
-				                          values))
-					throw runtime_error("pack expansion outside an "
-					                    "expandable context");
-				continue;
-			}
-			values.push_back(analyzer_.Analyze(*args[i]));
-		}
+		AnalyzeInitArguments(args, values);
 	if (copy_init && !braced && values.size() == 1 &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
 	    BaseClassDistance(RemoveTopCv(values[0].type)->named,

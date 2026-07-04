@@ -394,6 +394,11 @@ private:
 	                              std::set<const void*>& seen,
 	                              const AstNamePart* explicit_part = 0,
 	                              const Scope* declared_in = 0);
+	// The argument-dependent candidates of an unqualified call (3.4.2).
+	void AppendAdlCandidates(const string& name,
+	                         const vector<SemValue>& args,
+	                         vector<OperatorCandidate>& candidates,
+	                         std::set<const void*>& seen);
 	// PA21 9.4p2: whether every entry of a member function set is
 	// static (the set then decays like ordinary functions).
 	bool FunctionSetAllStatic(const ScopeBinding& binding);

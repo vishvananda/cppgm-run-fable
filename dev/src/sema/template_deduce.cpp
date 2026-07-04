@@ -18,12 +18,6 @@ using std::runtime_error;
 
 namespace {
 
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA18 assignment boundary");
-}
-
 // Removes exactly the cv-qualifiers the pattern spelled from the
 // deduced type (`const T&` binding `const X` deduces `T = X`).
 TypePtr StripPatternCv(const TypePtr& pattern, const TypePtr& deduced)
@@ -527,115 +521,6 @@ bool CollectPatternSlots(const TypePtr& pattern, std::vector<size_t>& out)
 	return !pattern->target || CollectPatternSlots(pattern->target, out);
 }
 
-// 14.5.6.2p3: the transformed parameter type of one partial-ordering
-// candidate - every type parameter replaced by its synthesized unique
-// type. Null when the pattern has a shape outside the ordering subset.
-TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
-                                const vector<TypePtr>& uniques)
-{
-	if (!pattern)
-		return pattern;
-	if (!TypeIsDependent(pattern))
-		return pattern;
-	switch (pattern->kind)
-	{
-	case TK_TYPE_PARAM:
-	{
-		int index = pattern->named->param_index;
-		if (index < 0 || (size_t)index >= uniques.size())
-			return TypePtr();
-		return MakeCvQualifiedType(uniques[index], pattern->is_const,
-		                           pattern->is_volatile);
-	}
-	case TK_POINTER:
-	{
-		TypePtr target = SubstituteOrderingTypes(pattern->target,
-		                                         uniques);
-		if (!target)
-			return TypePtr();
-		return MakePointerType(target, pattern->is_const,
-		                       pattern->is_volatile);
-	}
-	case TK_LVALUE_REFERENCE:
-	case TK_RVALUE_REFERENCE:
-	{
-		TypePtr target = SubstituteOrderingTypes(pattern->target,
-		                                         uniques);
-		if (!target)
-			return TypePtr();
-		return MakeReferenceType(target,
-		                         pattern->kind == TK_RVALUE_REFERENCE,
-		                         false);
-	}
-	case TK_TEMPLATE_SPEC:
-	{
-		Type copy = *pattern;
-		for (size_t i = 0; i < copy.targs.size(); i++)
-		{
-			if (copy.targs[i].is_value)
-				continue;  // value slots compare by identity
-			copy.targs[i].type = SubstituteOrderingTypes(
-				copy.targs[i].type, uniques);
-			if (!copy.targs[i].type)
-				return TypePtr();
-		}
-		return TypePtr(new Type(copy));
-	}
-	case TK_ARRAY:
-	{
-		TypePtr element = SubstituteOrderingTypes(pattern->target,
-		                                          uniques);
-		if (!element)
-			return TypePtr();
-		Type copy = *pattern;
-		copy.target = element;
-		// 14.5.6.2p3: a deducible bound slot synthesizes a unique
-		// value (consistent per slot, improbable as a written bound).
-		if (copy.bound_param >= 0)
-		{
-			copy.bound_known = true;
-			copy.bound = 0x7fffff00ull + (size_t)copy.bound_param;
-			copy.bound_param = -1;
-		}
-		return TypePtr(new Type(copy));
-	}
-	case TK_FUNCTION:
-	{
-		Type copy = *pattern;
-		copy.target = SubstituteOrderingTypes(pattern->target, uniques);
-		if (!copy.target)
-			return TypePtr();
-		for (size_t i = 0; i < copy.parameters.size(); i++)
-		{
-			bool was_pack = copy.parameters[i]->pack_expansion;
-			copy.parameters[i] = SubstituteOrderingTypes(
-				copy.parameters[i], uniques);
-			if (!copy.parameters[i])
-				return TypePtr();
-			if (was_pack && !copy.parameters[i]->pack_expansion)
-			{
-				Type marked = *copy.parameters[i];
-				marked.pack_expansion = true;
-				copy.parameters[i] = TypePtr(new Type(marked));
-			}
-		}
-		return TypePtr(new Type(copy));
-	}
-	case TK_MEMBER_POINTER:
-	{
-		TypePtr member = SubstituteOrderingTypes(pattern->target,
-		                                         uniques);
-		if (!member)
-			return TypePtr();
-		Type copy = *pattern;
-		copy.target = member;
-		return TypePtr(new Type(copy));
-	}
-	default:
-		return TypePtr();
-	}
-}
-
 // Whether an explicit template argument spells a pack expansion
 // (`Args...`): the argument's own flag, or the type-id's abstract
 // declarator carrying the `...` as a DI_PACK item.
@@ -717,131 +602,17 @@ TypePtr SemBinder::PlaceholderType(size_t index)
 	return placeholders_[index];
 }
 
-TypePtr SemBinder::OrderingUniqueType(size_t index)
-{
-	while (ordering_uniques_.size() <= index)
-	{
-		NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-			"struct #unique" + std::to_string(ordering_uniques_.size()),
-			model_.global(),
-			"#unique" + std::to_string(ordering_uniques_.size()));
-		ordering_uniques_.push_back(MakeNamedType(TK_CLASS, info));
-	}
-	return ordering_uniques_[index];
-}
-
-// 14.5.6.2p8 (subset): `a` is at least as specialized as `b` for the
-// leading `argc` parameters when `b`'s parameters deduce from `a`'s
-// transformed parameter types.
-bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
-                                             TemplateInfo& b,
-                                             size_t argc)
-{
-	EnsureFunctionPattern(a);
-	EnsureFunctionPattern(b);
-	if (a.param_patterns.size() < argc || b.param_patterns.size() < argc)
-		return false;
-	vector<TypePtr> uniques;
-	for (size_t i = 0; i < a.params.size(); i++)
-		uniques.push_back(OrderingUniqueType(i));
-	vector<TemplateArg> bound(b.params.size());
-	for (size_t i = 0; i < bound.size(); i++)
-		bound[i].is_pack_slot = b.params[i].pack;
-	for (size_t i = 0; i < argc; i++)
-	{
-		TypePtr transformed = SubstituteOrderingTypes(
-			a.param_patterns[i], uniques);
-		TypePtr pattern = b.param_patterns[i];
-		if (!transformed || !pattern)
-			return false;
-		// 14.8.2.4p5-7: references and top-level cv-qualifiers drop
-		// on both sides before deduction.
-		if (IsReferenceType(pattern))
-			pattern = pattern->target;
-		if (IsReferenceType(transformed))
-			transformed = transformed->target;
-		pattern = RemoveTopCv(pattern);
-		transformed = RemoveTopCv(transformed);
-		if (!TypeIsDependent(pattern))
-		{
-			if (!TypeEquals(pattern, transformed))
-				return false;
-			continue;
-		}
-		if (!DeduceFromType(pattern, transformed, bound))
-			return false;
-	}
-	return true;
-}
-
-bool SemBinder::TemplateCandidateMoreSpecialized(
-	const FunctionSpecialization* a, const FunctionSpecialization* b,
-	size_t argc)
-{
-	if (!a || !b || !a->owner || !b->owner || a->owner == b->owner)
-		return false;
-	bool a_at_least = OrderingAtLeastAsSpecialized(*a->owner, *b->owner,
-	                                               argc);
-	bool b_at_least = OrderingAtLeastAsSpecialized(*b->owner, *a->owner,
-	                                               argc);
-	if (a_at_least != b_at_least)
-		return a_at_least;
-	if (!a_at_least)
-		return false;
-	// 14.8.2.4p9: deduction succeeded in both directions; positions
-	// where both parameters were reference types tie-break on the
-	// remembered lvalue-ness and cv-qualification. `a` wins when some
-	// position prefers it and none prefers `b`.
-	TemplateInfo& ta = *a->owner;
-	TemplateInfo& tb = *b->owner;
-	bool prefer_a = false;
-	bool prefer_b = false;
-	for (size_t i = 0;
-	     i < argc && i < ta.param_patterns.size() &&
-	     i < tb.param_patterns.size(); i++)
-	{
-		const TypePtr& pa = ta.param_patterns[i];
-		const TypePtr& pb = tb.param_patterns[i];
-		if (!pa || !pb || !IsReferenceType(pa) || !IsReferenceType(pb))
-			continue;
-		bool a_lref = pa->kind == TK_LVALUE_REFERENCE;
-		bool b_lref = pb->kind == TK_LVALUE_REFERENCE;
-		if (a_lref != b_lref)
-		{
-			(a_lref ? prefer_a : prefer_b) = true;
-			continue;
-		}
-		// An array's top-level cv lives on its element type (3.9.3p2).
-		TypePtr ra = pa->target;
-		TypePtr rb = pb->target;
-		while (ra->kind == TK_ARRAY)
-			ra = ra->target;
-		while (rb->kind == TK_ARRAY)
-			rb = rb->target;
-		bool a_more_cv = (ra->is_const || !rb->is_const) &&
-			(ra->is_volatile || !rb->is_volatile) &&
-			(ra->is_const != rb->is_const ||
-			 ra->is_volatile != rb->is_volatile);
-		bool b_more_cv = (rb->is_const || !ra->is_const) &&
-			(rb->is_volatile || !ra->is_volatile) &&
-			(ra->is_const != rb->is_const ||
-			 ra->is_volatile != rb->is_volatile);
-		if (a_more_cv)
-			prefer_a = true;
-		if (b_more_cv)
-			prefer_b = true;
-	}
-	return prefer_a && !prefer_b;
-}
 
 // Composes the declarator of a function-template declaration with the
 // parameters bound to the positional placeholders. Returns false when
 // the signature does not compose abstractly (dependent qualified
 // forms); per-parameter patterns then compose individually.
-bool SemBinder::ComposeFunctionPattern(
-	const vector<TemplateParam>& params, Scope* declaring,
-	const AstDecl& inner, TypePtr& full, vector<TypePtr>& param_patterns,
-	vector<bool>& pattern_packs)
+// The abstract pattern scope: each named parameter binds its
+// positional placeholder (type placeholders, template-template
+// anchors, objectless value slots); packs stay unexpanded through
+// the param_index marker.
+Scope* SemBinder::MakePatternParamScope(const vector<TemplateParam>& params,
+                                        Scope* declaring)
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                  declaring);
@@ -870,12 +641,19 @@ bool SemBinder::ComposeFunctionPattern(
 			binding.kind = SB_VARIABLE;
 			binding.no_object = true;
 		}
-		// param_index marks the abstract pattern binding (packs stay
-		// unexpanded through it).
 		binding.param_index = (int)i;
 		binding.is_pack = params[i].pack;
 		AddBinding(*scope, binding);
 	}
+	return scope;
+}
+
+bool SemBinder::ComposeFunctionPattern(
+	const vector<TemplateParam>& params, Scope* declaring,
+	const AstDecl& inner, TypePtr& full, vector<TypePtr>& param_patterns,
+	vector<bool>& pattern_packs)
+{
+	Scope* scope = MakePatternParamScope(params, declaring);
 	const AstDeclarator* declarator = PatternDeclarator(inner);
 	Scope* saved = current_;
 	current_ = scope;
@@ -1051,42 +829,14 @@ bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
 	return DeduceFromArgList(pattern, args, bound, allow_trailing);
 }
 
-// 14.5.5.2 (subset): `a` is at least as specialized as `b` when `b`'s
-// argument pattern deduces from `a`'s pattern with `a`'s type
-// placeholders replaced by synthesized unique types. Value slots keep
-// their slot identity: a concrete value in `b` never deduces from a
-// slot in `a` (so `X<7>` beats `X<N>`), and repeated-slot consistency
-// falls out of slot-index equality. Shapes outside the ordering
-// subset are conservatively not-at-least-as-specialized.
-bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
-                                            const PartialSpecialization& b)
+// The single-type unification entry for the ordering/participation
+// unit (template_order.cpp); the structural rules stay file-local.
+bool SemBinder::DeducePatternType(const TypePtr& pattern,
+                                  const TypePtr& arg,
+                                  vector<TemplateArg>& bound,
+                                  bool exact_cv)
 {
-	vector<TypePtr> uniques;
-	for (size_t i = 0; i < a.params.size(); i++)
-		uniques.push_back(OrderingUniqueType(i));
-	vector<TemplateArg> transformed;
-	for (size_t i = 0; i < a.pattern.size(); i++)
-	{
-		TemplateArg arg = a.pattern[i];
-		if (!arg.is_value && arg.type)
-		{
-			arg.type = SubstituteOrderingTypes(arg.type, uniques);
-			if (!arg.type)
-				return false;
-		}
-		else if (arg.pack_pattern && !arg.is_value)
-			return false;
-		transformed.push_back(arg);
-	}
-	vector<TemplateArg> bound(b.params.size());
-	for (size_t i = 0; i < b.params.size(); i++)
-		bound[i].is_pack_slot = b.params[i].pack;
-	if (!DeduceFromArgList(b.pattern, transformed, bound, false))
-		return false;
-	// A pack pattern in `b` deducing from a fixed run in `a` (or the
-	// reverse absorption) already decided; a leftover fixed slot in
-	// `b` only matters for completeness, which ordering ignores.
-	return true;
+	return DeduceFromType(pattern, arg, bound, exact_cv);
 }
 
 // --- deduction ---------------------------------------------------------------
@@ -1293,6 +1043,44 @@ bool SemBinder::DeducePackElement(const TypePtr& pattern,
 	return true;
 }
 
+// Unbound parameters fill from default template arguments (under the
+// partially-bound alias scope); any remaining hole or substitution
+// failure fails the deduction.
+bool SemBinder::FillDeducedDefaults(TemplateInfo& tmpl,
+                                    vector<TemplateArg>& bound,
+                                    const vector<TemplateArg>& pack_elements)
+{
+	for (size_t i = 0; i < bound.size(); i++)
+	{
+		if (tmpl.params[i].pack || ArgBound(bound[i]))
+			continue;
+		const TemplateParam& param = tmpl.params[i];
+		if (!param.default_type && !param.default_expr)
+			return false;
+		Scope* partial = MakeArgumentAliasScope(
+			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
+		Scope* saved = current_;
+		current_ = partial;
+		try
+		{
+			if (param.kind == TPK_TYPE)
+				bound[i] = TemplateArg(builder_.ResolveTypeId(
+					*param.default_type));
+			else
+				bound[i] = ResolveDefaultValueExpr(
+					*param.default_expr,
+					ValueParamType(param, partial));
+		}
+		catch (const std::exception&)
+		{
+			current_ = saved;
+			return false;
+		}
+		current_ = saved;
+	}
+	return true;
+}
+
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	TemplateInfo& tmpl, const vector<SemValue>& args,
 	const AstNamePart* explicit_part)
@@ -1391,39 +1179,8 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		bound[pack_index].pack_done = true;
 		bound[pack_index].pack_elements = pack_elements;
 	}
-	// Unbound parameters fill from default template arguments; any
-	// remaining hole is a deduction failure.
-	for (size_t i = 0; i < bound.size(); i++)
-	{
-		if (tmpl.params[i].pack || ArgBound(bound[i]))
-			continue;
-		const TemplateParam& param = tmpl.params[i];
-		if (!param.default_type && !param.default_expr)
-			return 0;
-		Scope* partial = MakeArgumentAliasScope(
-			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
-		Scope* saved = current_;
-		current_ = partial;
-		try
-		{
-			if (param.kind == TPK_TYPE)
-				bound[i] = TemplateArg(builder_.ResolveTypeId(
-					*param.default_type));
-			else
-				bound[i] = ResolveDefaultValueExpr(
-					*param.default_expr,
-					ValueParamType(param, partial));
-		}
-		catch (const std::exception& error)
-		{
-			current_ = saved;
-			if (getenv("CPPGM_DEDUCE_DEBUG"))
-				fprintf(stderr, "DBG default %s: %s\n",
-				        tmpl.name.c_str(), error.what());
-			return 0;
-		}
-		current_ = saved;
-	}
+	if (!FillDeducedDefaults(tmpl, bound, pack_elements))
+		return 0;
 	// 14.8.2p8 (PA22): substitution failure while composing the
 	// concrete signature (parameter/return substitution, trailing
 	// decltype analysis, enable_if member lookup) is an immediate-
@@ -1436,16 +1193,45 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements),
 			&bound);
 	}
-	catch (const std::exception& error)
+	catch (const std::exception&)
 	{
-		if (getenv("CPPGM_DEDUCE_DEBUG"))
-			fprintf(stderr, "DBG deduce %s: %s\n", tmpl.name.c_str(),
-			        error.what());
 		return 0;
 	}
 }
 
 // --- specialization -----------------------------------------------------------
+
+// 13.5p6: a namespace-scope operator function must take at least one
+// class or enumeration operand, so a specialization over builtin
+// operand types only is ill-formed (allocation and literal operators
+// are exempt).
+void SemBinder::CheckOperatorSpecializationOperands(const TemplateInfo& tmpl,
+                                                    const TypePtr& type)
+{
+	if (tmpl.member_of || tmpl.name.compare(0, 9, "operator ") != 0 ||
+	    tmpl.name.compare(0, 10, "operator \"") == 0)
+		return;
+	const string text = tmpl.name.substr(9);
+	if (text == "new" || text == "new[]" || text == "delete" ||
+	    text == "delete[]")
+		return;
+	bool class_or_enum = false;
+	bool dependent = false;
+	for (size_t i = 0; i < type->parameters.size(); i++)
+	{
+		TypePtr param = type->parameters[i];
+		if (IsReferenceType(param))
+			param = param->target;
+		param = RemoveTopCv(param);
+		if (TypeIsDependent(param))
+			dependent = true;
+		if (param->kind == TK_CLASS || param->kind == TK_ENUM)
+			class_or_enum = true;
+	}
+	if (!class_or_enum && !dependent)
+		throw runtime_error("operator function specialization without "
+		                    "a class or enumeration parameter");
+}
 
 FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	TemplateInfo& tmpl, const vector<TemplateArg>& args,
@@ -1517,37 +1303,7 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	    composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function template " + tmpl.name +
 		                    " does not declare a function");
-	// 13.5p6: a namespace-scope operator function must take at least
-	// one class or enumeration operand, so a specialization over
-	// builtin operand types only is ill-formed (allocation and
-	// literal operators are exempt).
-	if (!tmpl.member_of && tmpl.name.compare(0, 9, "operator ") == 0 &&
-	    tmpl.name.compare(0, 10, "operator \"") != 0)
-	{
-		const string text = tmpl.name.substr(9);
-		if (text != "new" && text != "new[]" && text != "delete" &&
-		    text != "delete[]")
-		{
-			bool class_or_enum = false;
-			bool dependent = false;
-			for (size_t i = 0;
-			     i < composed.type->parameters.size(); i++)
-			{
-				TypePtr param = composed.type->parameters[i];
-				if (IsReferenceType(param))
-					param = param->target;
-				param = RemoveTopCv(param);
-				if (TypeIsDependent(param))
-					dependent = true;
-				if (param->kind == TK_CLASS || param->kind == TK_ENUM)
-					class_or_enum = true;
-			}
-			if (!class_or_enum && !dependent)
-				throw runtime_error(
-					"operator function specialization without a "
-					"class or enumeration parameter");
-		}
-	}
+	CheckOperatorSpecializationOperands(tmpl, composed.type);
 	spec->type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		spec->declared_params.push_back(composed.parameters[i].type);
@@ -1577,204 +1333,6 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 
 	tmpl.fn_specs[key] = std::move(fresh);
 	return spec;
-}
-
-// --- conversion-function templates (14.8.2.3) -------------------------------
-
-void SemBinder::CheckArrayElementType(const TypePtr& element)
-{
-	TypePtr bare = element ? RemoveTopCv(element) : element;
-	if (!bare || bare->kind != TK_CLASS)
-		return;
-	EnsureTypeCompleteness(bare->named);
-	const ClassInfo* cls = unit_.classes.Find(bare->named);
-	if (!cls)
-		return;
-	for (size_t i = 0; i < cls->vslots.size(); i++)
-		if (cls->vslots[i].kind == VS_METHOD && cls->vslots[i].pure)
-			throw runtime_error("array of abstract " +
-			                    bare->named->display);
-}
-
-void SemBinder::DeduceConversionTemplates(const NamedTypeInfo* entity,
-                                          const TypePtr& dest)
-{
-	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
-	while (cls)
-	{
-		for (size_t t = 0; t < cls->conversion_templates.size(); t++)
-		{
-			try
-			{
-				DeduceOneConversionTemplate(
-					*cls->conversion_templates[t], dest, *cls);
-			}
-			catch (const std::exception&)
-			{
-				// 14.8.2p8: the template contributes no entry.
-			}
-		}
-		cls = cls->base ? unit_.classes.Find(cls->base->entity) : 0;
-	}
-}
-
-void SemBinder::DeduceCtorTemplatesForConversion(
-	const NamedTypeInfo* entity, const ConversionSource& source)
-{
-	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
-	if (!cls || cls->ctor_templates.empty() || !source.type)
-		return;
-	vector<SemValue> shells(1);
-	shells[0].type = source.type;
-	shells[0].category = source.category;
-	vector<TypePtr> candidates;
-	vector<size_t> min_arity;
-	vector<size_t> positions;
-	AppendCtorTemplateCandidates(*cls, shells, candidates, min_arity,
-	                             positions, 0);
-}
-
-void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
-                                            const TypePtr& dest,
-                                            ClassInfo& cls)
-{
-	const AstDecl& inner = *tmpl.pattern_decl;
-	const AstName* id = inner.declarator ? inner.declarator->IdName() : 0;
-	if (!id || id->parts.empty() ||
-	    id->parts.back().kind != NP_CONVERSION_FUNCTION ||
-	    !id->parts.back().conversion_type)
-		throw OutsideBoundary("conversion template form");
-	const AstTypeId& conversion_type = *id->parts.back().conversion_type;
-	// The conversion-type-id composes with the parameters bound to
-	// the positional placeholders (the deduction pattern P).
-	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
-	                                  tmpl.declaring);
-	for (size_t i = 0; i < tmpl.params.size(); i++)
-	{
-		if (tmpl.params[i].name.empty())
-			continue;
-		ScopeBinding binding;
-		binding.name = tmpl.params[i].name;
-		if (tmpl.params[i].kind == TPK_TYPE)
-		{
-			binding.kind = SB_TYPE;
-			binding.type = PlaceholderType(i);
-		}
-		else if (tmpl.params[i].kind == TPK_TEMPLATE)
-		{
-			binding.kind = SB_CLASS_TEMPLATE;
-			binding.templ = TemplateParamPlaceholder(tmpl.params[i], i);
-		}
-		else
-		{
-			binding.kind = SB_VARIABLE;
-			binding.no_object = true;
-		}
-		binding.param_index = (int)i;
-		binding.is_pack = tmpl.params[i].pack;
-		AddBinding(*scope, binding);
-	}
-	TypePtr pattern;
-	{
-		Scope* saved = current_;
-		current_ = scope;
-		try
-		{
-			pattern = builder_.ResolveTypeId(conversion_type);
-		}
-		catch (...)
-		{
-			current_ = saved;
-			throw;
-		}
-		current_ = saved;
-	}
-	// The abstract composition doubles as the mangling pattern.
-	if (!tmpl.conversion_pattern)
-		tmpl.conversion_pattern = pattern;
-	// 14.8.2.3p2-3: reference types deduce through their referees.
-	TypePtr a = dest;
-	if (IsReferenceType(pattern))
-		pattern = pattern->target;
-	if (IsReferenceType(a))
-		a = a->target;
-	vector<TemplateArg> bound(tmpl.params.size());
-	if (TypeIsDependent(pattern))
-	{
-		if (!DeduceFromType(RemoveTopCv(pattern), RemoveTopCv(a), bound,
-		                    false))
-			throw runtime_error("conversion deduction failed");
-	}
-	else if (!TypeEquals(RemoveTopCv(pattern), RemoveTopCv(a)))
-		throw runtime_error("conversion deduction failed");
-	// Unbound parameters fill from defaults; a hole fails deduction.
-	for (size_t i = 0; i < bound.size(); i++)
-	{
-		if (tmpl.params[i].pack || ArgBound(bound[i]))
-			continue;
-		const TemplateParam& param = tmpl.params[i];
-		if (!param.default_type && !param.default_expr)
-			throw runtime_error("conversion deduction incomplete");
-		Scope* partial = MakeArgumentAliasScope(tmpl, bound);
-		Scope* saved = current_;
-		current_ = partial;
-		try
-		{
-			if (param.kind == TPK_TYPE)
-				bound[i] = TemplateArg(builder_.ResolveTypeId(
-					*param.default_type));
-			else
-				bound[i] = ResolveDefaultValueExpr(
-					*param.default_expr, ValueParamType(param, partial));
-		}
-		catch (...)
-		{
-			current_ = saved;
-			throw;
-		}
-		current_ = saved;
-	}
-	FunctionSpecialization* spec = EnsureFunctionSpecialization(
-		tmpl, FlattenDeduced(tmpl.params, bound,
-		                     vector<TemplateArg>()));
-	// The special-member composition returned `void() cv`; the real
-	// result type composes under the specialization's argument scope.
-	if (IsVoidType(spec->type->target))
-	{
-		TypePtr result;
-		Scope* saved = current_;
-		current_ = spec->param_scope;
-		try
-		{
-			result = builder_.ResolveTypeId(conversion_type);
-		}
-		catch (...)
-		{
-			current_ = saved;
-			throw;
-		}
-		current_ = saved;
-		Type fixed = *spec->type;
-		fixed.target = result;
-		spec->type = TypePtr(new Type(fixed));
-		spec->name = "operator " + DescribeType(result);
-		spec->self.type = spec->type;
-		spec->self.name = spec->name;
-	}
-	for (size_t i = 0; i < cls.conversions.size(); i++)
-		if (cls.conversions[i].spec == spec)
-			return;
-	ClassConversion conv;
-	conv.name = spec->name;
-	conv.result = spec->type->target;
-	conv.type = spec->type;
-	conv.is_explicit = false;
-	for (size_t i = 0; i < inner.member_specifiers.size(); i++)
-		if (inner.member_specifiers[i].keyword == KW_EXPLICIT)
-			conv.is_explicit = true;
-	conv.access = tmpl.member_access;
-	conv.spec = spec;
-	cls.conversions.push_back(conv);
 }
 
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(

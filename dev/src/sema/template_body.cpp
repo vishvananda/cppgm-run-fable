@@ -130,6 +130,19 @@ void SemBinder::OnSpecializationOdrUsed(const FunctionSpecialization* spec)
 		InstantiateFunctionBody(*used.owner, used);
 }
 
+// The conversion-type-id of a conversion-function template pattern
+// (null for other patterns).
+static const AstTypeId* PatternConversionTypeId(const AstDecl& inner)
+{
+	if (inner.kind != DK_SPECIAL_MEMBER_DEFINITION || !inner.declarator)
+		return 0;
+	const AstName* id = inner.declarator->IdName();
+	if (!id || id->parts.empty() ||
+	    id->parts.back().kind != NP_CONVERSION_FUNCTION)
+		return 0;
+	return id->parts.back().conversion_type.get();
+}
+
 void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
                                         FunctionSpecialization& spec)
 {
@@ -146,13 +159,7 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	                                         : *tmpl.pattern_decl;
 	// PA22 conversion-function templates: the pattern is a special
 	// member whose result type is its conversion-type-id.
-	const AstName* special_id =
-		inner.kind == DK_SPECIAL_MEMBER_DEFINITION && inner.declarator
-			? inner.declarator->IdName() : 0;
-	const AstTypeId* conversion_type =
-		special_id && !special_id->parts.empty() &&
-		special_id->parts.back().kind == NP_CONVERSION_FUNCTION
-			? special_id->parts.back().conversion_type.get() : 0;
+	const AstTypeId* conversion_type = PatternConversionTypeId(inner);
 	if ((inner.kind != DK_FUNCTION && !conversion_type) || !inner.body)
 		throw runtime_error("function template " + tmpl.name +
 		                    " has no definition");

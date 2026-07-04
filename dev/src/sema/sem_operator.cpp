@@ -377,26 +377,15 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 }
 
 // 3.4.2: an unqualified call merges the visible overloads with the
-// candidates argument-dependent lookup finds in the arguments'
-// associated namespaces (hidden friends included; using-declaration
-// imports into an associated namespace are not its own declarations).
-SemValue SemExprAnalyzer::AnalyzeAdlCall(
-	const AstExpr& expr, const string& name,
-	const vector<const ScopeBinding*>& visible)
+// The argument-dependent candidates: functions and templates
+// declared in the arguments' associated namespaces (hidden friends
+// included; using-declaration imports into an associated namespace
+// are not its own declarations, 3.4.2p3, but friend templates riding
+// an imported binding are).
+void SemExprAnalyzer::AppendAdlCandidates(
+	const string& name, const vector<SemValue>& args,
+	vector<OperatorCandidate>& candidates, set<const void*>& seen)
 {
-	vector<SemValue> args;
-	vector<ConversionSource> sources;
-	AnalyzeArgumentList(expr.arguments, args);
-	for (size_t i = 0; i < args.size(); i++)
-		sources.push_back(MakeConversionSource(args[i]));
-	set<const void*> seen;
-	vector<OperatorCandidate> candidates;
-	for (size_t i = 0; i < visible.size(); i++)
-	{
-		AppendBindingOverloads(*visible[i], false, false, candidates,
-		                       seen);
-		AppendTemplateCandidates(*visible[i], args, candidates, seen);
-	}
 	vector<const Scope*> namespaces;
 	for (size_t i = 0; i < args.size(); i++)
 	{
@@ -427,13 +416,33 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 				AppendTemplateCandidates(*found, args, candidates, seen);
 			}
 			else
-				// Friend templates declared here may ride a binding a
-				// using-declaration owns (3.4.2p3 ignores the import,
-				// not the friends).
 				AppendTemplateCandidates(*found, args, candidates, seen,
 				                         0, namespaces[i]);
 		}
 	}
+}
+
+// candidates argument-dependent lookup finds in the arguments'
+// associated namespaces (hidden friends included; using-declaration
+// imports into an associated namespace are not its own declarations).
+SemValue SemExprAnalyzer::AnalyzeAdlCall(
+	const AstExpr& expr, const string& name,
+	const vector<const ScopeBinding*>& visible)
+{
+	vector<SemValue> args;
+	vector<ConversionSource> sources;
+	AnalyzeArgumentList(expr.arguments, args);
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
+	set<const void*> seen;
+	vector<OperatorCandidate> candidates;
+	for (size_t i = 0; i < visible.size(); i++)
+	{
+		AppendBindingOverloads(*visible[i], false, false, candidates,
+		                       seen);
+		AppendTemplateCandidates(*visible[i], args, candidates, seen);
+	}
+	AppendAdlCandidates(name, args, candidates, seen);
 	if (candidates.empty())
 		throw runtime_error("undeclared name " + name);
 	vector<TypePtr> declared;

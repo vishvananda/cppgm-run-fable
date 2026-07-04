@@ -580,11 +580,8 @@ bool SemBinder::CheckDependentPatternSlots(
 				resolved = ResolveDependentAliasUse(slot.type,
 				                                    alias_scope, bound);
 			}
-			catch (const std::exception& error)
+			catch (const std::exception&)
 			{
-				if (getenv("CPPGM_DEDUCE_DEBUG"))
-					fprintf(stderr, "DBG aliasmatch %s: %s\n",
-					        tmpl.name.c_str(), error.what());
 				return false;
 			}
 			const TemplateArg& concrete = args[ai];
@@ -698,12 +695,7 @@ TypePtr SemBinder::ResolveDependentAliasUse(const TypePtr& pattern,
 		                  concrete);
 	for (size_t i = 0; i < concrete.size(); i++)
 		if (TemplateArgIsDependent(concrete[i]))
-		{
-			if (getenv("CPPGM_DEDUCE_DEBUG"))
-				fprintf(stderr, "DBG aliasuse %s: targ %zu dependent\n",
-				        alias.name.c_str(), i);
 			return TypePtr();
-		}
 	const ScopeBinding* resolved = ResolveAliasTemplateId(alias, concrete);
 	return resolved ? resolved->type : TypePtr();
 }

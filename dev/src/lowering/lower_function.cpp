@@ -1225,3 +1225,47 @@ void FunctionLowerer::LowerConditionInto(const SemNode& condition,
 	Terminate("branch " + truth.text + ", ^" + true_label + ", ^" +
 	          false_label);
 }
+
+// The declaration line of a used-but-undefined function (split from
+// lower_unit.cpp for size).
+string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
+{
+	string ret_text;
+	bool indirect_result = LowerAbiReturn(info.type->target, ret_text);
+	string params;
+	size_t at = 0;
+	if (indirect_result)
+	{
+		params = "%ret : ptr [pass=indirect_result]";
+		at = 1;
+	}
+	for (size_t i = 0; i < info.type->parameters.size(); i++, at++)
+	{
+		const TypePtr& param = info.type->parameters[i];
+		string param_text;
+		string pass;
+		LowerAbiParameter(param, param_text, pass);
+		params += (at ? ", " : "") + string("%arg") + to_string(at) +
+			" : " + param_text;
+		if (!pass.empty())
+			params += " [pass=" + pass + "]";
+	}
+	vector<string> meta;
+	if (info.type->variadic)
+		meta.push_back("arity=variadic");
+	if (info.c_linkage)
+		meta.push_back("linkage=c");
+	// A declared-but-undefined template specialization keeps its
+	// vague linkage: any translation unit may carry the definition.
+	meta.push_back(info.internal ? "binding=internal"
+	               : info.fn_spec ? "binding=weak"
+	                              : "binding=strong");
+	if (!info.object_name.empty())
+		meta.push_back("object=" + info.object_name);
+	string metadata;
+	for (size_t i = 0; i < meta.size(); i++)
+		metadata += (i ? ", " : " [") + meta[i];
+	metadata += "]";
+	return "declare function @" + info.low_name + "(" + params +
+		") -> " + ret_text + metadata;
+}

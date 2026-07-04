@@ -163,8 +163,7 @@ sizeof... bounds, a few deep alias/pack SFINAE compositions
 (and_helper chains inside member guards), several exact-LowIR shape
 diffs (empty-temporary ctor elision in delegating mem-initializers,
 canonical function ordering), and assorted single-feature corners;
-each needs its own reduction (the env-gated CPPGM_DEDUCE_DEBUG traces
-in template_deduce.cpp/sem_spec.cpp help).
+each needs its own reduction.
 
 ## Validation
 

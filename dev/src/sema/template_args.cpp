@@ -265,6 +265,37 @@ static EFundamentalType ValueTargetFundamental(const TypePtr& type)
 	return type->fundamental;
 }
 
+// 14.3.2: the entity a reference/pointer argument names (a plain
+// identifier, or & over one for the pointer form) with its declared
+// type checked against the parameter's referee.
+void SemBinder::ResolveEntityArgument(const AstName* name,
+                                      const AstExpr* expr,
+                                      const TypePtr& param_type,
+                                      TemplateArg& arg)
+{
+	const AstName* entity = name;
+	if (!entity && expr && expr->kind == EK_ID)
+		entity = &expr->name;
+	if (!entity && expr && expr->kind == EK_UNARY &&
+	    expr->op_spelling == "&" && !expr->operands.empty() &&
+	    expr->operands[0]->kind == EK_ID)
+		entity = &expr->operands[0]->name;
+	if (!entity)
+		throw runtime_error("template argument does not name an "
+		                    "entity with linkage");
+	const ScopeBinding* found = ResolveTerminal(*entity, SLF_ANY);
+	if (!found || found->kind != SB_VARIABLE || found->no_object ||
+	    !found->owner || found->owner->kind != SCOPE_NAMESPACE)
+		throw runtime_error("template argument does not name an "
+		                    "entity with linkage");
+	if (found->type &&
+	    !TypeEquals(RemoveTopCv(found->type),
+	                RemoveTopCv(param_type->target)))
+		throw runtime_error("template argument entity type mismatch");
+	arg.entity_scope = found->owner;
+	arg.entity_name = found->name;
+}
+
 // Resolves one value argument (an expression, or a type-form argument
 // re-read as an id-expression) against the parameter's declared type.
 TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
@@ -307,33 +338,11 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 	arg.is_value = true;
 	arg.type = param_type;
 	// 14.3.2: a reference/pointer parameter binds the address of a
-	// named entity with linkage; the argument spells the entity (with
-	// an optional & for the pointer form).
+	// named entity with linkage.
 	if (param_type &&
 	    (IsReferenceType(param_type) || param_type->kind == TK_POINTER))
 	{
-		const AstName* entity = name;
-		if (!entity && expr && expr->kind == EK_ID)
-			entity = &expr->name;
-		if (!entity && expr && expr->kind == EK_UNARY &&
-		    expr->op_spelling == "&" && !expr->operands.empty() &&
-		    expr->operands[0]->kind == EK_ID)
-			entity = &expr->operands[0]->name;
-		if (!entity)
-			throw runtime_error("template argument does not name an "
-			                    "entity with linkage");
-		const ScopeBinding* found = ResolveTerminal(*entity, SLF_ANY);
-		if (!found || found->kind != SB_VARIABLE || found->no_object ||
-		    !found->owner || found->owner->kind != SCOPE_NAMESPACE)
-			throw runtime_error("template argument does not name an "
-			                    "entity with linkage");
-		if (found->type &&
-		    !TypeEquals(RemoveTopCv(found->type),
-		                RemoveTopCv(param_type->target)))
-			throw runtime_error("template argument entity type "
-			                    "mismatch");
-		arg.entity_scope = found->owner;
-		arg.entity_name = found->name;
+		ResolveEntityArgument(name, expr, param_type, arg);
 		return arg;
 	}
 	if (!TypeIsDependent(param_type))

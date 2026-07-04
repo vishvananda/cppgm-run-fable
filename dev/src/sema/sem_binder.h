@@ -436,6 +436,10 @@ private:
 	// type-id re-reads as a zero-argument constexpr call.
 	bool EvaluateZeroArgConstantCall(const AstTypeId& type_id,
 	                                 ConstValue& out);
+	// 14.3.2: the entity a reference/pointer argument names.
+	void ResolveEntityArgument(const AstName* name, const AstExpr* expr,
+	                           const TypePtr& param_type,
+	                           TemplateArg& arg);
 	// The lazily-created binding scope over the already-resolved
 	// leading arguments.
 	Scope* EnsureArgBindingScope(TemplateInfo& tmpl,
@@ -522,6 +526,12 @@ private:
 	                        const vector<TemplateArg>& args,
 	                        vector<TemplateArg>& bound,
 	                        bool allow_trailing = true);
+	// Single-type unification for the ordering/participation unit
+	// (template_order.cpp); the structural rules stay in
+	// template_deduce.cpp.
+	bool DeducePatternType(const TypePtr& pattern, const TypePtr& arg,
+	                       vector<TemplateArg>& bound,
+	                       bool exact_cv = true);
 	// 14.5.5.2 (subset): whether partial specialization `a` is at
 	// least as specialized as `b` (template_deduce.cpp).
 	bool PartialAtLeastAsSpecialized(const PartialSpecialization& a,
@@ -615,6 +625,10 @@ private:
 	                            vector<bool>& pattern_packs);
 	// Composes the abstract signature pattern (lazily, cached).
 	void EnsureFunctionPattern(TemplateInfo& tmpl);
+	// The abstract pattern scope binding each named parameter to its
+	// positional placeholder.
+	Scope* MakePatternParamScope(const vector<TemplateParam>& params,
+	                             Scope* declaring);
 	// Whether a new declaration re-declares `tmpl` (positional
 	// parameter identity over the composed pattern).
 	// `match_head_spelling=false` relaxes the 14.5.6.1p6 template-head
@@ -635,6 +649,11 @@ private:
 	FunctionSpecialization* EnsureFunctionSpecialization(
 		TemplateInfo& tmpl, const vector<TemplateArg>& args,
 		const vector<TemplateArg>* slots = 0);
+	bool FillDeducedDefaults(TemplateInfo& tmpl,
+	                         vector<TemplateArg>& bound,
+	                         const vector<TemplateArg>& pack_elements);
+	void CheckOperatorSpecializationOperands(const TemplateInfo& tmpl,
+	                                         const TypePtr& type);
 	void InstantiateFunctionBody(TemplateInfo& tmpl,
 	                             FunctionSpecialization& spec);
 	// PA21: the implicit object parameter of a member-template body.
@@ -713,6 +732,9 @@ private:
 	void AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	                           const AstInitializer* init,
 	                           const ClassInfo& cls);
+	// The analyzed initializer arguments (pack expansions splice).
+	void AnalyzeInitArguments(const vector<const AstExpr*>& items,
+	                          vector<SemValue>& values);
 	bool ClassifyClassInitForm(const AstInitializer& init,
 	                           vector<const AstExpr*>& args,
 	                           const AstExpr*& braced);
