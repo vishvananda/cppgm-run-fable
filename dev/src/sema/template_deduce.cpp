@@ -1160,6 +1160,15 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	                                    spec->param_scope);
 	InstantiationContext context(*this, capture);
 	param_capture_scope_ = capture;
+	// PA21 member templates: a trailing-return decltype may name the
+	// enclosing class's members through the implicit this.
+	if (tmpl.member_of && !tmpl.member_static)
+	{
+		method_.cls = unit_.classes.Find(tmpl.member_of);
+		if (method_.cls)
+			method_.this_type = MakePointerType(
+				MakeNamedType(TK_CLASS, tmpl.member_of), false, false);
+	}
 	PreBindDeclaredParameters(declarator);
 	last_pack_param_ = PackParamRecord();
 	DeclSpecifierInfo specs;
@@ -1243,6 +1252,15 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	fn_scope->fn_type = spec.type;
 	InstantiationContext context(*this, fn_scope, true);
 	param_capture_scope_ = fn_scope;
+	// PA21 member templates: the trailing-return decltype may name
+	// the enclosing class's members through the implicit this.
+	if (tmpl.member_of && !tmpl.member_static)
+	{
+		method_.cls = unit_.classes.Find(tmpl.member_of);
+		if (method_.cls)
+			method_.this_type = MakePointerType(
+				MakeNamedType(TK_CLASS, tmpl.member_of), false, false);
+	}
 	// Pre-bind the parameters so the trailing-return decltype (which
 	// composes before the clause, 8.3.5p2) can name them, then
 	// re-compose the declarator in this specialization's context.
