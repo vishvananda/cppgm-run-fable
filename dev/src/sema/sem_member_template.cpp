@@ -342,8 +342,23 @@ void SemBinder::CaptureQualifiedMemberClassTemplate(const AstDecl& decl,
 	if (tmpl->params.size() != params.size())
 		throw runtime_error("template parameter list of " + name +
 		                    " disagrees with its declaration");
+	// 14.1p10: the in-class declaration's default arguments carry over
+	// (the definition's parameter names win positionally).
+	for (size_t i = 0; i < params.size(); i++)
+	{
+		if (params[i].kind != tmpl->params[i].kind)
+			throw runtime_error("template parameter kind of " + name +
+			                    " disagrees with its declaration");
+		if (!params[i].default_type)
+			params[i].default_type = tmpl->params[i].default_type;
+		if (!params[i].default_expr)
+			params[i].default_expr = tmpl->params[i].default_expr;
+	}
 	if (inner.kind != DK_CLASS)
+	{
+		tmpl->params = params;
 		return;
+	}
 	if (tmpl->has_definition)
 		throw runtime_error("redefinition of member class template " +
 		                    name);

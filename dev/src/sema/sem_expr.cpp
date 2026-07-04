@@ -400,8 +400,35 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		break;
 	}
 	case SB_FUNCTION:
+	{
+		// 9.4p2: a set of only static member functions behaves as
+		// ordinary functions (its address is a plain function
+		// pointer, not a member pointer).
+		if (member_class)
+		{
+			bool any_entry = false;
+			bool all_static = true;
+			size_t ordinary = binding->type
+				? binding->overloads.size() + 1 : 0;
+			for (size_t i = 0; i < ordinary; i++)
+			{
+				any_entry = true;
+				if (i >= binding->fn_static.size() ||
+				    !binding->fn_static[i])
+					all_static = false;
+			}
+			for (size_t t = 0; t < binding->fn_templates.size(); t++)
+			{
+				any_entry = true;
+				if (!binding->fn_templates[t]->member_static)
+					all_static = false;
+			}
+			if (any_entry && all_static)
+				member_class = 0;
+		}
 		FillFunctionSetValue(*binding, member_class, value);
 		break;
+	}
 	case SB_ENUMERATOR:
 	{
 		// Enumerators dump as value literals of their enumeration type.
