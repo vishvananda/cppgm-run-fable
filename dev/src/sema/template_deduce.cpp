@@ -954,7 +954,23 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 		TemplateArg resolved;
 		try
 		{
-			if (param.kind == TPK_TYPE)
+			if (param.kind == TPK_TEMPLATE)
+			{
+				// A template-name argument parses as a type-id
+				// spelling just the name (`check<F>(0)`).
+				const AstName* tname = 0;
+				if (argument.is_type && argument.type &&
+				    (!argument.type->declarator ||
+				     argument.type->declarator->Empty()) &&
+				    argument.type->specifiers.size() == 1 &&
+				    argument.type->specifiers[0].kind == SPEC_TYPE_NAME)
+					tname = &argument.type->specifiers[0].name;
+				if (!tname)
+					return false;
+				resolved = ResolveTemplateTemplateArgument(*tname, param,
+				                                           tmpl.name);
+			}
+			else if (param.kind == TPK_TYPE)
 			{
 				if (!argument.is_type || !argument.type)
 					return false;
