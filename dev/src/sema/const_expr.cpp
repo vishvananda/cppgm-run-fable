@@ -268,6 +268,12 @@ ConstValue EvaluateBinary(const AstExpr& expr, IConstExprContext& context)
 		return MakeBool(ConstValueIsNonZero(
 			EvaluateConstExpr(*expr.operands[1], context)));
 	}
+	// PA21: the comma operator discards its left operand's value.
+	if (expr.op == OP_COMMA)
+	{
+		EvaluateConstExpr(*expr.operands[0], context);
+		return EvaluateConstExpr(*expr.operands[1], context);
+	}
 	ConstValue lhs = EvaluateConstExpr(*expr.operands[0], context);
 	ConstValue rhs = EvaluateConstExpr(*expr.operands[1], context);
 	if (expr.op == OP_LSHIFT || expr.op == OP_RSHIFT)
@@ -289,6 +295,12 @@ ConstValue EvaluateTypedCast(const AstExpr& expr, IConstExprContext& context)
 		fundamental = target->fundamental;
 	else if (target->kind == TK_ENUM)
 		fundamental = target->named->enum_underlying;
+	else if (IsVoidType(target))
+	{
+		// PA21: a discarded-value void cast inside a comma operand
+		// (`(void(T()), 0)`); the operand need not fold.
+		return ConstValue(FT_INT, 0);
+	}
 	else
 		throw OutsideSubset("cast to a non-integral type");
 	ConstValue operand = EvaluateConstExpr(*expr.operands[0], context);
