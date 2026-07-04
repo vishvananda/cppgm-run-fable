@@ -1228,7 +1228,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	bool has_pack = pack_index < tmpl.params.size();
 	bool pack_pattern_last = !tmpl.param_pattern_packs.empty() &&
 		tmpl.param_pattern_packs.back();
-	if (!pack_pattern_last && tmpl.param_patterns.size() < args.size())
+	// Arguments beyond the declared parameters match a trailing
+	// ellipsis (13.3.2p2); they deduce nothing.
+	bool pattern_variadic = tmpl.pattern && tmpl.pattern->variadic;
+	if (!pack_pattern_last && !pattern_variadic &&
+	    tmpl.param_patterns.size() < args.size())
 		return 0;
 	vector<TemplateArg> bound(tmpl.params.size());
 	// Pack slots absorb runs when a template-id pattern (tuple<T...>)
@@ -1252,7 +1256,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	for (size_t i = 0; i < args.size(); i++)
 	{
 		if (p >= tmpl.param_patterns.size())
+		{
+			if (pattern_variadic)
+				break;  // the remaining arguments ride the ellipsis
 			return 0;
+		}
 		bool pattern_is_pack = p < tmpl.param_pattern_packs.size() &&
 			tmpl.param_pattern_packs[p];
 		const TypePtr& pattern = tmpl.param_patterns[p];
