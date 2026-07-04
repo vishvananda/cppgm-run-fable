@@ -748,7 +748,49 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 		if ((member = FindOwnBinding(*link, "operator ()")))
 			break;
 	if (!member || member->kind != SB_FUNCTION)
+	{
+		// 13.3.1.1.2: a conversion function to pointer (or reference)
+		// to function supplies a surrogate call: the converted value
+		// calls with the arguments.
+		TypePtr bare = RemoveTopCv(object.type);
+		host_.RequireCompleteType(bare->named);
+		const ClassInfo* cls = host_.Classes().Find(bare->named);
+		for (const ClassInfo* link = cls; link; link = link->base)
+			for (size_t i = 0; i < link->conversions.size(); i++)
+			{
+				const ClassConversion& conversion = link->conversions[i];
+				if (conversion.is_explicit)
+					continue;
+				TypePtr result = conversion.result;
+				if (IsReferenceType(result))
+					result = result->target;
+				result = RemoveTopCv(result);
+				TypePtr function_type;
+				if (result->kind == TK_POINTER &&
+				    result->target->kind == TK_FUNCTION)
+					function_type = result->target;
+				else if (result->kind == TK_FUNCTION)
+					function_type = result;
+				else
+					continue;
+				ImplicitConversion conv;
+				conv.viable = true;
+				conv.rank = CR_USER;
+				conv.conv_class = link->entity;
+				conv.conv_index = (int)i;
+				ApplyConversion(object, conv, conversion.result);
+				vector<SemValue> args;
+				AnalyzeArgumentList(expr.arguments, args);
+				CheckCallArguments(function_type, args);
+				SemValue value = CallResult(function_type);
+				value.node->children.push_back(std::move(object.node));
+				for (size_t a = 0; a < args.size(); a++)
+					value.node->children.push_back(
+						std::move(args[a].node));
+				return value;
+			}
 		throw runtime_error("object is not callable");
+	}
 	host_.CheckMemberAccess(member->home, member->access, "operator ()");
 	return AnalyzeMethodCall(std::move(object), *member, expr.arguments);
 }
