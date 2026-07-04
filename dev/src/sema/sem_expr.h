@@ -118,9 +118,11 @@ struct ISemExprHost
 	// context requires the complete type (14.7.1p1).
 	virtual void RequireCompleteType(const NamedTypeInfo* info) = 0;
 	// PA18 13.4p2: deduce `tmpl` against a target function type (null
-	// when deduction fails).
+	// when deduction fails); explicit template-id arguments pre-bind
+	// the leading parameters (14.8.1).
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
-		TemplateInfo& tmpl, const TypePtr& target) = 0;
+		TemplateInfo& tmpl, const TypePtr& target,
+		const AstNamePart* explicit_part = 0) = 0;
 	// PA18 14.7.1p2: a resolved use selected this specialization - the
 	// analyzer reports every winner so the host instantiates its body
 	// (deduction alone composes only the signature).
@@ -213,6 +215,13 @@ struct SemValue
 	// ordinary overloads).
 	vector<TemplateInfo*> fn_templates;
 	vector<const FunctionSpecialization*> overload_specs;
+	// PA23 14.8.1: the explicit template-id arguments of a set that
+	// could not resolve fully (`&X::create<Service, Owner>`); target
+	// -directed deduction pre-binds them. `fn_set_addressed` marks a
+	// set spelled under & - the selected member forms the pointer
+	// directly (5.3.1p6 with 13.4).
+	const AstNamePart* fn_explicit_part = 0;
+	bool fn_set_addressed = false;
 	const Scope* fn_owner;  // declaring scope (canonical callee name)
 	string fn_name;
 	// Set when the id names a class member: the class entity and the
@@ -433,6 +442,10 @@ private:
 	// this read (a value from an instantiated out-of-class definition
 	// folds only inside instantiated bodies).
 	bool StaticMemberValueFolds(const ScopeBinding& binding);
+	// 9.3.1p3: whether a qualified field name inside a member function
+	// reads through this.
+	bool QualifiedFieldThroughThis(const ScopeBinding& binding,
+	                               const NamedTypeInfo* member_class);
 
 	// --- PA16 allocation expressions (sem_new.cpp) ---
 	SemValue AnalyzeNew(const AstExpr& expr);

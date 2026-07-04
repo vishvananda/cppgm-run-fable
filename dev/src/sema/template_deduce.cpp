@@ -1413,22 +1413,44 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 }
 
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
-	TemplateInfo& tmpl, const TypePtr& target)
+	TemplateInfo& tmpl, const TypePtr& target,
+	const AstNamePart* explicit_part)
 {
 	EnsureFunctionPattern(tmpl);
 	if (!tmpl.pattern || !target || target->kind != TK_FUNCTION)
 		return 0;
 	vector<TemplateArg> bound(tmpl.params.size());
+	for (size_t i = 0; i < bound.size(); i++)
+		bound[i].is_pack_slot = tmpl.params[i].pack;
+	// 14.8.1: explicit template-id arguments bind the leading
+	// parameters before the target deduction
+	// (`&X::create<Service, Owner>` against a function-pointer type).
+	vector<TemplateArg> pack_elements;
+	if (explicit_part &&
+	    !BindExplicitDeductionArgs(tmpl, *explicit_part, bound,
+	                               pack_elements))
+		return 0;
 	if (!DeduceFromType(tmpl.pattern, target, bound))
 		return 0;
+	size_t pack_index = TemplatePackIndex(tmpl.params);
+	bool has_pack = pack_index < tmpl.params.size();
+	if (has_pack && !bound[pack_index].pack_done)
+	{
+		bound[pack_index].pack_done = true;
+		bound[pack_index].pack_elements = pack_elements;
+	}
+	if (!FillDeducedDefaults(tmpl, bound, pack_elements))
+		return 0;
 	for (size_t i = 0; i < bound.size(); i++)
-		if (!ArgBound(bound[i]))
+		if (!bound[i].is_pack_slot && !ArgBound(bound[i]))
 			return 0;
 	// 14.8.2.2: substitution failure drops the candidate from the
 	// overload-set deduction, like call deduction.
 	try
 	{
-		return EnsureFunctionSpecialization(tmpl, bound);
+		return EnsureFunctionSpecialization(
+			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements),
+			&bound);
 	}
 	catch (const InstantiationBodyFault&)
 	{

@@ -280,7 +280,8 @@ void SemExprAnalyzer::AddTargetDeducedOverloads(SemValue& value,
 	{
 		const FunctionSpecialization* spec =
 			host_.DeduceFunctionTemplateFromTarget(
-				*value.fn_templates[t], target);
+				*value.fn_templates[t], target,
+				value.fn_explicit_part);
 		if (!spec)
 			continue;
 		// The set fills once per ranked candidate: a specialization
@@ -731,7 +732,10 @@ void SemExprAnalyzer::AppendOperatorOperands(
 // candidates first.
 bool SemExprAnalyzer::OperatorOperand(const SemValue& value)
 {
-	return value.type->kind == TK_CLASS || value.type->kind == TK_ENUM;
+	// A template-only overload set carries no type until a target
+	// selects one member; no user operator consults it.
+	return value.type &&
+		(value.type->kind == TK_CLASS || value.type->kind == TK_ENUM);
 }
 
 bool SemExprAnalyzer::TryBinaryOperator(const string& spelling,

@@ -961,7 +961,8 @@ public:
 	bool OrderingAtLeastAsSpecialized(TemplateInfo& a, TemplateInfo& b,
 	                                  size_t argc);
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
-		TemplateInfo& tmpl, const TypePtr& target);
+		TemplateInfo& tmpl, const TypePtr& target,
+		const AstNamePart* explicit_part = 0);
 	virtual void OnSpecializationOdrUsed(const FunctionSpecialization* spec);
 	virtual void OnStaticMemberReferenced(const ScopeBinding& binding,
 	                                      bool folding_read);
