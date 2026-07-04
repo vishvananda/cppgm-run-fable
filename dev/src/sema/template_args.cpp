@@ -253,6 +253,10 @@ TypePtr SemBinder::ValueParamType(const TemplateParam& param,
 	// (14.3.2).
 	if (IsReferenceType(type) || type->kind == TK_POINTER)
 		return type;
+	// 14.1p8: a function-typed parameter adjusts to pointer to
+	// function.
+	if (type->kind == TK_FUNCTION)
+		return MakePointerType(type, false, false);
 	throw OutsideBoundary("non-integral non-type template parameter");
 }
 
@@ -284,6 +288,45 @@ void SemBinder::ResolveEntityArgument(const AstName* name,
 		throw runtime_error("template argument does not name an "
 		                    "entity with linkage");
 	const ScopeBinding* found = ResolveTerminal(*entity, SLF_ANY);
+	// 14.3.2p5 (PA23): a pointer-to-function parameter takes a
+	// function with linkage whose (unique overload-matched) type is
+	// the parameter's function type; the argument spells the name or
+	// & over it. A template-id argument names the deduced
+	// specialization (14.8.1).
+	if (found && found->kind == SB_FUNCTION && found->fn_self_spec &&
+	    param_type && param_type->kind == TK_POINTER &&
+	    param_type->target->kind == TK_FUNCTION)
+	{
+		// The name resolved to a deduced specialization's own binding
+		// (a template-id routed through the instantiation seam).
+		if (!found->type ||
+		    !TypeEquals(found->type, param_type->target))
+			throw runtime_error("template argument entity type "
+			                    "mismatch");
+		arg.entity_scope = found->owner;
+		arg.entity_name = found->name;
+		arg.entity_fn_spec = found->fn_self_spec;
+		return;
+	}
+	if (found && found->kind == SB_FUNCTION && param_type &&
+	    param_type->kind == TK_POINTER &&
+	    param_type->target->kind == TK_FUNCTION)
+	{
+		if (!found->owner || found->owner->kind != SCOPE_NAMESPACE)
+			throw runtime_error("template argument does not name an "
+			                    "entity with linkage");
+		bool matched = found->type &&
+			TypeEquals(found->type, param_type->target);
+		for (size_t i = 0; !matched && i < found->overloads.size(); i++)
+			matched = TypeEquals(found->overloads[i],
+			                     param_type->target);
+		if (!matched)
+			throw runtime_error("template argument entity type "
+			                    "mismatch");
+		arg.entity_scope = found->owner;
+		arg.entity_name = found->name;
+		return;
+	}
 	if (!found || found->kind != SB_VARIABLE || found->no_object ||
 	    !found->owner || found->owner->kind != SCOPE_NAMESPACE)
 		throw runtime_error("template argument does not name an "
@@ -517,6 +560,22 @@ void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
 		alias.kind = SB_VARIABLE;
 		alias.type = arg.type && IsReferenceType(arg.type)
 			? arg.type->target : arg.type;
+		// PA23: a function entity reads as the function lvalue; a
+		// call decays it to the entity's address (the checked shape).
+		if (arg.entity_fn_spec)
+		{
+			alias.type = arg.type->target;
+			alias.fn_self_spec = arg.entity_fn_spec;
+		}
+		else if (arg.type && arg.type->kind == TK_POINTER &&
+		         arg.type->target->kind == TK_FUNCTION)
+		{
+			const ScopeBinding* entity = FindOwnBinding(
+				*const_cast<Scope*>(arg.entity_scope),
+				arg.entity_name);
+			if (entity && entity->kind == SB_FUNCTION)
+				alias.type = arg.type->target;
+		}
 		alias.owner = arg.entity_scope;
 		alias.pack_element_name = arg.entity_name;
 	}

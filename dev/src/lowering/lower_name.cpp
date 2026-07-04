@@ -316,9 +316,17 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 			? string("T_") : "T" + to_string(arg.value_param - 1) + "_";
 	if (arg.dependent_value)
 		return "L_DEPE";
-	// 5.1.6: an entity-valued argument spells `L <mangled-name> E`.
+	// 5.1.6: an entity-valued argument spells `L <mangled-name> E`; a
+	// function entity spells the address expression
+	// `X ad L_Z <name><bare-function-type> E E`.
 	if (arg.entity_scope)
 	{
+		// A function-template-specialization entity keeps its full
+		// object encoding inside the literal.
+		if (arg.entity_fn_spec)
+			return "XadL" +
+				MangleFunctionTemplateObjectName(*arg.entity_fn_spec) +
+				"EE";
 		vector<NameComponent> parts =
 			ScopeComponents(arg.entity_scope);
 		string spelled;
@@ -327,6 +335,17 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 		spelled += SourceName(arg.entity_name);
 		if (!parts.empty())
 			spelled = "N" + spelled + "E";
+		if (arg.type && arg.type->kind == TK_POINTER &&
+		    arg.type->target->kind == TK_FUNCTION)
+		{
+			const TypePtr& fn = arg.type->target;
+			string params;
+			for (size_t i = 0; i < fn->parameters.size(); i++)
+				params += MangleType(fn->parameters[i], subs);
+			if (fn->parameters.empty())
+				params = "v";
+			return "XadL_Z" + spelled + params + "EE";
+		}
 		return "L_Z" + spelled + "E";
 	}
 	string code = MangleType(arg.type, subs);

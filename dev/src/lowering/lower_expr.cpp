@@ -1027,7 +1027,7 @@ string FunctionLowerer::LowerPointerOperand(const SemNode& node)
 		const ScopeBinding* binding = node.kind == SN_ID_EXPRESSION
 			? EntityBinding(node) : 0;
 		string address;
-		if (binding && binding->kind == SB_FUNCTION)
+		if ((binding && binding->kind == SB_FUNCTION) || node.fn_spec)
 			address = LowerAddressExpr(node);
 		else
 			address = LowerValueExpr(node).text;

@@ -102,6 +102,10 @@ struct TemplateArg
 	// and `is_value` stays set.
 	const struct Scope* entity_scope = 0;
 	string entity_name;
+	// PA23: the entity is a deduced function-template specialization
+	// (`&sample<char, 2, true>` bound to a function-pointer
+	// parameter); uses route through the specialization's entry.
+	const struct FunctionSpecialization* entity_fn_spec = 0;
 	// PA21 deduction slots only (never part of a specialization
 	// identity): a slot standing for a parameter pack accumulates its
 	// deduced element run; `pack_done` is set once one expansion
