@@ -39,6 +39,24 @@ bool DeduceFromArgList(const vector<TemplateArg>& pattern,
                        const vector<TemplateArg>& args,
                        vector<TemplateArg>& bound, bool allow_trailing);
 
+// A deferred alias-template use kept as an anchor TEMPLATE_SPEC
+// (diff_t<I> whose substitution needs instantiation-time facts): a
+// non-deduced context for call-argument deduction (14.8.2.5p5 - the
+// alias stands for a dependent qualified-id).
+bool PatternIsDeferredAliasUse(const TypePtr& pattern)
+{
+	TypePtr bare = pattern;
+	while (bare && (bare->kind == TK_LVALUE_REFERENCE ||
+	                bare->kind == TK_RVALUE_REFERENCE ||
+	                bare->kind == TK_POINTER))
+		bare = bare->target;
+	if (bare)
+		bare = RemoveTopCv(bare);
+	return bare && bare->kind == TK_TEMPLATE_SPEC && bare->named &&
+		bare->named->is_template_anchor && bare->named->spec_template &&
+		bare->named->spec_template->kind == TMPL_ALIAS;
+}
+
 // Whether a template-spec pattern may deduce from a base of the
 // argument class (14.8.2.1p4). The rule belongs to call-argument
 // deduction only; class partial-specialization matching (14.5.5.1)
@@ -1206,6 +1224,12 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 			p++;
 			if (!DeduceFixedParameter(pattern, args[i], bound))
 			{
+				// 14.8.2.5p5: a deferred alias/qualified pattern is a
+				// non-deduced context; the composed signature checks
+				// this argument by conversion once the other
+				// parameters bind (diff_t<I> alongside a deduced I).
+				if (PatternIsDeferredAliasUse(pattern))
+					continue;
 				// With every parameter explicitly bound, any pattern
 				// is concrete after substitution regardless of its
 				// (possibly deferred) shape.
