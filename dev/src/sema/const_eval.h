@@ -39,6 +39,10 @@ struct ConstPointer
 	const Scope* sym_scope;  // symbolic &global (no evaluated image)
 	string sym_name;
 	unsigned long long offset;  // byte offset within the target
+	// PA21: a symbolic FUNCTION address (the emitted image references
+	// the function symbol; specializations carry their identity).
+	TypePtr sym_fn_type;
+	const struct FunctionSpecialization* sym_fn_spec = 0;
 
 	bool IsNull() const
 	{

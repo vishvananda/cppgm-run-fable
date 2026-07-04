@@ -210,7 +210,11 @@ bool LowerProgram::AppendImageScalar(const ConstObject& image,
 		{
 			const ConstPointer& value = slot->second;
 			string symbol;
-			if (value.sym_scope)
+			if (value.sym_fn_type)
+				symbol = FunctionRef(value.sym_scope, value.sym_name,
+				                     value.sym_fn_type,
+				                     value.sym_fn_spec);
+			else if (value.sym_scope)
 				symbol = GlobalRef(value.sym_scope, value.sym_name);
 			else if (value.object && value.object->literal_node)
 				symbol = StringLiteralRef(*value.object->literal_node);

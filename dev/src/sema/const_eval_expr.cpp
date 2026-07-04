@@ -151,7 +151,10 @@ EvalValue ConstEvalEngine::EvalId(const SemNode& node)
 	}
 	ConstPointer address = EvalLValue(node);
 	TypePtr type = ValueTypeOf(node);
-	if (RemoveTopCv(type)->kind == TK_ARRAY)
+	// Arrays decay to their address; a function lvalue's address IS
+	// its (pointer) value (PA21 function-pointer constants).
+	if (RemoveTopCv(type)->kind == TK_ARRAY ||
+	    RemoveTopCv(type)->kind == TK_FUNCTION)
 	{
 		EvalValue value;
 		value.kind = EvalValue::EV_PTR;
@@ -243,6 +246,19 @@ ConstPointer ConstEvalEngine::IdAddress(const SemNode& node)
 		ConstPointer address;
 		address.sym_scope = node.entity_scope;
 		address.sym_name = node.entity_name;
+		return address;
+	}
+	// PA21: the address of a function (including a template
+	// specialization) is an address constant whatever its declaring
+	// scope kind; the image slot references the function symbol.
+	if (node.type && RemoveTopCv(node.type)->kind == TK_FUNCTION &&
+	    node.entity_scope)
+	{
+		ConstPointer address;
+		address.sym_scope = node.entity_scope;
+		address.sym_name = node.entity_name;
+		address.sym_fn_type = RemoveTopCv(node.type);
+		address.sym_fn_spec = node.fn_spec;
 		return address;
 	}
 	throw NotConstant("read of a non-constant object");
