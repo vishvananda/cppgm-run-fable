@@ -179,13 +179,30 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 			}
 			// PA21: a prefix resolving to a concrete class (or
 			// instantiated specialization) scope defines a member
-			// class template of that class out of class.
-			if (inner.class_name.parts.back().kind == NP_IDENTIFIER &&
-			    !TemplateMemberOwnerIsPattern(decl, inner.class_name))
+			// class template - or one of its partial specializations
+			// (template-id terminal) - of that class out of class.
+			if (!TemplateMemberOwnerIsPattern(decl, inner.class_name))
 			{
 				Scope* declaring = ResolvePrefixScope(inner.class_name);
 				if (declaring->kind == SCOPE_CLASS)
 				{
+					if (inner.class_name.parts.back().kind ==
+					    NP_TEMPLATE_ID)
+					{
+						Scope* saved = current_;
+						current_ = declaring;
+						try
+						{
+							RegisterClassPartial(decl, inner);
+						}
+						catch (...)
+						{
+							current_ = saved;
+							throw;
+						}
+						current_ = saved;
+						return;
+					}
 					CaptureQualifiedMemberTemplate(decl, inner,
 					                               declaring);
 					return;

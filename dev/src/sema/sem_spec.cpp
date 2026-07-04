@@ -171,9 +171,31 @@ void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 	case DK_CLASS:
 	case DK_CLASS_FORWARD:
 	{
-		if (!inner.has_name || inner.class_name.parts.size() != 1 ||
+		if (!inner.has_name || inner.class_name.parts.empty() ||
 		    inner.class_name.parts.back().kind != NP_TEMPLATE_ID)
 			throw OutsideBoundary("explicit specialization name form");
+		// PA21: a qualified name explicitly specializes a member class
+		// template inside its owner's scope.
+		if (inner.class_name.parts.size() > 1)
+		{
+			Scope* declaring = ResolvePrefixScope(inner.class_name);
+			if (!declaring || declaring->kind != SCOPE_CLASS)
+				throw OutsideBoundary("explicit specialization name "
+				                      "form");
+			Scope* saved = current_;
+			current_ = declaring;
+			try
+			{
+				BindClassExplicitSpecialization(inner);
+			}
+			catch (...)
+			{
+				current_ = saved;
+				throw;
+			}
+			current_ = saved;
+			return;
+		}
 		BindClassExplicitSpecialization(inner);
 		return;
 	}

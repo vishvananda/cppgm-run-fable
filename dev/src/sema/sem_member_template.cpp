@@ -68,8 +68,17 @@ void SemBinder::BindMemberTemplateDeclaration(const AstDecl& decl,
 	case DK_CLASS:
 	case DK_CLASS_FORWARD:
 		// A member class template captures like a namespace-scope one;
-		// its declaring scope is the class member scope.
-		if (!inner.has_name || !inner.class_name.IsPlainIdentifier())
+		// its declaring scope is the class member scope. A template-id
+		// name declares an in-class partial specialization.
+		if (!inner.has_name)
+			throw OutsideBoundary("member class template name");
+		if (inner.class_name.parts.size() == 1 &&
+		    inner.class_name.parts.back().kind == NP_TEMPLATE_ID)
+		{
+			RegisterClassPartial(decl, inner);
+			return;
+		}
+		if (!inner.class_name.IsPlainIdentifier())
 			throw OutsideBoundary("member class template name");
 		CaptureClassTemplate(decl, inner, inner.kind == DK_CLASS);
 		return;
