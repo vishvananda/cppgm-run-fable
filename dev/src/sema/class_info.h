@@ -308,6 +308,11 @@ private:
 	vector<const ClassInfo*> order_;  // creation order
 };
 
+// PA21 11.3p1: whether a friend-class grant covers `context` (a
+// friend class template's anchor grants every specialization).
+bool FriendClassMatches(const NamedTypeInfo* granted,
+                        const NamedTypeInfo* context);
+
 // PA21: whether `to` is `from` or one of its bases, including the
 // (empty) extra bases beside the single-inheritance chain.
 bool DerivedFromWithExtras(const ClassRegistry& classes,

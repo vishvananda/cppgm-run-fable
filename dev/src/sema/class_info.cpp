@@ -73,6 +73,16 @@ bool DerivedFromWithExtras(const ClassRegistry& classes,
 	return false;
 }
 
+bool FriendClassMatches(const NamedTypeInfo* granted,
+                        const NamedTypeInfo* context)
+{
+	if (granted == context)
+		return true;
+	return granted && context && granted->is_template_anchor &&
+		granted->spec_template &&
+		context->spec_template == granted->spec_template;
+}
+
 bool DerivedFromWithExtrasLinked(const NamedTypeInfo* from,
                                  const NamedTypeInfo* to)
 {

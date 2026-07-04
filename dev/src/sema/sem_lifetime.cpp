@@ -1177,7 +1177,8 @@ bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
 		if (contexts[i]->members == naming->members)
 			return true;
 		for (size_t j = 0; j < naming->friend_classes.size(); j++)
-			if (naming->friend_classes[j] == contexts[i]->entity)
+			if (FriendClassMatches(naming->friend_classes[j],
+			                       contexts[i]->entity))
 				return true;
 	}
 	if (!method_.fn_name.empty())

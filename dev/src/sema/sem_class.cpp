@@ -711,7 +711,29 @@ void SemBinder::BindFriendDeclaration(const AstDecl& decl)
 	if (decl.kind == DK_SIMPLE && decl.declarators.empty())
 	{
 		if (!has_nested)
+		{
+			// PA21 11.3p3: `friend typename C::self;` (a dependent
+			// type naming a class at instantiation) grants that class.
+			for (size_t i = 0; i < decl.specifiers.size(); i++)
+			{
+				if (decl.specifiers[i].kind != SPEC_TYPE_NAME)
+					continue;
+				try
+				{
+					TypePtr named =
+						ResolveTypeName(decl.specifiers[i].name);
+					if (named &&
+					    RemoveTopCv(named)->kind == TK_CLASS)
+						cls->friend_classes.push_back(
+							RemoveTopCv(named)->named);
+				}
+				catch (const std::exception&)
+				{
+					// A non-type friend specifier declares nothing.
+				}
+			}
 			return;  // friend of a non-class type declares nothing
+		}
 		Scope* saved = current_;
 		current_ = EnclosingNamespace();
 		DeclSpecifierInfo specs;
@@ -1015,15 +1037,21 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 			     link = link->base)
 				if (link->members == owner)
 					return;
-		// A friend class's members access everything (11.3).
+		// A friend class's members access everything (11.3); a friend
+		// class template's grant covers every specialization.
 		for (size_t j = 0; j < owner_cls->friend_classes.size(); j++)
-			if (owner_cls->friend_classes[j] == contexts[i]->entity)
+			if (FriendClassMatches(owner_cls->friend_classes[j],
+			                       contexts[i]->entity))
 				return;
 	}
 	if (!method_.fn_name.empty())
 		for (size_t i = 0; i < owner_cls->friend_functions.size(); i++)
 			if (owner_cls->friend_functions[i].first == method_.fn_owner &&
-			    owner_cls->friend_functions[i].second == method_.fn_name)
+			    (owner_cls->friend_functions[i].second ==
+			         method_.fn_name ||
+			     (!method_.fn_template_name.empty() &&
+			      owner_cls->friend_functions[i].second ==
+			          method_.fn_template_name)))
 				return;
 	// 11.2p5/11.4: a protected member of a base class is also
 	// accessible to members and friends of any class P on the object
@@ -1036,7 +1064,8 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 		{
 			for (size_t i = 0; i < contexts.size(); i++)
 				for (size_t j = 0; j < p->friend_classes.size(); j++)
-					if (p->friend_classes[j] == contexts[i]->entity)
+					if (FriendClassMatches(p->friend_classes[j],
+					                       contexts[i]->entity))
 						return;
 			if (!method_.fn_name.empty())
 				for (size_t i = 0; i < p->friend_functions.size(); i++)
