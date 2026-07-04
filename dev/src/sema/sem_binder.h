@@ -791,6 +791,9 @@ public:
 	// template_args.cpp.
 	virtual bool TryClassConversionConstant(const AstName& name,
 	                                        ConstValue& out);
+	// PA21 sizeof...(pack) in constant expressions (sem_pack.cpp).
+	virtual bool PackSizeConstant(const string& name,
+	                              unsigned long long& out);
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
 		TemplateInfo& tmpl, const vector<SemValue>& args,

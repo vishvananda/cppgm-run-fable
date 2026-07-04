@@ -204,7 +204,8 @@ bool SemBinder::InAbstractTemplateContext() const
 			    TypeIsDependent(binding.type))
 				return true;
 			if (binding.kind == SB_VARIABLE && binding.no_object &&
-			    !binding.has_value)
+			    !binding.has_value &&
+			    (!binding.is_pack || binding.param_index >= 0))
 				return true;
 		}
 	}

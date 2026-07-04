@@ -255,6 +255,30 @@ void SemBinder::ExpandTemplateArgumentPack(TemplateInfo& tmpl,
 			                    "pack");
 		TemplateArg pattern;
 		pattern.pack_pattern = true;
+		// A bare name re-reads as a value-parameter pack slot when it
+		// binds one (`index_tuple<Indexes...>` with a value pack).
+		const AstName* bare = 0;
+		if (argument.is_type && argument.type &&
+		    argument.type->specifiers.size() == 1 &&
+		    argument.type->specifiers[0].kind == SPEC_TYPE_NAME)
+			bare = &argument.type->specifiers[0].name;
+		else if (argument.expr && argument.expr->kind == EK_ID)
+			bare = &argument.expr->name;
+		if (bare && bare->IsPlainIdentifier())
+		{
+			const ScopeBinding* found =
+				UnqualifiedLookup(current_,
+				                  bare->parts[0].identifier, SLF_ANY);
+			if (found && found->kind == SB_VARIABLE &&
+			    found->no_object && found->is_pack &&
+			    found->param_index >= 0)
+			{
+				pattern.is_value = true;
+				pattern.value_param = found->param_index;
+				args.push_back(pattern);
+				return;
+			}
+		}
 		if (argument.is_type && argument.type)
 			pattern.type = builder_.ResolveTypeId(*argument.type);
 		else
@@ -394,6 +418,21 @@ const FunctionSpecialization* SemBinder::InstantiateCharPackLiteral(
 		return EnsureFunctionSpecialization(tmpl, args);
 	}
 	return 0;
+}
+
+// IConstExprContext: sizeof...(name) inside constant expressions
+// (false when the name binds no concrete pack, so abstract patterns
+// stay dependent).
+bool SemBinder::PackSizeConstant(const string& name,
+                                 unsigned long long& out)
+{
+	const ScopeBinding* found = UnqualifiedLookup(current_, name,
+	                                              SLF_ANY);
+	if (!found || !found->is_pack || found->param_index >= 0)
+		return false;
+	out = found->kind == SB_PARAMETER ? found->pack_param_names.size()
+	                                  : found->pack_args.size();
+	return true;
 }
 
 // The element count behind `sizeof...(name)`.

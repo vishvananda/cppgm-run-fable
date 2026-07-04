@@ -33,6 +33,15 @@ struct IConstExprContext
 		(void)expr;
 		return TypePtr();
 	}
+	// PA21: the element count of a parameter pack in scope
+	// (`sizeof...(name)`); false when the name binds no concrete pack.
+	virtual bool PackSizeConstant(const string& name,
+	                              unsigned long long& out)
+	{
+		(void)name;
+		(void)out;
+		return false;
+	}
 	// PA19: the constant value of a class-typed functional cast
 	// (`B{}` / `B(x)`) through a conversion function whose body is a
 	// single return of a constant expression. False when the name is

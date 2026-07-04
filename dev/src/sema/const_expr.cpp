@@ -579,6 +579,16 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	}
 	case EK_SIZEOF_EXPR:
 		return EvaluateSizeofExpr(expr, context);
+	case EK_SIZEOF_PACK:
+	{
+		// PA21 14.5.3p5: sizeof...(pack) folds to the element count.
+		unsigned long long count = 0;
+		if (!expr.name.parts.empty() &&
+		    context.PackSizeConstant(expr.name.parts[0].identifier,
+		                             count))
+			return ConstValue(FT_UNSIGNED_LONG_INT, count);
+		throw OutsideSubset("sizeof... of a non-pack");
+	}
 	case EK_SUBSCRIPT:
 	{
 		// 5.19-adjacent: an element read of a string literal folds to
