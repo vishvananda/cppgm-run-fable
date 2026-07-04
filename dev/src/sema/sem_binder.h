@@ -504,6 +504,9 @@ private:
 	// abstract template pattern (ITypeBuilderHost).
 	virtual bool ComposeAbstractPackParameter(const AstParameter& parameter,
 	                                          ParameterInfo& out);
+	// PA21: an abstract-pattern array bound naming a value parameter
+	// (ITypeBuilderHost).
+	virtual bool AbstractArrayBound(const AstExpr& expr, int& param);
 	// The most recent clause expansion (one pack parameter per clause
 	// in the slice): the declared pack name and its expanded slots,
 	// consumed right after signature composition to bind the function

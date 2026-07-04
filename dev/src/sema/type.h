@@ -194,6 +194,10 @@ struct Type
 	// abstract TK_FUNCTION pattern was spelled `P...` (deduction
 	// absorbs an argument run). Never set on concrete types.
 	bool pack_expansion = false;
+	// PA21 pattern-only: a TK_ARRAY bound spelled as a value template
+	// parameter (`T[N]`); deduction binds the slot from the argument's
+	// concrete bound. -1 on concrete types.
+	int bound_param = -1;
 };
 
 // --- classification of fundamental types (3.9.1) ---

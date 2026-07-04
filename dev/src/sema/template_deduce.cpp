@@ -251,6 +251,10 @@ bool DeduceFromArgList(const vector<TemplateArg>& pattern,
 		}
 		if (ai >= args.size())
 			return false;
+		// Ordering: a fixed slot never matches a pack expansion (the
+		// fixed list is more specialized, 14.8.2.4p11).
+		if (args[ai].pack_pattern)
+			return false;
 		if (!DeduceFromArg(p, args[ai], bound))
 			return false;
 		ai++;
@@ -316,6 +320,31 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 	case TK_RVALUE_REFERENCE:
 		return DeduceFromType(pattern->target, arg->target, bound);
 	case TK_ARRAY:
+		// PA21 `T[N]` pattern: the bound binds its value slot.
+		if (pattern->bound_param >= 0)
+		{
+			if (!arg->bound_known ||
+			    (size_t)pattern->bound_param >= bound.size())
+				return false;
+			TemplateArg& slot = bound[pattern->bound_param];
+			if (ArgBound(slot))
+			{
+				if (!slot.is_value || slot.value_bits != arg->bound)
+					return false;
+			}
+			else
+			{
+				bool keep_pack = slot.is_pack_slot;
+				slot = TemplateArg();
+				slot.is_value = true;
+				slot.type =
+					MakeFundamentalType(FT_UNSIGNED_LONG_INT);
+				slot.value_type = FT_UNSIGNED_LONG_INT;
+				slot.value_bits = arg->bound;
+				slot.is_pack_slot = keep_pack;
+			}
+			return DeduceFromType(pattern->target, arg->target, bound);
+		}
 		if (pattern->bound_known &&
 		    (!arg->bound_known || pattern->bound != arg->bound))
 			return false;

@@ -576,6 +576,25 @@ TemplateArg SemBinder::ResolveTemplateTemplateArgument(
 	return arg;
 }
 
+// PA21: inside an abstract pattern, an array bound spelling a value
+// template parameter composes as its slot (`T[N]`).
+bool SemBinder::AbstractArrayBound(const AstExpr& expr, int& param)
+{
+	if (!InAbstractTemplateContext())
+		return false;
+	const AstName* name = PlainExprName(expr);
+	if (!name)
+		return false;
+	const ScopeBinding* found = ResolveTerminal(*name, SLF_ANY);
+	if (found && found->kind == SB_VARIABLE && found->no_object &&
+	    !found->has_value && found->param_index >= 0)
+	{
+		param = found->param_index;
+		return true;
+	}
+	return false;
+}
+
 // A pattern-scope placeholder template standing for the enclosing
 // template's template-template parameter `index`; deduction reads the
 // slot off the anchor entity.

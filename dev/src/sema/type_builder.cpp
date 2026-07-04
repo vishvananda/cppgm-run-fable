@@ -298,9 +298,22 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	case DI_ARRAY:
 	{
 		bool bound_known = item.array_bound.get() != 0;
-		unsigned long long bound = bound_known
-			? host_.EvaluateArrayBound(*item.array_bound) : 0;
-		out.type = MakeArrayType(out.type, bound_known, bound);
+		unsigned long long bound = 0;
+		int bound_param = -1;
+		if (bound_known &&
+		    !host_.AbstractArrayBound(*item.array_bound, bound_param))
+			bound = host_.EvaluateArrayBound(*item.array_bound);
+		if (bound_param >= 0)
+		{
+			// PA21 pattern form `T[N]`: the bound is a value-parameter
+			// slot deduction fills.
+			TypePtr array = MakeArrayType(out.type, false, 0);
+			Type marked = *array;
+			marked.bound_param = bound_param;
+			out.type = TypePtr(new Type(marked));
+		}
+		else
+			out.type = MakeArrayType(out.type, bound_known, bound);
 		out.declares_function = false;
 		break;
 	}

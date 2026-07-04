@@ -259,7 +259,8 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 		return true;
 	if (a->kind != b->kind || a->is_const != b->is_const ||
 	    a->is_volatile != b->is_volatile ||
-	    a->pack_expansion != b->pack_expansion)
+	    a->pack_expansion != b->pack_expansion ||
+	    a->bound_param != b->bound_param)
 		return false;
 	switch (a->kind)
 	{
@@ -346,6 +347,8 @@ bool TypeIsDependent(const TypePtr& type)
 	if (!type)
 		return false;
 	if (type->kind == TK_TYPE_PARAM || type->kind == TK_TEMPLATE_SPEC)
+		return true;
+	if (type->bound_param >= 0)
 		return true;
 	for (size_t i = 0; i < type->parameters.size(); i++)
 		if (TypeIsDependent(type->parameters[i]))
