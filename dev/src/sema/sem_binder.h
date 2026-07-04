@@ -883,6 +883,11 @@ public:
 	// (template_deduce.cpp, reached through the sem_convert hook).
 	void DeduceConversionTemplates(const NamedTypeInfo* entity,
 	                               const TypePtr& dest);
+	// Deduces the destination class's constructor templates against a
+	// conversion source, synthesizing ClassCtor entries for the
+	// converting-constructor classification.
+	void DeduceCtorTemplatesForConversion(const NamedTypeInfo* entity,
+	                                      const ConversionSource& source);
 	// PA18 14.5.6.2 subset (template_deduce.cpp): partial ordering of
 	// two deduced candidates over the call's leading `argc` parameters.
 	virtual bool TemplateCandidateMoreSpecialized(

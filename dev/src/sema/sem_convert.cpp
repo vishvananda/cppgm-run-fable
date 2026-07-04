@@ -8,6 +8,12 @@ using std::runtime_error;
 
 namespace {
 
+// The active binder's constructor-template deduction entry point
+// (thread-local, like the completion hook below).
+thread_local void (*ctor_template_hook)(void*, const NamedTypeInfo*,
+                                        const ConversionSource&) = 0;
+thread_local void* ctor_template_context = 0;
+
 bool IsBoolType(const TypePtr& type)
 {
 	return type->kind == TK_FUNDAMENTAL && type->fundamental == FT_BOOL;
@@ -223,7 +229,13 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 	}
 	// 13.3.3.1.2/12.3.1: a class destination accepts sources its
 	// non-explicit converting constructors take through one standard
-	// conversion (the PA15 user-defined-conversion subset).
+	// conversion (the PA15 user-defined-conversion subset). PA22:
+	// constructor templates deduce against the source first,
+	// synthesizing their entries for the same loop.
+	if (allow_user && dest->kind == TK_CLASS && ctor_template_hook &&
+	    !(from->kind == TK_CLASS &&
+	      BaseClassDistance(from->named, dest->named) >= 0))
+		ctor_template_hook(ctor_template_context, dest->named, source);
 	if (allow_user && dest->kind == TK_CLASS && dest->named->class_record &&
 	    !(from->kind == TK_CLASS &&
 	      BaseClassDistance(from->named, dest->named) >= 0))
@@ -731,6 +743,15 @@ void SetConversionTemplateHook(void (*hook)(void* context,
 {
 	conversion_template_hook = hook;
 	conversion_template_context = context;
+}
+
+void SetCtorTemplateHook(void (*hook)(void* context,
+                                      const NamedTypeInfo* dest,
+                                      const ConversionSource& source),
+                         void* context)
+{
+	ctor_template_hook = hook;
+	ctor_template_context = context;
 }
 
 ImplicitConversion ClassifyConversion(const ConversionSource& source,

@@ -55,6 +55,13 @@ void ConversionTemplateTrampoline(void* context,
 	                                                            dest);
 }
 
+void CtorTemplateTrampoline(void* context, const NamedTypeInfo* dest,
+                            const ConversionSource& source)
+{
+	static_cast<SemBinder*>(context)->DeduceCtorTemplatesForConversion(
+		dest, source);
+}
+
 }  // namespace
 
 SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
@@ -66,6 +73,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 {
 	SetConversionCompletionHook(&ConversionCompletionTrampoline, this);
 	SetConversionTemplateHook(&ConversionTemplateTrampoline, this);
+	SetCtorTemplateHook(&CtorTemplateTrampoline, this);
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.
 	ScopeBinding nullptr_alias;
@@ -120,6 +128,7 @@ SemBinder::~SemBinder()
 {
 	SetConversionCompletionHook(0, 0);
 	SetConversionTemplateHook(0, 0);
+	SetCtorTemplateHook(0, 0);
 }
 
 // --- ISemExprHost ----------------------------------------------------------

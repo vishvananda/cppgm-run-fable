@@ -1457,6 +1457,12 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 		}
 		if (selected.inherited_base)
 			EnsureInheritedCtor(cls, ctor_index);
+		else if (selected.tmpl_spec)
+			// A conversion-selected constructor-template entry
+			// instantiates its body at this first use, like a
+			// construction-site selection.
+			InstantiateCtorTemplateBody(const_cast<ClassInfo&>(cls),
+			                            ctor_index);
 		else if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
 		         !selected.definition &&
 		         (selected.implicit || selected.defaulted))

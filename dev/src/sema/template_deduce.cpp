@@ -1568,6 +1568,22 @@ void SemBinder::DeduceConversionTemplates(const NamedTypeInfo* entity,
 	}
 }
 
+void SemBinder::DeduceCtorTemplatesForConversion(
+	const NamedTypeInfo* entity, const ConversionSource& source)
+{
+	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
+	if (!cls || cls->ctor_templates.empty() || !source.type)
+		return;
+	vector<SemValue> shells(1);
+	shells[0].type = source.type;
+	shells[0].category = source.category;
+	vector<TypePtr> candidates;
+	vector<size_t> min_arity;
+	vector<size_t> positions;
+	AppendCtorTemplateCandidates(*cls, shells, candidates, min_arity,
+	                             positions, 0);
+}
+
 void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
                                             const TypePtr& dest,
                                             ClassInfo& cls)

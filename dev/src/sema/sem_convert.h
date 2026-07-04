@@ -169,3 +169,12 @@ void SetConversionTemplateHook(void (*hook)(void* context,
                                             const NamedTypeInfo* from,
                                             const TypePtr& dest),
                                void* context);
+
+// PA22 constructor templates in implicit conversions: before a class
+// destination's converting constructors are consulted, the binder
+// deduces its constructor templates against the source, synthesizing
+// ordinary ClassCtor entries for the classification loop to rank.
+void SetCtorTemplateHook(void (*hook)(void* context,
+                                      const NamedTypeInfo* dest,
+                                      const ConversionSource& source),
+                         void* context);
