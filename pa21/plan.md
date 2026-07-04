@@ -141,7 +141,7 @@ the existing PA14-PA20 lowering path.
 
 ## Status (2026-07-04)
 
-156/180 pa21 tests pass; through-pa20 fully green (1551/1551); file
+158/180 pa21 tests pass; through-pa20 fully green (1551/1551); file
 audit clean. Landed: the full member-template layer (member function /
 constructor / class / alias templates, out-of-class `template<..>
 template<..>` definitions, member-template calls and operators),
@@ -153,12 +153,14 @@ partial specializations, dependent array bounds, function-type pack
 patterns, deferred pattern type slots with match-time substitution,
 deferred specialization bodies (14.7.1p4), and empty extra bases.
 
-Remaining (28): LowIR shape mismatches around instantiated member
-bodies (assignment/store shapes, base-hop chains, local statics per
-specialization), dependent member-alias template-template replay,
-decltype member-access explicit arguments, nested-member partial
-specialization reference-reset cases, and the anonymous-union storage
-constructor shape.
+Remaining (22): LowIR shape mismatches around instantiated member
+bodies (store shapes, base-hop chains, local statics and constexpr
+fn-pointer arrays per specialization, hidden-friend emission order,
+extern-template-builtin rejection), dependent member-alias
+template-template replay, the missing-template-keyword rejection, the
+nested-member partial-specialization reference-reset pair, the
+cv-qualified wrapper partial ambiguity, the alias-nontype tuple_impl
+case, and the multi-argument array functional cast.
 
 ## Validation
 
