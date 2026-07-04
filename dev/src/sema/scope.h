@@ -171,7 +171,16 @@ struct ScopeBinding
 	// PA18: set on a FunctionSpecialization's own `self` binding so an
 	// explicit template-id id-expression carries its identity.
 	const FunctionSpecialization* fn_self_spec;
+	// PA22: monotonic declaration order (stamped by AddBinding).
+	// Dependent-name lookup during instantiation compares it against
+	// the owning template's capture point so a later ordinary
+	// declaration cannot shadow ADL (14.6.4).
+	size_t seq = 0;
 };
+
+// The declaration-order stamp the next AddBinding will use; a template
+// capture records it as its definition point.
+size_t CurrentBindingSeq();
 
 struct Scope
 {
@@ -197,6 +206,12 @@ struct Scope
 	// synthesized helper scopes). Local-entity mangling (5.1.7) needs
 	// the owning overload's identity, which a name lookup cannot give.
 	TypePtr fn_type;
+	// PA22 14.6.4 subset: set on instantiation argument-alias scopes to
+	// the owning template's capture stamp. Unqualified lookup under
+	// such a scope ignores namespace-scope objects declared after it,
+	// so a later ordinary value cannot shadow ADL in a re-bound
+	// pattern.
+	size_t dependent_seq_limit = 0;
 
 	vector<ScopeBinding> bindings;      // first-binding (print) order
 	map<string, size_t> binding_index;  // name -> bindings position

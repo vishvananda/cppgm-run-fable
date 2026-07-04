@@ -260,7 +260,8 @@ void SemBinder::CaptureClassTemplate(const AstDecl& decl,
 
 TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
                                                  const AstDecl& inner,
-                                                 bool as_friend)
+                                                 bool as_friend,
+                                                 Scope* friend_home)
 {
 	const AstName* id = inner.kind == DK_FUNCTION
 		? inner.declarator->IdName()
@@ -273,6 +274,11 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	ScopeBinding* binding = FindOwnBinding(*current_, name);
 	if (binding && binding->kind != SB_FUNCTION)
 		throw runtime_error(name + " redeclared as a function template");
+	// 14.5.4: each enclosing instantiation declares its own friend;
+	// captures only merge with records from the same home (the
+	// instantiation's alias scope, or the namespace for plain-class
+	// friends).
+	Scope* home = as_friend && friend_home ? friend_home : current_;
 	TemplateInfo* merged = 0;
 	if (binding)
 	{
@@ -283,6 +289,8 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 		{
 			TemplateInfo* other = binding->fn_templates[i];
 			if (other->params.size() != params.size())
+				continue;
+			if (as_friend && other->declaring != home)
 				continue;
 			if (SameFunctionTemplateSignature(*other, decl, inner))
 			{
@@ -299,6 +307,8 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 				TemplateInfo* other = binding->fn_templates[i];
 				if (other->params.size() != params.size() ||
 				    other->has_definition)
+					continue;
+				if (as_friend && other->declaring != home)
 					continue;
 				if (SameFunctionTemplateSignature(*other, decl, inner,
 				                                  false))
@@ -533,6 +543,7 @@ bool SemBinder::CheckDependentPatternSlots(
 	TemplateInfo shadow;
 	shadow.params = partial.params;
 	shadow.declaring = tmpl.declaring;
+			shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, bound);
 	size_t ai = 0;
 	for (size_t i = 0; i < partial.pattern.size(); i++)
@@ -1111,6 +1122,7 @@ const ScopeBinding* SemBinder::ResolveVariableTemplateId(
 			TemplateInfo shadow;
 			shadow.params = tmpl.partials[partial].params;
 			shadow.declaring = tmpl.declaring;
+			shadow.capture_seq = tmpl.capture_seq;
 			alias = MakeArgumentAliasScope(shadow, bound);
 		}
 		else
@@ -1214,6 +1226,7 @@ void SemBinder::InstantiateClassFromPartial(
 	TemplateInfo shadow;
 	shadow.params = partial.params;
 	shadow.declaring = tmpl.declaring;
+			shadow.capture_seq = tmpl.capture_seq;
 	spec.param_scope = MakeArgumentAliasScope(shadow, bound);
 	ScopeBinding injected;
 	injected.kind = SB_TYPE;

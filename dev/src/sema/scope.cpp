@@ -70,6 +70,15 @@ const ScopeBinding* FindOwnBinding(const Scope& scope, const string& name)
 	return FindOwnBinding(const_cast<Scope&>(scope), name);
 }
 
+// Monotonic declaration order across the whole bind; binding runs
+// sequentially, so a plain counter suffices.
+static size_t binding_seq_counter = 1;
+
+size_t CurrentBindingSeq()
+{
+	return binding_seq_counter;
+}
+
 ScopeBinding& AddBinding(Scope& scope, const ScopeBinding& binding)
 {
 	if (scope.binding_index.count(binding.name))
@@ -83,6 +92,7 @@ ScopeBinding& AddBinding(Scope& scope, const ScopeBinding& binding)
 		throw runtime_error(binding.name + " redeclares a parameter");
 	scope.binding_index[binding.name] = scope.bindings.size();
 	scope.bindings.push_back(binding);
+	scope.bindings.back().seq = binding_seq_counter++;
 	if (!scope.bindings.back().owner)
 		scope.bindings.back().owner = &scope;
 	scope.bindings.back().home = &scope;

@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include <set>
 #include <stdexcept>
 
 #include "sema/scope_lookup.h"
@@ -199,6 +200,178 @@ void SemBinder::CaptureConversionFunctionTemplate(const AstDecl& decl,
 
 // --- friend templates -----------------------------------------------------
 
+namespace {
+
+bool FriendTypeIdDepends(const AstTypeId& id, const std::set<string>& outer,
+                         const string& cls_name);
+bool FriendExprDepends(const AstExpr& expr, const std::set<string>& outer,
+                       const string& cls_name);
+
+// A bare identifier equal to an outer parameter (any kind) or to the
+// enclosing template's own (injected) name re-resolves per
+// instantiation; the class name used as `name<args>` does not - the
+// arguments decide, and they are walked on their own.
+bool FriendNameDepends(const AstName& name, const std::set<string>& outer,
+                       const string& cls_name)
+{
+	for (size_t i = 0; i < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		if (outer.count(part.identifier))
+			return true;
+		if (part.kind == NP_IDENTIFIER && part.identifier == cls_name)
+			return true;
+		for (size_t a = 0; a < part.arguments.size(); a++)
+		{
+			const AstTemplateArgument& argument = part.arguments[a];
+			if (argument.type &&
+			    FriendTypeIdDepends(*argument.type, outer, cls_name))
+				return true;
+			if (argument.expr &&
+			    FriendExprDepends(*argument.expr, outer, cls_name))
+				return true;
+		}
+		if (part.conversion_type &&
+		    FriendTypeIdDepends(*part.conversion_type, outer, cls_name))
+			return true;
+	}
+	return false;
+}
+
+bool FriendSpecifiersDepend(const AstSpecifierSeq& seq,
+                            const std::set<string>& outer,
+                            const string& cls_name)
+{
+	for (size_t i = 0; i < seq.size(); i++)
+	{
+		if (seq[i].kind == SPEC_TYPE_NAME &&
+		    FriendNameDepends(seq[i].name, outer, cls_name))
+			return true;
+		if (seq[i].kind == SPEC_DECLTYPE && seq[i].decltype_expr &&
+		    FriendExprDepends(*seq[i].decltype_expr, outer, cls_name))
+			return true;
+	}
+	return false;
+}
+
+bool FriendDeclaratorDepends(const AstDeclarator& declarator,
+                             const std::set<string>& outer,
+                             const string& cls_name)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator.items[i];
+		switch (item.kind)
+		{
+		case DI_MEMBER_PTR:
+			if (FriendNameDepends(item.name, outer, cls_name))
+				return true;
+			break;
+		case DI_NESTED:
+			if (item.nested &&
+			    FriendDeclaratorDepends(*item.nested, outer, cls_name))
+				return true;
+			break;
+		case DI_PARAMS:
+			if (!item.params)
+				break;
+			for (size_t p = 0; p < item.params->parameters.size(); p++)
+			{
+				const AstParameter& parameter =
+					item.params->parameters[p];
+				if (FriendSpecifiersDepend(parameter.specifiers, outer,
+				                           cls_name))
+					return true;
+				if (parameter.declarator &&
+				    FriendDeclaratorDepends(*parameter.declarator,
+				                            outer, cls_name))
+					return true;
+			}
+			break;
+		case DI_TRAILING_RETURN:
+			if (item.trailing_type &&
+			    FriendTypeIdDepends(*item.trailing_type, outer,
+			                        cls_name))
+				return true;
+			break;
+		case DI_ARRAY:
+			if (item.array_bound &&
+			    FriendExprDepends(*item.array_bound, outer, cls_name))
+				return true;
+			break;
+		default:
+			break;
+		}
+	}
+	return false;
+}
+
+bool FriendTypeIdDepends(const AstTypeId& id, const std::set<string>& outer,
+                         const string& cls_name)
+{
+	if (FriendSpecifiersDepend(id.specifiers, outer, cls_name))
+		return true;
+	return id.declarator &&
+		FriendDeclaratorDepends(*id.declarator, outer, cls_name);
+}
+
+bool FriendExprDepends(const AstExpr& expr, const std::set<string>& outer,
+                       const string& cls_name)
+{
+	if (FriendNameDepends(expr.name, outer, cls_name))
+		return true;
+	if (expr.type && FriendTypeIdDepends(*expr.type, outer, cls_name))
+		return true;
+	for (size_t i = 0; i < expr.operands.size(); i++)
+		if (expr.operands[i] &&
+		    FriendExprDepends(*expr.operands[i], outer, cls_name))
+			return true;
+	for (size_t i = 0; i < expr.arguments.size(); i++)
+		if (expr.arguments[i] &&
+		    FriendExprDepends(*expr.arguments[i], outer, cls_name))
+			return true;
+	return false;
+}
+
+// Whether a friend template's written declaration depends on the
+// enclosing instantiation (an outer parameter or the bare
+// injected-class-name anywhere in its signature or its own parameter
+// list). Dependent friends are distinct per instantiation (14.5.4);
+// independent ones name a single namespace-scope template shared by
+// every instantiation and by ordinary redeclarations.
+bool FriendDeclarationDepends(const AstDecl& decl, const AstDecl& inner,
+                              const std::set<string>& outer,
+                              const string& cls_name)
+{
+	for (size_t i = 0; i < decl.template_params.size(); i++)
+	{
+		const AstTemplateParameter& parameter = decl.template_params[i];
+		if (parameter.default_type &&
+		    FriendTypeIdDepends(*parameter.default_type, outer, cls_name))
+			return true;
+		if (parameter.default_expr &&
+		    FriendExprDepends(*parameter.default_expr, outer, cls_name))
+			return true;
+		if (FriendSpecifiersDepend(parameter.specifiers, outer, cls_name))
+			return true;
+		if (parameter.declarator &&
+		    FriendDeclaratorDepends(*parameter.declarator, outer,
+		                            cls_name))
+			return true;
+	}
+	if (FriendSpecifiersDepend(inner.specifiers, outer, cls_name))
+		return true;
+	const AstDeclarator* declarator = 0;
+	if (inner.kind == DK_FUNCTION)
+		declarator = inner.declarator.get();
+	else if (inner.declarators.size() == 1)
+		declarator = inner.declarators[0].declarator.get();
+	return declarator &&
+		FriendDeclaratorDepends(*declarator, outer, cls_name);
+}
+
+}  // namespace
+
 void SemBinder::BindFriendTemplate(const AstDecl& decl,
                                    const AstDecl& inner)
 {
@@ -260,14 +433,37 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 	}
 	// An unqualified friend template declares into the enclosing
 	// namespace, hidden from ordinary lookup until a namespace-scope
-	// declaration appears; ADL finds it (7.3.1.2p3). Each enclosing
-	// instantiation re-captures; the same pattern merges silently.
+	// declaration appears; ADL finds it (7.3.1.2p3). A friend whose
+	// written signature depends on the enclosing instantiation (outer
+	// parameters, the bare injected-class-name) is a distinct template
+	// per instantiation (14.5.4) and merges only within its own; an
+	// independent signature names one shared namespace-scope template.
+	Scope* inst = cls->members && cls->members->parent &&
+	              cls->members->parent->kind == SCOPE_TEMPLATE_PARAMS
+	                  ? cls->members->parent : 0;
+	bool dependent_friend = false;
+	if (inst)
+	{
+		string cls_name = cls->entity && cls->entity->spec_template
+			? cls->entity->spec_template->name
+			: (cls->entity ? cls->entity->name : string());
+		// The alias scope also injects the class's own name; only its
+		// bare (injected-class-name) uses count, which the walk
+		// decides itself.
+		std::set<string> outer;
+		for (size_t i = 0; i < inst->bindings.size(); i++)
+			if (inst->bindings[i].name != cls_name)
+				outer.insert(inst->bindings[i].name);
+		dependent_friend =
+			FriendDeclarationDepends(decl, inner, outer, cls_name);
+	}
 	Scope* saved = current_;
 	current_ = ns;
 	TemplateInfo* tmpl = 0;
 	try
 	{
-		tmpl = CaptureFunctionTemplate(decl, inner, true);
+		tmpl = CaptureFunctionTemplate(decl, inner, true,
+		                               dependent_friend ? inst : ns);
 	}
 	catch (...)
 	{
@@ -277,14 +473,11 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 	current_ = saved;
 	if (tmpl)
 	{
-		// A friend captured inside an enclosing instantiation keeps
-		// the specialization's argument aliases visible to its
-		// lazily-composed pattern (an outer `T` in the signature);
-		// later instantiations merge onto the first (PA21 policy).
-		if (tmpl->declaring == ns && cls->members &&
-		    cls->members->parent &&
-		    cls->members->parent->kind == SCOPE_TEMPLATE_PARAMS)
-			tmpl->declaring = cls->members->parent;
+		// A dependent friend keeps the instantiation's argument
+		// aliases visible to its lazily-composed pattern (an outer
+		// `T` or the injected name in the signature).
+		if (tmpl->declaring == ns && dependent_friend)
+			tmpl->declaring = inst;
 		cls->friend_functions.push_back(
 			std::make_pair(ns, tmpl->name));
 	}

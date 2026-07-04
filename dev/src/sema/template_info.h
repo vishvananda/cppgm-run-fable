@@ -192,6 +192,10 @@ struct TemplateInfo
 	ETemplateKind kind;
 	string name;
 	Scope* declaring;      // lexical scope of the declaration
+	// PA22: the declaration-order stamp at capture (14.6.4 subset):
+	// instantiation-time dependent lookups ignore later-declared
+	// namespace-scope non-functions so they cannot shadow ADL.
+	size_t capture_seq = 0;
 	const AstDecl* decl;   // the DK_TEMPLATE node (definition once seen)
 	// The declaration inside `decl` (DK_CLASS / DK_FUNCTION / DK_SIMPLE).
 	const AstDecl* pattern_decl;
@@ -291,6 +295,7 @@ public:
 		info->kind = kind;
 		info->name = name;
 		info->declaring = declaring;
+		info->capture_seq = CurrentBindingSeq();
 		return info;
 	}
 

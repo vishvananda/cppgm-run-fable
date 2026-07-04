@@ -311,9 +311,13 @@ private:
 	                                   const AstDecl& inner);
 	// Returns the merged or fresh record; `as_friend` captures a
 	// hidden (ADL-only) namespace-scope friend template.
+	// `friend_home` is the enclosing instantiation's argument-alias
+	// scope: friends captured under different instantiations are
+	// distinct templates (14.5.4) and never merge across it.
 	TemplateInfo* CaptureFunctionTemplate(const AstDecl& decl,
 	                                      const AstDecl& inner,
-	                                      bool as_friend = false);
+	                                      bool as_friend = false,
+	                                      Scope* friend_home = 0);
 	// --- PA21 member templates (sem_member_template.cpp) ---
 	// Class-scope template-declaration dispatch (member function /
 	// constructor / class / alias / friend templates).

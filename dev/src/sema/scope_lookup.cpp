@@ -180,6 +180,18 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
                                       EScopeLookupFilter filter,
                                       vector<const ScopeBinding*>* fn_set)
 {
+	// 14.6.4 subset: under an instantiation argument-alias scope, a
+	// namespace-scope object declared after the template's capture
+	// point is invisible (a later ordinary value cannot shadow the
+	// hidden friends ADL will find). The innermost alias scope's stamp
+	// governs.
+	size_t seq_limit = 0;
+	for (const Scope* scope = from; scope; scope = scope->parent)
+		if (scope->dependent_seq_limit)
+		{
+			seq_limit = scope->dependent_seq_limit;
+			break;
+		}
 	vector<ActiveDirective> closure = DirectiveClosure(from);
 	for (const Scope* scope = from; scope; scope = scope->parent)
 	{
@@ -187,6 +199,9 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 			? ClassChainLookup(*scope, name, filter, true)
 			: FindOwnBinding(*scope, name);
 		if (own && !BindingPassesFilter(*own, filter))
+			own = 0;
+		if (own && seq_limit && scope->kind == SCOPE_NAMESPACE &&
+		    own->kind == SB_VARIABLE && own->seq > seq_limit)
 			own = 0;
 		if (scope->kind != SCOPE_NAMESPACE)
 		{
@@ -207,6 +222,9 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 				continue;
 			const ScopeBinding* member =
 				FindOwnBinding(*closure[i].nominated, name);
+			if (member && seq_limit && member->kind == SB_VARIABLE &&
+			    member->seq > seq_limit)
+				member = 0;
 			if (member && BindingPassesFilter(*member, filter))
 				MergeFound(member, found, functions);
 		}

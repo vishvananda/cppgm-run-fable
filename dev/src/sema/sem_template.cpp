@@ -524,6 +524,10 @@ Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                  tmpl.declaring);
+	// 14.6.4 subset: lookups under this instantiation see the
+	// namespace declarations visible at the template's capture point
+	// (later objects must not shadow ADL).
+	scope->dependent_seq_limit = tmpl.capture_seq;
 	// PA21: a deduction-produced slot list (one slot per parameter,
 	// pack slots carrying their element runs) binds one-to-one; the
 	// span mapping below is for flattened concrete argument lists.
@@ -772,6 +776,7 @@ void SemBinder::InstantiateReadyPartialMembers(TemplateInfo& tmpl)
 			CollectTemplateParams(def, def_params);
 			shadow.params = def_params;
 			shadow.declaring = tmpl.declaring;
+			shadow.capture_seq = tmpl.capture_seq;
 			Scope* alias_scope =
 				MakeArgumentAliasScope(shadow, spec.partial_bound);
 			InstantiationContext context(*this, alias_scope, true);
@@ -1004,6 +1009,7 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	TemplateInfo shadow;
 	shadow.params = params;
 	shadow.declaring = tmpl.declaring;
+			shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, spec.args);
 	InstantiationContext context(*this, alias_scope, true);
 	BindDeclaration(*decl.inner);
@@ -1038,6 +1044,10 @@ bool SemBinder::NameMentionsAny(const AstName& name,
 		for (size_t a = 0; a < part.arguments.size(); a++)
 		{
 			const AstTemplateArgument& argument = part.arguments[a];
+			// A value-parameter reference parses as an expression
+			// argument (`bytes<Bytes...>` with an NTTP pack).
+			if (argument.expr && ExprMentionsAny(*argument.expr, params))
+				return true;
 			if (!argument.is_type || !argument.type)
 				continue;
 			const AstSpecifierSeq& specs = argument.type->specifiers;
