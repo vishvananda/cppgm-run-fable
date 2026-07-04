@@ -443,6 +443,8 @@ private:
 	// type-id re-reads as a zero-argument constexpr call.
 	bool EvaluateZeroArgConstantCall(const AstTypeId& type_id,
 	                                 ConstValue& out);
+	bool EvaluateConstexprSpecReturn(const FunctionSpecialization& spec,
+	                                 ConstValue& out);
 	// 14.3.2: the entity a reference/pointer argument names.
 	void ResolveEntityArgument(const AstName* name, const AstExpr* expr,
 	                           const TypePtr& param_type,

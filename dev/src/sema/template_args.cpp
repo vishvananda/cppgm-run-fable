@@ -1000,6 +1000,11 @@ bool SemBinder::EvaluateZeroArgConstantCall(const AstTypeId& type_id,
 	}
 	if (!binding || binding->kind != SB_FUNCTION)
 		return false;
+	// A fully-resolved template-id (the instantiation seam already
+	// selected the specialization, `C::template f<A, B>`) evaluates
+	// directly.
+	if (binding->fn_self_spec)
+		return EvaluateConstexprSpecReturn(*binding->fn_self_spec, out);
 	const AstNamePart* explicit_part =
 		callee.parts.back().kind == NP_TEMPLATE_ID
 			? &callee.parts.back() : 0;
@@ -1012,31 +1017,42 @@ bool SemBinder::EvaluateZeroArgConstantCall(const AstTypeId& type_id,
 			continue;
 		if (!DeclHasConstexpr(*spec->owner->pattern_decl))
 			continue;
-		const AstExpr* ret = SingleReturnExpr(spec->owner->pattern_decl);
-		if (!ret)
-			return false;
-		Scope* saved = current_;
-		current_ = spec->param_scope;
-		bool evaluated = false;
+		return EvaluateConstexprSpecReturn(*spec, out);
+	}
+	return false;
+}
+
+// The constant value of a constexpr specialization's lone return
+// expression, evaluated under its argument bindings.
+bool SemBinder::EvaluateConstexprSpecReturn(
+	const FunctionSpecialization& spec, ConstValue& out)
+{
+	if (!spec.owner || !spec.owner->pattern_decl ||
+	    !DeclHasConstexpr(*spec.owner->pattern_decl))
+		return false;
+	const AstExpr* ret = SingleReturnExpr(spec.owner->pattern_decl);
+	if (!ret)
+		return false;
+	Scope* saved = current_;
+	current_ = spec.param_scope;
+	bool evaluated = false;
+	try
+	{
+		out = EvaluateConstExpr(*ret, *this);
+		evaluated = true;
+	}
+	catch (const std::exception&)
+	{
 		try
 		{
-			out = EvaluateConstExpr(*ret, *this);
-			evaluated = true;
+			evaluated = TryFullConstant(*ret, out);
 		}
 		catch (const std::exception&)
 		{
-			try
-			{
-				evaluated = TryFullConstant(*ret, out);
-			}
-			catch (const std::exception&)
-			{
-			}
 		}
-		current_ = saved;
-		return evaluated;
 	}
-	return false;
+	current_ = saved;
+	return evaluated;
 }
 
 bool SemBinder::TryFullValueArgument(const AstExpr& expr,
