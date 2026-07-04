@@ -139,6 +139,27 @@ the existing PA14-PA20 lowering path.
   ordering); value slots keep slot identity; cv on pointees/top-level
   distinguishes candidates.
 
+## Status (2026-07-04)
+
+152/180 pa21 tests pass; through-pa20 fully green (1551/1551); file
+audit clean. Landed: the full member-template layer (member function /
+constructor / class / alias templates, out-of-class `template<..>
+template<..>` definitions, member-template calls and operators),
+alias templates (including as template-template arguments), template
+-template parameters, friend templates with specialization-wide
+grants, explicit instantiation/extern-template semantics, explicit
+member specializations with stale-instantiation refresh, multi-pack
+partial specializations, dependent array bounds, function-type pack
+patterns, deferred pattern type slots with match-time substitution,
+deferred specialization bodies (14.7.1p4), and empty extra bases.
+
+Remaining (28): LowIR shape mismatches around instantiated member
+bodies (assignment/store shapes, base-hop chains, local statics per
+specialization), dependent member-alias template-template replay,
+decltype member-access explicit arguments, nested-member partial
+specialization reference-reset cases, and the anonymous-union storage
+constructor shape.
+
 ## Validation
 
 - Fast loop: `make test-report ACTIVE_TEST_REPORT_PAS='pa21'` and

@@ -407,6 +407,9 @@ private:
 	Scope* EnsureArgBindingScope(TemplateInfo& tmpl,
 	                             const vector<TemplateArg>& so_far,
 	                             Scope*& partial);
+	// Defaults fill the remaining parameters of one resolved list.
+	void FillDefaultedTail(TemplateInfo& tmpl, size_t cursor,
+	                       vector<TemplateArg>& args, Scope*& partial);
 	// One source argument against one parameter's kind.
 	TemplateArg ResolveOneArgument(TemplateInfo& tmpl,
 	                               const TemplateParam& param,
@@ -591,6 +594,16 @@ private:
 		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	void InstantiateFunctionBody(TemplateInfo& tmpl,
 	                             FunctionSpecialization& spec);
+	// PA21: the implicit object parameter of a member-template body.
+	void AttachMemberBodyThis(const ClassInfo& cls,
+	                          const TypePtr& declared, Scope* fn_scope,
+	                          SemNode& item);
+	// The instantiated body's parameter nodes (slot-name fallbacks and
+	// explicit-definition redirects included).
+	void AttachBodyParameters(TemplateInfo& tmpl,
+	                          FunctionSpecialization& spec,
+	                          const DeclaratorInfo& composed,
+	                          Scope* fn_scope, SemNode& item);
 	// An explicit specialization's renamed parameters redirect onto
 	// the primary declaration's slot names.
 	void RedirectExplicitSlotNames(const AstDeclarator& primary,

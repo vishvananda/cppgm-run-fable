@@ -704,8 +704,16 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 			              args.size());
 		cursor = pack_at + 1;
 	}
-	// Defaults fill the remaining parameters (an unreached pack is
-	// empty).
+	FillDefaultedTail(tmpl, cursor, args, partial);
+	return args;
+}
+
+// Defaults fill the remaining parameters of one resolved argument
+// list (an unreached pack is empty).
+void SemBinder::FillDefaultedTail(TemplateInfo& tmpl, size_t cursor,
+                                  vector<TemplateArg>& args,
+                                  Scope*& partial)
+{
 	for (; cursor < tmpl.params.size(); cursor++)
 	{
 		const TemplateParam& param = tmpl.params[cursor];
@@ -762,7 +770,6 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 		if (partial)
 			BindParamAlias(*partial, param, args.back());
 	}
-	return args;
 }
 
 // The single returned expression of an in-class function body, or

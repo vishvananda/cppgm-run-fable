@@ -387,6 +387,15 @@ private:
 	                              vector<OperatorCandidate>& out,
 	                              std::set<const void*>& seen,
 	                              const AstNamePart* explicit_part = 0);
+	// PA21 9.4p2: whether every entry of a member function set is
+	// static (the set then decays like ordinary functions).
+	bool FunctionSetAllStatic(const ScopeBinding& binding);
+	// The resolved operator call's operand children (member operators
+	// take the object address first).
+	void AppendOperatorOperands(bool is_member,
+	                            const NamedTypeInfo* member_owner,
+	                            vector<SemValue>& operands,
+	                            SemNode& call);
 	// PA21: member (operator) templates deduce against the explicit
 	// operands; the object binds as the implicit parameter in ranking.
 	void AppendMemberTemplateCandidates(const ScopeBinding& binding,

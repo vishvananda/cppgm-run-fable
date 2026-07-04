@@ -639,29 +639,38 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	    binding.fn_noexcept_decl[chosen.index])
 		callee->noexcept_decl = true;
 	result.node->children.push_back(std::move(callee));
-	if (chosen.is_member)
+	AppendOperatorOperands(chosen.is_member, member_owner, operands,
+	                       *result.node);
+	return true;
+}
+
+// The resolved operator call's operand children: a member operator
+// takes the (possibly base-adjusted) object address first.
+void SemExprAnalyzer::AppendOperatorOperands(
+	bool is_member, const NamedTypeInfo* member_owner,
+	vector<SemValue>& operands, SemNode& call)
+{
+	if (is_member)
 	{
-		const NamedTypeInfo* owner_entity = member_owner;
-		int hops = owner_entity
-			? BaseClassDistance(operands[0].type->named, owner_entity)
+		int hops = member_owner
+			? BaseClassDistance(operands[0].type->named, member_owner)
 			: 0;
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
-			adjusted->type = MakeNamedType(TK_CLASS, owner_entity);
+			adjusted->type = MakeNamedType(TK_CLASS, member_owner);
 			adjusted->category = VC_LVALUE;
 			adjusted->base_hops = hops;
 			adjusted->children.push_back(std::move(operands[0].node));
 			operands[0].node = std::move(adjusted);
 		}
-		result.node->children.push_back(
+		call.children.push_back(
 			AddressOfObject(std::move(operands[0].node)));
 	}
 	else
-		result.node->children.push_back(std::move(operands[0].node));
+		call.children.push_back(std::move(operands[0].node));
 	for (size_t i = 1; i < operands.size(); i++)
-		result.node->children.push_back(std::move(operands[i].node));
-	return true;
+		call.children.push_back(std::move(operands[i].node));
 }
 
 // Whether a built-in operator form should consult the user-declared
