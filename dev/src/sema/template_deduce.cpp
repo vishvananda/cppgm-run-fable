@@ -319,7 +319,10 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		if (pattern->is_const != arg->is_const ||
 		    pattern->is_volatile != arg->is_volatile)
 			return false;
-		return DeduceFromType(pattern->target, arg->target, bound);
+		// 14.8.2.1p4: call deduction lets the deduced pointee be less
+		// cv-qualified than the pattern spells one level down.
+		return DeduceFromType(pattern->target, arg->target, bound,
+		                      exact_cv);
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
 		return DeduceFromType(pattern->target, arg->target, bound);
@@ -389,10 +392,18 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 	case TK_TEMPLATE_SPEC:
 	{
 		// The deduced A must carry the pattern's exact qualification
-		// (a top-level cv wrapper pattern owns cv-qualified arguments).
-		if (exact_cv && (pattern->is_const != arg->is_const ||
-		                 pattern->is_volatile != arg->is_volatile))
-			return false;
+		// (a top-level cv wrapper pattern owns cv-qualified
+		// arguments); call deduction only needs the pattern to cover
+		// the argument's qualification.
+		if (pattern->is_const != arg->is_const ||
+		    pattern->is_volatile != arg->is_volatile)
+		{
+			if (exact_cv)
+				return false;
+			if ((arg->is_const && !pattern->is_const) ||
+			    (arg->is_volatile && !pattern->is_volatile))
+				return false;
+		}
 		// PA21: a pattern anchored on a template-template parameter
 		// placeholder binds the argument's template into its slot, then
 		// unifies the argument lists.
