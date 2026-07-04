@@ -464,13 +464,15 @@ bool SameTemplateParameterLists(const vector<TemplateParam>& a,
 		{
 			string shape = FlattenDeclarator(*a[i].source->declarator);
 			ReplaceWholeIdentifier(shape, a[i].name, "");
-			left += "|" + shape;
+			if (!shape.empty())
+				left += "|" + shape;
 		}
 		if (b[i].source->declarator)
 		{
 			string shape = FlattenDeclarator(*b[i].source->declarator);
 			ReplaceWholeIdentifier(shape, b[i].name, "");
-			right += "|" + shape;
+			if (!shape.empty())
+				right += "|" + shape;
 		}
 		if (PositionalizeTemplateNames(left, a) !=
 		    PositionalizeTemplateNames(right, b))
@@ -493,14 +495,17 @@ string CanonicalDeclaratorParams(const AstDeclarator& declarator,
 			if (parameter.declarator)
 			{
 				// The declarator-id is not part of the signature; the
-				// shape (`*`, `&`, nested clauses) is.
+				// shape (`*`, `&`, nested clauses) is. An id-only
+				// declarator leaves no shape, matching the unnamed
+				// spelling of the same parameter.
 				string shape = FlattenDeclarator(*parameter.declarator);
 				const AstName* id = parameter.declarator->IdName();
 				if (id && id->parts.size() == 1 &&
 				    id->parts[0].kind == NP_IDENTIFIER)
 					ReplaceWholeIdentifier(
 						shape, id->parts[0].identifier, "");
-				text += "|" + shape;
+				if (!shape.empty())
+					text += "|" + shape;
 			}
 			out += text + ";";
 		}

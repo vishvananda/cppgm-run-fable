@@ -826,6 +826,36 @@ TypePtr SemBinder::ComposeReturnPattern(TemplateInfo& tmpl)
 	return result;
 }
 
+// The flattened return spelling for signature identity: `friend` and
+// `inline` are not part of the signature (11.3, 7.1.2).
+static string SignatureReturnSpelling(const AstSpecifierSeq& specifiers)
+{
+	string text = FlattenSpecifierSeq(specifiers);
+	const char* drop[] = {"friend", "inline"};
+	for (size_t d = 0; d < 2; d++)
+	{
+		string word = drop[d];
+		size_t at = 0;
+		while ((at = text.find(word, at)) != string::npos)
+		{
+			bool left_ok = at == 0 || text[at - 1] == ' ';
+			size_t end = at + word.size();
+			bool right_ok = end == text.size() || text[end] == ' ';
+			if (!left_ok || !right_ok)
+			{
+				at = end;
+				continue;
+			}
+			if (end < text.size())
+				end++;
+			else if (at > 0)
+				at--;
+			text.erase(at, end - at);
+		}
+	}
+	return text;
+}
+
 bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
                                               const AstDecl& decl,
                                               const AstDecl& inner,
@@ -883,10 +913,10 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	// The dependent return spelling distinguishes overloads the
 	// abstract composition cannot see (`typename T::A f(T)` vs
 	// `typename T::B f(T)` are distinct templates).
-	if (PositionalizeTemplateNames(FlattenSpecifierSeq(inner.specifiers),
-	                               params) !=
+	if (PositionalizeTemplateNames(
+	        SignatureReturnSpelling(inner.specifiers), params) !=
 	    PositionalizeTemplateNames(
-	        FlattenSpecifierSeq(tmpl.pattern_decl->specifiers),
+	        SignatureReturnSpelling(tmpl.pattern_decl->specifiers),
 	        tmpl.params))
 		return false;
 	return true;
