@@ -385,12 +385,15 @@ private:
 	                               bool member_only,
 	                               vector<OperatorCandidate>& out);
 	// PA18: deduced function-template specializations of `binding`
-	// against the argument list join the candidate set.
+	// against the argument list join the candidate set. `declared_in`
+	// filters to templates declared in one scope (the ADL leg: friend
+	// templates may ride a binding owned by a using-declaration).
 	void AppendTemplateCandidates(const ScopeBinding& binding,
 	                              const vector<SemValue>& args,
 	                              vector<OperatorCandidate>& out,
 	                              std::set<const void*>& seen,
-	                              const AstNamePart* explicit_part = 0);
+	                              const AstNamePart* explicit_part = 0,
+	                              const Scope* declared_in = 0);
 	// PA21 9.4p2: whether every entry of a member function set is
 	// static (the set then decays like ordinary functions).
 	bool FunctionSetAllStatic(const ScopeBinding& binding);

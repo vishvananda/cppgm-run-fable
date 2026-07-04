@@ -180,10 +180,20 @@ Scope* TemplateDefaultArgScope(const ScopeBinding& binding)
 void SemExprAnalyzer::AppendTemplateCandidates(
 	const ScopeBinding& binding, const vector<SemValue>& args,
 	vector<OperatorCandidate>& out, set<const void*>& seen,
-	const AstNamePart* explicit_part)
+	const AstNamePart* explicit_part, const Scope* declared_in)
 {
 	for (size_t t = 0; t < binding.fn_templates.size(); t++)
 	{
+		if (declared_in)
+		{
+			// A friend's declaring may chain through an enclosing
+			// instantiation's alias scope to its home namespace.
+			const Scope* home = binding.fn_templates[t]->declaring;
+			while (home && home->kind == SCOPE_TEMPLATE_PARAMS)
+				home = home->parent;
+			if (home != declared_in)
+				continue;
+		}
 		const FunctionSpecialization* spec =
 			host_.DeduceFunctionTemplate(*binding.fn_templates[t], args,
 			                             explicit_part);
@@ -389,19 +399,39 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	}
 	vector<const Scope*> namespaces;
 	for (size_t i = 0; i < args.size(); i++)
+	{
+		// 3.4.2: a class argument's associated entities include its
+		// friends, so a dormant specialization instantiates first.
+		TypePtr bare = args[i].type;
+		if (bare && IsReferenceType(bare))
+			bare = bare->target;
+		if (bare)
+			bare = RemoveTopCv(bare);
+		if (bare && bare->kind == TK_CLASS)
+			host_.RequireCompleteType(bare->named);
 		CollectAssociatedNamespaces(host_.Model(), args[i].type,
 		                            namespaces);
+	}
 	set<const Scope*> visited;
 	for (size_t i = 0; i < namespaces.size(); i++)
 	{
 		if (!visited.insert(namespaces[i]).second)
 			continue;
 		const ScopeBinding* found = FindOwnBinding(*namespaces[i], name);
-		if (found && found->kind == SB_FUNCTION &&
-		    found->owner == namespaces[i])
+		if (found && found->kind == SB_FUNCTION)
 		{
-			AppendBindingOverloads(*found, false, true, candidates, seen);
-			AppendTemplateCandidates(*found, args, candidates, seen);
+			if (found->owner == namespaces[i])
+			{
+				AppendBindingOverloads(*found, false, true, candidates,
+				                       seen);
+				AppendTemplateCandidates(*found, args, candidates, seen);
+			}
+			else
+				// Friend templates declared here may ride a binding a
+				// using-declaration owns (3.4.2p3 ignores the import,
+				// not the friends).
+				AppendTemplateCandidates(*found, args, candidates, seen,
+				                         0, namespaces[i]);
 		}
 	}
 	if (candidates.empty())

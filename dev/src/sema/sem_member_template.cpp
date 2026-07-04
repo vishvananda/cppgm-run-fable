@@ -276,8 +276,18 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 	}
 	current_ = saved;
 	if (tmpl)
+	{
+		// A friend captured inside an enclosing instantiation keeps
+		// the specialization's argument aliases visible to its
+		// lazily-composed pattern (an outer `T` in the signature);
+		// later instantiations merge onto the first (PA21 policy).
+		if (tmpl->declaring == ns && cls->members &&
+		    cls->members->parent &&
+		    cls->members->parent->kind == SCOPE_TEMPLATE_PARAMS)
+			tmpl->declaring = cls->members->parent;
 		cls->friend_functions.push_back(
 			std::make_pair(ns, tmpl->name));
+	}
 }
 
 // --- out-of-class member-template definitions ------------------------------

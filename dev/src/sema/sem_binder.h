@@ -336,6 +336,9 @@ private:
 	TypePtr ResolveDependentAliasUse(const TypePtr& pattern,
 	                                 Scope* alias_scope,
 	                                 const vector<TemplateArg>& bound);
+	void SubstituteSlotArg(const TemplateArg& slot, Scope* alias_scope,
+	                       const vector<TemplateArg>& bound,
+	                       vector<TemplateArg>& out);
 	// A friend template declaration/definition inside a class (11.3):
 	// captures into the enclosing namespace, hidden until a matching
 	// namespace-scope declaration appears.

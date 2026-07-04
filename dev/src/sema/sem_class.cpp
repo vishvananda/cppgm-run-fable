@@ -1105,9 +1105,15 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 			                       contexts[i]->entity))
 				return;
 	}
+	// A friend captured inside an enclosing instantiation declares
+	// through the specialization's alias scope; friendship recorded
+	// its home namespace.
+	const Scope* fn_home = method_.fn_owner;
+	while (fn_home && fn_home->kind == SCOPE_TEMPLATE_PARAMS)
+		fn_home = fn_home->parent;
 	if (!method_.fn_name.empty())
 		for (size_t i = 0; i < owner_cls->friend_functions.size(); i++)
-			if (owner_cls->friend_functions[i].first == method_.fn_owner &&
+			if (owner_cls->friend_functions[i].first == fn_home &&
 			    (owner_cls->friend_functions[i].second ==
 			         method_.fn_name ||
 			     (!method_.fn_template_name.empty() &&
@@ -1130,8 +1136,7 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 						return;
 			if (!method_.fn_name.empty())
 				for (size_t i = 0; i < p->friend_functions.size(); i++)
-					if (p->friend_functions[i].first ==
-					        method_.fn_owner &&
+					if (p->friend_functions[i].first == fn_home &&
 					    p->friend_functions[i].second ==
 					        method_.fn_name)
 						return;

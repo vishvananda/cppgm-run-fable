@@ -96,6 +96,10 @@ const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 	unique_ptr<ScopeBinding>& slot = tmpl.dependent_uses[key];
 	if (slot)
 		return slot.get();
+	bool dependent_args = false;
+	for (size_t i = 0; i < args.size(); i++)
+		if (TemplateArgIsDependent(args[i]))
+			dependent_args = true;
 	Scope* alias_scope = MakeArgumentAliasScope(tmpl, args);
 	Scope* saved = current_;
 	current_ = alias_scope;
@@ -124,6 +128,21 @@ const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 		throw;
 	}
 	current_ = saved;
+	// CWG 1558: when the substitution discarded dependent arguments
+	// (void_t's target never mentions its parameters), the use stays
+	// deferred so the arguments' validity re-checks at match and
+	// instantiation time.
+	if (dependent_args && !TypeIsDependent(substituted) &&
+	    InAbstractTemplateContext())
+	{
+		slot.reset(new ScopeBinding());
+		slot->kind = SB_TYPE_ALIAS;
+		slot->name = tmpl.name;
+		slot->type = MakeTemplateSpecType(tmpl.anchor, args);
+		slot->owner = tmpl.declaring;
+		slot->home = tmpl.declaring;
+		return slot.get();
+	}
 	slot.reset(new ScopeBinding());
 	slot->kind = SB_TYPE_ALIAS;
 	slot->name = tmpl.name;
@@ -561,8 +580,11 @@ bool SemBinder::CheckDependentPatternSlots(
 				resolved = ResolveDependentAliasUse(slot.type,
 				                                    alias_scope, bound);
 			}
-			catch (const std::exception&)
+			catch (const std::exception& error)
 			{
+				if (getenv("CPPGM_DEDUCE_DEBUG"))
+					fprintf(stderr, "DBG aliasmatch %s: %s\n",
+					        tmpl.name.c_str(), error.what());
 				return false;
 			}
 			const TemplateArg& concrete = args[ai];
@@ -573,6 +595,89 @@ bool SemBinder::CheckDependentPatternSlots(
 		ai++;
 	}
 	return true;
+}
+
+// One pattern argument slot substituted under the deduced bindings:
+// parameter references take their bound slots, pack patterns splice
+// their runs, deferred type-ids re-resolve under `alias_scope`, and
+// nested alias/template-template applications resolve recursively
+// (a substitution failure propagates so the match check can reject).
+void SemBinder::SubstituteSlotArg(const TemplateArg& slot,
+                                  Scope* alias_scope,
+                                  const vector<TemplateArg>& bound,
+                                  vector<TemplateArg>& out)
+{
+	// A pack pattern over a bound pack slot splices its run.
+	if (slot.pack_pattern && !slot.is_value && slot.type &&
+	    slot.type->kind == TK_TYPE_PARAM &&
+	    slot.type->named->param_index >= 0 &&
+	    (size_t)slot.type->named->param_index < bound.size() &&
+	    bound[slot.type->named->param_index].pack_done)
+	{
+		const vector<TemplateArg>& run =
+			bound[slot.type->named->param_index].pack_elements;
+		for (size_t k = 0; k < run.size(); k++)
+			out.push_back(run[k]);
+		return;
+	}
+	TemplateArg arg = slot;
+	if (slot.dependent_type)
+	{
+		Scope* saved = current_;
+		current_ = alias_scope;
+		try
+		{
+			arg = TemplateArg(
+				builder_.ResolveTypeId(*slot.dependent_type));
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+	}
+	else if (!slot.is_value && slot.type &&
+	         slot.type->kind == TK_TYPE_PARAM &&
+	         slot.type->named->param_index >= 0 &&
+	         (size_t)slot.type->named->param_index < bound.size())
+		arg = bound[slot.type->named->param_index];
+	else if (!slot.is_value && TypeIsDependentAliasUse(slot.type))
+	{
+		TypePtr resolved = ResolveDependentAliasUse(slot.type,
+		                                            alias_scope, bound);
+		if (resolved)
+			arg = TemplateArg(resolved);
+	}
+	else if (!slot.is_value && slot.type &&
+	         slot.type->kind == TK_TEMPLATE_SPEC &&
+	         slot.type->named->is_template_anchor &&
+	         slot.type->named->param_index >= 0 &&
+	         (size_t)slot.type->named->param_index < bound.size() &&
+	         bound[slot.type->named->param_index].template_entity)
+	{
+		// A bound template-template application (`Op<Args...>`).
+		TemplateInfo& applied = *const_cast<TemplateInfo*>(
+			bound[slot.type->named->param_index].template_entity);
+		vector<TemplateArg> inner;
+		for (size_t i = 0; i < slot.type->targs.size(); i++)
+			SubstituteSlotArg(slot.type->targs[i], alias_scope, bound,
+			                  inner);
+		if (applied.kind == TMPL_ALIAS)
+		{
+			const ScopeBinding* resolved =
+				ResolveAliasTemplateId(applied, inner);
+			if (resolved && resolved->type)
+				arg = TemplateArg(resolved->type);
+		}
+		else if (ClassSpecialization* spec =
+		             EnsureClassSpecialization(applied, inner))
+			arg = TemplateArg(spec->self.type);
+	}
+	else if (slot.is_value && slot.value_param >= 0 &&
+	         (size_t)slot.value_param < bound.size())
+		arg = bound[slot.value_param];
+	out.push_back(arg);
 }
 
 // A dependent alias-template use kept as a TEMPLATE_SPEC pattern:
@@ -589,37 +694,16 @@ TypePtr SemBinder::ResolveDependentAliasUse(const TypePtr& pattern,
 		*const_cast<TemplateInfo*>(pattern->named->spec_template);
 	vector<TemplateArg> concrete;
 	for (size_t i = 0; i < pattern->targs.size(); i++)
-	{
-		const TemplateArg& slot = pattern->targs[i];
-		TemplateArg arg = slot;
-		if (slot.dependent_type)
+		SubstituteSlotArg(pattern->targs[i], alias_scope, bound,
+		                  concrete);
+	for (size_t i = 0; i < concrete.size(); i++)
+		if (TemplateArgIsDependent(concrete[i]))
 		{
-			Scope* saved = current_;
-			current_ = alias_scope;
-			try
-			{
-				arg = TemplateArg(
-					builder_.ResolveTypeId(*slot.dependent_type));
-			}
-			catch (...)
-			{
-				current_ = saved;
-				throw;
-			}
-			current_ = saved;
-		}
-		else if (!slot.is_value && slot.type &&
-		         slot.type->kind == TK_TYPE_PARAM &&
-		         slot.type->named->param_index >= 0 &&
-		         (size_t)slot.type->named->param_index < bound.size())
-			arg = bound[slot.type->named->param_index];
-		else if (slot.is_value && slot.value_param >= 0 &&
-		         (size_t)slot.value_param < bound.size())
-			arg = bound[slot.value_param];
-		if (TemplateArgIsDependent(arg))
+			if (getenv("CPPGM_DEDUCE_DEBUG"))
+				fprintf(stderr, "DBG aliasuse %s: targ %zu dependent\n",
+				        alias.name.c_str(), i);
 			return TypePtr();
-		concrete.push_back(arg);
-	}
+		}
 	const ScopeBinding* resolved = ResolveAliasTemplateId(alias, concrete);
 	return resolved ? resolved->type : TypePtr();
 }
