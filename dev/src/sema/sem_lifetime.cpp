@@ -753,7 +753,10 @@ void SemBinder::AppendElidedObjectInit(SemNode& item,
 	// reference emits no dynamic initializer for it. A user-declared
 	// (defaulted) default constructor selected for the elided init is
 	// still odr-used (3.2p3): its synthesized body emits, call-free.
-	if (binding.owner && binding.owner->kind == SCOPE_NAMESPACE &&
+	if (binding.owner &&
+	    (binding.owner->kind == SCOPE_NAMESPACE ||
+	     binding.owner->kind == SCOPE_BLOCK ||
+	     binding.owner->kind == SCOPE_FUNCTION) &&
 	    call.children.size() == 1 && !cls.has_user_ctor &&
 	    !unit_.classes.NeedsConstruction(cls))
 	{
