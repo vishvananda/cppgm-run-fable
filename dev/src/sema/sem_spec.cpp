@@ -105,13 +105,20 @@ int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
                                           vector<TemplateArg>& bound)
 {
 	vector<size_t> matches;
+	// The defaulted-tail allowance (a pattern shorter than the
+	// argument list) only applies when the primary's length is fixed;
+	// with a primary parameter pack the pattern must consume the whole
+	// list.
+	bool allow_trailing =
+		TemplatePackIndex(tmpl.params) == tmpl.params.size();
 	for (size_t p = 0; p < tmpl.partials.size(); p++)
 	{
 		const PartialSpecialization& partial = tmpl.partials[p];
 		vector<TemplateArg> candidate(partial.params.size());
 		for (size_t i = 0; i < partial.params.size(); i++)
 			candidate[i].is_pack_slot = partial.params[i].pack;
-		if (!DeduceTemplateArgs(partial.pattern, args, candidate))
+		if (!DeduceTemplateArgs(partial.pattern, args, candidate,
+		                        allow_trailing))
 			continue;
 		bool complete = true;
 		for (size_t i = 0; i < candidate.size(); i++)
@@ -153,7 +160,8 @@ int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
 	bound.assign(tmpl.partials[best].params.size(), TemplateArg());
 	for (size_t i = 0; i < bound.size(); i++)
 		bound[i].is_pack_slot = tmpl.partials[best].params[i].pack;
-	DeduceTemplateArgs(tmpl.partials[best].pattern, args, bound);
+	DeduceTemplateArgs(tmpl.partials[best].pattern, args, bound,
+	                   allow_trailing);
 	return (int)best;
 }
 

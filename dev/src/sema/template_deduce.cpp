@@ -841,9 +841,10 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 // (defaulted tails) are accepted.
 bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
                                    const vector<TemplateArg>& args,
-                                   vector<TemplateArg>& bound)
+                                   vector<TemplateArg>& bound,
+                                   bool allow_trailing)
 {
-	return DeduceFromArgList(pattern, args, bound, true);
+	return DeduceFromArgList(pattern, args, bound, allow_trailing);
 }
 
 // 14.5.5.2 (subset): `a` is at least as specialized as `b` when `b`'s

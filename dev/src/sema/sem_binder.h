@@ -478,7 +478,8 @@ private:
 	// arguments (template_deduce.cpp).
 	bool DeduceTemplateArgs(const vector<TemplateArg>& pattern,
 	                        const vector<TemplateArg>& args,
-	                        vector<TemplateArg>& bound);
+	                        vector<TemplateArg>& bound,
+	                        bool allow_trailing = true);
 	// 14.5.5.2 (subset): whether partial specialization `a` is at
 	// least as specialized as `b` (template_deduce.cpp).
 	bool PartialAtLeastAsSpecialized(const PartialSpecialization& a,
