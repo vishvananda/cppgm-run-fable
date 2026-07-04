@@ -39,6 +39,25 @@ bool DeduceFromArgList(const vector<TemplateArg>& pattern,
                        const vector<TemplateArg>& args,
                        vector<TemplateArg>& bound, bool allow_trailing);
 
+// Whether a template-spec pattern may deduce from a base of the
+// argument class (14.8.2.1p4). The rule belongs to call-argument
+// deduction only; class partial-specialization matching (14.5.5.1)
+// deduces structurally, so DeduceTemplateArgs scopes it off (a
+// derived argument must not select a base-pattern partial through
+// inheritance).
+thread_local bool deduce_via_bases = true;
+
+struct BaseDeductionScope
+{
+	explicit BaseDeductionScope(bool active)
+		: saved(deduce_via_bases)
+	{
+		deduce_via_bases = active;
+	}
+	~BaseDeductionScope() { deduce_via_bases = saved; }
+	bool saved;
+};
+
 // Unification of one template-argument slot of a specialization
 // pattern against the corresponding concrete argument. Value slots
 // bind through the pattern's value-parameter reference or compare by
@@ -440,7 +459,8 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		}
 		// 14.8.2.1p4: the (unique) base from which deduction succeeds;
 		// a same-template base whose arguments do not unify keeps the
-		// walk going (impl<I+1, Tail...> recursion chains).
+		// walk going (impl<I+1, Tail...> recursion chains). Outside
+		// call-argument deduction only the class itself participates.
 		while (entity)
 		{
 			if (entity->spec_template == pattern->named->spec_template)
@@ -453,6 +473,8 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 					return true;
 				}
 			}
+			if (!deduce_via_bases)
+				return false;
 			entity = entity->base_entity;
 		}
 		return false;
@@ -864,6 +886,10 @@ bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
                                    vector<TemplateArg>& bound,
                                    bool allow_trailing)
 {
+	// 14.5.5.1 matching is structural: a materialized class argument
+	// matches a template-spec pattern only as itself, never through a
+	// base (no derived-to-base fallback in partial-spec selection).
+	BaseDeductionScope scope(false);
 	return DeduceFromArgList(pattern, args, bound, allow_trailing);
 }
 
