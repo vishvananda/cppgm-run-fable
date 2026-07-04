@@ -855,6 +855,17 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	return true;
 }
 
+bool SemBinder::SameImportedTemplateSignature(TemplateInfo& own,
+                                              TemplateInfo& other)
+{
+	if (own.params.size() != other.params.size())
+		return false;
+	if (!other.pattern_decl)
+		return false;
+	return SameFunctionTemplateSignature(own, *other.decl,
+	                                     *other.pattern_decl);
+}
+
 // Structural deduction of a partial-specialization pattern list
 // against concrete arguments: fixed pattern slots unify one-to-one,
 // `pattern...` slots absorb their run; trailing concrete arguments

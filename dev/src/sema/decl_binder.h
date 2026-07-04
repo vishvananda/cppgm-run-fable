@@ -54,6 +54,13 @@ protected:
 	virtual void BindInheritingConstructors(Scope* base_scope);
 	void MergeImportedOverloads(ScopeBinding& own,
 	                            const ScopeBinding& imported);
+	// Whether two function templates declare the same signature
+	// (7.3.3p15 hiding); the PA11 layer has no template patterns.
+	virtual bool SameImportedTemplateSignature(struct TemplateInfo& own,
+	                                           struct TemplateInfo& other)
+	{
+		return false;
+	}
 	void BindStaticAssert(const AstDecl& decl);
 	// PA20: full constant evaluation over the analyzed tree of the
 	// derived binder, tried when the PA11 subset evaluator fails.

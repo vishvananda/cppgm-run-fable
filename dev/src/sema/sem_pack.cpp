@@ -248,6 +248,38 @@ void SemBinder::ExpandTemplateArgumentPack(TemplateInfo& tmpl,
 		CollectFromTypeId(*argument.type, current_, mentions);
 	if (argument.expr)
 		CollectFromExpr(*argument.expr, current_, mentions);
+	{
+		// A bare expansion of a pack alias that re-binds pattern slots
+		// (an alias template's pack bound to the enclosing pattern's
+		// pack) forwards the slots verbatim: the expansion stays a
+		// pattern over the outer parameters.
+		const AstName* fwd = 0;
+		if (argument.is_type && argument.type &&
+		    argument.type->specifiers.size() == 1 &&
+		    argument.type->specifiers[0].kind == SPEC_TYPE_NAME)
+			fwd = &argument.type->specifiers[0].name;
+		else if (argument.expr && argument.expr->kind == EK_ID)
+			fwd = &argument.expr->name;
+		if (fwd && fwd->IsPlainIdentifier())
+		{
+			const ScopeBinding* found = UnqualifiedLookup(
+				current_, fwd->parts[0].identifier, SLF_ANY);
+			if (found && found->is_pack && !found->pack_args.empty())
+			{
+				bool pattern_run = false;
+				for (size_t i = 0; i < found->pack_args.size(); i++)
+					if (TemplateArgIsDependent(found->pack_args[i]))
+						pattern_run = true;
+				if (pattern_run)
+				{
+					for (size_t i = 0; i < found->pack_args.size();
+					     i++)
+						args.push_back(found->pack_args[i]);
+					return;
+				}
+			}
+		}
+	}
 	if (mentions.packs.empty() || PacksAreAbstract(mentions))
 	{
 		if (!InAbstractTemplateContext())

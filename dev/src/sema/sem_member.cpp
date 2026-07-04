@@ -983,6 +983,11 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 		callee->type = fn;
 		callee->entity_scope = binding.owner;
 		callee->entity_name = binding.name;
+		// A pre-resolved template-id (`A::go<F>`) carries its own
+		// single-overload binding; the call routes through the
+		// specialization's entry.
+		callee->fn_spec = binding.fn_self_spec;
+		host_.OnSpecializationOdrUsed(binding.fn_self_spec);
 		if (winner < binding.fn_unwind_no.size() &&
 		    binding.fn_unwind_no[winner])
 			callee->unwind_no = true;

@@ -587,6 +587,10 @@ private:
 	bool SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	                                   const AstDecl& decl,
 	                                   const AstDecl& inner);
+	// 7.3.3p15 hiding between an own member template and an imported
+	// one: positional pattern identity over the composed patterns.
+	bool SameImportedTemplateSignature(TemplateInfo& own,
+	                                   TemplateInfo& other);
 	// The specialization for an explicit/deduced argument list,
 	// composing the concrete signature on first use (and the body once
 	// the definition is available).

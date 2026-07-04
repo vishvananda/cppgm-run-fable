@@ -661,21 +661,46 @@ void DeclBinder::BindInheritingConstructors(Scope* base_scope)
 void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
                                         const ScopeBinding& imported)
 {
+	// 7.3.3p15: imported member templates join the set unless an own
+	// template with the same signature hides them.
+	for (size_t i = 0; i < imported.fn_templates.size(); i++)
+	{
+		bool hidden = false;
+		for (size_t j = 0; !hidden && j < own.fn_templates.size(); j++)
+			hidden = SameImportedTemplateSignature(
+				*own.fn_templates[j], *imported.fn_templates[i]);
+		if (!hidden)
+			own.fn_templates.push_back(imported.fn_templates[i]);
+	}
 	vector<TypePtr> incoming;
-	incoming.push_back(imported.type);
-	for (size_t i = 0; i < imported.overloads.size(); i++)
-		incoming.push_back(imported.overloads[i]);
+	if (imported.type)
+	{
+		incoming.push_back(imported.type);
+		for (size_t i = 0; i < imported.overloads.size(); i++)
+			incoming.push_back(imported.overloads[i]);
+	}
 	for (size_t i = 0; i < incoming.size(); i++)
 	{
-		bool replaced = TypeEquals(RemoveTopCv(own.type),
-		                           RemoveTopCv(incoming[i]));
+		bool replaced = own.type &&
+			TypeEquals(RemoveTopCv(own.type), RemoveTopCv(incoming[i]));
 		for (size_t j = 0; !replaced && j < own.overloads.size(); j++)
 			if (TypeEquals(RemoveTopCv(own.overloads[j]),
 			               RemoveTopCv(incoming[i])))
 				replaced = true;
 		if (replaced)
 			continue;
-		own.overloads.push_back(incoming[i]);
+		size_t at;
+		if (!own.type)
+		{
+			// A template-only set gains its first ordinary entry.
+			own.type = incoming[i];
+			at = 0;
+		}
+		else
+		{
+			own.overloads.push_back(incoming[i]);
+			at = own.overloads.size();
+		}
 		size_t count = own.overloads.size() + 1;
 		own.fn_defaults.resize(count);
 		own.fn_deleted.resize(count, false);
@@ -686,7 +711,6 @@ void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
 		own.fn_unwind_no.resize(count, false);
 		own.fn_noexcept_decl.resize(count, false);
 		own.fn_owner.resize(count, 0);
-		size_t at = count - 1;
 		own.fn_access[at] = current_access_;
 		own.fn_owner[at] =
 			i < imported.fn_owner.size() && imported.fn_owner[i]
