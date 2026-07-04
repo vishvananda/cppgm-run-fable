@@ -19,14 +19,37 @@ runtime_error OutsideBoundary(const char* what)
 // One component of a qualified name. A class-template specialization
 // component carries the template name plus its argument list and
 // mangles as `NameI<args>E` (5.1.8), with the template name and the
-// template-id both substitution candidates.
+// template-id both substitution candidates. `pack_start`/`pack_end`
+// bound the flattened argument run a template parameter pack owns
+// (5.1.8: pack arguments spell `J <args> E`).
 struct NameComponent
 {
-	NameComponent() : args(0) {}
+	NameComponent() : args(0), pack_start((size_t)-1), pack_end(0) {}
 
 	string name;
 	const vector<TemplateArg>* args;
+	size_t pack_start;
+	size_t pack_end;
 };
+
+// The flattened argument span the template's parameter pack owns;
+// `start` stays (size_t)-1 when there is no pack (or the argument
+// list is shorter than the non-pack parameters).
+void ArgsPackSpan(const vector<TemplateParam>& params, size_t arg_count,
+                  size_t& start, size_t& end)
+{
+	start = (size_t)-1;
+	end = 0;
+	for (size_t i = 0; i < params.size(); i++)
+		if (params[i].pack)
+		{
+			if (arg_count + 1 < params.size())
+				return;
+			start = i;
+			end = i + (arg_count + 1 - params.size());
+			return;
+		}
+}
 
 NameComponent ScopeComponent(const Scope* scope)
 {
@@ -36,6 +59,8 @@ NameComponent ScopeComponent(const Scope* scope)
 	{
 		part.name = scope->entity->spec_template->name;
 		part.args = &scope->entity->spec_args;
+		ArgsPackSpan(scope->entity->spec_template->params,
+		             part.args->size(), part.pack_start, part.pack_end);
 	}
 	else
 		part.name = scope->name;
@@ -70,6 +95,8 @@ vector<NameComponent> EntityComponents(const NamedTypeInfo& info)
 	{
 		leaf.name = info.spec_template->name;
 		leaf.args = &info.spec_args;
+		ArgsPackSpan(info.spec_template->params, leaf.args->size(),
+		             leaf.pack_start, leaf.pack_end);
 	}
 	else
 		leaf.name = info.name;
@@ -320,6 +347,25 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 	return "L" + code + digits + "E";
 }
 
+// One template-argument list with the parameter pack's run wrapped in
+// `J <args> E` (an empty pack still spells `JE`).
+string MangleArgList(const vector<TemplateArg>& args, size_t pack_start,
+                     size_t pack_end, Substitutions& subs)
+{
+	string out;
+	for (size_t i = 0; i <= args.size(); i++)
+	{
+		if (pack_start != (size_t)-1 && i == pack_start)
+			out += "J";
+		if (pack_start != (size_t)-1 && i == pack_end &&
+		    pack_end >= pack_start)
+			out += "E";
+		if (i < args.size())
+			out += MangleTemplateArg(args[i], subs);
+	}
+	return out;
+}
+
 // Appends one component's spelling. A specialization registers its
 // template name first (5.1.9: the template-name is a substitution
 // candidate), then mangles its arguments in sequence; when the
@@ -343,8 +389,8 @@ void AppendComponentSpelling(const NameComponent& part,
 		tname = SourceName(part.name);
 	}
 	out += tname + "I";
-	for (size_t i = 0; i < part.args->size(); i++)
-		out += MangleTemplateArg((*part.args)[i], subs);
+	out += MangleArgList(*part.args, part.pack_start, part.pack_end,
+	                     subs);
 	out += "E";
 }
 
@@ -405,8 +451,8 @@ string MangleComponentList(const vector<NameComponent>& parts,
 	{
 		const NameComponent& leaf = parts.back();
 		body += "I";
-		for (size_t i = 0; i < leaf.args->size(); i++)
-			body += MangleTemplateArg((*leaf.args)[i], subs);
+		body += MangleArgList(*leaf.args, leaf.pack_start,
+		                      leaf.pack_end, subs);
 		body += "E";
 	}
 	else
@@ -970,9 +1016,10 @@ string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 	string terminal =
 		MangleTerminalName(tmpl.name, pattern->parameters.size() +
 		                              (member ? 1 : 0));
-	string targs;
-	for (size_t i = 0; i < spec.args.size(); i++)
-		targs += MangleTemplateArg(spec.args[i], subs);
+	size_t pack_start;
+	size_t pack_end;
+	ArgsPackSpan(tmpl.params, spec.args.size(), pack_start, pack_end);
+	string targs = MangleArgList(spec.args, pack_start, pack_end, subs);
 	string result = MangleType(pattern->target, subs);
 	string params = MangleBareParameters(pattern, subs);
 	string encoding = terminal + "I" + targs + "E";
@@ -994,9 +1041,10 @@ string MangleMemberFunctionTemplateObjectName(
 	string encoding = "N";
 	ManglePrefixComponents(parts, subs, encoding);
 	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
-	string targs;
-	for (size_t i = 0; i < spec.args.size(); i++)
-		targs += MangleTemplateArg(spec.args[i], subs);
+	size_t pack_start;
+	size_t pack_end;
+	ArgsPackSpan(tmpl.params, spec.args.size(), pack_start, pack_end);
+	string targs = MangleArgList(spec.args, pack_start, pack_end, subs);
 	encoding += special_code + "I" + targs + "E";
 	encoding += "E";
 	return "_Z" + encoding + MangleBareParameters(pattern, subs);

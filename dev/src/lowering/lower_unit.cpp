@@ -433,7 +433,8 @@ bool LowerProgram::HasGlobal(const Scope* scope, const string& name) const
 // under its per-scope key, named from the declarator's token span
 // (the reference presentation).
 LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
-                                                 const string& base_name)
+                                                 const string& base_name,
+                                                 bool weak)
 {
 	string key = LocalStaticKey(item.entity_scope, item.entity_name);
 	map<string, size_t>::iterator found = global_index_.find(key);
@@ -441,10 +442,15 @@ LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
 		return globals_[found->second];
 	LowGlobalInfo info;
 	info.defined = true;
-	info.internal = true;
+	info.internal = !weak;
+	info.weak = weak;
 	info.node = &item;
 	info.type = item.type;
 	info.low_name = UniqueSymbol(base_name);
+	// The weak copies merge by the symbol itself (no Itanium _ZZ...E
+	// spelling in the LowIR contract).
+	if (weak)
+		info.object_name = "@" + info.low_name;
 	global_index_[key] = globals_.size();
 	globals_.push_back(info);
 	return globals_.back();

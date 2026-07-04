@@ -168,10 +168,11 @@ public:
 	// --- PA20 function-local statics ---
 	// Whether (scope, name) already resolves to a registered global.
 	bool HasGlobal(const Scope* scope, const string& name) const;
-	// Hoists a local static to an internal global under its block
-	// -scope entity key.
+	// Hoists a local static to a global under its block-scope entity
+	// key (internal, or weak inside a vague-linkage definition).
 	LowGlobalInfo& RegisterLocalStatic(const SemNode& item,
-	                                   const string& base_name);
+	                                   const string& base_name,
+	                                   bool weak);
 	// The i64 first-use guard global beside `object_name`.
 	string LocalStaticGuard(const string& object_name);
 	// PA15: a lowered function registered an automatic-object cleanup;

@@ -502,11 +502,28 @@ void FunctionLowerer::LowerLocalStatic(const SemNode& node)
 {
 	if (node.needs_dtor)
 		throw OutsideBoundary("function-local static with a destructor");
-	string base_name = "__local_static__" + info_.low_name + "__" +
+	// A weak (vague-linkage) enclosing definition names its statics
+	// from the function's mangled symbol so every translation unit's
+	// copy merges onto one weak object; internal-emission functions
+	// key by their local symbol.
+	string owner_part = info_.low_name;
+	if (info_.weak && !info_.object_name.empty())
+	{
+		static const char* digits = "0123456789abcdef";
+		owner_part = "function_symbol_";
+		for (size_t i = 0; i < info_.object_name.size(); i++)
+		{
+			unsigned char c = info_.object_name[i];
+			owner_part += digits[c >> 4];
+			owner_part += digits[c & 15];
+		}
+	}
+	string base_name = "__local_static__" + owner_part + "__" +
 		node.entity_name + "__tokens" +
 		to_string(node.decl_begin_token) + "_" +
 		to_string(node.decl_end_token);
-	LowGlobalInfo& info = program_.RegisterLocalStatic(node, base_name);
+	LowGlobalInfo& info = program_.RegisterLocalStatic(
+		node, base_name, info_.weak && !info_.object_name.empty());
 	const TypePtr& declared = node.type;
 	TypePtr inner = declared;
 	while (inner->kind == TK_ARRAY)

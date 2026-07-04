@@ -845,11 +845,14 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		// An inherited method receives the base subobject's address; a
 		// using-imported one belongs to the importing class for
 		// addressing (its base sits at offset zero either way). A
-		// PA21 extra (empty) base shares the object's address.
+		// PA21 extra (empty) base sits at offset zero but still takes
+		// one base-subobject projection.
 		int hops = binding.home != owner_scope && !spec
 			? 0 : BaseClassDistance(object_entity, callee_class);
 		if (hops < 0)
-			hops = 0;
+			hops = object_entity != callee_class &&
+				DerivedFromWithExtras(host_.Classes(), object_entity,
+				                      callee_class) ? 1 : 0;
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
