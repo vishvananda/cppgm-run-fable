@@ -495,6 +495,30 @@ bool SemBinder::ExpandPackParameter(const AstParameter& parameter,
 	return true;
 }
 
+// PA21: inside an abstract pattern (partial-specialization or
+// function-template signature composition), a pack-expanded parameter
+// composes as its unexpanded element pattern; the caller marks the
+// function-type entry pack_expansion so deduction absorbs a run.
+bool SemBinder::ComposeAbstractPackParameter(const AstParameter& parameter,
+                                             ParameterInfo& out)
+{
+	PackMentions mentions;
+	CollectFromSpecifiers(parameter.specifiers, current_, mentions);
+	if (parameter.declarator)
+		CollectFromDeclarator(*parameter.declarator, current_, mentions);
+	if (mentions.packs.empty() || !PacksAreAbstract(mentions))
+		return false;
+	DeclSpecifierInfo specs =
+		builder_.ProcessSpecifiers(parameter.specifiers, false);
+	DeclaratorInfo composed = builder_.ComposeDeclarator(
+		parameter.declarator.get(), specs.type);
+	out.type = composed.type;
+	out.pack_pattern = true;
+	if (composed.id && composed.id->IsPlainIdentifier())
+		out.name = composed.id->parts[0].identifier;
+	return true;
+}
+
 // After a signature composed with an expanded pack parameter, the
 // function scope gains (or completes) the pack binding: `args...`
 // expansions and sizeof...(args) inside the body read it.

@@ -49,7 +49,7 @@ bool ArgBound(const TemplateArg& arg)
 }
 
 bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
-                    vector<TemplateArg>& bound);
+                    vector<TemplateArg>& bound, bool exact_cv = true);
 bool DeduceFromArgList(const vector<TemplateArg>& pattern,
                        const vector<TemplateArg>& args,
                        vector<TemplateArg>& bound, bool allow_trailing);
@@ -260,8 +260,11 @@ bool DeduceFromArgList(const vector<TemplateArg>& pattern,
 
 // 14.8.2.5: structural unification of one parameter pattern against
 // one argument type. `bound` has one slot per template parameter.
+// `exact_cv` enforces the deduced-A-equals-A identity (partial
+// specializations, ordering); call-argument deduction relaxes it at
+// the top level of each parameter (14.8.2.1p3).
 bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
-                    vector<TemplateArg>& bound)
+                    vector<TemplateArg>& bound, bool exact_cv)
 {
 	if (!pattern || !arg)
 		return false;
@@ -269,6 +272,13 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 	{
 		int index = pattern->named->param_index;
 		if (index < 0 || (size_t)index >= bound.size())
+			return false;
+		// 14.8.2.5: a cv-qualified pattern (`const T`) only deduces
+		// from an argument carrying those qualifiers (the deduced A
+		// must be identical to A).
+		if (exact_cv &&
+		    ((pattern->is_const && !arg->is_const) ||
+		     (pattern->is_volatile && !arg->is_volatile)))
 			return false;
 		TypePtr deduced = StripPatternCv(pattern, arg);
 		if (ArgBound(bound[index]))
@@ -312,14 +322,31 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		return DeduceFromType(pattern->target, arg->target, bound);
 	case TK_FUNCTION:
 	{
-		if (pattern->parameters.size() != arg->parameters.size() ||
-		    pattern->variadic != arg->variadic ||
-		    pattern->ref_qual != arg->ref_qual)
+		// Function-type patterns compare cv/ref-qualifiers (the method
+		// forms `R(A...) const` are distinct types) and absorb
+		// `P...` parameter runs structurally.
+		if (pattern->variadic != arg->variadic ||
+		    pattern->ref_qual != arg->ref_qual ||
+		    pattern->is_const != arg->is_const ||
+		    pattern->is_volatile != arg->is_volatile)
 			return false;
+		vector<TemplateArg> pattern_params;
 		for (size_t i = 0; i < pattern->parameters.size(); i++)
-			if (!DeduceFromType(pattern->parameters[i],
-			                    arg->parameters[i], bound))
-				return false;
+		{
+			TemplateArg entry(pattern->parameters[i]);
+			entry.pack_pattern = pattern->parameters[i]->pack_expansion;
+			pattern_params.push_back(entry);
+		}
+		vector<TemplateArg> arg_params;
+		for (size_t i = 0; i < arg->parameters.size(); i++)
+		{
+			TemplateArg entry(arg->parameters[i]);
+			entry.pack_pattern = arg->parameters[i]->pack_expansion;
+			arg_params.push_back(entry);
+		}
+		if (!DeduceFromArgList(pattern_params, arg_params, bound,
+		                       false))
+			return false;
 		return DeduceFromType(pattern->target, arg->target, bound);
 	}
 	case TK_MEMBER_POINTER:
@@ -465,10 +492,17 @@ TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
 			return TypePtr();
 		for (size_t i = 0; i < copy.parameters.size(); i++)
 		{
+			bool was_pack = copy.parameters[i]->pack_expansion;
 			copy.parameters[i] = SubstituteOrderingTypes(
 				copy.parameters[i], uniques);
 			if (!copy.parameters[i])
 				return TypePtr();
+			if (was_pack && !copy.parameters[i]->pack_expansion)
+			{
+				Type marked = *copy.parameters[i];
+				marked.pack_expansion = true;
+				copy.parameters[i] = TypePtr(new Type(marked));
+			}
 		}
 		return TypePtr(new Type(copy));
 	}
@@ -915,10 +949,10 @@ bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
 			bound[index] = TemplateArg(as_ref);
 			return true;
 		}
-		return DeduceFromType(referee, arg_type, bound);
+		return DeduceFromType(referee, arg_type, bound, false);
 	}
 	return DeduceFromType(RemoveTopCv(pattern),
-	                      DecayForDeduction(arg_type), bound);
+	                      DecayForDeduction(arg_type), bound, false);
 }
 
 // One pack element: the element pattern unifies against a copy of the
@@ -952,7 +986,7 @@ bool SemBinder::DeducePackElement(const TypePtr& pattern,
 		pat = RemoveTopCv(pat);
 		at = DecayForDeduction(at);
 	}
-	if (!DeduceFromType(pat, at, probe))
+	if (!DeduceFromType(pat, at, probe, false))
 		return false;
 	if (!ArgBound(probe[pack_index]))
 		return false;

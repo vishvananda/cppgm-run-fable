@@ -495,6 +495,10 @@ private:
 	// `Args... args` in a parameter clause (ITypeBuilderHost).
 	virtual bool ExpandPackParameter(const AstParameter& parameter,
 	                                 std::vector<ParameterInfo>& out);
+	// PA21: the unexpanded element pattern of `P...` inside an
+	// abstract template pattern (ITypeBuilderHost).
+	virtual bool ComposeAbstractPackParameter(const AstParameter& parameter,
+	                                          ParameterInfo& out);
 	// The most recent clause expansion (one pack parameter per clause
 	// in the slice): the declared pack name and its expanded slots,
 	// consumed right after signature composition to bind the function
@@ -599,6 +603,8 @@ private:
 	// form that registers on the owner template).
 	bool TemplateMemberOwnerIsPattern(const AstDecl& decl,
 	                                  const AstName& name);
+	bool ExprMentionsAny(const AstExpr& expr,
+	                     const std::set<string>& params);
 
 	// --- PA17 virtual members (sem_virtual.cpp) ---
 	// Declaration-time slot recording for an ordinary member function

@@ -192,19 +192,26 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 		const AstParameter& parameter = clause.parameters[i];
 		if (ParameterIsPackExpanded(parameter))
 		{
-			// PA19: one composed parameter per pack element; an
-			// abstract context has nothing to expand and the whole
-			// composition fails over to per-parameter patterns.
+			// PA19: one composed parameter per pack element; PA21: an
+			// abstract pattern context keeps the unexpanded element
+			// pattern (marked pack_expansion) so partial-specialization
+			// function-type patterns deduce structurally.
 			vector<ParameterInfo> expanded;
-			if (!host_.ExpandPackParameter(parameter, expanded))
+			if (host_.ExpandPackParameter(parameter, expanded))
+			{
+				for (size_t k = 0; k < expanded.size(); k++)
+				{
+					host_.OnParameterComposed(expanded[k].name,
+					                          expanded[k].type);
+					parameters.push_back(expanded[k]);
+				}
+				continue;
+			}
+			ParameterInfo pattern;
+			if (!host_.ComposeAbstractPackParameter(parameter, pattern))
 				throw runtime_error("parameter pack outside an "
 				                    "expandable context");
-			for (size_t k = 0; k < expanded.size(); k++)
-			{
-				host_.OnParameterComposed(expanded[k].name,
-				                          expanded[k].type);
-				parameters.push_back(expanded[k]);
-			}
+			parameters.push_back(pattern);
 			continue;
 		}
 		DeclSpecifierInfo specs =
@@ -247,6 +254,14 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 		}
 		else
 			types.push_back(parameters[i].type);
+		// PA21: the pattern's pack-expansion marker rides the function
+		// -type entry.
+		if (parameters[i].pack_pattern && !types.back()->pack_expansion)
+		{
+			Type marked = *types.back();
+			marked.pack_expansion = true;
+			types.back() = TypePtr(new Type(marked));
+		}
 	}
 }
 

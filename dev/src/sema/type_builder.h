@@ -36,6 +36,17 @@ struct ITypeBuilderHost
 		(void)out;
 		return false;
 	}
+	// PA21: composes a pack-expanded parameter as its unexpanded
+	// element pattern inside an abstract template pattern (the
+	// composed type carries the pack_expansion marker). False outside
+	// abstract contexts.
+	virtual bool ComposeAbstractPackParameter(const AstParameter& parameter,
+	                                          ParameterInfo& out)
+	{
+		(void)parameter;
+		(void)out;
+		return false;
+	}
 	// Lookup of a possibly qualified type name (throws when the name
 	// does not name a type).
 	virtual TypePtr ResolveTypeName(const AstName& name) = 0;
@@ -84,13 +95,17 @@ struct DeclSpecifierInfo
 // adjustment - the fixtures pin `function of (array of 3 int)`).
 struct ParameterInfo
 {
-	ParameterInfo() : default_arg(0) {}
+	ParameterInfo() : default_arg(0), pack_pattern(false) {}
 
 	string name;  // empty when unnamed
 	TypePtr type;
 	// PA14: `= expression` default argument (null when absent); points
 	// into the translation unit's AST, used while it is alive.
 	const AstExpr* default_arg;
+	// PA21: an unexpanded `P...` element pattern of an abstract
+	// template pattern (the composed function type marks the entry
+	// pack_expansion).
+	bool pack_pattern;
 };
 
 // The composition result of one declarator over a base type.

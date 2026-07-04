@@ -258,7 +258,8 @@ bool TypeEquals(const TypePtr& a, const TypePtr& b)
 	if (a.get() == b.get())
 		return true;
 	if (a->kind != b->kind || a->is_const != b->is_const ||
-	    a->is_volatile != b->is_volatile)
+	    a->is_volatile != b->is_volatile ||
+	    a->pack_expansion != b->pack_expansion)
 		return false;
 	switch (a->kind)
 	{

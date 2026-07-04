@@ -314,10 +314,14 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 bool SemBinder::TemplateMemberOwnerIsPattern(const AstDecl& decl,
                                              const AstName& name)
 {
+	// The declared parameter names (a non-type parameter's name lives
+	// in its declarator).
 	std::set<string> params;
-	for (size_t i = 0; i < decl.template_params.size(); i++)
-		if (!decl.template_params[i].name.empty())
-			params.insert(decl.template_params[i].name);
+	vector<TemplateParam> collected;
+	CollectTemplateParams(decl, collected);
+	for (size_t i = 0; i < collected.size(); i++)
+		if (!collected[i].name.empty())
+			params.insert(collected[i].name);
 	if (params.empty())
 		return false;
 	for (size_t i = 0; i + 1 < name.parts.size(); i++)
@@ -326,15 +330,46 @@ bool SemBinder::TemplateMemberOwnerIsPattern(const AstDecl& decl,
 		for (size_t a = 0; a < part.arguments.size(); a++)
 		{
 			const AstTemplateArgument& argument = part.arguments[a];
-			if (!argument.is_type || !argument.type)
-				continue;
-			const AstSpecifierSeq& specs = argument.type->specifiers;
-			for (size_t k = 0; k < specs.size(); k++)
-				if (specs[k].kind == SPEC_TYPE_NAME &&
-				    NameMentionsAny(specs[k].name, params))
-					return true;
+			if (argument.type)
+			{
+				const AstSpecifierSeq& specs =
+					argument.type->specifiers;
+				for (size_t k = 0; k < specs.size(); k++)
+					if (specs[k].kind == SPEC_TYPE_NAME &&
+					    NameMentionsAny(specs[k].name, params))
+						return true;
+			}
+			if (argument.expr &&
+			    ExprMentionsAny(*argument.expr, params))
+				return true;
 		}
 	}
+	return false;
+}
+
+// Whether an expression mentions any of the given parameter names
+// (id-expressions, operands, call arguments, and embedded type-ids).
+bool SemBinder::ExprMentionsAny(const AstExpr& expr,
+                                const std::set<string>& params)
+{
+	if ((expr.kind == EK_ID || expr.kind == EK_MEMBER) &&
+	    NameMentionsAny(expr.name, params))
+		return true;
+	if (expr.type)
+	{
+		const AstSpecifierSeq& specs = expr.type->specifiers;
+		for (size_t k = 0; k < specs.size(); k++)
+			if (specs[k].kind == SPEC_TYPE_NAME &&
+			    NameMentionsAny(specs[k].name, params))
+				return true;
+	}
+	for (size_t i = 0; i < expr.operands.size(); i++)
+		if (expr.operands[i] && ExprMentionsAny(*expr.operands[i], params))
+			return true;
+	for (size_t i = 0; i < expr.arguments.size(); i++)
+		if (expr.arguments[i] &&
+		    ExprMentionsAny(*expr.arguments[i], params))
+			return true;
 	return false;
 }
 

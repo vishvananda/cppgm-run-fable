@@ -190,6 +190,10 @@ struct Type
 	// TK_TEMPLATE_SPEC: the argument pattern list (types and values);
 	// `parameters` stays function-only.
 	vector<TemplateArg> targs;
+	// PA21 pattern-only marker: this function-parameter entry of an
+	// abstract TK_FUNCTION pattern was spelled `P...` (deduction
+	// absorbs an argument run). Never set on concrete types.
+	bool pack_expansion = false;
 };
 
 // --- classification of fundamental types (3.9.1) ---
