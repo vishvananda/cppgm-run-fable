@@ -335,6 +335,11 @@ string TemplateArgumentSpelling(const vector<TemplateArg>& args);
 bool SameTemplateParameterKinds(const vector<TemplateParam>& a,
                                 const vector<TemplateParam>& b);
 
+// Whether a pattern type is a dependent alias-template use kept as a
+// TEMPLATE_SPEC node (14.5.7p2: matching re-substitutes it under the
+// deduced bindings instead of comparing structurally).
+bool TypeIsDependentAliasUse(const TypePtr& type);
+
 // 14.5.6.1p6: whether two template parameter lists declare the same
 // template head - positionally matching kinds and pack-ness, with
 // non-type parameter types compared by positionalized spelling

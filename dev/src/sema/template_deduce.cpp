@@ -82,8 +82,13 @@ bool DeduceFromArg(const TemplateArg& pattern, const TemplateArg& arg,
 	if (pattern.template_entity || arg.template_entity)
 		return pattern.template_entity == arg.template_entity;
 	// A deferred type slot re-resolves after structural deduction
-	// (CheckDependentPatternSlots); it matches anything here.
+	// (CheckDependentPatternSlots); it matches anything here. A
+	// dependent alias-template use (void_t<typename T::x>) is the
+	// same: 14.5.7p2 matching re-substitutes rather than comparing
+	// the alias node structurally.
 	if (pattern.dependent_type)
+		return true;
+	if (!pattern.is_value && TypeIsDependentAliasUse(pattern.type))
 		return true;
 	if (!pattern.is_value && !arg.is_value)
 		return DeduceFromType(pattern.type, arg.type, bound);

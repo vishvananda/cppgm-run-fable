@@ -491,7 +491,9 @@ bool SemBinder::CheckDependentPatternSlots(
 {
 	bool any = false;
 	for (size_t i = 0; i < partial.pattern.size(); i++)
-		if (partial.pattern[i].dependent_type)
+		if (partial.pattern[i].dependent_type ||
+		    (!partial.pattern[i].is_value &&
+		     TypeIsDependentAliasUse(partial.pattern[i].type)))
 			any = true;
 	if (!any)
 		return true;
@@ -535,9 +537,77 @@ bool SemBinder::CheckDependentPatternSlots(
 			    !TypeEquals(resolved, concrete.type))
 				return false;
 		}
+		else if (!slot.is_value && TypeIsDependentAliasUse(slot.type))
+		{
+			// 14.5.7p2: the alias use re-substitutes with the deduced
+			// bindings; a substitution failure means no match.
+			TypePtr resolved;
+			try
+			{
+				resolved = ResolveDependentAliasUse(slot.type,
+				                                    alias_scope, bound);
+			}
+			catch (const std::exception&)
+			{
+				return false;
+			}
+			const TemplateArg& concrete = args[ai];
+			if (!resolved || concrete.is_value || !concrete.type ||
+			    !TypeEquals(resolved, concrete.type))
+				return false;
+		}
 		ai++;
 	}
 	return true;
+}
+
+// A dependent alias-template use kept as a TEMPLATE_SPEC pattern:
+// re-resolves under `alias_scope` with the deduced `bound` slots
+// substituted into its argument patterns. Null when a nested pattern
+// stays dependent.
+TypePtr SemBinder::ResolveDependentAliasUse(const TypePtr& pattern,
+                                            Scope* alias_scope,
+                                            const vector<TemplateArg>& bound)
+{
+	if (!TypeIsDependentAliasUse(pattern))
+		return TypePtr();
+	TemplateInfo& alias =
+		*const_cast<TemplateInfo*>(pattern->named->spec_template);
+	vector<TemplateArg> concrete;
+	for (size_t i = 0; i < pattern->targs.size(); i++)
+	{
+		const TemplateArg& slot = pattern->targs[i];
+		TemplateArg arg = slot;
+		if (slot.dependent_type)
+		{
+			Scope* saved = current_;
+			current_ = alias_scope;
+			try
+			{
+				arg = TemplateArg(
+					builder_.ResolveTypeId(*slot.dependent_type));
+			}
+			catch (...)
+			{
+				current_ = saved;
+				throw;
+			}
+			current_ = saved;
+		}
+		else if (!slot.is_value && slot.type &&
+		         slot.type->kind == TK_TYPE_PARAM &&
+		         slot.type->named->param_index >= 0 &&
+		         (size_t)slot.type->named->param_index < bound.size())
+			arg = bound[slot.type->named->param_index];
+		else if (slot.is_value && slot.value_param >= 0 &&
+		         (size_t)slot.value_param < bound.size())
+			arg = bound[slot.value_param];
+		if (TemplateArgIsDependent(arg))
+			return TypePtr();
+		concrete.push_back(arg);
+	}
+	const ScopeBinding* resolved = ResolveAliasTemplateId(alias, concrete);
+	return resolved ? resolved->type : TypePtr();
 }
 
 // --- explicit specialization entry -------------------------------------------

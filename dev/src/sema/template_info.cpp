@@ -371,6 +371,13 @@ string PositionalizeTemplateNames(const string& text,
 	return out;
 }
 
+bool TypeIsDependentAliasUse(const TypePtr& type)
+{
+	return type && type->kind == TK_TEMPLATE_SPEC && type->named &&
+		type->named->spec_template &&
+		type->named->spec_template->kind == TMPL_ALIAS;
+}
+
 bool SameTemplateParameterKinds(const vector<TemplateParam>& a,
                                 const vector<TemplateParam>& b)
 {
