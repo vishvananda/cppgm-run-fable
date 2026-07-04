@@ -745,6 +745,8 @@ bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
 	for (size_t i = 0; i < a.params.size(); i++)
 		uniques.push_back(OrderingUniqueType(i));
 	vector<TemplateArg> bound(b.params.size());
+	for (size_t i = 0; i < bound.size(); i++)
+		bound[i].is_pack_slot = b.params[i].pack;
 	for (size_t i = 0; i < argc; i++)
 	{
 		TypePtr transformed = SubstituteOrderingTypes(
@@ -1090,8 +1092,9 @@ bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
 // --- deduction ---------------------------------------------------------------
 
 // The flattened concrete argument list of a deduction result: the
-// per-parameter slots with the pack's deduced elements spliced into
-// its position.
+// per-parameter slots with each pack's deduced run spliced into its
+// position (a completed slot run wins; the shared trailing-parameter
+// run serves the classic single trailing pack).
 static vector<TemplateArg> FlattenDeduced(
 	const vector<TemplateParam>& params, const vector<TemplateArg>& bound,
 	const vector<TemplateArg>& pack_elements)
@@ -1100,8 +1103,13 @@ static vector<TemplateArg> FlattenDeduced(
 	for (size_t i = 0; i < params.size(); i++)
 	{
 		if (params[i].pack)
-			for (size_t k = 0; k < pack_elements.size(); k++)
-				flattened.push_back(pack_elements[k]);
+		{
+			const vector<TemplateArg>& run =
+				i < bound.size() && bound[i].pack_done
+					? bound[i].pack_elements : pack_elements;
+			for (size_t k = 0; k < run.size(); k++)
+				flattened.push_back(run[k]);
+		}
 		else
 			flattened.push_back(bound[i]);
 	}
@@ -1375,11 +1383,14 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 			pack_elements.push_back(element);
 		deduced_elements++;
 	}
-	// A pack deduced through a template-id pattern (tuple<T...>)
-	// accumulates on its slot; splice it like the trailing-parameter
-	// run.
-	if (has_pack && pack_elements.empty() && bound[pack_index].pack_done)
-		pack_elements = bound[pack_index].pack_elements;
+	// The trailing pack's run completes its slot, so the flatten and
+	// the alias scope read every pack from its own slot (multiple
+	// deducible packs each carry their own run).
+	if (has_pack && !bound[pack_index].pack_done)
+	{
+		bound[pack_index].pack_done = true;
+		bound[pack_index].pack_elements = pack_elements;
+	}
 	// Unbound parameters fill from default template arguments; any
 	// remaining hole is a deduction failure.
 	for (size_t i = 0; i < bound.size(); i++)
@@ -1419,7 +1430,8 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	try
 	{
 		return EnsureFunctionSpecialization(
-			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
+			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements),
+			&bound);
 	}
 	catch (const std::exception& error)
 	{
@@ -1433,15 +1445,23 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 // --- specialization -----------------------------------------------------------
 
 FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
-	TemplateInfo& tmpl, const vector<TemplateArg>& args)
+	TemplateInfo& tmpl, const vector<TemplateArg>& args,
+	const vector<TemplateArg>* slots)
 {
-	std::vector<std::pair<size_t, size_t>> spans;
-	if (!MapParamSpans(tmpl.params, args.size(), spans) ||
-	    (TemplatePackIndex(tmpl.params) == tmpl.params.size() &&
-	     args.size() != tmpl.params.size()))
+	if (slots && slots->size() != tmpl.params.size())
 		throw runtime_error("wrong template argument count for " +
 		                    tmpl.name);
-	string key = TemplateArgumentKey(args);
+	std::vector<std::pair<size_t, size_t>> spans;
+	if (!slots &&
+	    (!MapParamSpans(tmpl.params, args.size(), spans) ||
+	     (TemplatePackIndex(tmpl.params) == tmpl.params.size() &&
+	      args.size() != tmpl.params.size())))
+		throw runtime_error("wrong template argument count for " +
+		                    tmpl.name);
+	// The slot list keys multi-pack results (the flattened list loses
+	// the run boundaries).
+	string key = slots ? TemplateArgumentKey(*slots)
+	                   : TemplateArgumentKey(args);
 	{
 		map<string, unique_ptr<FunctionSpecialization>>::iterator found =
 			tmpl.fn_specs.find(key);
@@ -1459,7 +1479,8 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->args = args;
 	spec->key = key;
 	spec->name = tmpl.name + TemplateArgumentSpelling(args);
-	spec->param_scope = MakeArgumentAliasScope(tmpl, args);
+	spec->param_scope =
+		MakeArgumentAliasScope(tmpl, slots ? *slots : args);
 
 	// Compose the concrete signature in the template's context; the
 	// parameters bind into a scratch scope so a trailing-return

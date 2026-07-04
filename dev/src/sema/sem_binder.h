@@ -622,9 +622,12 @@ private:
 	                                   TemplateInfo& other);
 	// The specialization for an explicit/deduced argument list,
 	// composing the concrete signature on first use (and the body once
-	// the definition is available).
+	// the definition is available). `slots` (one entry per parameter,
+	// pack slots carrying their runs) keys and binds multi-pack
+	// deduction results whose flattened list is ambiguous.
 	FunctionSpecialization* EnsureFunctionSpecialization(
-		TemplateInfo& tmpl, const vector<TemplateArg>& args);
+		TemplateInfo& tmpl, const vector<TemplateArg>& args,
+		const vector<TemplateArg>* slots = 0);
 	void InstantiateFunctionBody(TemplateInfo& tmpl,
 	                             FunctionSpecialization& spec);
 	// PA21: the implicit object parameter of a member-template body.

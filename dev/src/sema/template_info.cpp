@@ -223,6 +223,19 @@ static void AppendArgKey(const TemplateArg& arg, string& out)
 {
 	if (arg.pack_pattern)
 		out += "pk";
+	// A deduction slot carrying a pack's run keys its elements with
+	// boundaries (multi-pack lists flatten ambiguously).
+	if (arg.is_pack_slot && arg.pack_done)
+	{
+		out += "P[";
+		for (size_t i = 0; i < arg.pack_elements.size(); i++)
+		{
+			AppendArgKeyRef(arg.pack_elements[i], out);
+			out += ",";
+		}
+		out += "]";
+		return;
+	}
 	if (arg.dependent_type)
 	{
 		char buffer[32];
