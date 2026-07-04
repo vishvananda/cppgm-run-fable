@@ -753,6 +753,16 @@ private:
 
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;
+	// PA21: poisoned instantiated bodies retried at the end of the
+	// unit (the poisoned deferred item is replaced on success).
+	struct RetryBody
+	{
+		RetryBody() : deferred_index(0) {}
+
+		DeferredBody body;
+		size_t deferred_index;
+	};
+	vector<RetryBody> retry_bodies_;
 	MethodContext method_;
 	// Saved method contexts around member-signature composition.
 	vector<MethodContext> signature_contexts_;

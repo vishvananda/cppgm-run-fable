@@ -98,6 +98,11 @@ void SemBinder::AppendPoisonedBody(const DeferredBody& body,
 	SemNodePtr item = BuildFunctionNode(body, special);
 	item->instantiation_error = what;
 	unit_.deferred.push_back(std::move(item));
+	// The end-of-unit pass retries the bind once all classes complete.
+	RetryBody retry;
+	retry.body = body;
+	retry.deferred_index = unit_.deferred.size() - 1;
+	retry_bodies_.push_back(retry);
 }
 
 // The this-adjusted printed type of a member function: pointer to cv

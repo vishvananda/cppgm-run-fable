@@ -328,5 +328,23 @@ void SemBinder::FinishTemplateChecks()
 void SemBinder::BindTranslationUnit(const AstDecl& unit)
 {
 	DeclBinder::BindTranslationUnit(unit);
+	// PA21 14.6.4.1: an instantiated body that failed mid-instantiation
+	// (a sibling specialization still open) re-binds once every class
+	// is complete; a still-failing body keeps its poisoned definition.
+	for (size_t i = 0; i < retry_bodies_.size(); i++)
+	{
+		try
+		{
+			AnalyzeDeferredBody(retry_bodies_[i].body);
+		}
+		catch (const std::exception&)
+		{
+			continue;
+		}
+		unit_.deferred[retry_bodies_[i].deferred_index].swap(
+			unit_.deferred.back());
+		unit_.deferred.pop_back();
+	}
+	retry_bodies_.clear();
 	FinishTemplateChecks();
 }
