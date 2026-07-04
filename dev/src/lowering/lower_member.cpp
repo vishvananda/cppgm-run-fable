@@ -26,6 +26,18 @@ TypePtr StripRef(const TypePtr& type)
 	return IsReferenceType(type) ? type->target : type;
 }
 
+// The selected constructor of an elided (effect-free) construction
+// stays odr-used even though the call drops (3.2p3).
+static void DemandElidedActionCtor(LowerProgram& program,
+                                   const SemNode& action)
+{
+	if (action.children.empty() ||
+	    action.children[0]->kind != SN_CALL_EXPRESSION ||
+	    action.children[0]->children.empty())
+		return;
+	program.DemandElidedCtor(*action.children[0]->children[0]);
+}
+
 // String-literal objects inside a dropped (elided) expression still
 // exist in the program image (the checked references emit them).
 void RegisterDroppedLiterals(LowerProgram& program, const SemNode& node)
@@ -660,13 +672,7 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 				break;
 			if (child.elided)
 			{
-				// The selected constructor stays odr-used even though
-				// the effect-free call drops (3.2p3).
-				if (!child.children.empty() &&
-				    child.children[0]->kind == SN_CALL_EXPRESSION &&
-				    !child.children[0]->children.empty())
-					program_.DemandElidedCtor(
-						*child.children[0]->children[0]);
+				DemandElidedActionCtor(program_, child);
 				break;
 			}
 			if (child.trivial_copy)

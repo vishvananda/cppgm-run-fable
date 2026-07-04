@@ -33,6 +33,17 @@ struct IConstExprContext
 		(void)expr;
 		return TypePtr();
 	}
+	// PA22 dialect intrinsic: the libstdc++ tuple-constraints helper
+	// `_TCC<Cond>::__is_implicitly_constructible<Args...>()` evaluates
+	// to the enclosing specialization's leading bool gate (the
+	// reference never runs the body). False when the qualified name
+	// does not have that shape.
+	virtual bool TupleConstraintGate(const AstName& name, ConstValue& out)
+	{
+		(void)name;
+		(void)out;
+		return false;
+	}
 	// PA21: the element count of a parameter pack in scope
 	// (`sizeof...(name)`); false when the name binds no concrete pack.
 	virtual bool PackSizeConstant(const string& name,

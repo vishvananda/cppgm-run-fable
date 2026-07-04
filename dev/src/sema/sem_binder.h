@@ -924,6 +924,9 @@ public:
 	// PA21 sizeof...(pack) in constant expressions (sem_pack.cpp).
 	virtual bool PackSizeConstant(const string& name,
 	                              unsigned long long& out);
+	// PA22 dialect intrinsic (template_args.cpp): the libstdc++
+	// tuple-constraints gate.
+	virtual bool TupleConstraintGate(const AstName& name, ConstValue& out);
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
 		TemplateInfo& tmpl, const vector<SemValue>& args,

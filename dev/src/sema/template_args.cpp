@@ -1009,6 +1009,41 @@ bool SemBinder::TryClassConversionConstant(const AstName& name,
 	return ClassConversionConstant(type, true, out);
 }
 
+// The reference dialect treats the libstdc++ helper
+// `_TCC<Cond>::__is_implicitly_constructible<Args...>()` as an
+// intrinsic: the result is the enclosing specialization's leading
+// bool template argument, and the captured body never runs. The
+// qualifier must resolve to a class-template specialization declaring
+// a member function template of that name.
+bool SemBinder::TupleConstraintGate(const AstName& name, ConstValue& out)
+{
+	Scope* scope = 0;
+	try
+	{
+		scope = ResolvePrefixScope(name);
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
+	if (!scope || scope->kind != SCOPE_CLASS || !scope->entity)
+		return false;
+	const NamedTypeInfo* entity = scope->entity;
+	if (!entity->spec_template || entity->is_template_anchor ||
+	    entity->spec_args.empty())
+		return false;
+	const ScopeBinding* member = FindOwnBinding(
+		*scope, "__is_implicitly_constructible");
+	if (!member || member->kind != SB_FUNCTION ||
+	    member->fn_templates.empty())
+		return false;
+	const TemplateArg& gate = entity->spec_args.front();
+	if (!gate.is_value || gate.value_type != FT_BOOL)
+		return false;
+	out = ConstValue(FT_BOOL, gate.value_bits);
+	return true;
+}
+
 bool SemBinder::TryConstantClassBool(const TypePtr& type, bool& out)
 {
 	// The presentation fold for `flag ? a : b` over an

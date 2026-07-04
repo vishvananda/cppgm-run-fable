@@ -167,8 +167,8 @@ PA14-PA21 lowering path.
 
 ## Status (2026-07-04)
 
-IN PROGRESS: 155/176 pa22 tests pass (95 at baseline); through-pa21
-stays fully green (1731/1731) after every landed batch.
+COMPLETE: 176/176 pa22 tests pass and the root
+`make test-report-through-pa22` gate is fully green (1907/1907).
 
 Landed: SFINAE candidate dropping (tasks 1-2), template-head identity
 with out-of-class pairing tolerance, template-id overload sets,
@@ -197,13 +197,22 @@ NTTP defaults, non-type declarator packs, zero-arg constexpr-call
 value arguments, surrogate calls, abstract-array SFINAE, decltype
 base-specifiers and prefix demands, one-byte pointer-difference fold.
 
-Remaining (21): two-phase-lookup timing for later-declared shadowing
-values (decl-order-aware lookup), value-pack static-data members with
-sizeof... bounds, a few deep alias/pack SFINAE compositions
-(and_helper chains inside member guards), several exact-LowIR shape
-diffs (empty-temporary ctor elision in delegating mem-initializers,
-canonical function ordering), and assorted single-feature corners;
-each needs its own reduction.
+The final batch landed: Itanium dependent-signature mangling (task 9,
+including `Dp` pack parameters and written-form substitutable keys),
+trailing-return decltype packs with the 14.8.2.4p8 pack ordering rule,
+value-pack static-data-member definitions, decl-order-aware dependent
+lookup (14.6.4 subset over binding sequence stamps), per-instantiation
+dependent hidden friends with the class-scope signature lookup
+context, recursive match-probe completeness demands as SFINAE,
+explicit template-template arguments in unevaluated call deduction,
+the init-helper anchor and by-address parameter conventions the
+reference pins, pointer-arithmetic count widening, effect-free
+implicit default-construction elision (with the odr-use preserved),
+integral_constant-style conditional folding, pack-deduced delegating
+temporaries, and the libstdc++ `__is_implicitly_constructible`
+tuple-constraints gate as a dialect intrinsic (the reference resolves
+that exact helper name to the enclosing specialization's leading bool
+argument instead of running the body).
 
 ## Validation
 

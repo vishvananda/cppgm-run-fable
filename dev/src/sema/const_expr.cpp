@@ -487,6 +487,18 @@ ConstValue EvaluateCall(const AstExpr& expr, IConstExprContext& context)
 			throw OutsideSubset("class temporary value");
 		}
 	}
+	// The reference dialect's libstdc++ tuple-constraints intrinsic:
+	// the exact helper name evaluates to the enclosing
+	// specialization's bool gate instead of running the body.
+	if (callee && callee->kind == EK_ID && expr.arguments.empty() &&
+	    callee->name.parts.size() >= 2 &&
+	    callee->name.parts.back().identifier ==
+	        "__is_implicitly_constructible")
+	{
+		ConstValue gate;
+		if (context.TupleConstraintGate(callee->name, gate))
+			return gate;
+	}
 	return EvaluateGnuAlignof(expr, context);
 }
 
