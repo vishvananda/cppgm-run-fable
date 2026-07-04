@@ -1180,7 +1180,10 @@ bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
 	if (!method_.fn_name.empty())
 		for (size_t i = 0; i < naming->friend_functions.size(); i++)
 			if (naming->friend_functions[i].first == method_.fn_owner &&
-			    naming->friend_functions[i].second == method_.fn_name)
+			    (naming->friend_functions[i].second == method_.fn_name ||
+			     (!method_.fn_template_name.empty() &&
+			      naming->friend_functions[i].second ==
+			          method_.fn_template_name)))
 				return true;
 	return false;
 }

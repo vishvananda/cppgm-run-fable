@@ -175,6 +175,96 @@ AstDeclPtr AstParser::ParseClassSpecifier()
 	return decl;
 }
 
+// PA21: member bodies may reference member templates declared later
+// in the class (`thunk = &invoke<F>;` with invoke below), so their
+// names must classify as templates for the `<` disambiguation. A
+// token-level pre-scan registers every top-level `template<...>`
+// member's declared name before the members parse.
+void AstParser::PreScanMemberTemplates()
+{
+	size_t depth = 1;
+	for (size_t i = pos_; i < tokens_.size() && depth > 0; i++)
+	{
+		const ParseToken& token = tokens_[i];
+		if (token.kind != PTOK_SIMPLE)
+			continue;
+		if (token.simple_type == OP_LBRACE)
+		{
+			depth++;
+			continue;
+		}
+		if (token.simple_type == OP_RBRACE)
+		{
+			depth--;
+			continue;
+		}
+		if (token.simple_type != KW_TEMPLATE || depth != 1)
+			continue;
+		size_t j = i + 1;
+		if (j >= tokens_.size() || tokens_[j].kind != PTOK_SIMPLE ||
+		    tokens_[j].simple_type != OP_LT)
+			continue;
+		int angles = 1;
+		for (j++; j < tokens_.size() && angles > 0; j++)
+		{
+			const ParseToken& t = tokens_[j];
+			if (t.kind == PTOK_RSHIFT_1 || t.kind == PTOK_RSHIFT_2)
+			{
+				angles--;
+				continue;
+			}
+			if (t.kind != PTOK_SIMPLE)
+				continue;
+			if (t.simple_type == OP_LT)
+				angles++;
+			else if (t.simple_type == OP_GT)
+				angles--;
+			else if (t.simple_type == OP_RSHIFT)
+				angles -= 2;
+			else if (t.simple_type == OP_SEMICOLON ||
+			         t.simple_type == OP_LBRACE ||
+			         t.simple_type == OP_RBRACE)
+				break;
+		}
+		if (angles != 0)
+			continue;
+		// The declared name: `class/struct NAME`, `using NAME`, or the
+		// first identifier followed by `(` (a member function
+		// template); the scan stops at the declaration boundary.
+		for (; j < tokens_.size(); j++)
+		{
+			const ParseToken& t = tokens_[j];
+			if (t.kind == PTOK_IDENTIFIER && j + 1 < tokens_.size() &&
+			    tokens_[j + 1].kind == PTOK_SIMPLE &&
+			    tokens_[j + 1].simple_type == OP_LPAREN)
+			{
+				Register(t.spelling, NF_VALUE | NF_TEMPLATE);
+				break;
+			}
+			if (t.kind != PTOK_SIMPLE)
+				continue;
+			if (t.simple_type == OP_SEMICOLON ||
+			    t.simple_type == OP_LBRACE ||
+			    t.simple_type == OP_ASS ||
+			    t.simple_type == KW_OPERATOR)
+				break;
+			if ((t.simple_type == KW_CLASS ||
+			     t.simple_type == KW_STRUCT ||
+			     t.simple_type == KW_USING) &&
+			    j + 1 < tokens_.size() &&
+			    tokens_[j + 1].kind == PTOK_IDENTIFIER)
+			{
+				Register(tokens_[j + 1].spelling,
+				         NF_TYPE | NF_TEMPLATE);
+				break;
+			}
+			if (t.simple_type == KW_FRIEND)
+				break;
+		}
+		i = j;
+	}
+}
+
 bool AstParser::ParseClassBody(AstDecl& decl)
 {
 	Advance();  // OP_LBRACE
@@ -186,6 +276,7 @@ bool AstParser::ParseClassBody(AstDecl& decl)
 	else
 		table = NewTable();
 	PushScope(table, false);
+	PreScanMemberTemplates();
 	while (!AtSimple(OP_RBRACE))
 	{
 		AstDeclPtr member = ParseMemberDeclaration();

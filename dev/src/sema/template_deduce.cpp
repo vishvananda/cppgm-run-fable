@@ -1290,6 +1290,7 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	method_.fn_scope = fn_scope;
 	method_.fn_owner = tmpl.declaring;
 	method_.fn_name = spec.name;
+	method_.fn_template_name = tmpl.name;
 	if (tmpl.member_of)
 	{
 		method_.cls = unit_.classes.Find(tmpl.member_of);

@@ -737,6 +737,10 @@ private:
 		Scope* fn_scope;
 		const Scope* fn_owner;  // declaring scope of the open function
 		string fn_name;
+		// PA21: the template name behind an instantiated specialization
+		// body ("read" while binding read<int>); friend grants recorded
+		// under the template name match through it.
+		string fn_template_name;
 	};
 
 	vector<ClassInfo*> open_classes_;

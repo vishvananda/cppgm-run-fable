@@ -235,6 +235,9 @@ private:
 	bool ParseBaseClause(AstDecl& decl);
 	AstDeclPtr ParseMemberDeclaration();  // forms + token span
 	AstDeclPtr ParseMemberDeclarationForms();
+	// PA21: registers later-declared member templates' names before
+	// the members parse (template classification for `<`).
+	void PreScanMemberTemplates();
 	AstDeclPtr ParseBitFieldDeclaration();
 	AstDeclPtr ParseSpecialMember(bool require_definition,
 	                              bool qualified_default_only = false);

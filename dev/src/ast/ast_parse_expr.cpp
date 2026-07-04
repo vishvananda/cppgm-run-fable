@@ -599,12 +599,23 @@ AstExprPtr AstParser::ParsePostfixSuffixes(AstExprPtr expr)
 			ETokenType op = token.simple_type;
 			string spelling = token.spelling;
 			Advance();
+			// PA21 14.2p4: `. template` / `-> template` marks the
+			// member name as a template-id; the terminal identifier
+			// gains the template classification for the clause parse.
+			bool template_keyword = false;
+			if (AtSimple(KW_TEMPLATE) && AtIdentifier(1))
+			{
+				template_keyword = true;
+				Advance();
+				Register(Peek().spelling, NF_VALUE | NF_TEMPLATE);
+			}
 			AstName name;
 			if (!ParseIdExpressionName(name))
 			{
 				Restore(state);
 				break;
 			}
+			(void)template_keyword;
 			AstExprPtr node = MakeExpr(EK_MEMBER);
 			node->op = op;
 			node->op_spelling = spelling;
@@ -677,6 +688,22 @@ AstExprPtr AstParser::ParsePostfixRoot()
 			node->arguments.swap(args->arguments);
 			return node;
 		}
+	}
+	if (AtSimple(KW_TYPENAME))
+	{
+		// PA21 14.6p2: `typename T::X(args)` functional-casts the
+		// named dependent type; the qualified name parses as the
+		// id-expression root and the callee re-reads as a type.
+		State entry = Save();
+		AstName name;
+		if (ParseQualifiedTypeName(name) &&
+		    (AtSimple(OP_LPAREN) || AtSimple(OP_LBRACE)))
+		{
+			AstExprPtr node = MakeExpr(EK_ID);
+			node->name = move(name);
+			return node;
+		}
+		Restore(entry);
 	}
 	if (AtSimple(KW_DECLTYPE) && AtSimple(OP_LPAREN, 1))
 	{
