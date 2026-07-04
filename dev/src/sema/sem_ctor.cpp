@@ -333,12 +333,30 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 		AppendMemberInit(cls, field, field.default_init, out);
 		return;
 	}
+	// 9.5/12.6.2p8: variant members are not default-initialized.
+	if (field.from_union)
+		return;
 	TypePtr bare = RemoveTopCv(field.type);
 	if (bare->kind == TK_CLASS)
 	{
 		const ClassInfo* member_cls = unit_.classes.Find(bare->named);
 		if (!member_cls)
 			return;
+		// 12.6.2p8: a union member without a user-declared default
+		// constructor is not default-initialized (the storage stays
+		// uninitialized; a variant member's nontrivial constructor
+		// never runs implicitly).
+		if (member_cls->is_union)
+		{
+			bool declared_default = false;
+			for (size_t i = 0; i < member_cls->ctors.size(); i++)
+				if (member_cls->ctors[i].kind == CK_ORDINARY &&
+				    !member_cls->ctors[i].implicit &&
+				    member_cls->ctors[i].type->parameters.empty())
+					declared_default = true;
+			if (!declared_default)
+				return;
+		}
 		if (member_cls->has_user_ctor ||
 		    unit_.classes.NeedsConstruction(*member_cls))
 		{
@@ -600,6 +618,9 @@ void SemBinder::AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item)
 	for (size_t i = cls.fields.size(); i-- > 0;)
 	{
 		const ClassField& field = cls.fields[i];
+		// 9.5: variant members are not destroyed implicitly.
+		if (field.from_union)
+			continue;
 		TypePtr bare = RemoveTopCv(field.type);
 		if (bare->kind == TK_ARRAY)
 		{

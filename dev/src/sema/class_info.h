@@ -44,6 +44,10 @@ struct ClassField
 	EMemberAccess access;
 	// 12.6.2: brace-or-equal-initializer (owned by the AST).
 	const AstInitializer* default_init;
+	// PA21 9.5: an anonymous-union member row injected beside its
+	// storage row (variant members are not default-initialized or
+	// destroyed implicitly).
+	bool from_union = false;
 };
 
 // PA16: the special-member role of a constructor (12.8p2/p3).

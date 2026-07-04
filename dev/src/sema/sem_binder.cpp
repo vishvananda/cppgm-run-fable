@@ -863,6 +863,7 @@ void SemBinder::BindAnonymousUnionMembers(const AstDecl& decl,
 				ClassField row = *inner;
 				row.offset += anon_row->offset;
 				row.access = current_access_;
+				row.from_union = true;
 				enclosing->fields.push_back(row);
 			}
 		}
