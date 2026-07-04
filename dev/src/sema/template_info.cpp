@@ -6,7 +6,14 @@
 
 using std::to_string;
 
+static void AppendArgKey(const struct TemplateArg& arg, string& out);
+
 namespace {
+
+void AppendArgKeyRef(const struct TemplateArg& arg, string& out)
+{
+	AppendArgKey(arg, out);
+}
 
 bool IdentifierChar(char c)
 {
@@ -81,6 +88,20 @@ void AppendKey(const TypePtr& type, string& out)
 		char buffer[32];
 		snprintf(buffer, sizeof(buffer), "n%p", (const void*)type->named);
 		out += buffer;
+		// PA21: a dependent specialization pattern's identity includes
+		// its argument pattern (distinct `typelist<A>` / `typelist<A,
+		// B>` patterns must not collide).
+		if (type->kind == TK_TEMPLATE_SPEC)
+		{
+			out += "<";
+			for (size_t i = 0; i < type->targs.size(); i++)
+			{
+				if (i)
+					out += ",";
+				AppendArgKeyRef(type->targs[i], out);
+			}
+			out += ">";
+		}
 		break;
 	}
 	case TK_POINTER:
@@ -122,6 +143,7 @@ void AppendKey(const TypePtr& type, string& out)
 }
 
 // The enclosing named namespace/class path of an argument entity.
+// (AppendArgKeyRef is defined after AppendArgKey below.)
 // Distinct same-named entities must spell apart: the spellings become
 // specialization entity/scope names, which the lowering's printed
 // symbols and function identity keys derive from. Unnamed namespace
