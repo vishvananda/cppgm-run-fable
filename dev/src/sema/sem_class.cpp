@@ -101,6 +101,10 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 		const ClassInfo* extra_cls = unit_.classes.Find(extra->named);
 		if (!extra_cls || !extra_cls->is_empty)
 			throw OutsideBoundary("multiple inheritance");
+		// PA21: qualified member access reaches the extra base (all
+		// empty subobjects share offset 0).
+		if (cls)
+			cls->extra_bases.push_back(extra->named);
 	}
 	const AstBaseSpecifier& base = decl.bases[0];
 	TypePtr base_type = base_types[0];

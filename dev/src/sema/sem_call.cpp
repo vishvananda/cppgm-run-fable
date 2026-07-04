@@ -114,7 +114,9 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 		                                           : home_entity;
 		TypePtr this_type = host_.CurrentThisType();
 		if (this_type &&
-		    BaseClassDistance(this_type->target->named, target) >= 0)
+		    (BaseClassDistance(this_type->target->named, target) >= 0 ||
+		     DerivedFromWithExtras(host_.Classes(),
+		                           this_type->target->named, target)))
 		{
 			SemValue object;
 			object.node = ImplicitThisObject();

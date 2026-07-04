@@ -56,6 +56,40 @@ void InvalidateClassFacts()
 	g_class_facts_version++;
 }
 
+bool DerivedFromWithExtras(const ClassRegistry& classes,
+                           const NamedTypeInfo* from,
+                           const NamedTypeInfo* to)
+{
+	for (const NamedTypeInfo* at = from; at; at = at->base_entity)
+	{
+		if (at == to)
+			return true;
+		if (const ClassInfo* info = classes.Find(at))
+			for (size_t i = 0; i < info->extra_bases.size(); i++)
+				if (DerivedFromWithExtras(classes,
+				                          info->extra_bases[i], to))
+					return true;
+	}
+	return false;
+}
+
+bool DerivedFromWithExtrasLinked(const NamedTypeInfo* from,
+                                 const NamedTypeInfo* to)
+{
+	for (const NamedTypeInfo* at = from; at; at = at->base_entity)
+	{
+		if (at == to)
+			return true;
+		if (at->class_record)
+			for (size_t i = 0;
+			     i < at->class_record->extra_bases.size(); i++)
+				if (DerivedFromWithExtrasLinked(
+				        at->class_record->extra_bases[i], to))
+					return true;
+	}
+	return false;
+}
+
 ClassInfo& ClassRegistry::Create(const NamedTypeInfo* entity)
 {
 	unique_ptr<ClassInfo>& slot = infos_[entity];

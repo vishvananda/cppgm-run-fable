@@ -178,6 +178,9 @@ struct ClassInfo
 	Scope* members;
 	const ClassInfo* base;  // single direct base subobject (offset 0)
 	EMemberAccess base_access;
+	// PA21: additional (empty) direct bases beside the primary chain -
+	// pack-expanded and variadic-recursion bases; all at offset 0.
+	vector<const NamedTypeInfo*> extra_bases;
 	vector<ClassField> fields;  // declaration order
 	bool is_union;
 	bool is_empty;  // no fields and no non-empty base
@@ -304,6 +307,15 @@ private:
 	map<const NamedTypeInfo*, unique_ptr<ClassInfo>> infos_;
 	vector<const ClassInfo*> order_;  // creation order
 };
+
+// PA21: whether `to` is `from` or one of its bases, including the
+// (empty) extra bases beside the single-inheritance chain.
+bool DerivedFromWithExtras(const ClassRegistry& classes,
+                           const NamedTypeInfo* from,
+                           const NamedTypeInfo* to);
+// The link-based variant (class_record chain; no registry needed).
+bool DerivedFromWithExtrasLinked(const NamedTypeInfo* from,
+                                 const NamedTypeInfo* to);
 
 // --- layout -----------------------------------------------------------
 

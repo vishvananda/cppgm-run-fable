@@ -315,6 +315,16 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 			result.base_distance = distance;
 			return result;
 		}
+		// PA21: an extra (empty) base binds at the object's address.
+		if (distance < 0 &&
+		    DerivedFromWithExtrasLinked(source.type->named,
+		                                referee->named))
+		{
+			result.viable = true;
+			result.rank = CR_CONVERSION;
+			result.base_distance = 0;
+			return result;
+		}
 	}
 	// Not reference-related: a const lvalue reference (or an rvalue
 	// reference over an rvalue) binds a temporary created by the value

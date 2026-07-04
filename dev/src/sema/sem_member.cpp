@@ -605,7 +605,8 @@ const NamedTypeInfo* SemExprAnalyzer::ResolveMemberQualifier(
 	if (!named || RemoveTopCv(named)->kind != TK_CLASS)
 		throw runtime_error("member qualifier does not name a class");
 	const NamedTypeInfo* entity = RemoveTopCv(named)->named;
-	if (BaseClassDistance(object_entity, entity) < 0)
+	if (BaseClassDistance(object_entity, entity) < 0 &&
+	    !DerivedFromWithExtras(host_.Classes(), object_entity, entity))
 		throw runtime_error("member qualifier does not name the "
 		                    "object's class or a base class");
 	return entity;
@@ -673,9 +674,12 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		TypePtr object_param;
 		if (is_static)
 			// 13.3.1p4: the implicit object argument matches anything;
-			// an identity binding keeps the comparison neutral.
-			object_param = MakeReferenceType(RemoveTopCv(object.type),
-			                                 false, true);
+			// a const identity binding keeps the comparison neutral
+			// for cv-qualified object expressions too.
+			object_param = MakeReferenceType(
+				MakeCvQualifiedType(RemoveTopCv(object.type), true,
+				                    false),
+				false, true);
 		else
 		{
 			// 13.3.1p4 with 8.3.5p6: the implicit object parameter
@@ -708,6 +712,30 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 			required--;
 		min_arity.push_back(required + 1);
 		is_template.push_back(c >= ordinary);
+	}
+	// PA18 13.4: overloaded/template arguments deduce against every
+	// candidate's parameter types before ranking (the implicit object
+	// parameter shifts the alignment by one).
+	{
+		bool augmented = false;
+		for (size_t c = 0; c < candidates.size(); c++)
+			for (size_t i = 0;
+			     i < args.size() &&
+			     i + 1 < candidates[c]->parameters.size(); i++)
+				if (args[i].function_set &&
+				    !args[i].fn_templates.empty())
+				{
+					AddTargetDeducedOverloads(
+						args[i], candidates[c]->parameters[i + 1]);
+					augmented = true;
+				}
+		if (augmented)
+		{
+			sources.clear();
+			sources.push_back(object_source);
+			for (size_t i = 0; i < args.size(); i++)
+				sources.push_back(MakeConversionSource(args[i]));
+		}
 	}
 	vector<ImplicitConversion> conversions;
 	SpecOverloadOrder order(host_, specs, args.size());
@@ -815,9 +843,12 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	{
 		// An inherited method receives the base subobject's address; a
 		// using-imported one belongs to the importing class for
-		// addressing (its base sits at offset zero either way).
+		// addressing (its base sits at offset zero either way). A
+		// PA21 extra (empty) base shares the object's address.
 		int hops = binding.home != owner_scope && !spec
 			? 0 : BaseClassDistance(object_entity, callee_class);
+		if (hops < 0)
+			hops = 0;
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
