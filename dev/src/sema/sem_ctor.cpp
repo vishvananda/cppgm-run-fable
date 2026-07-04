@@ -525,14 +525,15 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 				                    "mem-initializers");
 			vector<SemValue> values;
 			const AstInitializer& init = *mem.init;
+			vector<const AstExpr*> items;
 			if (init.kind == INIT_PAREN)
 				for (size_t j = 0; j < init.args.size(); j++)
-					values.push_back(analyzer_.Analyze(*init.args[j]));
+					items.push_back(init.args[j].get());
 			else if (init.kind == INIT_BRACED)
 				for (size_t j = 0;
 				     j < init.expr->arguments.size(); j++)
-					values.push_back(analyzer_.Analyze(
-						*init.expr->arguments[j]));
+					items.push_back(init.expr->arguments[j].get());
+			AnalyzeInitArguments(items, values);
 			int index = ResolveClassConstructor(
 				cls, values, false, "delegating constructor");
 			vector<SemNodePtr> arg_nodes;
