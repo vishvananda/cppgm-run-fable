@@ -309,6 +309,13 @@ void SemBinder::PreBindDeclaredParameters(const AstDeclarator* declarator)
 	{
 		try
 		{
+			// A pack parameter pre-binds its expanded pack so the
+			// trailing-return decltype (which composes before the
+			// clause, 8.3.5p2) can expand `args...`; the expansion
+			// publishes the captured binding itself.
+			vector<ParameterInfo> expanded;
+			if (ExpandPackParameter(clause->parameters[i], expanded))
+				continue;
 			DeclSpecifierInfo pspecs = builder_.ProcessSpecifiers(
 				clause->parameters[i].specifiers, false);
 			DeclaratorInfo pcomposed = builder_.ComposeDeclarator(
@@ -519,15 +526,25 @@ void SemBinder::OnParameterComposed(const string& name,
 {
 	if (!param_capture_scope_ || name.empty())
 		return;
-	if (FindOwnBinding(*param_capture_scope_, name))
+	// 8.3.5p5: an array- or function-typed parameter declares the
+	// adjusted pointer object.
+	TypePtr adjusted = type->kind == TK_ARRAY || type->kind == TK_FUNCTION
+		? AdjustParameterType(type) : type;
+	if (ScopeBinding* existing = FindOwnBinding(*param_capture_scope_,
+	                                            name))
+	{
+		// A pack binding published ahead of the clause (for the
+		// trailing-return decltype) carries only the pack facts; its
+		// element-0 composition completes the parameter type.
+		if (existing->kind == SB_PARAMETER && existing->is_pack &&
+		    !existing->type)
+			existing->type = adjusted;
 		return;
+	}
 	ScopeBinding binding;
 	binding.kind = SB_PARAMETER;
 	binding.name = name;
-	// 8.3.5p5: an array- or function-typed parameter declares the
-	// adjusted pointer object.
-	binding.type = type->kind == TK_ARRAY || type->kind == TK_FUNCTION
-		? AdjustParameterType(type) : type;
+	binding.type = adjusted;
 	AddBinding(*param_capture_scope_, binding);
 }
 

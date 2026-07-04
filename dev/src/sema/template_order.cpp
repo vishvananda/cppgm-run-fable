@@ -195,6 +195,14 @@ bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
 		bound[i].is_pack_slot = b.params[i].pack;
 	for (size_t i = 0; i < argc; i++)
 	{
+		// 14.8.2.4p8: an argument transformed from a function
+		// parameter pack does not deduce against a non-pack parameter
+		// (`f(F&&, Args&&...)` is more specialized than
+		// `f(Args&&...)`).
+		if (i < a.param_pattern_packs.size() && a.param_pattern_packs[i] &&
+		    (i >= b.param_pattern_packs.size() ||
+		     !b.param_pattern_packs[i]))
+			return false;
 		TypePtr transformed = SubstituteOrderingTypes(
 			a.param_patterns[i], uniques);
 		TypePtr pattern = b.param_patterns[i];

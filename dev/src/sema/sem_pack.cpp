@@ -563,6 +563,11 @@ bool SemBinder::ExpandPackParameter(const AstParameter& parameter,
 		}
 		current_ = saved;
 	}
+	// 8.3.5p2: a trailing-return decltype composes right after the
+	// clause and must already see this pack (`decltype(f(args...))`);
+	// publish the captured binding now (the caller's post-composition
+	// publish then finds the record consumed and keeps the binding).
+	BindCapturedPackParameter(param_capture_scope_);
 	return true;
 }
 
