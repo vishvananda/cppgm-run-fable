@@ -24,6 +24,22 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA19 assignment boundary");
 }
 
+// Whether a declarator carries a parameter clause (declares a
+// function) at any nesting level.
+bool DeclaratorHasParameterClause(const AstDeclarator& declarator)
+{
+	for (size_t i = 0; i < declarator.items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator.items[i];
+		if (item.kind == DI_PARAMS)
+			return true;
+		if (item.kind == DI_NESTED && item.nested &&
+		    DeclaratorHasParameterClause(*item.nested))
+			return true;
+	}
+	return false;
+}
+
 }  // namespace
 
 // --- shared pattern composition and matching --------------------------------
@@ -162,14 +178,95 @@ void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 		return;
 	}
 	case DK_FUNCTION:
+	{
+		const AstName* id =
+			inner.declarator ? inner.declarator->IdName() : 0;
+		if (id && id->parts.size() > 1)
+		{
+			BindMemberExplicitSpecialization(inner, *id);
+			return;
+		}
 		BindFunctionExplicitSpecialization(inner);
 		return;
+	}
 	case DK_SIMPLE:
+	{
+		const AstName* id = inner.declarators.size() == 1 &&
+			inner.declarators[0].declarator
+			? inner.declarators[0].declarator->IdName() : 0;
+		if (id && id->parts.size() > 1)
+		{
+			BindMemberExplicitSpecialization(inner, *id);
+			return;
+		}
 		BindVariableExplicitSpecialization(inner);
 		return;
+	}
+	case DK_SPECIAL_MEMBER_DEFINITION:
+	case DK_SPECIAL_MEMBER_DECLARATION:
+	{
+		const AstName* id =
+			inner.declarator ? inner.declarator->IdName() : 0;
+		if (id && id->parts.size() > 1)
+		{
+			BindMemberExplicitSpecialization(inner, *id);
+			return;
+		}
+		throw OutsideBoundary("explicit specialization form");
+	}
 	default:
 		throw OutsideBoundary("explicit specialization form");
 	}
+}
+
+// PA21 14.7.3: an explicit specialization of one member of a class
+// -template specialization (`template<> int tag<int>::id() {..}`,
+// `template<> const int code<int>::value = 7;`, qualified
+// constructors). Resolving the qualifier instantiates (or refreshes)
+// the enclosing specialization; the declaration itself then binds
+// through the ordinary qualified-member machinery as a source-owned
+// strong definition, and the primary's registered member definitions
+// stop instantiating for that name.
+void SemBinder::BindMemberExplicitSpecialization(const AstDecl& inner,
+                                                 const AstName& id)
+{
+	Scope* declaring = ResolvePrefixScope(id);
+	if (!declaring || declaring->kind != SCOPE_CLASS)
+		throw OutsideBoundary("explicit specialization declarator");
+	const NamedTypeInfo* entity = model_.ScopeEntity(declaring);
+	if (ClassSpecialization* record = FindSpecializationRecord(entity))
+	{
+		const AstNamePart& terminal = id.parts.back();
+		string name = terminal.kind == NP_IDENTIFIER
+			? terminal.identifier : DeclaredFunctionName(terminal);
+		record->member_spec_names[name] = true;
+		// A pattern-instantiated constructor definition yields to the
+		// explicit one.
+		if (inner.kind == DK_SPECIAL_MEMBER_DEFINITION &&
+		    entity && !terminal.tilde)
+			if (ClassInfo* cls = unit_.classes.Find(entity))
+				for (size_t i = 0; i < cls->ctors.size(); i++)
+					cls->ctors[i].definition = 0;
+	}
+	// A bare specialization declaration only reserves the member (the
+	// declared signature already exists on the instantiated class).
+	if (inner.kind == DK_SPECIAL_MEMBER_DECLARATION &&
+	    !inner.special_init)
+		return;
+	if (inner.kind == DK_SIMPLE)
+	{
+		bool any_init = false;
+		for (size_t i = 0; i < inner.declarators.size(); i++)
+			if (inner.declarators[i].init)
+				any_init = true;
+		bool declares_function = inner.declarators.size() == 1 &&
+			inner.declarators[0].declarator &&
+			DeclaratorHasParameterClause(
+				*inner.declarators[0].declarator);
+		if (!any_init && declares_function)
+			return;
+	}
+	BindDeclaration(inner);
 }
 
 // --- class explicit specialization -------------------------------------------
@@ -211,12 +308,31 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 		fresh->self.home = tmpl.declaring;
 	}
 	ClassSpecialization& spec = *slot.get();
+	bool was_explicit = spec.explicit_spec;
 	spec.explicit_spec = true;
 	if (inner.kind == DK_CLASS_FORWARD)
 		return;  // a declaration reserves the key
-	if (spec.instantiated)
+	if (spec.instantiated && was_explicit)
 		throw runtime_error("explicit specialization of " + tmpl.name +
 		                    " after its instantiation");
+	if (spec.instantiated)
+	{
+		// 14.7.3p6 makes a use before the explicit specialization
+		// ill-formed (no diagnostic required); the checked behavior
+		// re-binds the entity from the explicit definition and
+		// discards the stale primary instantiation.
+		NamedTypeInfo* stale = model_.MutableInfo(spec.entity);
+		stale->complete = false;
+		stale->is_defined = false;
+		if (ClassInfo* record = unit_.classes.Find(spec.entity))
+		{
+			*record = ClassInfo();
+			record->entity = spec.entity;
+		}
+		spec.from_partial = false;
+		spec.statics_demanded = false;
+		spec.members_done.clear();
+	}
 	spec.instantiated = true;
 	spec.param_scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                      tmpl.declaring);

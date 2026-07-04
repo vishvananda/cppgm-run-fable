@@ -103,6 +103,10 @@ struct ClassSpecialization
 	// Indices into owner->member_defs already instantiated for this
 	// specialization.
 	map<size_t, bool> members_done;
+	// PA21 14.7.3: member names owned by explicit specializations
+	// (`template<> int tag<int>::id() ...`); the primary's registered
+	// member definitions do not instantiate for them.
+	map<string, bool> member_spec_names;
 };
 
 // One instantiated function-template specialization: the concrete

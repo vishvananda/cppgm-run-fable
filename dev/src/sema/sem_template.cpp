@@ -785,7 +785,9 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 		spec->self.home = tmpl.declaring;
 	}
 	ClassSpecialization* spec = slot.get();
-	if (!spec->instantiated)
+	// 14.7.3: a declared explicit specialization owns its key; uses
+	// see an incomplete type until its definition arrives.
+	if (!spec->instantiated && !spec->explicit_spec)
 	{
 		// 14.5.5: a matching partial specialization's pattern binds
 		// instead of the primary's.
@@ -992,6 +994,13 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 		{
 			if (spec.members_done.count(i))
 				continue;
+			// 14.7.3: an explicit member specialization owns its name.
+			if (spec.member_spec_names.count(
+			        MemberDefName(*tmpl.member_defs[i])))
+			{
+				spec.members_done[i] = true;
+				continue;
+			}
 			if (MemberDefIsStaticData(*tmpl.member_defs[i]) &&
 			    !spec.statics_demanded)
 				continue;
@@ -1019,7 +1028,10 @@ void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
 			continue;
 		if (name && MemberDefName(decl) != *name)
 			continue;
+		// 14.7.3: an explicit member specialization owns its name.
 		spec.members_done[i] = true;
+		if (spec.member_spec_names.count(MemberDefName(decl)))
+			continue;
 		InstantiateMemberDefinition(tmpl, spec, i);
 	}
 }

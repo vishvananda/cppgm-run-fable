@@ -450,6 +450,11 @@ private:
 	// (sem_spec.cpp) ---
 	void BindExplicitSpecialization(const AstDecl& decl);
 	void BindClassExplicitSpecialization(const AstDecl& inner);
+	// PA21 14.7.3: explicit specialization of one member of a class
+	// -template specialization (member function, static data member,
+	// constructor).
+	void BindMemberExplicitSpecialization(const AstDecl& inner,
+	                                      const AstName& id);
 	void BindFunctionExplicitSpecialization(const AstDecl& inner);
 	void BindVariableExplicitSpecialization(const AstDecl& inner);
 	void CaptureVariableTemplate(const AstDecl& decl,
