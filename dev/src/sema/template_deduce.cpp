@@ -625,6 +625,37 @@ TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
 	}
 }
 
+// Whether an explicit template argument spells a pack expansion
+// (`Args...`): the argument's own flag, or the type-id's abstract
+// declarator carrying the `...` as a DI_PACK item.
+bool ExplicitArgumentIsExpansion(const AstTemplateArgument& argument)
+{
+	if (argument.pack)
+		return true;
+	if (!argument.is_type || !argument.type || !argument.type->declarator)
+		return false;
+	for (size_t i = 0; i < argument.type->declarator->items.size(); i++)
+		if (argument.type->declarator->items[i].kind == DI_PACK)
+			return true;
+	return false;
+}
+
+// The bare single-identifier name of an expansion's pattern type-id
+// (`Args...`), or null for composite patterns.
+const AstName* ExpansionPackName(const AstTemplateArgument& argument)
+{
+	if (!argument.is_type || !argument.type)
+		return 0;
+	if (argument.type->specifiers.size() != 1 ||
+	    argument.type->specifiers[0].kind != SPEC_TYPE_NAME)
+		return 0;
+	const AstName& name = argument.type->specifiers[0].name;
+	if (name.parts.size() != 1 ||
+	    name.parts[0].kind != NP_IDENTIFIER || name.parts[0].tilde)
+		return 0;
+	return &name;
+}
+
 // PA21 constructor templates: the pattern declaration is a special
 // member (no decl-specifier-seq; the composed base type is void).
 bool PatternIsSpecialMember(const AstDecl& inner)
@@ -1079,7 +1110,31 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 	for (size_t i = 0; i < part.arguments.size(); i++)
 	{
 		const AstTemplateArgument& argument = part.arguments[i];
-		if (argument.pack || cursor >= tmpl.params.size())
+		// An explicit `Args...` expansion splices the bound pack's
+		// elements (the instantiated base/body context binds them).
+		if (ExplicitArgumentIsExpansion(argument))
+		{
+			const AstName* pname = ExpansionPackName(argument);
+			if (!pname)
+				return false;
+			const ScopeBinding* pack = UnqualifiedLookup(
+				current_, pname->parts[0].identifier, SLF_ANY);
+			if (!pack || !pack->is_pack || pack->param_index >= 0)
+				return false;
+			for (size_t k = 0; k < pack->pack_args.size(); k++)
+			{
+				const TemplateArg& element = pack->pack_args[k];
+				if (TemplateArgIsDependent(element))
+					return false;
+				if (cursor < tmpl.params.size() &&
+				    !tmpl.params[cursor].pack)
+					bound[cursor++] = element;
+				else
+					pack_elements.push_back(element);
+			}
+			continue;
+		}
+		if (cursor >= tmpl.params.size())
 			return false;
 		const TemplateParam& param = tmpl.params[cursor];
 		TemplateArg resolved;

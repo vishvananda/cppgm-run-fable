@@ -1254,6 +1254,11 @@ bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
 
 TypePtr SemBinder::ResolveTypeName(const AstName& name)
 {
+	// 7.1.6.2p4: a decltype-specifier names the operand's type
+	// directly (base clauses spell it as a base-type-specifier).
+	if (name.parts.size() == 1 && name.parts[0].kind == NP_DECLTYPE &&
+	    name.parts[0].decltype_expr)
+		return ResolveDecltype(*name.parts[0].decltype_expr);
 	// 14.6p3: a qualified dependent type whose qualifier names a
 	// template parameter needs the `typename` disambiguator (base
 	// clauses and other implicit type contexts do not, and pass a set
