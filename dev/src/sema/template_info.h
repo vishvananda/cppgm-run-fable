@@ -197,6 +197,12 @@ struct TemplateInfo
 	ETemplateKind kind;
 	string name;
 	Scope* declaring;      // lexical scope of the declaration
+	// PA22 11.3/3.4.1: a friend template declared in a class belongs
+	// to the enclosing namespace (`declaring`, which the mangling and
+	// visibility read) but its signature resolves names with the
+	// class in scope (`prop::convertible` parameters). Pattern and
+	// argument scopes parent here when set.
+	Scope* lookup_scope = 0;
 	// PA22: the declaration-order stamp at capture (14.6.4 subset):
 	// instantiation-time dependent lookups ignore later-declared
 	// namespace-scope non-functions so they cannot shadow ADL.
@@ -307,6 +313,14 @@ public:
 private:
 	vector<unique_ptr<TemplateInfo>> all_;
 };
+
+// The scope a template's signature composes and substitutes under:
+// the friend-capture lookup context when set, else the declaring
+// scope.
+inline Scope* TemplateLookupScope(const TemplateInfo& tmpl)
+{
+	return tmpl.lookup_scope ? tmpl.lookup_scope : tmpl.declaring;
+}
 
 // Cyclic or runaway instantiation guard, far above any supported
 // nesting.

@@ -208,6 +208,12 @@ struct SemNode
 	// SN_VARIABLE: the object's lifetime ends at scope exit; the
 	// attached SN_DESTRUCTOR_ACTION child holds the destruction call.
 	bool needs_dtor;
+	// SN_VARIABLE: the declaration spelled an initializer. A
+	// namespace-scope class object without one anchors the program
+	// init helper even when its default construction is trivial (the
+	// reference presentation); initialized objects anchor it only
+	// through surviving dynamic actions.
+	bool has_explicit_init = false;
 	// SN_CONSTRUCTOR_ACTION: the implicit default constructor does
 	// nothing, so default-initialization emits no call.
 	bool trivial_init;

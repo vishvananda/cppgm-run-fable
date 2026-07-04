@@ -1256,7 +1256,16 @@ void LowerProgram::BuildLifetimeHelpers()
 		// constructs behind its own first-use guard, not in the
 		// program-wide init helper.
 		bool tls_dynamic = info.is_thread_local && is_class;
-		if (is_class && !info.weak && !tls_dynamic)
+		// A class object initialized through a constructor - even a
+		// trivial or elided one - anchors the init helper; an
+		// aggregate braced initialization does not (the reference
+		// presentation pins both shapes).
+		bool ctor_driven = info.node->children.empty() &&
+			!info.node->has_explicit_init;
+		for (size_t j = 0; j < info.node->children.size(); j++)
+			if (info.node->children[j]->kind == SN_CONSTRUCTOR_ACTION)
+				ctor_driven = true;
+		if (is_class && !info.weak && !tls_dynamic && ctor_driven)
 			any_class_object = true;
 		// PA20: an initializer-less storage definition (9.4.2p3) whose
 		// image cannot render initializes dynamically from the analyzed

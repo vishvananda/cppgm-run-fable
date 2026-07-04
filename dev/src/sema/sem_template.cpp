@@ -523,7 +523,7 @@ Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
                                          const vector<TemplateArg>& args)
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
-	                                  tmpl.declaring);
+	                                  TemplateLookupScope(tmpl));
 	// 14.6.4 subset: lookups under this instantiation see the
 	// namespace declarations visible at the template's capture point
 	// (later objects must not shadow ADL).

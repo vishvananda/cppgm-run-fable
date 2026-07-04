@@ -478,6 +478,11 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 		// `T` or the injected name in the signature).
 		if (tmpl->declaring == ns && dependent_friend)
 			tmpl->declaring = inst;
+		// 11.3/3.4.1: the friend's signature resolves names with the
+		// declaring class in scope (`prop::convertible` parameters);
+		// its namespace identity stays `declaring`.
+		if (!tmpl->lookup_scope && cls->members)
+			tmpl->lookup_scope = cls->members;
 		cls->friend_functions.push_back(
 			std::make_pair(ns, tmpl->name));
 	}

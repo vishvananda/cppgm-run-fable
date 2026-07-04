@@ -552,6 +552,7 @@ void SemBinder::OnVariableBound(ScopeBinding& binding,
 	item->c_linkage = in_c_linkage_;
 	item->decl_begin_token = current_declarator_begin_token_;
 	item->decl_end_token = current_decl_end_token_;
+	item->has_explicit_init = init != 0;
 	AttachObjectLifetime(*item, binding, init, specs);
 	FinishConstexprObject(*item, binding, specs.is_constexpr);
 }

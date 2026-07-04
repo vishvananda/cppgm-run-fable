@@ -736,7 +736,7 @@ void SemBinder::EnsureFunctionPattern(TemplateInfo& tmpl)
 		return;
 	tmpl.pattern_ready = true;
 	tmpl.return_pattern = TypePtr();
-	ComposeFunctionPattern(tmpl.params, tmpl.declaring,
+	ComposeFunctionPattern(tmpl.params, TemplateLookupScope(tmpl),
 	                       *tmpl.pattern_decl, tmpl.pattern,
 	                       tmpl.param_patterns,
 	                       tmpl.param_pattern_packs);
@@ -767,7 +767,8 @@ TypePtr SemBinder::ComposeReturnPattern(TemplateInfo& tmpl)
 		prefix.items.back().token = item.token;
 		prefix.items.back().spelling = item.spelling;
 	}
-	Scope* scope = MakePatternParamScope(tmpl.params, tmpl.declaring);
+	Scope* scope = MakePatternParamScope(tmpl.params,
+	                                     TemplateLookupScope(tmpl));
 	Scope* saved = current_;
 	current_ = scope;
 	TypePtr result;
@@ -808,7 +809,8 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	TypePtr full;
 	vector<TypePtr> param_patterns;
 	vector<bool> pattern_packs;
-	bool composed = ComposeFunctionPattern(params, tmpl.declaring, inner,
+	bool composed = ComposeFunctionPattern(params,
+	                                       TemplateLookupScope(tmpl), inner,
 	                                       full, param_patterns,
 	                                       pattern_packs);
 	if (composed != bool(tmpl.pattern))

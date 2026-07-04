@@ -1057,6 +1057,7 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	item->type = member->type;
 	item->entity_scope = declaring;
 	item->entity_name = name;
+	item->has_explicit_init = declarator.init != 0;
 	item->is_static_decl = specs.is_static;
 	item->is_thread_local_decl = specs.is_thread_local;
 	item->is_extern_decl = declaring->kind == SCOPE_NAMESPACE;

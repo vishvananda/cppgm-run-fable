@@ -583,7 +583,7 @@ Scope* SemBinder::EnsureArgBindingScope(TemplateInfo& tmpl,
 	if (!partial)
 	{
 		partial = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
-		                             tmpl.declaring);
+		                             TemplateLookupScope(tmpl));
 		for (size_t i = 0; i < so_far.size() && i < tmpl.params.size();
 		     i++)
 			BindParamAlias(*partial, tmpl.params[i], so_far[i]);
