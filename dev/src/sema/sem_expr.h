@@ -24,6 +24,16 @@ struct SemValue;
 // The analyzer's view of the PA12 binder.
 struct ISemExprHost
 {
+	// PA22 presentation fold: whether an object of class `type`
+	// contextually converts to a known constant bool (an
+	// integral_constant-style conversion operator returning a
+	// constant); false when unknown.
+	virtual bool TryConstantClassBool(const TypePtr& type, bool& out)
+	{
+		(void)type;
+		(void)out;
+		return false;
+	}
 	virtual Scope* CurrentScope() = 0;
 	virtual TypesModel& Model() = 0;
 	// Resolution of a possibly qualified value name; `member_class` is

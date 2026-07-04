@@ -911,6 +911,11 @@ public:
 	// template_args.cpp.
 	virtual bool TryClassConversionConstant(const AstName& name,
 	                                        ConstValue& out);
+	// The shared constexpr/presentation conversion-constant walk and
+	// the ISemExprHost fold hook for class-typed conditions.
+	bool ClassConversionConstant(const TypePtr& type,
+	                             bool require_constexpr, ConstValue& out);
+	virtual bool TryConstantClassBool(const TypePtr& type, bool& out);
 	// PA21 sizeof...(pack) in constant expressions (sem_pack.cpp).
 	virtual bool PackSizeConstant(const string& name,
 	                              unsigned long long& out);

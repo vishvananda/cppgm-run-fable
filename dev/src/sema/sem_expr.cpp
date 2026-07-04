@@ -1312,9 +1312,24 @@ TypePtr SemExprAnalyzer::ConditionalResultType(const SemValue& a,
 SemValue SemExprAnalyzer::AnalyzeConditional(const AstExpr& expr)
 {
 	SemValue cond = Analyze(*expr.operands[0]);
+	TypePtr cond_class = RemoveTopCv(
+		IsReferenceType(cond.type) ? cond.type->target : cond.type);
 	RequireContextualBool(cond, "conditional condition");
 	SemValue a = Analyze(*expr.operands[1]);
 	SemValue b = Analyze(*expr.operands[2]);
+	// An integral_constant-style condition (a class whose contextual
+	// bool is a known constant) folds to the selected literal branch,
+	// the reference presentation for trait-driven conditionals.
+	bool known = false;
+	if (cond_class->kind == TK_CLASS &&
+	    host_.TryConstantClassBool(cond_class, known))
+	{
+		SemValue& pick = known ? a : b;
+		SemValue& drop = known ? b : a;
+		if (pick.node && pick.node->has_value && drop.node &&
+		    drop.node->has_value)
+			return std::move(pick);
+	}
 	EValueCategory category = VC_PRVALUE;
 	TypePtr type = ConditionalResultType(a, b, category);
 	SemValue value;

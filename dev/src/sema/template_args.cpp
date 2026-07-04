@@ -1004,6 +1004,28 @@ bool SemBinder::TryClassConversionConstant(const AstName& name,
                                            ConstValue& out)
 {
 	TypePtr type = TryResolveTypeFromName(name);
+	// PA20 14.3.2/5.19: only a constexpr conversion function produces
+	// a converted constant expression.
+	return ClassConversionConstant(type, true, out);
+}
+
+bool SemBinder::TryConstantClassBool(const TypePtr& type, bool& out)
+{
+	// The presentation fold for `flag ? a : b` over an
+	// integral_constant-style object: the reference folds through a
+	// plain (non-constexpr) conversion operator whose body returns a
+	// constant.
+	ConstValue value;
+	if (!ClassConversionConstant(type, false, value))
+		return false;
+	out = value.bits != 0;
+	return true;
+}
+
+bool SemBinder::ClassConversionConstant(const TypePtr& type,
+                                        bool require_constexpr,
+                                        ConstValue& out)
+{
 	if (!type || type->kind != TK_CLASS)
 		return false;
 	EnsureTypeCompleteness(type->named);
@@ -1018,9 +1040,7 @@ bool SemBinder::TryClassConversionConstant(const AstName& name,
 			const ClassConversion& conv = cls->conversions[i];
 			if (!conv.decl)
 				continue;
-			// PA20 14.3.2/5.19: only a constexpr conversion function
-			// produces a converted constant expression.
-			if (!DeclHasConstexpr(*conv.decl))
+			if (require_constexpr && !DeclHasConstexpr(*conv.decl))
 				continue;
 			TypePtr result = RemoveTopCv(conv.result);
 			if (!IsIntegralType(result) && result->kind != TK_ENUM)
@@ -1028,6 +1048,18 @@ bool SemBinder::TryClassConversionConstant(const AstName& name,
 			const AstExpr* returned = SingleReturnExpr(conv.decl);
 			if (!returned)
 				continue;
+			// The presentation fold applies only to a returned NAME (a
+			// static constant member); a returned literal keeps its
+			// runtime call (both shapes are pinned).
+			if (!require_constexpr)
+			{
+				const AstExpr* inner = returned;
+				while (inner->kind == EK_PAREN &&
+				       inner->operands.size() == 1)
+					inner = inner->operands[0].get();
+				if (inner->kind != EK_ID)
+					continue;
+			}
 			Scope* saved = current_;
 			current_ = cls->members;
 			try
