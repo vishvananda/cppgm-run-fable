@@ -566,7 +566,7 @@ TemplateArg SemBinder::ResolveTemplateTemplateArgument(
 		arg.template_param = named->tt_param_index;
 		return arg;
 	}
-	if (named->kind != TMPL_CLASS)
+	if (named->kind != TMPL_CLASS && named->kind != TMPL_ALIAS)
 		throw runtime_error("template argument of " + context +
 		                    " is not a class template");
 	if (!TemplateTemplateParamsMatch(param.tt_params, named->params))

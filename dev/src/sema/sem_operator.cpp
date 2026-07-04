@@ -99,12 +99,22 @@ void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
 			if (ns)
 				out.push_back(ns);
 			// 3.4.2p2: a class-template specialization associates the
-			// namespaces of its type template arguments (value
+			// namespaces of its type template arguments and the
+			// namespaces of its template template arguments (value
 			// arguments contribute nothing).
 			for (size_t i = 0; i < entity->spec_args.size(); i++)
-				if (!entity->spec_args[i].is_value)
-					CollectAssociatedNamespaces(
-						model, entity->spec_args[i].type, out);
+			{
+				const TemplateArg& arg = entity->spec_args[i];
+				if (arg.template_entity)
+				{
+					const Scope* tns =
+						InnermostNamespace(arg.template_entity->declaring);
+					if (tns)
+						out.push_back(tns);
+				}
+				else if (!arg.is_value)
+					CollectAssociatedNamespaces(model, arg.type, out);
+			}
 		}
 		return;
 	case TK_ENUM:
