@@ -916,6 +916,11 @@ public:
 	bool ClassConversionConstant(const TypePtr& type,
 	                             bool require_constexpr, ConstValue& out);
 	virtual bool TryConstantClassBool(const TypePtr& type, bool& out);
+	// The reference's delegating-argument presentation: empty
+	// functional-cast temporaries feeding a value-pack-deduced
+	// constructor-template parameter drop their calls.
+	void DowngradePackDeducedTemporaries(const ClassCtor& ctor,
+	                                     vector<SemValue>& values);
 	// PA21 sizeof...(pack) in constant expressions (sem_pack.cpp).
 	virtual bool PackSizeConstant(const string& name,
 	                              unsigned long long& out);

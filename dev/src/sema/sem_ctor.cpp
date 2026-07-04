@@ -536,6 +536,7 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 			AnalyzeInitArguments(items, values);
 			int index = ResolveClassConstructor(
 				cls, values, false, "delegating constructor");
+			DowngradePackDeducedTemporaries(cls.ctors[index], values);
 			vector<SemNodePtr> arg_nodes;
 			for (size_t j = 0; j < values.size(); j++)
 				arg_nodes.push_back(std::move(values[j].node));
@@ -651,6 +652,53 @@ void SemBinder::AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item)
 		                                     ThisBaseAddress(cls)));
 	for (size_t i = 0; i < actions.size(); i++)
 		item.children.push_back(std::move(actions[i]));
+}
+
+// The reference's delegating-argument presentation: an empty
+// no-user-constructor temporary spelled as a functional cast drops
+// its constructor call (and the odr-use) when the selected
+// constructor template's parameter for that position deduced through
+// a template-id holding a value-pack expansion
+// (`index_sequence<I1...>`); concrete parameters keep the explicit
+// call.
+void SemBinder::DowngradePackDeducedTemporaries(const ClassCtor& ctor,
+                                                vector<SemValue>& values)
+{
+	if (!ctor.tmpl_spec || !ctor.tmpl_spec->owner)
+		return;
+	const TemplateInfo& tmpl = *ctor.tmpl_spec->owner;
+	for (size_t i = 0; i < values.size(); i++)
+	{
+		if (i >= tmpl.param_patterns.size())
+			break;
+		// A function-parameter pack breaks the positional alignment.
+		if (i < tmpl.param_pattern_packs.size() &&
+		    tmpl.param_pattern_packs[i])
+			break;
+		const TypePtr& pattern = tmpl.param_patterns[i];
+		if (!pattern || pattern->kind != TK_TEMPLATE_SPEC)
+			continue;
+		bool value_pack = false;
+		for (size_t a = 0; a < pattern->targs.size(); a++)
+			if (pattern->targs[a].pack_pattern &&
+			    pattern->targs[a].is_value)
+				value_pack = true;
+		if (!value_pack)
+			continue;
+		SemNode* node = values[i].node.get();
+		if (!node || node->kind != SN_CONSTRUCTOR_ACTION ||
+		    node->ctor_addressed || node->children.empty() ||
+		    node->children[0]->children.size() != 1)
+			continue;
+		TypePtr bare = RemoveTopCv(values[i].type);
+		if (bare->kind != TK_CLASS)
+			continue;
+		const ClassInfo* temp_cls = unit_.classes.Find(bare->named);
+		if (!temp_cls || temp_cls->has_user_ctor ||
+		    unit_.classes.NeedsConstruction(*temp_cls))
+			continue;
+		node->trivial_init = true;
+	}
 }
 
 // --- implicit special members ----------------------------------------------
