@@ -125,6 +125,46 @@ PA14-PA21 lowering path.
   the plain-identifier fallback that embedded template-id text in the
   mangled name is removed.
 
+### Dependent-signature Itanium mangling (task 9)
+
+- The `object=` name of a function-template specialization must spell
+  the template's as-written signature (5.1.5.2): `T&&` is `OT_`,
+  `typename remove_reference<T>::type&` is
+  `RN16remove_referenceIS3_E4typeE`, a pack parameter is
+  `Dp<element>`, and a written `T...` inside a dependent template-id is
+  `JDpT0_E`. Today the mangler substitutes the concrete signature
+  whenever the abstract pattern is null (dependent forms) or has pack
+  parameters, so those specializations fail to pair with the reference
+  and the compare falls back to emission order (first blocker:
+  `100-type-pack-element-preserves-concrete-argument`).
+- Ownership: mangling of dependent forms is syntax-directed in the ABI,
+  so the mangler walks the written pattern (`tmpl.pattern_decl`) for
+  exactly the pieces that do not compose into `TypePtr` patterns;
+  composable pieces keep mangling from the typed pattern
+  (typedef-resolved, adjusted). `EnsureFunctionPattern` additionally
+  composes a `return_pattern` for signatures whose full pattern fails
+  (prefix `*`/`&`/`&&`/cv declarator items only), so a composable
+  return like `T&&` still mangles from typed state.
+- Substitution-table alignment: written-form components and typed
+  components must share substitution keys (`TP:n` for parameter
+  references, `T:name<argkeys>` for template-ids, `...` marks pack
+  patterns) so a written return type and a typed parameter compress
+  against each other exactly like the reference
+  (`RS7_` in `get`'s mangling).
+- Value-parameter references in written template-ids spell `XT_E`
+  (not substitution candidates); pack-expansion components `Dp<t>` are
+  candidates. The template-args `J...E` wrap stays the deduced-run rule
+  for concrete lists and the per-expansion rule for written lists.
+- Totality: any written form outside the supported subset throws and
+  the mangler falls back to today's concrete-signature spelling, so
+  lowering never fails on an exotic pattern; the fallback path is kept
+  byte-identical for signatures the new walk cannot handle.
+- Layout: the shared mangling internals (`Substitutions`, component
+  keys, type mangling) move behind `lowering/lower_name_parts.h`; the
+  template-signature and written-form mangling lives in a new
+  `lowering/lower_name_template.cpp` (file-audit headroom on
+  `lower_name.cpp`).
+
 ## Status (2026-07-04)
 
 IN PROGRESS: 155/176 pa22 tests pass (95 at baseline); through-pa21

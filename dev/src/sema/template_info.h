@@ -207,6 +207,11 @@ struct TemplateInfo
 	bool pattern_ready;
 	TypePtr pattern;
 	vector<TypePtr> param_patterns;
+	// PA22: the composed declared return type when `pattern` is null
+	// (a dependent parameter broke the full composition but the return
+	// still composes, `T&& forward(...)`); null when the return itself
+	// is dependent - the mangler then spells its written form.
+	TypePtr return_pattern;
 	// PA19: which function parameters are pack-expanded (aligned with
 	// param_patterns; the pattern entry is the element pattern).
 	vector<bool> param_pattern_packs;

@@ -735,10 +735,55 @@ void SemBinder::EnsureFunctionPattern(TemplateInfo& tmpl)
 	if (tmpl.pattern_ready)
 		return;
 	tmpl.pattern_ready = true;
+	tmpl.return_pattern = TypePtr();
 	ComposeFunctionPattern(tmpl.params, tmpl.declaring,
 	                       *tmpl.pattern_decl, tmpl.pattern,
 	                       tmpl.param_patterns,
 	                       tmpl.param_pattern_packs);
+	if (!tmpl.pattern)
+		tmpl.return_pattern = ComposeReturnPattern(tmpl);
+}
+
+TypePtr SemBinder::ComposeReturnPattern(TemplateInfo& tmpl)
+{
+	if (!tmpl.pattern_decl || PatternIsSpecialMember(*tmpl.pattern_decl))
+		return TypePtr();
+	const AstDeclarator* declarator = PatternDeclarator(*tmpl.pattern_decl);
+	if (!declarator)
+		return TypePtr();
+	// The declared return type is the specifier base wrapped by the
+	// prefix pointer/reference/cv items; any other prefix form
+	// (nested declarators, trailing returns) stays out of the subset.
+	AstDeclarator prefix;
+	for (size_t i = 0; i < declarator->items.size(); i++)
+	{
+		const AstDeclaratorItem& item = declarator->items[i];
+		if (item.kind == DI_ID || item.kind == DI_PARAMS)
+			break;
+		if (item.kind != DI_PTR && item.kind != DI_CV)
+			return TypePtr();
+		prefix.items.emplace_back();
+		prefix.items.back().kind = item.kind;
+		prefix.items.back().token = item.token;
+		prefix.items.back().spelling = item.spelling;
+	}
+	Scope* scope = MakePatternParamScope(tmpl.params, tmpl.declaring);
+	Scope* saved = current_;
+	current_ = scope;
+	TypePtr result;
+	try
+	{
+		DeclSpecifierInfo specs =
+			builder_.ProcessSpecifiers(tmpl.pattern_decl->specifiers, true);
+		result = builder_.ComposeDeclarator(&prefix, specs.type).type;
+	}
+	catch (const std::exception&)
+	{
+		// A dependent return type keeps its written form; the mangler
+		// walks the AST.
+	}
+	current_ = saved;
+	return result;
 }
 
 bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,

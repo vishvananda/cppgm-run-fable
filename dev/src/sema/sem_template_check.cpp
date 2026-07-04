@@ -453,5 +453,28 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 				retry_bodies_[j].deferred_index = deferred_index;
 	}
 	retry_bodies_.clear();
+	// PA22: the mangler spells specialization object names from the
+	// composed pattern pieces, and explicit-argument calls can create
+	// specializations without a deduction pass. Compose the missing
+	// patterns now that no analysis is in flight: composition
+	// re-enters the analyzer (dependent return decltypes), which must
+	// not happen inside an expression walk holding binding pointers.
+	const vector<unique_ptr<TemplateInfo>>& templates =
+		unit_.templates.All();
+	for (size_t t = 0; t < templates.size(); t++)
+	{
+		TemplateInfo& tmpl = *templates[t];
+		if (tmpl.kind != TMPL_FUNCTION || !tmpl.pattern_decl ||
+		    tmpl.fn_specs.empty())
+			continue;
+		try
+		{
+			EnsureFunctionPattern(tmpl);
+		}
+		catch (const std::exception&)
+		{
+			// The mangler keeps its concrete fallback spelling.
+		}
+	}
 	FinishTemplateChecks();
 }

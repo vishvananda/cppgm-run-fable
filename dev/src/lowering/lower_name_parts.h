@@ -1,0 +1,133 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "sema/scope.h"
+#include "sema/template_info.h"
+#include "sema/type.h"
+
+// Shared internals of the Itanium object-name mangler, split between
+// lower_name.cpp (scope/type spellings) and lower_name_template.cpp
+// (function-template signatures and written dependent forms). These
+// are implementation details of the lowering name layer; public entry
+// points stay in lower_name.h.
+
+struct AstTypeId;
+
+namespace lower_mangle {
+
+using std::string;
+using std::vector;
+
+std::runtime_error OutsideBoundary(const char* what);
+
+// One component of a qualified name. A class-template specialization
+// component carries the template name plus its argument list and
+// mangles as `NameI<args>E` (5.1.8), with the template name and the
+// template-id both substitution candidates. `pack_start`/`pack_end`
+// bound the flattened argument run a template parameter pack owns
+// (5.1.8: pack arguments spell `J <args> E`).
+struct NameComponent
+{
+	NameComponent() : args(0), pack_start((size_t)-1), pack_end(0) {}
+
+	string name;
+	const vector<TemplateArg>* args;
+	size_t pack_start;
+	size_t pack_end;
+};
+
+// The flattened argument span the template's parameter pack owns;
+// `start` stays (size_t)-1 when there is no pack (or the argument
+// list is shorter than the non-pack parameters).
+void ArgsPackSpan(const vector<TemplateParam>& params, size_t arg_count,
+                  size_t& start, size_t& end);
+
+// The named components (namespaces and classes) from the global scope
+// down to `scope`, outermost first.
+vector<NameComponent> ScopeComponents(const Scope* scope);
+
+// Component substitution table (5.1.9): previously seen substitutable
+// fragments compress to S_/S<n>_.
+class Substitutions
+{
+public:
+	// Returns the compressed spelling if `key` was seen, else "".
+	string Find(const string& key) const
+	{
+		for (size_t i = 0; i < seen_.size(); i++)
+		{
+			if (seen_[i] != key)
+				continue;
+			if (i == 0)
+				return "S_";
+			return "S" + Base36(i - 1) + "_";
+		}
+		return "";
+	}
+
+	void Add(const string& key)
+	{
+		if (Find(key).empty())
+			seen_.push_back(key);
+	}
+
+private:
+	static string Base36(size_t value)
+	{
+		const char* digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+		string out;
+		do
+		{
+			out.insert(out.begin(), digits[value % 36]);
+			value /= 36;
+		} while (value);
+		return out;
+	}
+
+	vector<string> seen_;
+
+public:
+	// The enclosing function template's parameters while its abstract
+	// pattern mangles: deferred dependent type-ids (14.5.2 written
+	// forms kept as ASTs) spell parameter references T_/Tn_ through
+	// this list.
+	const vector<TemplateParam>* pattern_params = 0;
+};
+
+string SourceName(const string& name);
+
+string MangleSubstitutable(const string& key, const string& spelling,
+                           Substitutions& subs);
+
+string MangleType(const TypePtr& type, Substitutions& subs,
+                  string* key_out = 0);
+
+// Appends the parameter encodings of a function type ("v" when empty,
+// trailing "z" when variadic); abstract pack-expansion parameters
+// spell `Dp<element>`.
+string MangleBareParameters(const TypePtr& fn, Substitutions& subs,
+                            string* key_out = 0);
+
+// One template-argument list with the parameter pack's run wrapped in
+// `J <args> E` (an empty pack still spells `JE`).
+string MangleArgList(const vector<TemplateArg>& args, size_t pack_start,
+                     size_t pack_end, Substitutions& subs);
+
+// Appends the enclosing components of a symbol's nested-name prefix,
+// registering each as a substitution candidate. Returns the prefix
+// key for the terminal component.
+string ManglePrefixComponents(const vector<NameComponent>& parts,
+                              Substitutions& subs, string& encoding);
+
+string MangleTerminalName(const string& name, size_t arity);
+
+// 5.1.8 dependent names (lower_name_template.cpp): a written type-id
+// (dependent qualified names, dependent template-ids, pointer /
+// reference declarator suffixes, pack expansions) mangles
+// syntactically with template-parameter references spelled T_/Tn_.
+string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
+                             string* key_out);
+
+}  // namespace lower_mangle

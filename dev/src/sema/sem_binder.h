@@ -625,6 +625,10 @@ private:
 	                            vector<bool>& pattern_packs);
 	// Composes the abstract signature pattern (lazily, cached).
 	void EnsureFunctionPattern(TemplateInfo& tmpl);
+	// The composed declared return type when the full pattern fails
+	// (prefix pointer/reference/cv declarator items only); null when
+	// the return type is itself dependent.
+	TypePtr ComposeReturnPattern(TemplateInfo& tmpl);
 	// The abstract pattern scope binding each named parameter to its
 	// positional placeholder.
 	Scope* MakePatternParamScope(const vector<TemplateParam>& params,

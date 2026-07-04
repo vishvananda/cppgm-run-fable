@@ -6,34 +6,19 @@
 
 #include "ast/ast_names.h"
 #include "ast/ast_text.h"
+#include "lowering/lower_name_parts.h"
 
 using std::runtime_error;
 using std::to_string;
 using std::vector;
 
-namespace {
+namespace lower_mangle {
 
 runtime_error OutsideBoundary(const char* what)
 {
 	return runtime_error(string(what) +
 	                     " is outside the PA14 assignment boundary");
 }
-
-// One component of a qualified name. A class-template specialization
-// component carries the template name plus its argument list and
-// mangles as `NameI<args>E` (5.1.8), with the template name and the
-// template-id both substitution candidates. `pack_start`/`pack_end`
-// bound the flattened argument run a template parameter pack owns
-// (5.1.8: pack arguments spell `J <args> E`).
-struct NameComponent
-{
-	NameComponent() : args(0), pack_start((size_t)-1), pack_end(0) {}
-
-	string name;
-	const vector<TemplateArg>* args;
-	size_t pack_start;
-	size_t pack_end;
-};
 
 // The flattened argument span the template's parameter pack owns;
 // `start` stays (size_t)-1 when there is no pack (or the argument
@@ -173,66 +158,17 @@ bool LookupOperatorCode(const string& text, string& code)
 	return false;
 }
 
-// Component substitution table (5.1.9): previously seen substitutable
-// fragments compress to S_/S<n>_.
-class Substitutions
-{
-public:
-	// Returns the compressed spelling if `key` was seen, else "".
-	string Find(const string& key) const
-	{
-		for (size_t i = 0; i < seen_.size(); i++)
-		{
-			if (seen_[i] != key)
-				continue;
-			if (i == 0)
-				return "S_";
-			return "S" + Base36(i - 1) + "_";
-		}
-		return "";
-	}
-
-	void Add(const string& key)
-	{
-		if (Find(key).empty())
-			seen_.push_back(key);
-	}
-
-private:
-	static string Base36(size_t value)
-	{
-		const char* digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-		string out;
-		do
-		{
-			out.insert(out.begin(), digits[value % 36]);
-			value /= 36;
-		} while (value);
-		return out;
-	}
-
-	vector<string> seen_;
-
-public:
-	// The enclosing function template's parameters while its abstract
-	// pattern mangles: deferred dependent type-ids (14.5.2 written
-	// forms kept as ASTs) spell parameter references T_/Tn_ through
-	// this list.
-	const vector<TemplateParam>* pattern_params = 0;
-};
-
 string SourceName(const string& name)
 {
 	return to_string(name.size()) + name;
 }
 
-string MangleType(const TypePtr& type, Substitutions& subs,
-                  string* key_out = 0);
-
 // Appends the parameter encodings of a function type ("v" when empty,
-// trailing "z" when variadic).
+// trailing "z" when variadic). An abstract pattern's pack-expansion
+// parameter spells `Dp<element>` (5.1.5.2), itself a substitution
+// candidate.
 string MangleBareParameters(const TypePtr& fn, Substitutions& subs,
-                            string* key_out = 0)
+                            string* key_out)
 {
 	if (fn->parameters.empty() && !fn->variadic)
 	{
@@ -244,7 +180,13 @@ string MangleBareParameters(const TypePtr& fn, Substitutions& subs,
 	for (size_t i = 0; i < fn->parameters.size(); i++)
 	{
 		string key;
-		out += MangleType(fn->parameters[i], subs, &key);
+		string one = MangleType(fn->parameters[i], subs, &key);
+		if (fn->parameters[i]->pack_expansion)
+		{
+			key = "Dp|" + key;
+			one = MangleSubstitutable(key, "Dp" + one, subs);
+		}
+		out += one;
 		if (key_out)
 			*key_out += key + ",";
 	}
@@ -267,120 +209,6 @@ string MangleSubstitutable(const string& key, const string& spelling,
 	return spelling;
 }
 
-string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
-                             string* key_out);
-
-// 5.1.8 dependent names: a deferred type-id argument kept as its
-// written form (`typename C::value_type`, `less<typename
-// C::value_type>`) mangles syntactically - the Itanium rule for
-// dependent names - with template-parameter references spelled
-// T_/Tn_ and each prefix a substitution candidate.
-string MangleDependentName(const AstName& name, Substitutions& subs,
-                           string* key_out)
-{
-	if (name.parts.empty())
-		throw OutsideBoundary("mangled dependent name form");
-	string body;
-	string prev_key;
-	for (size_t i = 0; i < name.parts.size(); i++)
-	{
-		const AstNamePart& part = name.parts[i];
-		if ((part.kind != NP_IDENTIFIER && part.kind != NP_TEMPLATE_ID) ||
-		    part.tilde)
-			throw OutsideBoundary("mangled dependent name form");
-		if (i == 0 && part.kind == NP_IDENTIFIER && subs.pattern_params)
-		{
-			// A leading template-parameter reference.
-			const vector<TemplateParam>& params = *subs.pattern_params;
-			int index = -1;
-			for (size_t p = 0; p < params.size(); p++)
-				if (params[p].kind == TPK_TYPE &&
-				    params[p].name == part.identifier)
-					index = (int)p;
-			if (index >= 0)
-			{
-				prev_key = "TP:" + to_string(index);
-				string spelling = index == 0
-					? string("T_")
-					: "T" + to_string(index - 1) + "_";
-				body = MangleSubstitutable(prev_key, spelling, subs);
-				continue;
-			}
-		}
-		string name_key = (prev_key.empty() ? string("T:")
-		                                    : prev_key + "::") +
-			part.identifier;
-		string full_key = name_key;
-		if (part.kind == NP_TEMPLATE_ID)
-		{
-			full_key += "<";
-			for (size_t a = 0; a < part.arguments.size(); a++)
-			{
-				const AstTemplateArgument& argument = part.arguments[a];
-				if (!argument.is_type || !argument.type ||
-				    argument.pack)
-					throw OutsideBoundary(
-						"mangled dependent argument form");
-				full_key += "dep:" +
-					FlattenSpecifierSeq(argument.type->specifiers) +
-					",";
-			}
-			full_key += ">";
-		}
-		string found = subs.Find(full_key);
-		if (!found.empty())
-		{
-			body = found;
-			prev_key = full_key;
-			continue;
-		}
-		if (part.kind == NP_IDENTIFIER)
-			body += SourceName(part.identifier);
-		else
-		{
-			// The template name is its own substitution candidate; a
-			// registered one opens the spelling compressed ("S_IiE").
-			string tname = body.empty() ? subs.Find(name_key) : string();
-			if (tname.empty())
-			{
-				subs.Add(name_key);
-				tname = SourceName(part.identifier);
-			}
-			body += tname + "I";
-			for (size_t a = 0; a < part.arguments.size(); a++)
-				body += MangleDependentTypeId(*part.arguments[a].type,
-				                              subs, 0);
-			body += "E";
-		}
-		subs.Add(full_key);
-		prev_key = full_key;
-	}
-	if (key_out)
-		*key_out = prev_key;
-	if (name.parts.size() > 1)
-		body = "N" + body + "E";
-	return body;
-}
-
-string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
-                             string* key_out)
-{
-	if (id.declarator && !id.declarator->items.empty())
-		throw OutsideBoundary("mangled dependent type form");
-	const AstName* name = 0;
-	for (size_t i = 0; i < id.specifiers.size(); i++)
-	{
-		const AstSpecifier& specifier = id.specifiers[i];
-		if (specifier.kind == SPEC_TYPE_NAME && !name)
-			name = &specifier.name;
-		else
-			throw OutsideBoundary("mangled dependent type form");
-	}
-	if (!name)
-		throw OutsideBoundary("mangled dependent type form");
-	return MangleDependentName(*name, subs, key_out);
-}
-
 // The structural key of a type, independent of any substitution state.
 string TypeKey(const TypePtr& type)
 {
@@ -395,8 +223,8 @@ string TypeKey(const TypePtr& type)
 // the full key (with the argument keys for a specialization).
 // The structural key of one template argument (types recurse through
 // TypeKey; values key by declared type + bits; pattern slots by their
-// parameter index).
-string ArgKey(const TemplateArg& arg)
+// parameter index; a `...` expansion pattern marks its element key).
+string ArgKeyBase(const TemplateArg& arg)
 {
 	if (arg.template_entity)
 		return "tt:" + LowerScopeKey(arg.template_entity->declaring) +
@@ -419,6 +247,11 @@ string ArgKey(const TemplateArg& arg)
 		return "ven:" + LowerScopeKey(arg.entity_scope) +
 			arg.entity_name;
 	return "v" + TypeKey(arg.type) + ":" + to_string(arg.value_bits);
+}
+
+string ArgKey(const TemplateArg& arg)
+{
+	return ArgKeyBase(arg) + (arg.pack_pattern ? "..." : "");
 }
 
 void ComponentKeys(const NameComponent& part, const string& prev,
@@ -446,6 +279,19 @@ string MangleComponentList(const vector<NameComponent>& parts,
 // repeatable without encoding the full expression grammar).
 string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 {
+	if (arg.pack_pattern && !arg.is_value)
+	{
+		// 5.1.6/5.1.8: a written `T...` expansion inside a dependent
+		// template-id spells an argument pack holding the expansion,
+		// `J Dp <element> E`; the Dp component is a substitution
+		// candidate (a written value expansion keeps its plain element
+		// spelling - no test pins the `sp` form yet).
+		TemplateArg element = arg;
+		element.pack_pattern = false;
+		string inner = MangleTemplateArg(element, subs);
+		string key = "Dp|" + ArgKey(element);
+		return "J" + MangleSubstitutable(key, "Dp" + inner, subs) + "E";
+	}
 	if (arg.template_entity)
 	{
 		// 5.1.6: a template-template argument spells the template's
@@ -857,7 +703,9 @@ string MangleTerminalName(const string& name, size_t arity)
 	return SourceName(name);
 }
 
-}  // namespace
+}  // namespace lower_mangle
+
+using namespace lower_mangle;
 
 string LowerScopePath(const Scope* scope)
 {
@@ -1123,87 +971,6 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 			MangleTerminalName(name, type->parameters.size()) + "E";
 	}
 	return "_Z" + encoding + MangleBareParameters(type, subs);
-}
-
-string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
-{
-	// 5.1.2/5.1.8: <name> I <args> E with the return type included;
-	// the signature mangles from the abstract pattern so parameter
-	// references spell T_/Tn_ (falling back to the concrete signature
-	// when the pattern has non-composing dependent forms).
-	const TemplateInfo& tmpl = *spec.owner;
-	Substitutions subs;
-	subs.pattern_params = &tmpl.params;
-	vector<NameComponent> parts = ScopeComponents(tmpl.declaring);
-	// PA21 member function templates: the encoding is the member form
-	// (method cv/ref-qualifiers before the class prefix).
-	bool member = tmpl.declaring && tmpl.declaring->kind == SCOPE_CLASS;
-	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
-	// A pattern with an unexpanded pack parameter mangles from the
-	// concrete signature (the pinned PA19 spellings).
-	for (size_t i = 0; pattern.get() != spec.type.get() &&
-	     i < pattern->parameters.size(); i++)
-		if (pattern->parameters[i]->pack_expansion)
-			pattern = spec.type;
-	string cv;
-	if (member)
-	{
-		if (pattern->is_volatile)
-			cv += "V";
-		if (pattern->is_const)
-			cv += "K";
-		if (pattern->ref_qual == 1)
-			cv += "R";
-		else if (pattern->ref_qual == 2)
-			cv += "O";
-	}
-	string prefix;
-	string prev = ManglePrefixComponents(parts, subs, prefix);
-	string name_key = (prev.empty() ? string("T:") : prev + "::") +
-		tmpl.name;
-	subs.Add(name_key);
-	// A conversion-function template's terminal encodes `cv` with the
-	// abstract conversion pattern; the return type re-spells it.
-	string terminal = tmpl.conversion_pattern
-		? "cv" + MangleType(tmpl.conversion_pattern, subs)
-		: MangleTerminalName(tmpl.name, pattern->parameters.size() +
-		                                (member ? 1 : 0));
-	size_t pack_start;
-	size_t pack_end;
-	ArgsPackSpan(tmpl.params, spec.args.size(), pack_start, pack_end);
-	string targs = MangleArgList(spec.args, pack_start, pack_end, subs);
-	string result = MangleType(tmpl.conversion_pattern
-	                               ? tmpl.conversion_pattern
-	                               : pattern->target,
-	                           subs);
-	string params = MangleBareParameters(pattern, subs);
-	string encoding = terminal + "I" + targs + "E";
-	if (!parts.empty() || member)
-		encoding = "N" + cv + prefix + encoding + "E";
-	return "_Z" + encoding + result + params;
-}
-
-// PA21 constructor-template specializations: C1/C2 followed by the
-// template-argument list, with the parameters mangled from the
-// pattern (`_ZN4pairIiEC1IiiLi0EEEOT_OT0_`).
-string MangleMemberFunctionTemplateObjectName(
-	const Scope* scope, const FunctionSpecialization& spec,
-	const string& special_code)
-{
-	const TemplateInfo& tmpl = *spec.owner;
-	Substitutions subs;
-	subs.pattern_params = &tmpl.params;
-	vector<NameComponent> parts = ScopeComponents(scope);
-	string encoding = "N";
-	ManglePrefixComponents(parts, subs, encoding);
-	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
-	size_t pack_start;
-	size_t pack_end;
-	ArgsPackSpan(tmpl.params, spec.args.size(), pack_start, pack_end);
-	string targs = MangleArgList(spec.args, pack_start, pack_end, subs);
-	encoding += special_code + "I" + targs + "E";
-	encoding += "E";
-	return "_Z" + encoding + MangleBareParameters(pattern, subs);
 }
 
 string MangleVariableObjectName(const Scope* scope, const string& name)
