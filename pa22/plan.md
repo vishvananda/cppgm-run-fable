@@ -127,7 +127,7 @@ PA14-PA21 lowering path.
 
 ## Status (2026-07-04)
 
-IN PROGRESS: 147/176 pa22 tests pass (95 at baseline); through-pa21
+IN PROGRESS: 155/176 pa22 tests pass (95 at baseline); through-pa21
 stays fully green (1731/1731) after every landed batch.
 
 Landed: SFINAE candidate dropping (tasks 1-2), template-head identity
@@ -149,10 +149,22 @@ trailing arguments, explicit `Args...` splicing, surrogate calls
 (13.3.1.1.2), decltype base-specifiers, and pack expansions in
 paren-init declarations.
 
-Remaining (29): variadic template-template deduction, dependent-ADL
-hidden-friend timing, several deep alias/pack SFINAE compositions,
-transitive-base explicit-call deduction, some LowIR shape diffs, and
-assorted single-feature corners; each needs its own reduction.
+Also landed since: multi-pack slot deduction/keys, CWG1558 void_t
+deferral with nested tt-application re-substitution (detected_or),
+hidden-friend ADL through using-declaration-owned bindings, friend
+outer-argument aliasing, 14.1p10 default accumulation, null-pointer
+NTTP defaults, non-type declarator packs, zero-arg constexpr-call
+value arguments, surrogate calls, abstract-array SFINAE, decltype
+base-specifiers and prefix demands, one-byte pointer-difference fold.
+
+Remaining (21): two-phase-lookup timing for later-declared shadowing
+values (decl-order-aware lookup), value-pack static-data members with
+sizeof... bounds, a few deep alias/pack SFINAE compositions
+(and_helper chains inside member guards), several exact-LowIR shape
+diffs (empty-temporary ctor elision in delegating mem-initializers,
+canonical function ordering), and assorted single-feature corners;
+each needs its own reduction (the env-gated CPPGM_DEDUCE_DEBUG traces
+in template_deduce.cpp/sem_spec.cpp help).
 
 ## Validation
 
