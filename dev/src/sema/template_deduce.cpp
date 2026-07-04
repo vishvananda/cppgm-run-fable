@@ -1389,7 +1389,13 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->self.owner = spec->param_scope;
 	spec->self.home = spec->param_scope;
 	spec->self.fn_defaults.resize(1);
-	spec->self.fn_deleted.resize(1, false);
+	// 8.4.3: a deleted pattern deletes every specialization; referring
+	// to one is ill-formed even unevaluated, which substitution probes
+	// turn into deduction failures.
+	bool pattern_deleted = inner.kind == DK_SIMPLE &&
+		!inner.declarators.empty() && inner.declarators[0].init &&
+		inner.declarators[0].init->kind == INIT_DELETE;
+	spec->self.fn_deleted.resize(1, pattern_deleted);
 	spec->self.fn_access.resize(1, tmpl.member_access);
 	spec->self.fn_static.resize(1, tmpl.member_static);
 	spec->self.fn_inline_def.resize(1, false);

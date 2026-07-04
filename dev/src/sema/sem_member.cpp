@@ -829,8 +829,9 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	                                   &set.is_template, &order);
 	const FunctionSpecialization* spec =
 		winner < set.ordinary ? 0 : set.specs[winner];
-	if (!spec && winner < binding.fn_deleted.size() &&
-	    binding.fn_deleted[winner])
+	if (spec ? spec->self.fn_deleted[0]
+	         : winner < binding.fn_deleted.size() &&
+	           binding.fn_deleted[winner])
 		throw runtime_error("use of deleted member function");
 	EMemberAccess access = MA_PUBLIC;
 	if (spec)
@@ -972,8 +973,9 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 	const FunctionSpecialization* spec =
 		best < specs.size() ? specs[best] : 0;
 	size_t winner = spec ? 0 : positions[best];
-	if (!spec && winner < binding.fn_deleted.size() &&
-	    binding.fn_deleted[winner])
+	if (spec ? spec->self.fn_deleted[0]
+	         : winner < binding.fn_deleted.size() &&
+	           binding.fn_deleted[winner])
 		throw runtime_error("use of deleted member function");
 	EMemberAccess access = MA_PUBLIC;
 	if (spec)
