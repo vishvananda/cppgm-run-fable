@@ -164,7 +164,10 @@ void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 	// Explicitly-defaulted ones synthesize like the implicit members.
 	if (ScopeBinding* assign = FindOwnBinding(*cls.members, "operator ="))
 	{
-		size_t count = assign->overloads.size() + 1;
+		// PA21: a template-only operator= binding has no ordinary
+		// overload entries (12.8p17 last sentence: an assignment
+		// operator template never declares a copy/move assignment).
+		size_t count = assign->type ? assign->overloads.size() + 1 : 0;
 		for (size_t i = 0; assign->kind == SB_FUNCTION && i < count; i++)
 		{
 			const TypePtr& declared =
