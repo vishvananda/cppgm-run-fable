@@ -241,6 +241,10 @@ struct SemNode
 	// analyze; the definition is ill-formed only if a use demands it
 	// (14.7.1), so the lowering throws this message on demand.
 	string instantiation_error;
+	// PA21 SN_FUNCTION_DEFINITION: the body came from template
+	// instantiation, so its references are not definition-time demand
+	// (14.7.1: an unused instantiated body is never required).
+	bool from_instantiation = false;
 	// SN_CONSTRUCTOR_ACTION: the call's second child is the target
 	// object address (declared objects, members, placement results),
 	// not the first constructor argument.

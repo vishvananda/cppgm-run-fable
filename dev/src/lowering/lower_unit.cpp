@@ -371,9 +371,11 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		info.weak = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
+		// An instantiated friend body binds only when odr-used
+		// (14.7.1), so it never counts as definition-time demand.
 		info.friend_def = item.entity_scope &&
 			item.entity_scope->kind == SCOPE_NAMESPACE &&
-			!item.is_constexpr_fn;
+			!item.is_constexpr_fn && !item.from_instantiation;
 	}
 }
 

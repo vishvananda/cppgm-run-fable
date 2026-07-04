@@ -129,6 +129,7 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 {
 	SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
 	bool is_method = !body.is_friend && !body.is_static;
+	item->from_instantiation = instantiating_;
 	if (body.is_friend)
 		item->name = CanonicalQualifiedName(body.declaring, body.name);
 	else

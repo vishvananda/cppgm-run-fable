@@ -423,16 +423,22 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 	// PA21 14.6.4.1: an instantiated body that failed mid-instantiation
 	// (a sibling specialization still open) re-binds once every class
 	// is complete; a still-failing body keeps its poisoned definition.
+	// Retried bodies only ever come from instantiation, so they keep
+	// binding as instantiated bodies (14.7.1 demand semantics).
 	for (size_t i = 0; i < retry_bodies_.size(); i++)
 	{
+		bool saved_instantiating = instantiating_;
+		instantiating_ = true;
 		try
 		{
 			AnalyzeDeferredBody(retry_bodies_[i].body);
 		}
 		catch (const std::exception&)
 		{
+			instantiating_ = saved_instantiating;
 			continue;
 		}
+		instantiating_ = saved_instantiating;
 		unit_.deferred[retry_bodies_[i].deferred_index].swap(
 			unit_.deferred.back());
 		unit_.deferred.pop_back();
