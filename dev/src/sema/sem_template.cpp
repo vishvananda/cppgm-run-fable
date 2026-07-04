@@ -1136,6 +1136,12 @@ void SemBinder::BindClassDeclaration(const AstDecl& decl)
 
 void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 {
+	// PA21 14.7.3p6: a completeness demand pins the instantiation (an
+	// explicit specialization can no longer replace it).
+	if (info && info->spec_template && !info->is_template_anchor)
+		if (ClassSpecialization* record = FindSpecializationRecord(info))
+			if (record->instantiated)
+				record->hard_used = true;
 	if (!info || info->complete)
 		return;
 	// PA21 14.7.1p4: a specialization whose body was deferred (an

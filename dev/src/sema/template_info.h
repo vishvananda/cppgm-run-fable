@@ -100,6 +100,10 @@ struct ClassSpecialization
 	// explicit-instantiation definition emits on ordinary demand
 	// without the emission-root marking).
 	bool extern_declared = false;
+	// PA21 14.7.3p6: the instantiation was used in a way that pins its
+	// definition (member lookup, completeness); a later explicit
+	// specialization is then ill-formed rather than refreshing.
+	bool hard_used = false;
 	// Indices into owner->member_defs already instantiated for this
 	// specialization.
 	map<size_t, bool> members_done;

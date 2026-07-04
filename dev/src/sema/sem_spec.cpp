@@ -604,6 +604,12 @@ void SemBinder::BindMemberExplicitSpecialization(const AstDecl& inner,
 	const NamedTypeInfo* entity = model_.ScopeEntity(declaring);
 	if (ClassSpecialization* record = FindSpecializationRecord(entity))
 	{
+		// 14.7.3p5: members of an explicit specialization are ordinary
+		// members; a template<> header on their definitions is
+		// ill-formed.
+		if (record->explicit_spec)
+			throw runtime_error("template<> header on a member of an "
+			                    "explicit specialization");
 		const AstNamePart& terminal = id.parts.back();
 		string name = terminal.kind == NP_IDENTIFIER
 			? terminal.identifier : DeclaredFunctionName(terminal);
@@ -680,7 +686,7 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 	spec.explicit_spec = true;
 	if (inner.kind == DK_CLASS_FORWARD)
 		return;  // a declaration reserves the key
-	if (spec.instantiated && was_explicit)
+	if (spec.instantiated && (was_explicit || spec.hard_used))
 		throw runtime_error("explicit specialization of " + tmpl.name +
 		                    " after its instantiation");
 	if (spec.instantiated)
