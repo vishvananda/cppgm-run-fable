@@ -929,6 +929,15 @@ void SemBinder::BindInheritingConstructors(Scope* base_scope)
 		cls->ctors.push_back(ctor);
 		any_inherited = true;
 	}
+	// 12.9 with member templates: base constructor templates inherit
+	// as constructor templates; a deduced selection synthesizes a
+	// forwarding entry (EnsureCtorTemplateEntry marks it inherited by
+	// the template's owning class).
+	for (size_t i = 0; i < cls->base->ctor_templates.size(); i++)
+	{
+		cls->ctor_templates.push_back(cls->base->ctor_templates[i]);
+		any_inherited = true;
+	}
 	cls->has_user_ctor = any_inherited || cls->has_user_ctor;
 	cls->is_aggregate = false;
 }
@@ -984,6 +993,16 @@ void SemBinder::EnsureInheritedCtor(const ClassInfo& cls_in, int index)
 	method_.fn_name = base_name;
 	method_.this_type = node->type->parameters[0];
 	int base_index = base ? ClassCtorIndex(*base, ctor.type) : -1;
+	// An inherited constructor-template selection synthesizes the
+	// base's own entry (and instantiates its body) on first forward.
+	if (base_index < 0 && ctor.tmpl_spec && base)
+	{
+		ClassInfo& mutable_base = unit_.classes.Create(base->entity);
+		base_index = EnsureCtorTemplateEntry(mutable_base,
+		                                     ctor.tmpl_spec);
+		if (base_index >= 0)
+			InstantiateCtorTemplateBody(mutable_base, base_index);
+	}
 	vector<SemNodePtr> args;
 	for (size_t i = 0; i < body.composed.parameters.size(); i++)
 	{

@@ -608,11 +608,14 @@ void DeclBinder::BindUsingDeclaration(const AstDecl& decl)
 	Scope* prefix = ResolvePrefixScope(target);
 	// 3.4.3.1p2: the terminal names the constructor when it repeats
 	// the class name or the last nested-name-specifier component's
-	// spelling (`using Base::Base`, `typedef Base A; using A::A`).
+	// spelling (`using Base::Base`, `typedef Base A; using A::A`,
+	// `using Base<T>::Base`).
 	bool names_ctor = prefix->kind == SCOPE_CLASS &&
 		(prefix->name == name ||
 		 (target.parts.size() >= 2 &&
-		  target.parts[target.parts.size() - 2].kind == NP_IDENTIFIER &&
+		  (target.parts[target.parts.size() - 2].kind == NP_IDENTIFIER ||
+		   target.parts[target.parts.size() - 2].kind ==
+		       NP_TEMPLATE_ID) &&
 		  !target.parts[target.parts.size() - 2].tilde &&
 		  target.parts[target.parts.size() - 2].identifier == name));
 	if (names_ctor)

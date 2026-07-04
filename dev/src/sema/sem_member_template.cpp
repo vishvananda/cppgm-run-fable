@@ -465,11 +465,24 @@ int SemBinder::EnsureCtorTemplateEntry(ClassInfo& cls,
 	ctor.tmpl_spec = spec;
 	ctor.tmpl_param_scope = spec->param_scope;
 	ctor.defaults = spec->self.fn_defaults[0];
+	// The declared parameter names carry into forwarding syntheses.
+	if (tmpl.pattern_decl && tmpl.pattern_decl->declarator)
+		CollectDeclaredParamNames(*tmpl.pattern_decl->declarator,
+		                          ctor.param_names);
 	// 12.8p2 last sentence: a constructor template never declares a
 	// copy/move constructor, so the entry stays CK_ORDINARY.
 	ctor.kind = CK_ORDINARY;
 	if (tmpl.pattern_decl && tmpl.has_definition)
 		ctor.definition = tmpl.pattern_decl;
+	// 12.9p8: an inherited constructor template's entry forwards to
+	// the base subobject's constructor instead of binding the pattern
+	// body as its own.
+	if (tmpl.member_of && cls.entity && tmpl.member_of != cls.entity)
+	{
+		ctor.inherited_base = tmpl.member_of;
+		ctor.inherited_built = false;
+		ctor.definition = 0;
+	}
 	cls.ctors.push_back(ctor);
 	int index = (int)(cls.ctors.size() - 1);
 	// 14.7.1p2: the body instantiates only when overload resolution
@@ -486,6 +499,10 @@ int SemBinder::EnsureCtorTemplateEntry(ClassInfo& cls,
 void SemBinder::InstantiateCtorTemplateBody(ClassInfo& cls, int index)
 {
 	ClassCtor& ctor = cls.ctors[index];
+	// An inherited entry forwards through EnsureInheritedCtor; the
+	// pattern body belongs to the base class.
+	if (ctor.inherited_base)
+		return;
 	const FunctionSpecialization* spec = ctor.tmpl_spec;
 	if (!spec || !spec->owner || !spec->owner->pattern_decl)
 		return;

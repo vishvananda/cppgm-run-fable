@@ -593,8 +593,10 @@ ImplicitConversion ClassifySourceConversionFunction(
 	// 13.3.3.1p10: two conversion functions no better than each other
 	// make the user-defined sequence ambiguous; the source then has no
 	// viable conversion to `dest` (a strictly better later candidate
-	// clears the tie).
+	// clears the tie). 13.3.3p1: a non-template conversion function
+	// beats a deduced specialization with equal sequences.
 	bool tie = false;
+	bool best_is_template = false;
 	for (const ClassInfo* link = from->named->class_record; link;
 	     link = link->base)
 	{
@@ -626,6 +628,7 @@ ImplicitConversion ClassifySourceConversionFunction(
 			if (!second.viable)
 				continue;
 			bool better = false;
+			bool cand_is_template = conv.spec != 0;
 			if (!result.viable)
 				better = true;
 			else
@@ -639,7 +642,12 @@ ImplicitConversion ClassifySourceConversionFunction(
 					better = true;
 				else if (object_order == 0 &&
 				         second.rank == result.second_rank)
-					tie = true;
+				{
+					if (!cand_is_template && best_is_template)
+						better = true;
+					else if (cand_is_template == best_is_template)
+						tie = true;
+				}
 			}
 			if (!better)
 				continue;
@@ -651,6 +659,7 @@ ImplicitConversion ClassifySourceConversionFunction(
 			result.second_rank = second.rank;
 			result.null_to_pointer = false;
 			best_object = object;
+			best_is_template = cand_is_template;
 		}
 	}
 	if (tie)

@@ -1031,6 +1031,29 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 			((cls->is_polymorphic && cls->dtor_virtual) ||
 			 (cls->entity && cls->entity->spec_template &&
 			  !cls->base));
+		// A constructor-template specialization's entries emit each
+		// on their own demand (witness: the inherited constructor
+		// -template forwarding references carry a lone C2).
+		if (comdat_pair && info.special_code == "C2")
+			for (size_t i = 0; i < cls->ctors.size(); i++)
+			{
+				const ClassCtor& ctor = cls->ctors[i];
+				if (!ctor.tmpl_spec ||
+				    ctor.type->parameters.size() + 1 !=
+				        info.type->parameters.size())
+					continue;
+				bool same = true;
+				for (size_t p = 0; p < ctor.type->parameters.size();
+				     p++)
+					if (!TypeEquals(ctor.type->parameters[p],
+					                info.type->parameters[p + 1]))
+						same = false;
+				if (same)
+				{
+					comdat_pair = false;
+					break;
+				}
+			}
 		if (comdat_pair)
 			DemandFunction(MemberFunctionEntry(
 				info.scope, info.name, info.type,
