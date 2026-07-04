@@ -182,8 +182,11 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	item->entity_name = spec.name;
 	item->unwind_no = composed.noexcept_simple;
 	// An explicit specialization is an ordinary definition: strong
-	// unless declared inline (7.1.2); instantiated bodies stay weak.
-	item->inline_def = !spec.explicit_def || spec.explicit_inline;
+	// unless declared inline (7.1.2), but emitted only on demand like
+	// an instantiation (the reference omits an unused one).
+	// Instantiated bodies stay weak.
+	item->inline_def = true;
+	item->demand_strong = spec.explicit_def && !spec.explicit_inline;
 	item->fn_spec = &spec;
 	// 7.1.5: constexpr on the pattern (or explicit-specialization)
 	// declaration makes the instantiated body engine-evaluable and

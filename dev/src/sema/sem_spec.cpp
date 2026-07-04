@@ -998,6 +998,21 @@ void SemBinder::BindFunctionExplicitSpecialization(const AstDecl& inner)
 	FunctionSpecialization* spec = 0;
 	if (terminal.kind == NP_TEMPLATE_ID)
 	{
+		// 14.7.3 with 14.8.2.6: among same-name templates accepting
+		// the explicit arguments, the declared parameter list selects
+		// the specialized one.
+		TypePtr declared;
+		try
+		{
+			DeclaratorInfo composed = builder_.ComposeDeclarator(
+				inner.declarator.get(), specs.type);
+			if (composed.type->kind == TK_FUNCTION)
+				declared = composed.type;
+		}
+		catch (const std::exception&)
+		{
+			declared = TypePtr();
+		}
 		for (size_t t = 0;
 		     t < binding->fn_templates.size() && !spec; t++)
 		{
@@ -1005,15 +1020,19 @@ void SemBinder::BindFunctionExplicitSpecialization(const AstDecl& inner)
 			if (TemplatePackIndex(tmpl.params) < tmpl.params.size())
 				continue;
 			vector<TemplateArg> args;
+			FunctionSpecialization* candidate;
 			try
 			{
 				args = ResolveTemplateArgumentList(tmpl, terminal);
+				candidate = EnsureFunctionSpecialization(tmpl, args);
 			}
 			catch (const std::exception&)
 			{
 				continue;
 			}
-			spec = EnsureFunctionSpecialization(tmpl, args);
+			if (declared && !TypeEquals(candidate->type, declared))
+				continue;
+			spec = candidate;
 		}
 	}
 	else

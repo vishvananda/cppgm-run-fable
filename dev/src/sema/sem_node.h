@@ -208,6 +208,10 @@ struct SemNode
 	// SN_FUNCTION_DEFINITION: an out-of-class member spelled `inline`
 	// emits weak but unconditionally (the reference prints it unused).
 	bool inline_root = false;
+	// SN_FUNCTION_DEFINITION: an explicit-specialization definition -
+	// emitted only on demand like an instantiation, but with a strong
+	// binding (PA23; the reference omits an unused one).
+	bool demand_strong = false;
 	// SN_VARIABLE: the object's lifetime ends at scope exit; the
 	// attached SN_DESTRUCTOR_ACTION child holds the destruction call.
 	bool needs_dtor;

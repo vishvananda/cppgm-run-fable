@@ -1275,3 +1275,131 @@ TemplateArg SemBinder::ResolveDefaultValueExpr(const AstExpr& expr,
 	arg.dependent_value = &expr;
 	return arg;
 }
+
+// --- explicit deduction arguments (14.8.1) ---------------------------------
+
+namespace {
+
+// Whether an explicit template argument spells a pack expansion
+// (`Args...`): the argument's own flag, or the type-id's abstract
+// declarator carrying the `...` as a DI_PACK item.
+bool ExplicitArgumentIsExpansion(const AstTemplateArgument& argument)
+{
+	if (argument.pack)
+		return true;
+	if (!argument.is_type || !argument.type || !argument.type->declarator)
+		return false;
+	for (size_t i = 0; i < argument.type->declarator->items.size(); i++)
+		if (argument.type->declarator->items[i].kind == DI_PACK)
+			return true;
+	return false;
+}
+
+// The bare single-identifier name of an expansion's pattern type-id
+// (`Args...`), or null for composite patterns.
+const AstName* ExpansionPackName(const AstTemplateArgument& argument)
+{
+	if (!argument.is_type || !argument.type)
+		return 0;
+	if (argument.type->specifiers.size() != 1 ||
+	    argument.type->specifiers[0].kind != SPEC_TYPE_NAME)
+		return 0;
+	const AstName& name = argument.type->specifiers[0].name;
+	if (name.parts.size() != 1 ||
+	    name.parts[0].kind != NP_IDENTIFIER || name.parts[0].tilde)
+		return 0;
+	return &name;
+}
+
+}  // namespace
+
+// 14.8.1: explicit template arguments bind the leading parameters;
+// the pack absorbs the remaining explicit arguments. False on any
+// unresolvable or dependent argument (the template contributes no
+// candidate).
+bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
+                                          const AstNamePart& part,
+                                          vector<TemplateArg>& bound,
+                                          vector<TemplateArg>& pack_elements)
+{
+	size_t cursor = 0;
+	for (size_t i = 0; i < part.arguments.size(); i++)
+	{
+		const AstTemplateArgument& argument = part.arguments[i];
+		// An explicit `Args...` expansion splices the bound pack's
+		// elements (the instantiated base/body context binds them).
+		if (ExplicitArgumentIsExpansion(argument))
+		{
+			const AstName* pname = ExpansionPackName(argument);
+			if (!pname)
+				return false;
+			const ScopeBinding* pack = UnqualifiedLookup(
+				current_, pname->parts[0].identifier, SLF_ANY);
+			if (!pack || !pack->is_pack || pack->param_index >= 0)
+				return false;
+			for (size_t k = 0; k < pack->pack_args.size(); k++)
+			{
+				const TemplateArg& element = pack->pack_args[k];
+				if (TemplateArgIsDependent(element))
+					return false;
+				if (cursor < tmpl.params.size() &&
+				    !tmpl.params[cursor].pack)
+					bound[cursor++] = element;
+				else
+					pack_elements.push_back(element);
+			}
+			continue;
+		}
+		if (cursor >= tmpl.params.size())
+			return false;
+		const TemplateParam& param = tmpl.params[cursor];
+		TemplateArg resolved;
+		try
+		{
+			if (param.kind == TPK_TEMPLATE)
+			{
+				// A template-name argument parses as a type-id
+				// spelling just the name (`check<F>(0)`).
+				const AstName* tname = 0;
+				if (argument.is_type && argument.type &&
+				    (!argument.type->declarator ||
+				     argument.type->declarator->Empty()) &&
+				    argument.type->specifiers.size() == 1 &&
+				    argument.type->specifiers[0].kind == SPEC_TYPE_NAME)
+					tname = &argument.type->specifiers[0].name;
+				if (!tname)
+					return false;
+				resolved = ResolveTemplateTemplateArgument(*tname, param,
+				                                           tmpl.name);
+			}
+			else if (param.kind == TPK_TYPE)
+			{
+				if (!argument.is_type || !argument.type)
+					return false;
+				resolved = TemplateArg(
+					builder_.ResolveTypeId(*argument.type));
+			}
+			else
+			{
+				Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+				resolved = ResolveValueArgument(
+					argument, ValueParamType(param, partial));
+			}
+		}
+		catch (const InstantiationBodyFault&)
+		{
+			throw;
+		}
+		catch (const std::exception&)
+		{
+			return false;
+		}
+		if (TemplateArgIsDependent(resolved))
+			return false;
+		if (param.pack)
+			pack_elements.push_back(resolved);
+		else
+			bound[cursor++] = resolved;
+	}
+	return true;
+}

@@ -45,8 +45,11 @@ struct LowFunctionInfo
 	bool unwind_no;
 	bool internal;
 	// PA15: in-class definitions emit weak and only on demand; methods
-	// carry the hidden `this` first parameter.
+	// carry the hidden `this` first parameter. `demand_strong` keeps
+	// the demand gating but prints a strong binding (an explicit
+	// -specialization definition).
 	bool weak;
+	bool demand_strong = false;
 	bool is_method;
 	// Constructor/destructor ABI entry: "C1"/"C2"/"D1"/"D2" ("" for
 	// ordinary functions); C1/D1 definitions emit an alias for the

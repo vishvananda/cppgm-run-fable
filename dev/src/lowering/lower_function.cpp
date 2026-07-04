@@ -107,7 +107,7 @@ string FunctionLowerer::Header() const
 		meta.push_back("unwind=no");
 	if (info_.c_linkage)
 		meta.push_back("linkage=c");
-	meta.push_back(info_.weak ? "binding=weak"
+	meta.push_back(info_.weak && !info_.demand_strong ? "binding=weak"
 	               : info_.internal ? "binding=internal"
 	                                : "binding=strong");
 	if (!info_.object_name.empty())

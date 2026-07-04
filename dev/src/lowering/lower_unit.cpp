@@ -229,6 +229,7 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 	{
 		info.defined = true;
 		info.weak = true;
+		info.demand_strong = item.demand_strong;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
 		// An instantiated friend body binds only when odr-used
