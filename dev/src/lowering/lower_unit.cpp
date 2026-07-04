@@ -1034,15 +1034,21 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 	// the complete and base entries do identical work and the
 	// reference prints one definition carrying both symbols; a base
 	// makes them distinct definitions, each emitted on its own demand
-	// (witness: inherited-class-template-conversion-operator).
+	// (witness: inherited-class-template-conversion-operator). PA23: a
+	// by-value class-typed parameter also splits the unit; the lone
+	// base entry emits by itself (the tag-constructor shape).
 	if ((info.special_code == "C2" || info.special_code == "D2") &&
 	    info.defined && info.definition && !info.definition->synthesized)
 	{
 		const ClassInfo* cls = MethodClass(info.type);
+		bool value_class_param = false;
+		for (size_t p = 1; p < info.type->parameters.size(); p++)
+			if (RemoveTopCv(info.type->parameters[p])->kind == TK_CLASS)
+				value_class_param = true;
 		bool comdat_pair = cls &&
 			((cls->is_polymorphic && cls->dtor_virtual) ||
 			 (cls->entity && cls->entity->spec_template &&
-			  !cls->base));
+			  !cls->base && !value_class_param));
 		// A constructor-template specialization's entries emit each
 		// on their own demand (witness: the inherited constructor
 		// -template forwarding references carry a lone C2).
