@@ -1135,6 +1135,25 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	    !BindExplicitDeductionArgs(tmpl, *explicit_part, bound,
 	                               pack_elements))
 		return 0;
+	// 14.1p11 with 14.8.2.1: a second, later pack in the parameter
+	// list (`Signatures...` explicitly bound before deducible
+	// `Args...`) keeps its own run - the explicit elements seal the
+	// leading pack and the call-side run belongs to the trailing
+	// pattern's slot.
+	size_t call_pack = pack_index;
+	if (pack_pattern_last && has_pack)
+	{
+		std::vector<size_t> slots;
+		CollectPatternPackSlots(tmpl.param_patterns.back(), bound,
+		                        slots);
+		if (slots.size() == 1 && slots[0] != pack_index)
+		{
+			call_pack = slots[0];
+			bound[pack_index].pack_done = true;
+			bound[pack_index].pack_elements = pack_elements;
+			pack_elements.clear();
+		}
+	}
 	// 14.8.2p2: explicit arguments substitute into P before deduction;
 	// a parameter type mentioning only explicitly bound slots is a
 	// concrete type checked by conversion, not unification.
@@ -1168,7 +1187,7 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		// one element (14.8.2.1p1 last clause).
 		TemplateArg element;
 		if (!has_pack ||
-		    !DeducePackElement(pattern, args[i], pack_index, bound,
+		    !DeducePackElement(pattern, args[i], call_pack, bound,
 		                       element))
 			return 0;
 		if (deduced_elements < explicit_elements)
@@ -1184,10 +1203,10 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	// The trailing pack's run completes its slot, so the flatten and
 	// the alias scope read every pack from its own slot (multiple
 	// deducible packs each carry their own run).
-	if (has_pack && !bound[pack_index].pack_done)
+	if (has_pack && !bound[call_pack].pack_done)
 	{
-		bound[pack_index].pack_done = true;
-		bound[pack_index].pack_elements = pack_elements;
+		bound[call_pack].pack_done = true;
+		bound[call_pack].pack_elements = pack_elements;
 	}
 	if (!FillDeducedDefaults(tmpl, bound, pack_elements))
 		return 0;
