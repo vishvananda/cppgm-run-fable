@@ -287,6 +287,18 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 		value.node->null_pointer = true;
 		return value;
 	}
+	// 5.2.3p2: `void()` is a prvalue of type void (an unevaluated
+	// -operand probe shape).
+	if (IsVoidType(to))
+	{
+		SemValue value;
+		value.type = to;
+		value.category = VC_PRVALUE;
+		value.node = MakeSemNode(SN_CAST_EXPRESSION);
+		value.node->type = to;
+		value.node->category = VC_PRVALUE;
+		return value;
+	}
 	if (!IsIntegralType(to) && to->kind != TK_ENUM)
 		throw OutsideBoundary("value-initialization form");
 	SemValue value;
