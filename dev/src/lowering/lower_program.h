@@ -236,6 +236,13 @@ private:
 	void DemandFunction(LowFunctionInfo& info);
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();
+	// The init-order anchor of an image-backed call-initialized weak
+	// object (PA23 variable templates).
+	void AppendImageInitTouch(const LowGlobalInfo& info, bool is_class,
+	                          SemNode& init_def);
+	// Registers and lowers one @__cppgm_init / @__cppgm_fini body.
+	void RegisterLifetimeHelper(const char* name, const char* role,
+	                            SemNodePtr def);
 	void AppendTlsWrapperDeclares(vector<string>& declares);
 	// A thread-local object's first-use guard global and internal
 	// `__tls_init` function built from its construction actions.

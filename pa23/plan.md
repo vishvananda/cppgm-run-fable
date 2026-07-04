@@ -17,29 +17,23 @@ combined cases without special-casing individual tests.
 
 ## Status
 
-2273/2279 through-pa23; clusters A-D and most of E are done (static
--member storage/fold rules, partial-spec structural matching, deleted
--template SFINAE, function-pointer NTTPs, explicit-instantiation forms,
-ADL template-ids, pack-prefix deduction, non-deduced alias contexts,
-declared-signature specialization selection, friend-template merging).
-Six composition cases remain:
+COMPLETE: 2279/2279 through-pa23; file audit passes. All clusters
+landed: static-member storage/fold rules, partial-spec structural
+matching, deleted-template SFINAE, function-pointer NTTPs,
+explicit-instantiation forms, ADL template-ids, pack-prefix and
+dual-pack deduction, non-deduced alias contexts, declared-signature
+specialization selection, friend-template merging, written
+function-type + decltype-expression mangling, effect-gated
+user-conversion elision, and class-typed member variable templates
+(storage + template-id object mangling + init-order anchor).
 
-- `200-forwarding-pack-cast-trailing-return` and
-  `500-async-initiate-cached-sfinae-pack-return`: multi-level
-  async_initiate SFINAE with a pack in mid-parameter-list and
-  leading-explicit calls inside trailing decltypes.
-- `200-member-template-implicit-instantiation-not-overload`: a member
-  template instantiation must not join the overload set as a separate
-  entity when a matching non-template member exists.
-- `400-qualified-member-variable-template-class-value`: class-typed
-  member variable templates with storage (decltype over a qualified
-  variable-template-id).
-- `500-reentrant-static-query-callable-enable-if-cache`: reentrant
-  enable_if probing through a cached callable member.
-- `spec/100-out-of-class-conversion-operator-definition`: effect-free
-  user-conversion initialization elides its call like the implicit
-  default-construction chains (needs a conversion-body syntactic
-  effect walk).
+Known convention gap for later stages: our variable-template-id
+object name spells the class-spec argument by full-prefix
+substitution (`_ZN4propILi0EE14static_query_vI2exS0_EE`, the g++
+form) while the reference spells it via injected-class-name
+(`...I2exS_ILi0EEE`). The relaxed compare strips object= metadata, so
+this only matters if a later execution stage links our objects
+against reference-mangled symbols.
 
 ## Failure taxonomy (from the checked-in refs and diagnostics)
 

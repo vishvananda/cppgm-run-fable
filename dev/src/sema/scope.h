@@ -106,6 +106,11 @@ struct ScopeBinding
 	bool no_object;
 	int param_index;
 	ConstValue value;
+	// PA23: a variable-template specialization binding carries its
+	// typed template identity (the template and resolved arguments)
+	// so the lowering mangles the template-id form.
+	const TemplateInfo* var_spec_template = 0;
+	vector<TemplateArg> var_spec_args;
 	// PA19 packs. A template parameter pack's alias binding carries
 	// its elements (types or values); a function parameter pack's
 	// binding additionally carries the expanded parameter slot names

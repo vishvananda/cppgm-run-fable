@@ -1006,6 +1006,30 @@ string MangleVariableObjectName(const Scope* scope, const string& name)
 	return "_ZN" + prefix + SourceName(name) + "E";
 }
 
+string MangleVariableTemplateObjectName(const Scope* scope,
+                                        const TemplateInfo& tmpl,
+                                        const vector<TemplateArg>& args)
+{
+	Substitutions subs;
+	vector<NameComponent> parts = ScopeComponents(scope);
+	NameComponent leaf;
+	leaf.name = tmpl.name;
+	leaf.args = &args;
+	ArgsPackSpan(tmpl.params, args.size(), leaf.pack_start,
+	             leaf.pack_end);
+	string encoding;
+	string prev;
+	if (!parts.empty())
+		prev = ManglePrefixComponents(parts, subs, encoding);
+	string name_key;
+	string full_key;
+	ComponentKeys(leaf, prev, name_key, full_key);
+	AppendComponentSpelling(leaf, name_key, subs, encoding, false);
+	if (parts.empty())
+		return "_Z" + encoding;
+	return "_ZN" + encoding + "E";
+}
+
 string MangleClassTypeEncoding(const NamedTypeInfo* entity)
 {
 	Substitutions subs;

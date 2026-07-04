@@ -1145,6 +1145,48 @@ void SemBinder::BindVariableExplicitSpecialization(const AstDecl& inner)
 	tmpl.var_explicit[TemplateArgumentKey(args)] = init->expr.get();
 }
 
+// PA23: a class-typed variable-template use materializes a weak
+// object (the constexpr image emits statically; reads designate the
+// storage). Runs with `current_` already inside the argument alias
+// scope; the cache slot fills before the initializer analysis so
+// self-references terminate.
+const ScopeBinding* SemBinder::ResolveClassVariableTemplate(
+	TemplateInfo& tmpl, const vector<TemplateArg>& args,
+	const string& key, const TypePtr& declared, const AstExpr& init,
+	bool is_constexpr)
+{
+	unique_ptr<ScopeBinding>& slot = tmpl.var_specs[key];
+	slot.reset(new ScopeBinding());
+	ScopeBinding fresh;
+	fresh.kind = SB_VARIABLE;
+	fresh.name = tmpl.name + TemplateArgumentSpelling(args);
+	fresh.type = MakeCvQualifiedType(RemoveTopCv(declared), true,
+	                                 false);
+	fresh.owner = tmpl.declaring;
+	fresh.home = tmpl.declaring;
+	fresh.var_spec_template = &tmpl;
+	fresh.var_spec_args = args;
+	// The scope registration makes the entity resolvable by
+	// (scope, name) like an ordinary object (the lowering identity).
+	ScopeBinding& binding = AddBinding(*tmpl.declaring, fresh);
+	// The definition is a unit-level object regardless of where the
+	// first use sits (a body-analysis use must not make it a local).
+	unit_.items.push_back(MakeSemNode(SN_VARIABLE));
+	SemNode* item = unit_.items.back().get();
+	item->name = QualifiedScopePath(tmpl.declaring) + binding.name;
+	item->type = binding.type;
+	item->entity_scope = tmpl.declaring;
+	item->entity_name = binding.name;
+	item->has_explicit_init = true;
+	item->weak_def = true;
+	SemValue value = analyzer_.Analyze(init);
+	analyzer_.CopyInitialize(value, binding.type, "initialization");
+	item->children.push_back(std::move(value.node));
+	FinishConstexprObject(*item, binding, is_constexpr);
+	*slot = binding;
+	return slot.get();
+}
+
 // A use of `name<args>`: the per-key objectless constant binding,
 // evaluated on first demand from the selected initializer (explicit
 // specialization, matching partial, or the primary).
@@ -1194,14 +1236,25 @@ const ScopeBinding* SemBinder::ResolveVariableTemplateId(
 	current_ = alias;
 	ConstValue value;
 	TypePtr declared;
+	bool is_constexpr = false;
 	try
 	{
-		value = EvaluateConstExpr(*init, *this);
 		DeclSpecifierInfo specs = builder_.ProcessSpecifiers(
 			tmpl.var_decl->specifiers, true);
 		declared = specs.type;
+		is_constexpr = specs.is_constexpr;
 		if (specs.is_constexpr)
 			declared = MakeCvQualifiedType(declared, true, false);
+		// PA23: a class-typed variable template gets storage - the
+		// constexpr image emits weak and reads designate the object.
+		if (RemoveTopCv(declared)->kind == TK_CLASS)
+		{
+			const ScopeBinding* object = ResolveClassVariableTemplate(
+				tmpl, args, key, declared, *init, is_constexpr);
+			current_ = saved;
+			return object;
+		}
+		value = EvaluateConstExpr(*init, *this);
 	}
 	catch (...)
 	{

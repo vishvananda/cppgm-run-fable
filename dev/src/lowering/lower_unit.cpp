@@ -279,7 +279,12 @@ LowGlobalInfo& LowerProgram::GlobalEntry(const Scope* scope,
 	info.is_thread_local = binding->is_thread_local;
 	info.low_name = UniqueSymbol(LowerScopePath(scope) +
 	                             LowerSanitizeName(name));
-	info.object_name = MangleVariableObjectName(scope, name);
+	if (binding->var_spec_template)
+		info.object_name = MangleVariableTemplateObjectName(
+			scope, *binding->var_spec_template,
+			binding->var_spec_args);
+	else
+		info.object_name = MangleVariableObjectName(scope, name);
 	global_index_[key] = globals_.size();
 	globals_.push_back(info);
 	return globals_.back();
@@ -758,6 +763,14 @@ void LowerProgram::DemandImageInitCallees(const SemNode& item)
 	for (size_t i = 0; i < item.children.size(); i++)
 	{
 		const SemNode& action = *item.children[i];
+		// A call-initialized image (a constexpr function result): the
+		// callee tree stays odr-used even though the call dropped.
+		if (action.kind == SN_CALL_EXPRESSION)
+		{
+			if (demanded_trees_.insert(&action).second)
+				DemandTreeCallees(action);
+			continue;
+		}
 		if (action.kind != SN_CONSTRUCTOR_ACTION ||
 		    action.children.empty() ||
 		    action.children[0]->kind != SN_CALL_EXPRESSION ||
@@ -1087,7 +1100,10 @@ void LowerProgram::BuildLifetimeHelpers()
 		// unrenderable image (engine-internal addresses, bit-fields)
 		// falls through and initializes dynamically.
 		if (TryImageBackedInit(info))
+		{
+			AppendImageInitTouch(info, is_class, *init_def);
 			continue;
+		}
 		// PA18: a weak (instantiated static member) object does not by
 		// itself anchor the init helper; a thread-local object
 		// constructs behind its own first-use guard, not in the
@@ -1153,36 +1169,51 @@ void LowerProgram::BuildLifetimeHelpers()
 	// Finalization actions run in reverse declaration order.
 	for (size_t i = 0, j = fini_def->children.size(); i < j / 2; i++)
 		fini_def->children[i].swap(fini_def->children[j - 1 - i]);
-	bool want_init = any_class_object || !init_def->children.empty();
-	bool want_fini = !fini_def->children.empty();
-	if (want_init)
-	{
-		LowFunctionInfo info;
-		info.scope = 0;
-		info.name = "__cppgm_init";
-		info.type = init_def->type;
-		info.low_name = UniqueSymbol("__cppgm_init");
-		info.internal = true;
-		info.role = "init";
-		info.index = functions_.size();
-		functions_.push_back(info);
-		LowerHelper(functions_.back(), *init_def);
-		helper_defs_.push_back(std::move(init_def));
-	}
-	if (want_fini)
-	{
-		LowFunctionInfo info;
-		info.scope = 0;
-		info.name = "__cppgm_fini";
-		info.type = fini_def->type;
-		info.low_name = UniqueSymbol("__cppgm_fini");
-		info.internal = true;
-		info.role = "fini";
-		info.index = functions_.size();
-		functions_.push_back(info);
-		LowerHelper(functions_.back(), *fini_def);
-		helper_defs_.push_back(std::move(fini_def));
-	}
+	if (any_class_object || !init_def->children.empty())
+		RegisterLifetimeHelper("__cppgm_init", "init",
+		                       std::move(init_def));
+	if (!fini_def->children.empty())
+		RegisterLifetimeHelper("__cppgm_fini", "fini",
+		                       std::move(fini_def));
+}
+
+// PA23: a call-copy-initialized weak image object keeps its
+// init-order anchor - the dropped call and empty copy leave the
+// destination address evaluation (the checked variable-template
+// shape).
+void LowerProgram::AppendImageInitTouch(const LowGlobalInfo& info,
+                                        bool is_class, SemNode& init_def)
+{
+	if (!info.weak || !is_class || !info.node->has_explicit_init ||
+	    info.node->children.size() != 1 ||
+	    info.node->children[0]->kind != SN_CALL_EXPRESSION)
+		return;
+	SemNodePtr touch = MakeSemNode(SN_EXPRESSION_STATEMENT);
+	SemNodePtr id = MakeSemNode(SN_ID_EXPRESSION);
+	id->name = info.node->entity_name;
+	id->type = info.type;
+	id->category = VC_LVALUE;
+	id->entity_scope = info.node->entity_scope;
+	id->entity_name = info.node->entity_name;
+	touch->children.push_back(std::move(id));
+	init_def.children.push_back(std::move(touch));
+}
+
+void LowerProgram::RegisterLifetimeHelper(const char* name,
+                                          const char* role,
+                                          SemNodePtr def)
+{
+	LowFunctionInfo info;
+	info.scope = 0;
+	info.name = name;
+	info.type = def->type;
+	info.low_name = UniqueSymbol(name);
+	info.internal = true;
+	info.role = role;
+	info.index = functions_.size();
+	functions_.push_back(info);
+	LowerHelper(functions_.back(), *def);
+	helper_defs_.push_back(std::move(def));
 }
 
 // PA17 polymorphic emission: external declares, the pure-virtual

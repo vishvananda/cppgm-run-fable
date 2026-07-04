@@ -523,6 +523,10 @@ private:
 	                                const PartialSpecialization& partial,
 	                                const vector<TemplateArg>& args,
 	                                const vector<TemplateArg>& bound);
+	const ScopeBinding* ResolveClassVariableTemplate(
+		TemplateInfo& tmpl, const vector<TemplateArg>& args,
+		const string& key, const TypePtr& declared, const AstExpr& init,
+		bool is_constexpr);
 	const ScopeBinding* ResolveVariableTemplateId(TemplateInfo& tmpl,
 	                                              const AstNamePart& part);
 	void InstantiateClassFromPartial(TemplateInfo& tmpl,

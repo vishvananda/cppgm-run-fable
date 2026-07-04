@@ -51,6 +51,13 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec);
 string MangleVariableObjectName(const Scope* scope, const string& name);
 
+// PA23: the Itanium spelling of a variable-template specialization
+// (`_ZN4propILi0EE14static_query_vI2exS0_EE`): the terminal is a
+// template-id with the template name a substitution candidate.
+string MangleVariableTemplateObjectName(const Scope* scope,
+                                        const TemplateInfo& tmpl,
+                                        const vector<TemplateArg>& args);
+
 // PA15: the Itanium spelling of a non-static member function,
 // constructor, or destructor. `type` is the this-adjusted function
 // type (the implicit object pointer first); `special_code` is
