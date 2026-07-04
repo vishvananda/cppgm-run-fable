@@ -1351,7 +1351,10 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	CheckOperatorSpecializationOperands(tmpl, composed.type);
 	spec->type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
+	{
 		spec->declared_params.push_back(composed.parameters[i].type);
+		spec->param_names.push_back(composed.parameters[i].name);
+	}
 
 	spec->self.kind = SB_FUNCTION;
 	spec->self.name = spec->name;

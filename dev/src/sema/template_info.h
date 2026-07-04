@@ -135,6 +135,10 @@ struct FunctionSpecialization
 	string name;   // entity name: template-name + argument spellings
 	TypePtr type;  // concrete namespace-scope function type
 	vector<TypePtr> declared_params;  // pre-adjustment parameter types
+	// Composed parameter names, one per concrete parameter (expanded
+	// pack elements follow the `name`, `name__pack2`, ... convention);
+	// forwarding syntheses reuse them.
+	vector<string> param_names;
 	Scope* param_scope;  // argument alias scope (body + defaults bind here)
 	ScopeBinding self;
 	// 14.7.1p2: the body instantiates on the first odr-use (deduction

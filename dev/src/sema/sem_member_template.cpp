@@ -475,8 +475,16 @@ int SemBinder::EnsureCtorTemplateEntry(ClassInfo& cls,
 	ctor.tmpl_spec = spec;
 	ctor.tmpl_param_scope = spec->param_scope;
 	ctor.defaults = spec->self.fn_defaults[0];
-	// The declared parameter names carry into forwarding syntheses.
-	if (tmpl.pattern_decl && tmpl.pattern_decl->declarator)
+	// The composed parameter names carry into forwarding syntheses
+	// (pack elements keep the `name`, `name__pack2`, ... spellings);
+	// an unnamed composition falls back to the declared spellings.
+	bool any_named = false;
+	for (size_t i = 0; i < spec->param_names.size(); i++)
+		if (!spec->param_names[i].empty())
+			any_named = true;
+	if (any_named)
+		ctor.param_names = spec->param_names;
+	else if (tmpl.pattern_decl && tmpl.pattern_decl->declarator)
 		CollectDeclaredParamNames(*tmpl.pattern_decl->declarator,
 		                          ctor.param_names);
 	// 12.8p2 last sentence: a constructor template never declares a
