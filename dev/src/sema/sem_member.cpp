@@ -541,6 +541,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		throw OutsideBoundary("member name form");
 	if (object.type->kind != TK_CLASS)
 		throw runtime_error("member call on a non-class value");
+	host_.RequireCompleteType(object.type->named);
 	const NamedTypeInfo* lookup_entity = object.type->named;
 	if (qualified)
 		lookup_entity = ResolveMemberQualifier(callee.name,

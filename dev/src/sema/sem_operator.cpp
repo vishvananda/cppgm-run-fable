@@ -306,6 +306,7 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 	set<const void*> seen;
 	if (!operands.empty() && operands[0].type->kind == TK_CLASS)
 	{
+		host_.RequireCompleteType(operands[0].type->named);
 		Scope* members =
 			host_.Model().MemberScope(operands[0].type->named);
 		for (const Scope* link = members; link;

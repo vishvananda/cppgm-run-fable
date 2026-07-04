@@ -107,6 +107,12 @@ struct ClassSpecialization
 	// (`template<> int tag<int>::id() ...`); the primary's registered
 	// member definitions do not instantiate for them.
 	map<string, bool> member_spec_names;
+	// PA21: the partial specialization this body came from (index into
+	// owner->partials; -1 for the primary) with its deduced parameter
+	// slots, and the partial member definitions already instantiated.
+	int partial_index = -1;
+	vector<TemplateArg> partial_bound;
+	map<size_t, bool> partial_members_done;
 };
 
 // One instantiated function-template specialization: the concrete
@@ -155,6 +161,9 @@ struct PartialSpecialization
 	vector<TemplateArg> pattern;
 	const AstDecl* decl;      // class definition (TMPL_CLASS)
 	const AstExpr* init;      // initializer (TMPL_VARIABLE)
+	// PA21: out-of-class member definitions of this partial
+	// specialization (qualified by its template-id), in source order.
+	vector<const AstDecl*> member_defs;
 };
 
 // One captured template declaration (class or function). Forward

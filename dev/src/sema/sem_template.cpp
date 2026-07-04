@@ -842,27 +842,52 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 	}
 	ClassSpecialization* spec = slot.get();
 	// 14.7.3: a declared explicit specialization owns its key; uses
-	// see an incomplete type until its definition arrives.
-	if (!spec->instantiated && !spec->explicit_spec)
-	{
-		// 14.5.5: a matching partial specialization's pattern binds
-		// instead of the primary's.
-		vector<TemplateArg> bound;
-		int partial = MatchPartialSpecialization(tmpl, spec->args,
-		                                         bound);
-		if (partial >= 0)
-		{
-			InstantiateClassFromPartial(tmpl, *spec,
-			                            tmpl.partials[partial], bound);
-			InstantiateReadyMembers(tmpl);
-		}
-		else if (tmpl.has_definition)
-		{
-			InstantiateClassSpecialization(tmpl, *spec);
-			InstantiateReadyMembers(tmpl);
-		}
-	}
+	// see an incomplete type until its definition arrives. 14.7.1p4:
+	// an argument type still mid-instantiation defers the body to the
+	// first completeness demand (EnsureTypeCompleteness).
+	if (!spec->instantiated && !spec->explicit_spec &&
+	    !SpecializationArgsOpen(*spec))
+		InstantiateSpecializationBody(tmpl, *spec);
 	return spec;
+}
+
+// Whether an argument names a class whose body is still binding (its
+// member scope exists but the entity is incomplete).
+bool SemBinder::SpecializationArgsOpen(const ClassSpecialization& spec)
+{
+	for (size_t i = 0; i < spec.args.size(); i++)
+	{
+		const TemplateArg& arg = spec.args[i];
+		if (arg.is_value || !arg.type)
+			continue;
+		TypePtr bare = RemoveTopCv(arg.type);
+		if (bare->kind == TK_CLASS && !bare->named->complete &&
+		    model_.MemberScope(bare->named))
+			return true;
+	}
+	return false;
+}
+
+// The deferred body path shared by first resolution and the
+// completeness demand: a matching partial specialization's pattern
+// binds instead of the primary's (14.5.5).
+void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
+                                              ClassSpecialization& spec)
+{
+	vector<TemplateArg> bound;
+	int partial = MatchPartialSpecialization(tmpl, spec.args, bound);
+	if (partial >= 0)
+	{
+		InstantiateClassFromPartial(tmpl, spec,
+		                            tmpl.partials[partial], bound);
+		InstantiateReadyMembers(tmpl);
+		InstantiateReadyPartialMembers(tmpl);
+	}
+	else if (tmpl.has_definition)
+	{
+		InstantiateClassSpecialization(tmpl, spec);
+		InstantiateReadyMembers(tmpl);
+	}
 }
 
 void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
@@ -927,6 +952,8 @@ TemplateInfo* SemBinder::ResolveMemberOwnerTemplate(const AstName& id,
 	return 0;
 }
 
+static string MemberDefName(const AstDecl& decl);
+
 void SemBinder::RegisterTemplateMember(const AstDecl& decl,
                                        const AstName& id)
 {
@@ -938,12 +965,86 @@ void SemBinder::RegisterTemplateMember(const AstDecl& decl,
 	// at each instantiation; arity must agree with the template.
 	vector<TemplateParam> params;
 	CollectTemplateParams(decl, params);
+	// PA21: a definition whose qualifier pattern matches a partial
+	// specialization belongs to that partial (its own parameter list
+	// pairs with the partial's).
+	if (!tmpl->partials.empty())
+	{
+		vector<TemplateArg> pattern;
+		bool composed = false;
+		try
+		{
+			pattern = ComposePartialPattern(*tmpl, params,
+			                                id.parts[tmpl_part]);
+			composed = true;
+		}
+		catch (const std::exception&)
+		{
+			// Not a partial-form qualifier; the primary check below
+			// applies.
+		}
+		if (composed)
+		{
+			string key = TemplateArgumentKey(pattern);
+			for (size_t p = 0; p < tmpl->partials.size(); p++)
+			{
+				if (tmpl->partials[p].params.size() != params.size() ||
+				    TemplateArgumentKey(tmpl->partials[p].pattern) !=
+				        key)
+					continue;
+				tmpl->partials[p].member_defs.push_back(&decl);
+				InstantiateReadyPartialMembers(*tmpl);
+				return;
+			}
+		}
+	}
 	if (params.size() != tmpl->params.size())
 		throw runtime_error("template parameter list of a member of " +
 		                    tmpl->name + " disagrees");
 	CheckMemberDefinitionAgainstPattern(*tmpl, *decl.inner, params);
 	tmpl->member_defs.push_back(&decl);
 	InstantiateReadyMembers(*tmpl);
+}
+
+// Instantiates the pending member definitions registered on partial
+// specializations for every specialization built from them.
+void SemBinder::InstantiateReadyPartialMembers(TemplateInfo& tmpl)
+{
+	for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
+	         tmpl.class_specs.begin();
+	     it != tmpl.class_specs.end(); ++it)
+	{
+		ClassSpecialization& spec = *it->second;
+		if (!spec.instantiated || !spec.entity->complete ||
+		    spec.partial_index < 0 ||
+		    (size_t)spec.partial_index >= tmpl.partials.size())
+			continue;
+		PartialSpecialization& partial =
+			tmpl.partials[spec.partial_index];
+		for (size_t i = 0; i < partial.member_defs.size(); i++)
+		{
+			if (spec.partial_members_done.count(i))
+				continue;
+			spec.partial_members_done[i] = true;
+			const AstDecl& def = *partial.member_defs[i];
+			if (spec.member_spec_names.count(MemberDefName(def)))
+				continue;
+			if (instantiation_depth_ >=
+			    kTemplateInstantiationDepthLimit)
+				throw runtime_error("template instantiation depth "
+				                    "limit exceeded for " + tmpl.name);
+			TemplateInfo shadow;
+			vector<TemplateParam> def_params;
+			CollectTemplateParams(def, def_params);
+			shadow.params = def_params;
+			shadow.declaring = tmpl.declaring;
+			Scope* alias_scope =
+				MakeArgumentAliasScope(shadow, spec.partial_bound);
+			InstantiationContext context(*this, alias_scope, true);
+			BindDeclaration(*def.inner);
+			FlushDeferredBodies();
+		}
+	}
 }
 
 // 15.4p5: an out-of-class special-member definition must repeat the
@@ -1281,6 +1382,23 @@ void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 {
 	if (!info || info->complete)
 		return;
+	// PA21 14.7.1p4: a specialization whose body was deferred (an
+	// argument was still binding at resolution) instantiates at the
+	// first completeness demand.
+	if (info->spec_template && !info->is_template_anchor)
+	{
+		TemplateInfo& tmpl =
+			*const_cast<TemplateInfo*>(info->spec_template);
+		map<string, unique_ptr<ClassSpecialization>>::iterator spec =
+			tmpl.class_specs.find(TemplateArgumentKey(info->spec_args));
+		if (spec != tmpl.class_specs.end() &&
+		    !spec->second->instantiated &&
+		    !spec->second->explicit_spec)
+		{
+			InstantiateSpecializationBody(tmpl, *spec->second);
+			return;
+		}
+	}
 	std::map<const NamedTypeInfo*, PendingClassDefinition>::iterator
 		found = pending_classes_.find(info);
 	if (found == pending_classes_.end())

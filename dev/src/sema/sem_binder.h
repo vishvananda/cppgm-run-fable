@@ -526,11 +526,18 @@ private:
 	// body on demand when the definition is available.
 	ClassSpecialization* EnsureClassSpecialization(
 		TemplateInfo& tmpl, const vector<TemplateArg>& args);
+	// PA21: deferred-body helpers (14.7.1p4).
+	bool SpecializationArgsOpen(const ClassSpecialization& spec);
+	void InstantiateSpecializationBody(TemplateInfo& tmpl,
+	                                   ClassSpecialization& spec);
 	void InstantiateClassSpecialization(TemplateInfo& tmpl,
 	                                    ClassSpecialization& spec);
 	// Instantiates the registered out-of-class member definitions that
 	// are ready (definition and specialization both seen).
 	void InstantiateReadyMembers(TemplateInfo& tmpl);
+	// PA21: the same for member definitions registered on partial
+	// specializations.
+	void InstantiateReadyPartialMembers(TemplateInfo& tmpl);
 	void InstantiateMemberDefinition(TemplateInfo& tmpl,
 	                                 ClassSpecialization& spec,
 	                                 size_t member_index);

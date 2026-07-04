@@ -646,6 +646,8 @@ void SemBinder::InstantiateClassFromPartial(
 		                    "exceeded for " + tmpl.name);
 	spec.instantiated = true;
 	spec.from_partial = true;
+	spec.partial_index = (int)(&partial - &tmpl.partials[0]);
+	spec.partial_bound = bound;
 	TemplateInfo shadow;
 	shadow.params = partial.params;
 	shadow.declaring = tmpl.declaring;

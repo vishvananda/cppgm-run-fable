@@ -96,6 +96,8 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	for (size_t b = 1; b < base_types.size(); b++)
 	{
 		const TypePtr& extra = base_types[b];
+		if (extra->kind == TK_CLASS)
+			EnsureTypeCompleteness(extra->named);
 		if (extra->kind != TK_CLASS || !extra->named->complete)
 			throw runtime_error("base class is not a complete class");
 		const ClassInfo* extra_cls = unit_.classes.Find(extra->named);
@@ -108,6 +110,8 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	}
 	const AstBaseSpecifier& base = decl.bases[0];
 	TypePtr base_type = base_types[0];
+	if (base_type->kind == TK_CLASS)
+		EnsureTypeCompleteness(base_type->named);
 	if (base_type->kind != TK_CLASS || !base_type->named->complete)
 		throw runtime_error("base class is not a complete class");
 	ClassInfo* base_cls = unit_.classes.Find(base_type->named);
