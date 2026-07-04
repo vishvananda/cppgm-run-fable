@@ -1125,6 +1125,10 @@ string FunctionLowerer::LowerCallArgument(const SemNode& node,
 		else if (source->kind == TK_ARRAY ||
 		         source->kind == TK_FUNCTION)
 			return LowerPointerOperand(node);
+		else if (RemoveTopCv(source)->kind == TK_CLASS)
+			// 5.2.2p7: a class through the ellipsis is conditionally
+			// supported; the reference passes the object's address.
+			return MaterializeClassArg(node, RemoveTopCv(source));
 		return LowerValueAs(node, promoted, LCC_INIT);
 	}
 	if (IsReferenceType(param))
