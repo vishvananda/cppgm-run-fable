@@ -62,6 +62,13 @@ struct ITypeBuilderHost
 		(void)param;
 		return false;
 	}
+	// PA22 10.4p3: an array of an abstract class is ill-formed; the
+	// semantic layer overrides with the class-registry check (a
+	// substitution context turns the throw into a SFINAE discard).
+	virtual void CheckArrayElementType(const TypePtr& element)
+	{
+		(void)element;
+	}
 	// PA18: each composed parameter reports its declared name and type
 	// so a trailing-return decltype can see the parameters (8.3.5p2);
 	// no-op outside template substitution.

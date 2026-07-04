@@ -321,6 +321,7 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	}
 	case DI_ARRAY:
 	{
+		host_.CheckArrayElementType(out.type);
 		bool bound_known = item.array_bound.get() != 0;
 		unsigned long long bound = 0;
 		int bound_param = -1;

@@ -1578,6 +1578,21 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 
 // --- conversion-function templates (14.8.2.3) -------------------------------
 
+void SemBinder::CheckArrayElementType(const TypePtr& element)
+{
+	TypePtr bare = element ? RemoveTopCv(element) : element;
+	if (!bare || bare->kind != TK_CLASS)
+		return;
+	EnsureTypeCompleteness(bare->named);
+	const ClassInfo* cls = unit_.classes.Find(bare->named);
+	if (!cls)
+		return;
+	for (size_t i = 0; i < cls->vslots.size(); i++)
+		if (cls->vslots[i].kind == VS_METHOD && cls->vslots[i].pure)
+			throw runtime_error("array of abstract " +
+			                    bare->named->display);
+}
+
 void SemBinder::DeduceConversionTemplates(const NamedTypeInfo* entity,
                                           const TypePtr& dest)
 {

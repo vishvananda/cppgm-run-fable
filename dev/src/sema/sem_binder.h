@@ -880,6 +880,9 @@ public:
 		const AstNamePart* explicit_part);
 	virtual Scope* SwapLookupScope(Scope* scope);
 	virtual void RequireCompleteType(const NamedTypeInfo* info);
+	// ITypeBuilderHost: arrays of abstract classes are ill-formed
+	// (10.4p3); substitution contexts SFINAE-discard the throw.
+	virtual void CheckArrayElementType(const TypePtr& element);
 	// Deduces the source class's conversion-function templates (base
 	// chain included) against the required destination type; each
 	// success synthesizes an ordinary ClassConversion entry
