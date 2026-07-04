@@ -129,8 +129,14 @@ int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
 			         !candidate[i].template_entity)
 				complete = false;
 		}
-		if (complete)
-			matches.push_back(p);
+		if (!complete)
+			continue;
+		// PA21: deferred type slots re-resolve under the deduced
+		// bindings and must match the concrete argument (a failed
+		// substitution disqualifies the candidate).
+		if (!CheckDependentPatternSlots(tmpl, partial, args, candidate))
+			continue;
+		matches.push_back(p);
 	}
 	if (matches.empty())
 		return -1;
@@ -163,6 +169,65 @@ int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
 	DeduceTemplateArgs(tmpl.partials[best].pattern, args, bound,
 	                   allow_trailing);
 	return (int)best;
+}
+
+// The deferred (dependent_type) slots of a matched pattern:
+// re-resolve each under the deduced parameter bindings and compare
+// with the concrete argument. False when a substitution fails or
+// disagrees (the candidate does not match, 14.8.2 in the PA21 slice).
+bool SemBinder::CheckDependentPatternSlots(
+	TemplateInfo& tmpl, const PartialSpecialization& partial,
+	const vector<TemplateArg>& args, const vector<TemplateArg>& bound)
+{
+	bool any = false;
+	for (size_t i = 0; i < partial.pattern.size(); i++)
+		if (partial.pattern[i].dependent_type)
+			any = true;
+	if (!any)
+		return true;
+	TemplateInfo shadow;
+	shadow.params = partial.params;
+	shadow.declaring = tmpl.declaring;
+	Scope* alias_scope = MakeArgumentAliasScope(shadow, bound);
+	size_t ai = 0;
+	for (size_t i = 0; i < partial.pattern.size(); i++)
+	{
+		const TemplateArg& slot = partial.pattern[i];
+		if (slot.pack_pattern)
+		{
+			// A pack slot absorbs the remaining run less the fixed
+			// tail; deferred slots after a top-level pack stay
+			// unsupported (none in the suites).
+			size_t fixed_tail = partial.pattern.size() - i - 1;
+			ai = args.size() >= fixed_tail ? args.size() - fixed_tail
+			                               : args.size();
+			continue;
+		}
+		if (ai >= args.size())
+			return false;
+		if (slot.dependent_type)
+		{
+			Scope* saved = current_;
+			current_ = alias_scope;
+			TypePtr resolved;
+			try
+			{
+				resolved = builder_.ResolveTypeId(*slot.dependent_type);
+			}
+			catch (const std::exception&)
+			{
+				current_ = saved;
+				return false;
+			}
+			current_ = saved;
+			const TemplateArg& concrete = args[ai];
+			if (concrete.is_value || !concrete.type ||
+			    !TypeEquals(resolved, concrete.type))
+				return false;
+		}
+		ai++;
+	}
+	return true;
 }
 
 // --- explicit specialization entry -------------------------------------------

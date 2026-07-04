@@ -314,7 +314,8 @@ TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
 
 bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
 {
-	if (a.is_value != b.is_value || a.pack_pattern != b.pack_pattern)
+	if (a.is_value != b.is_value || a.pack_pattern != b.pack_pattern ||
+	    a.dependent_type != b.dependent_type)
 		return false;
 	// PA21 template-template arguments compare by template identity.
 	if (a.template_entity || b.template_entity ||
@@ -334,6 +335,8 @@ bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
 bool TemplateArgIsDependent(const TemplateArg& arg)
 {
 	if (arg.value_param >= 0 || arg.dependent_value || arg.pack_pattern)
+		return true;
+	if (arg.dependent_type)
 		return true;
 	if (arg.template_param >= 0)
 		return true;

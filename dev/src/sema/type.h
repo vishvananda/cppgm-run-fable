@@ -91,6 +91,11 @@ struct TemplateArg
 	// parameter slot the argument forwards positionally.
 	const struct TemplateInfo* template_entity = 0;
 	int template_param = -1;
+	// PA21 pattern slot: a type argument whose resolution needs
+	// instantiation-time facts (dependent qualified members, deferred
+	// alias substitutions); matching re-resolves the type-id under the
+	// deduced bindings and compares.
+	const struct AstTypeId* dependent_type = 0;
 	// PA21 deduction slots only (never part of a specialization
 	// identity): a slot standing for a parameter pack accumulates its
 	// deduced element run; `pack_done` is set once one expansion

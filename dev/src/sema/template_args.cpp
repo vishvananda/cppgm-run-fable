@@ -532,7 +532,21 @@ TemplateArg SemBinder::ResolveOneArgument(TemplateInfo& tmpl,
 		if (!argument.is_type || !argument.type)
 			throw runtime_error("expected a type argument for " +
 			                    tmpl.name);
-		return TemplateArg(builder_.ResolveTypeId(*argument.type));
+		try
+		{
+			return TemplateArg(builder_.ResolveTypeId(*argument.type));
+		}
+		catch (const std::exception&)
+		{
+			// PA21: a type-id needing instantiation-time facts
+			// (dependent members, deferred aliases) becomes a pattern
+			// slot re-resolved during specialization matching.
+			if (!InAbstractTemplateContext())
+				throw;
+			TemplateArg deferred;
+			deferred.dependent_type = argument.type.get();
+			return deferred;
+		}
 	}
 	TypePtr param_type = ValueParamType(
 		param, EnsureArgBindingScope(tmpl, so_far, partial));

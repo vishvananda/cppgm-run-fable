@@ -210,6 +210,14 @@ static void AppendArgKey(const TemplateArg& arg, string& out)
 {
 	if (arg.pack_pattern)
 		out += "pk";
+	if (arg.dependent_type)
+	{
+		char buffer[32];
+		snprintf(buffer, sizeof(buffer), "dt%p",
+		         (const void*)arg.dependent_type);
+		out += buffer;
+		return;
+	}
 	// PA21 template-template arguments key by template identity (or
 	// pattern slot).
 	if (arg.template_entity)

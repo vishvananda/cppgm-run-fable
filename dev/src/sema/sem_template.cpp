@@ -485,6 +485,11 @@ void SemBinder::CaptureAliasTemplate(const AstDecl& decl,
 	tmpl->decl = &decl;
 	tmpl->pattern_decl = &inner;
 	tmpl->alias_type = inner.type.get();
+	// The anchor stands behind deferred (dependent) alias uses.
+	tmpl->anchor = model_.CreateNamedTypeInfo(
+		"alias-template " + inner.name, current_, inner.name);
+	tmpl->anchor->is_template_anchor = true;
+	tmpl->anchor->spec_template = tmpl;
 	ScopeBinding binding;
 	binding.kind = SB_CLASS_TEMPLATE;
 	binding.name = inner.name;
@@ -519,6 +524,20 @@ const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 	catch (...)
 	{
 		current_ = saved;
+		// A substitution that needs instantiation-time facts
+		// (dependent member types) defers inside an abstract pattern:
+		// the use re-resolves concretely when its context
+		// instantiates.
+		if (InAbstractTemplateContext())
+		{
+			slot.reset(new ScopeBinding());
+			slot->kind = SB_TYPE_ALIAS;
+			slot->name = tmpl.name;
+			slot->type = MakeTemplateSpecType(tmpl.anchor, args);
+			slot->owner = tmpl.declaring;
+			slot->home = tmpl.declaring;
+			return slot.get();
+		}
 		throw;
 	}
 	current_ = saved;

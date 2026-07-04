@@ -81,6 +81,10 @@ bool DeduceFromArg(const TemplateArg& pattern, const TemplateArg& arg,
 	}
 	if (pattern.template_entity || arg.template_entity)
 		return pattern.template_entity == arg.template_entity;
+	// A deferred type slot re-resolves after structural deduction
+	// (CheckDependentPatternSlots); it matches anything here.
+	if (pattern.dependent_type)
+		return true;
 	if (!pattern.is_value && !arg.is_value)
 		return DeduceFromType(pattern.type, arg.type, bound);
 	if (!pattern.is_value || !arg.is_value)

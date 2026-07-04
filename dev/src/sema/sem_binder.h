@@ -468,6 +468,11 @@ private:
 	int MatchPartialSpecialization(TemplateInfo& tmpl,
 	                               const vector<TemplateArg>& args,
 	                               vector<TemplateArg>& bound);
+	// PA21: match-time re-resolution of deferred pattern type slots.
+	bool CheckDependentPatternSlots(TemplateInfo& tmpl,
+	                                const PartialSpecialization& partial,
+	                                const vector<TemplateArg>& args,
+	                                const vector<TemplateArg>& bound);
 	const ScopeBinding* ResolveVariableTemplateId(TemplateInfo& tmpl,
 	                                              const AstNamePart& part);
 	void InstantiateClassFromPartial(TemplateInfo& tmpl,
