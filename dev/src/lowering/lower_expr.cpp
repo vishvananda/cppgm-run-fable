@@ -542,15 +542,22 @@ LowerValue FunctionLowerer::LowerBinary(const SemNode& node)
 	if (IsPointerish(NodeType(lhs)) && IsPointerish(NodeType(rhs)) &&
 	    node.op == OP_MINUS)
 	{
-		// 5.7p6: pointer difference scales back by the element size.
+		// 5.7p6: pointer difference scales back by the element size
+		// (a one-byte element needs no scaling).
 		string a = LowerPointerOperand(lhs);
 		string b = LowerPointerOperand(rhs);
 		string diff = NewTemp();
 		Emit(diff + " = binary sub ptr " + a + ", " + b);
 		TypePtr element = NodeType(lhs)->target;
+		unsigned long long size = TypeSize(RemoveTopCv(element));
+		if (size == 1)
+		{
+			value.text = diff;
+			return value;
+		}
 		value.text = NewTemp();
 		Emit(value.text + " = binary div i64 " + diff + ", " +
-		     to_string(TypeSize(RemoveTopCv(element))));
+		     to_string(size));
 		return value;
 	}
 	LowerValue a = LowerValueExpr(lhs);
