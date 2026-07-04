@@ -12,8 +12,34 @@ combined cases without special-casing individual tests.
 
 - Through-pa22 is green (2242/2279 report tests; every pa23 failure is
   pa23-local).
-- 37 pa23 failures: 20 LowIR reference mismatches and 17 unexpected
-  EXIT_FAILUREs.
+- 37 pa23 failures at the start of this pass: 20 LowIR reference
+  mismatches and 17 unexpected EXIT_FAILUREs.
+
+## Status
+
+2273/2279 through-pa23; clusters A-D and most of E are done (static
+-member storage/fold rules, partial-spec structural matching, deleted
+-template SFINAE, function-pointer NTTPs, explicit-instantiation forms,
+ADL template-ids, pack-prefix deduction, non-deduced alias contexts,
+declared-signature specialization selection, friend-template merging).
+Six composition cases remain:
+
+- `200-forwarding-pack-cast-trailing-return` and
+  `500-async-initiate-cached-sfinae-pack-return`: multi-level
+  async_initiate SFINAE with a pack in mid-parameter-list and
+  leading-explicit calls inside trailing decltypes.
+- `200-member-template-implicit-instantiation-not-overload`: a member
+  template instantiation must not join the overload set as a separate
+  entity when a matching non-template member exists.
+- `400-qualified-member-variable-template-class-value`: class-typed
+  member variable templates with storage (decltype over a qualified
+  variable-template-id).
+- `500-reentrant-static-query-callable-enable-if-cache`: reentrant
+  enable_if probing through a cached callable member.
+- `spec/100-out-of-class-conversion-operator-definition`: effect-free
+  user-conversion initialization elides its call like the implicit
+  default-construction chains (needs a conversion-body syntactic
+  effect walk).
 
 ## Failure taxonomy (from the checked-in refs and diagnostics)
 
