@@ -423,10 +423,19 @@ int CompareConversions(const ImplicitConversion& a,
 	if (a.referee && b.referee && ReferenceRelated(a.referee, b.referee) &&
 	    !TypeEquals(a.referee, b.referee))
 	{
-		// p3: the less cv-qualified referee wins.
-		if (CvSuperset(b.referee, a.referee))
+		// p3: the less cv-qualified referee wins (an array's cv lives
+		// on its element type, 3.9.3p2).
+		TypePtr ra = a.referee;
+		TypePtr rb = b.referee;
+		while (ra->kind == TK_ARRAY)
+			ra = ra->target;
+		while (rb->kind == TK_ARRAY)
+			rb = rb->target;
+		bool b_super = CvSuperset(rb, ra);
+		bool a_super = CvSuperset(ra, rb);
+		if (b_super && !a_super)
 			return -1;
-		if (CvSuperset(a.referee, b.referee))
+		if (a_super && !b_super)
 			return 1;
 	}
 	return 0;
