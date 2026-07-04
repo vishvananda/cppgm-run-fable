@@ -1324,16 +1324,26 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 			p++;
 			if (!DeduceFixedParameter(pattern, args[i], bound))
 			{
-				std::vector<size_t> slots;
-				if (!CollectPatternSlots(pattern, slots))
-					return 0;
-				bool all_explicit = true;
-				for (size_t s = 0; s < slots.size(); s++)
-					if (slots[s] >= explicit_bound.size() ||
-					    !explicit_bound[slots[s]])
-						all_explicit = false;
-				if (!all_explicit)
-					return 0;
+				// With every parameter explicitly bound, any pattern
+				// is concrete after substitution regardless of its
+				// (possibly deferred) shape.
+				bool all_params_explicit = true;
+				for (size_t s = 0; s < explicit_bound.size(); s++)
+					if (!tmpl.params[s].pack && !explicit_bound[s])
+						all_params_explicit = false;
+				if (!all_params_explicit)
+				{
+					std::vector<size_t> slots;
+					if (!CollectPatternSlots(pattern, slots))
+						return 0;
+					bool all_explicit = true;
+					for (size_t s = 0; s < slots.size(); s++)
+						if (slots[s] >= explicit_bound.size() ||
+						    !explicit_bound[slots[s]])
+							all_explicit = false;
+					if (!all_explicit)
+						return 0;
+				}
 			}
 			continue;
 		}
@@ -1400,8 +1410,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		return EnsureFunctionSpecialization(
 			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
 	}
-	catch (const std::exception&)
+	catch (const std::exception& error)
 	{
+		if (getenv("CPPGM_DEDUCE_DEBUG"))
+			fprintf(stderr, "DBG deduce %s: %s\n", tmpl.name.c_str(),
+			        error.what());
 		return 0;
 	}
 }

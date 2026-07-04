@@ -225,6 +225,7 @@ Scope* DeclBinder::ResolvePrefixScope(const AstName& name)
 				IsReferenceType(named) ? named->target : named);
 			if (named->kind != TK_CLASS)
 				throw runtime_error("decltype qualifier is not a class");
+			EnsureTypeCompleteness(named->named);
 			Scope* members = model_.MemberScope(named->named);
 			if (!members)
 				throw runtime_error("decltype qualifier has no members");
