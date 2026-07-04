@@ -1351,6 +1351,17 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 	case SN_CAST_EXPRESSION:
 		if (IsVoidType(node.type))
 		{
+			// A discarded reference-typed call result still reads
+			// through the reference (the checked reference shape).
+			if (node.children[0]->kind == SN_CALL_EXPRESSION &&
+			    node.children[0]->type &&
+			    IsReferenceType(node.children[0]->type) &&
+			    RemoveTopCv(NodeType(*node.children[0]))->kind !=
+			        TK_CLASS)
+			{
+				LowerValueExpr(*node.children[0]);
+				return;
+			}
 			LowerEffect(*node.children[0]);
 			return;
 		}

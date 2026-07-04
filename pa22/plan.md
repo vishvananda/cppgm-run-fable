@@ -125,6 +125,35 @@ PA14-PA21 lowering path.
   the plain-identifier fallback that embedded template-id text in the
   mangled name is removed.
 
+## Status (2026-07-04)
+
+IN PROGRESS: 147/176 pa22 tests pass (95 at baseline); through-pa21
+stays fully green (1731/1731) after every landed batch.
+
+Landed: SFINAE candidate dropping (tasks 1-2), template-head identity
+with out-of-class pairing tolerance, template-id overload sets,
+no-eager-instantiation with demand sites (new-expressions, class
+copies, returns, conversion classification via binder hooks, explicit
+instantiation, decltype prefixes), the retry-loop use-after-free and
+dependent-name mangling fixes, declaration-only spec mangling/weak
+linkage, overload-set argument deduction (14.8.2.1p6), explicit-arg
+conversion fallback, partial-ordering ref/cv tie-breaks with unique
+array bounds, conversion-function templates end to end (capture,
+destination deduction, synthesized entries, bodies, cv mangling),
+constructor templates in implicit conversions, inherited constructor
+templates (using Base<T>::Base), entity-valued NTTPs
+(reference/pointer forms with L_Z mangling), dependent alias-use
+re-substitution in partial-spec matching (void_t detectors),
+pack-slot deduction through template-id patterns, ellipsis-riding
+trailing arguments, explicit `Args...` splicing, surrogate calls
+(13.3.1.1.2), decltype base-specifiers, and pack expansions in
+paren-init declarations.
+
+Remaining (29): variadic template-template deduction, dependent-ADL
+hidden-friend timing, several deep alias/pack SFINAE compositions,
+transitive-base explicit-call deduction, some LowIR shape diffs, and
+assorted single-feature corners; each needs its own reduction.
+
 ## Validation
 
 - Fast loop: `make test-report ACTIVE_TEST_REPORT_PAS='pa22'` and

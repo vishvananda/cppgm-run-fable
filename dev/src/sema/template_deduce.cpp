@@ -453,13 +453,24 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 			return DeduceFromArgList(pattern->targs, entity->spec_args,
 			                         bound, false);
 		}
-		while (entity &&
-		       entity->spec_template != pattern->named->spec_template)
+		// 14.8.2.1p4: the (unique) base from which deduction succeeds;
+		// a same-template base whose arguments do not unify keeps the
+		// walk going (impl<I+1, Tail...> recursion chains).
+		while (entity)
+		{
+			if (entity->spec_template == pattern->named->spec_template)
+			{
+				vector<TemplateArg> probe = bound;
+				if (DeduceFromArgList(pattern->targs, entity->spec_args,
+				                      probe, false))
+				{
+					bound.swap(probe);
+					return true;
+				}
+			}
 			entity = entity->base_entity;
-		if (!entity)
-			return false;
-		return DeduceFromArgList(pattern->targs, entity->spec_args,
-		                         bound, false);
+		}
+		return false;
 	}
 	default:
 		return false;
