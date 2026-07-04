@@ -163,6 +163,10 @@ struct PartialSpecialization
 
 	vector<TemplateParam> params;
 	vector<TemplateArg> pattern;
+	// Canonical key of `pattern`, computed once at registration so
+	// redeclaration merging and member-definition matching never
+	// rebuild it per candidate.
+	string pattern_key;
 	const AstDecl* decl;      // class definition (TMPL_CLASS)
 	const AstExpr* init;      // initializer (TMPL_VARIABLE)
 	// PA21: out-of-class member definitions of this partial

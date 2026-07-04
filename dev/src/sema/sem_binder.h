@@ -489,7 +489,7 @@ private:
 	                                              const AstNamePart& part);
 	void InstantiateClassFromPartial(TemplateInfo& tmpl,
 	                                 ClassSpecialization& spec,
-	                                 const PartialSpecialization& partial,
+	                                 int partial_index,
 	                                 const vector<TemplateArg>& bound);
 	// Structural deduction of a pattern argument list against concrete
 	// arguments (template_deduce.cpp).

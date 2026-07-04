@@ -1001,12 +1001,12 @@ void SemBinder::RegisterClassPartial(const AstDecl& decl,
 	partial.decl = inner.kind == DK_CLASS ? &inner : 0;
 	// A redeclaration merges onto the recorded pattern (a forward
 	// declaration gains its definition later).
-	string merge_key = TemplateArgumentKey(partial.pattern);
+	partial.pattern_key = TemplateArgumentKey(partial.pattern);
 	for (size_t p = 0; p < tmpl.partials.size(); p++)
 	{
 		PartialSpecialization& existing = tmpl.partials[p];
 		if (existing.params.size() != partial.params.size() ||
-		    TemplateArgumentKey(existing.pattern) != merge_key)
+		    existing.pattern_key != partial.pattern_key)
 			continue;
 		if (partial.decl)
 		{
@@ -1023,16 +1023,16 @@ void SemBinder::RegisterClassPartial(const AstDecl& decl,
 }
 
 void SemBinder::InstantiateClassFromPartial(
-	TemplateInfo& tmpl, ClassSpecialization& spec,
-	const PartialSpecialization& partial,
+	TemplateInfo& tmpl, ClassSpecialization& spec, int partial_index,
 	const vector<TemplateArg>& bound)
 {
 	if (instantiation_depth_ >= kTemplateInstantiationDepthLimit)
 		throw runtime_error("template instantiation depth limit "
 		                    "exceeded for " + tmpl.name);
+	const PartialSpecialization& partial = tmpl.partials[partial_index];
 	spec.instantiated = true;
 	spec.from_partial = true;
-	spec.partial_index = (int)(&partial - &tmpl.partials[0]);
+	spec.partial_index = partial_index;
 	spec.partial_bound = bound;
 	TemplateInfo shadow;
 	shadow.params = partial.params;

@@ -634,8 +634,7 @@ void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
 	int partial = MatchPartialSpecialization(tmpl, spec.args, bound);
 	if (partial >= 0)
 	{
-		InstantiateClassFromPartial(tmpl, spec,
-		                            tmpl.partials[partial], bound);
+		InstantiateClassFromPartial(tmpl, spec, partial, bound);
 		InstantiateReadyMembers(tmpl);
 		InstantiateReadyPartialMembers(tmpl);
 	}
@@ -745,8 +744,7 @@ void SemBinder::RegisterTemplateMember(const AstDecl& decl,
 			for (size_t p = 0; p < tmpl->partials.size(); p++)
 			{
 				if (tmpl->partials[p].params.size() != params.size() ||
-				    TemplateArgumentKey(tmpl->partials[p].pattern) !=
-				        key)
+				    tmpl->partials[p].pattern_key != key)
 					continue;
 				tmpl->partials[p].member_defs.push_back(&decl);
 				InstantiateReadyPartialMembers(*tmpl);

@@ -165,6 +165,89 @@ two-stage base projections, reference-lvalue compound-assignment
 store re-derivation, inline out-of-class ctor weakness, and concrete
 pack expansions filling fixed template parameters (14.3p1).
 
+## Architecture Review
+
+Audit of the landed implementation (range `ab31396f0..HEAD`, ~5,000
+insertions over 55 files) against the design above:
+
+- Entity graph: identity lives where the design put it.
+  `template_info.h` holds the only identity-bearing records
+  (`TemplateInfo`, `ClassSpecialization`, `FunctionSpecialization`,
+  `PartialSpecialization`); specialization identity is
+  `TemplateArgumentKey` over typed arguments (entity pointers for
+  template-template arguments, canonical types for type arguments,
+  PA20 constant values for value arguments). No source-text form
+  carries identity. The pre-PA21 text-canonicalization helpers
+  (`PositionalizeTemplateNames`, `CanonicalDeclaratorParams`) remain
+  confined to out-of-class-definition redeclaration matching and are
+  not used for specialization identity or selection.
+- Ownership split held: capture/class instantiation in
+  `sem_template.cpp`, member-template layer in
+  `sem_member_template.cpp`, explicit/partial specialization and
+  extern-template in `sem_spec.cpp`, parameter/argument resolution in
+  `template_args.cpp`, unification/ordering in `template_deduce.cpp`,
+  instantiation-demand bookkeeping in `template_body.cpp`. The audit
+  found no duplicated selection or deduction logic across these
+  units.
+- Lowering boundary held: lowering consumes
+  `SemUnit::explicit_fn_instantiations` /
+  `extern_fn_suppressions` and the per-spec `extern_suppressed` /
+  `inst_definition` flags; the definition-after-extern case is
+  ordered correctly because the suppression loop skips specs whose
+  `inst_definition` was set by sema. Weak local statics inside
+  vague-linkage bodies carry `object=@<symbol>` — verified against
+  the checked-in reference LowIR, which uses exactly that spelling as
+  the weak merge key.
+- Member templates re-capture per enclosing specialization, as
+  designed: the pattern re-walk binds under a fresh specialization
+  scope, so each `ClassSpecialization` owns fresh member
+  `TemplateInfo`s; `members_done` / `partial_members_done` /
+  `member_spec_names` keep every (specialization, definition) pair
+  instantiated exactly once, with explicit member specializations
+  masking pattern definitions.
+- Audit fixes applied on top of the landed work: partial
+  specializations now cache their canonical `pattern_key` at
+  registration (redeclaration merging and member-definition matching
+  no longer rebuild candidate keys in loops);
+  `InstantiateClassFromPartial` takes the matched partial's index
+  from the caller instead of recovering it by pointer arithmetic;
+  the ctor-template entry scan in `lower_unit.cpp` stops at the
+  first match.
+
+## Final Architecture Review
+
+Exit state against the Stage Handoff contract:
+
+- Stable graph: templates, partial specializations, explicit
+  specializations, and explicit instantiations resolve onto shared
+  records; `class_specs`/`fn_specs` are ordered maps keyed by
+  canonical argument keys, so selection and emission order are
+  deterministic for identical inputs.
+- Specialization selection is deterministic: partials are kept in
+  declaration order and matched via the PA19 most-specialized
+  ordering; the chosen partial's index and bound slots are recorded
+  on the specialization (`partial_index`, `partial_bound`).
+- Ownership lowers through the ordinary path: explicit-instantiation
+  definitions emit as object roots, extern declarations suppress
+  emission, definitions after extern re-enable it — all through
+  sema-owned flags; no lowering-side re-derivation of template facts
+  beyond mangled-name construction from the entity records.
+- No "template entity model later" gap remains: alias templates,
+  variable templates, template-template parameters, member/friend
+  templates, and current-specialization identity are all modeled.
+  What PA21 intentionally leaves for PA22 is exactly the README's
+  out-of-scope list (full deduction, function-template partial
+  ordering, SFINAE); the one visible seam is template-id friend
+  matching, which takes the first deducible template — inputs where
+  several templates match need partial ordering, which the handout
+  defines as undefined behaviour for this milestone and PA22
+  completes.
+- Performance: the 180-test pa21 suite runs in ~2.1s wall; audit
+  removed the only avoidable quadratic registration scans (cached
+  pattern keys). The ready-member instantiation walk visits each
+  (specialization, definition) pair once, which is proportional to
+  the work it must produce.
+
 ## Validation
 
 - Fast loop: `make test-report ACTIVE_TEST_REPORT_PAS='pa21'` and

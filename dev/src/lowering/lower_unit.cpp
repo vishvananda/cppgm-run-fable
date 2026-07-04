@@ -663,7 +663,7 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	const FunctionSpecialization* ctor_spec = 0;
 	if (special_code == "C1" || special_code == "C2")
 		if (const ClassInfo* cls = MethodClass(type))
-			for (size_t i = 0; i < cls->ctors.size(); i++)
+			for (size_t i = 0; !ctor_spec && i < cls->ctors.size(); i++)
 				if (cls->ctors[i].tmpl_spec &&
 				    CtorEntryMatches(cls->ctors[i].type, type))
 					ctor_spec = cls->ctors[i].tmpl_spec;
