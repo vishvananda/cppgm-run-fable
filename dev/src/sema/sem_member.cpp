@@ -508,6 +508,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		object = DereferenceObject(std::move(object));
 	string name;
 	bool qualified = false;
+	const AstNamePart* explicit_part = 0;
 	const AstNamePart& last = callee.name.parts.back();
 	if (callee.name.IsPlainIdentifier())
 		name = callee.name.parts[0].identifier;
@@ -520,6 +521,14 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		// canonical member name.
 		name = "operator " + DescribeType(
 			host_.ResolveCastTypeId(*last.conversion_type));
+	else if (last.kind == NP_TEMPLATE_ID)
+	{
+		// PA21 member templates: an explicit member template-id call
+		// (`obj.f<int>(..)`, possibly Base-qualified).
+		name = last.identifier;
+		explicit_part = &last;
+		qualified = callee.name.parts.size() > 1;
+	}
 	else if (last.kind == NP_IDENTIFIER)
 	{
 		// PA17 10.3p15: explicit scope qualification (`d.Base::f()`)
@@ -571,7 +580,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		host_.CheckMemberAccess(member->home, member->access, name,
 		                        object.type->named);
 	return AnalyzeMethodCall(std::move(object), *member, expr.arguments,
-	                         qualified);
+	                         qualified, explicit_part);
 }
 
 // The class named by the qualifier of a qualified member-call name
@@ -608,13 +617,19 @@ const NamedTypeInfo* SemExprAnalyzer::ResolveMemberQualifier(
 // take a neutral identity binding.
 SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	SemValue object, const ScopeBinding& binding,
-	const vector<AstExprPtr>& arguments, bool qualified)
+	const vector<AstExprPtr>& arguments, bool qualified,
+	const AstNamePart* explicit_part)
 {
 	const NamedTypeInfo* object_entity = object.type->named;
 	vector<TypePtr> declared;
-	declared.push_back(binding.type);
-	for (size_t i = 0; i < binding.overloads.size(); i++)
-		declared.push_back(binding.overloads[i]);
+	size_t ordinary = 0;
+	if (binding.type)
+	{
+		declared.push_back(binding.type);
+		for (size_t i = 0; i < binding.overloads.size(); i++)
+			declared.push_back(binding.overloads[i]);
+	}
+	ordinary = declared.size();
 
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
@@ -626,15 +641,35 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	AnalyzeArgumentList(arguments, args);
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
+	// PA21 member templates: deduced specializations join after the
+	// ordinary overloads.
+	vector<const FunctionSpecialization*> specs(ordinary,
+	                                            (const FunctionSpecialization*)0);
+	if (!binding.fn_templates.empty())
+	{
+		std::set<const void*> seen;
+		vector<OperatorCandidate> deduced;
+		AppendTemplateCandidates(binding, args, deduced, seen,
+		                         explicit_part);
+		for (size_t i = 0; i < deduced.size(); i++)
+		{
+			declared.push_back(deduced[i].declared);
+			specs.push_back(deduced[i].spec);
+		}
+	}
+	if (declared.empty())
+		throw runtime_error("no viable member function " + binding.name);
 	vector<TypePtr> candidates;
 	vector<size_t> min_arity;
+	vector<bool> is_template;
 	const NamedTypeInfo* owner_entity =
 		host_.Model().ScopeEntity(binding.owner);
 	for (size_t c = 0; c < declared.size(); c++)
 	{
 		const TypePtr& fn = declared[c];
-		bool is_static = c < binding.fn_static.size() &&
-			binding.fn_static[c];
+		bool is_static = c < ordinary
+			? c < binding.fn_static.size() && binding.fn_static[c]
+			: specs[c]->owner && specs[c]->owner->member_static;
 		TypePtr object_param;
 		if (is_static)
 			// 13.3.1p4: the implicit object argument matches anything;
@@ -662,35 +697,51 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		candidates.push_back(MakeFunctionType(fn->target, parameters,
 		                                      fn->variadic));
 		size_t required = fn->parameters.size();
-		const vector<const AstExpr*>* defaults =
-			c < binding.fn_defaults.size() ? &binding.fn_defaults[c] : 0;
+		const vector<const AstExpr*>* defaults = 0;
+		if (c < ordinary)
+			defaults = c < binding.fn_defaults.size()
+				? &binding.fn_defaults[c] : 0;
+		else
+			defaults = &specs[c]->self.fn_defaults[0];
 		while (defaults && required > 0 && required <= defaults->size()
 		       && (*defaults)[required - 1])
 			required--;
 		min_arity.push_back(required + 1);
+		is_template.push_back(c >= ordinary);
 	}
 	vector<ImplicitConversion> conversions;
+	SpecOverloadOrder order(host_, specs, args.size());
 	size_t winner = SelectBestOverload(candidates, sources, conversions,
-	                                   &min_arity);
-	if (winner < binding.fn_deleted.size() && binding.fn_deleted[winner])
+	                                   &min_arity, &is_template, &order);
+	const FunctionSpecialization* spec =
+		winner < ordinary ? 0 : specs[winner];
+	if (!spec && winner < binding.fn_deleted.size() &&
+	    binding.fn_deleted[winner])
 		throw runtime_error("use of deleted member function");
-	EMemberAccess access = winner < binding.fn_access.size()
-		? binding.fn_access[winner] : MA_PUBLIC;
+	EMemberAccess access = MA_PUBLIC;
+	if (spec)
+		access = spec->owner->member_access;
+	else if (winner < binding.fn_access.size())
+		access = binding.fn_access[winner];
 	host_.CheckMemberAccess(binding.home, access, binding.name,
 	                        object_entity);
 	// A using-declaration merges overloads from another class; the
 	// winner keeps its real declaring scope for identity/addressing.
 	const Scope* owner_scope = binding.owner;
-	if (winner < binding.fn_owner.size() && binding.fn_owner[winner])
+	if (!spec && winner < binding.fn_owner.size() &&
+	    binding.fn_owner[winner])
 		owner_scope = binding.fn_owner[winner];
+	if (spec)
+		owner_scope = spec->owner->declaring;
 	// PA16: a qualified or explicit call can select an implicitly
 	// declared assignment operator; synthesize it on first selection.
-	if (binding.name == "operator =")
+	if (!spec && binding.name == "operator =")
 		if (const NamedTypeInfo* assign_entity =
 		        host_.Model().ScopeEntity(owner_scope))
 			host_.EnsureAssignSpecial(assign_entity, winner);
-	bool is_static = winner < binding.fn_static.size() &&
-		binding.fn_static[winner];
+	bool is_static = spec
+		? spec->owner->member_static
+		: winner < binding.fn_static.size() && binding.fn_static[winner];
 	const TypePtr& fn = declared[winner];
 	for (size_t i = 0; i < args.size(); i++)
 		if (i < fn->parameters.size())
@@ -698,9 +749,9 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 			                fn->parameters[i]);
 	for (size_t i = args.size(); i < fn->parameters.size(); i++)
 	{
-		SemValue filled = Analyze(*binding.fn_defaults[winner][i]);
-		CopyInitialize(filled, fn->parameters[i], "default argument");
-		args.push_back(std::move(filled));
+		const ScopeBinding& chosen = spec ? spec->self : binding;
+		args.push_back(SynthesizeDefaultArgument(
+			chosen, spec ? 0 : winner, i, fn->parameters[i]));
 	}
 
 	SemValue value = CallResult(fn);
@@ -709,22 +760,44 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	const NamedTypeInfo* callee_class =
 		winner_entity ? winner_entity : object_entity;
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	callee->name = CanonicalQualifiedName(owner_scope, binding.name);
-	callee->type = is_static ? fn
-	                         : ThisAdjustedType(callee_class, fn);
-	callee->entity_scope = owner_scope;
-	callee->entity_name = binding.name;
-	callee->is_method = !is_static;
-	if (winner < binding.fn_unwind_no.size() &&
-	    binding.fn_unwind_no[winner])
-		callee->unwind_no = true;
-	if (winner < binding.fn_noexcept_decl.size() &&
-	    binding.fn_noexcept_decl[winner])
-		callee->noexcept_decl = true;
+	if (spec)
+	{
+		// A member-template specialization routes like a namespace
+		// -scope specialization (its own entry keyed on the argument
+		// alias scope), with the object address as the leading
+		// argument.
+		callee->name = CanonicalQualifiedName(spec->self.owner,
+		                                      spec->name);
+		callee->type = is_static
+			? fn : ThisAdjustedType(callee_class, fn);
+		callee->entity_scope = spec->self.owner;
+		callee->entity_name = spec->name;
+		callee->fn_spec = spec;
+		host_.OnSpecializationOdrUsed(spec);
+		if (spec->self.fn_unwind_no[0])
+			callee->unwind_no = true;
+		if (spec->self.fn_noexcept_decl[0])
+			callee->noexcept_decl = true;
+	}
+	else
+	{
+		callee->name = CanonicalQualifiedName(owner_scope, binding.name);
+		callee->type = is_static ? fn
+		                         : ThisAdjustedType(callee_class, fn);
+		callee->entity_scope = owner_scope;
+		callee->entity_name = binding.name;
+		callee->is_method = !is_static;
+		if (winner < binding.fn_unwind_no.size() &&
+		    binding.fn_unwind_no[winner])
+			callee->unwind_no = true;
+		if (winner < binding.fn_noexcept_decl.size() &&
+		    binding.fn_noexcept_decl[winner])
+			callee->noexcept_decl = true;
+	}
 	// PA17 dynamic dispatch: an unqualified call to a virtual member
 	// dispatches through the static class's vtable slot (10.3p6); the
 	// dynamic callee may not be the statically selected one.
-	if (!is_static && !qualified)
+	if (!spec && !is_static && !qualified)
 	{
 		const ClassInfo* static_cls = host_.Classes().Find(object_entity);
 		if (static_cls)
@@ -743,7 +816,7 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		// An inherited method receives the base subobject's address; a
 		// using-imported one belongs to the importing class for
 		// addressing (its base sits at offset zero either way).
-		int hops = binding.home != owner_scope
+		int hops = binding.home != owner_scope && !spec
 			? 0 : BaseClassDistance(object_entity, callee_class);
 		if (hops > 0)
 		{
@@ -765,15 +838,20 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 // A member function call without any object context: only static
 // overloads participate (9.3.1p3).
 SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
-	const AstExpr& expr, const ScopeBinding& binding)
+	const AstExpr& expr, const ScopeBinding& binding,
+	const AstNamePart* explicit_part)
 {
 	vector<TypePtr> declared;
-	declared.push_back(binding.type);
-	for (size_t i = 0; i < binding.overloads.size(); i++)
-		declared.push_back(binding.overloads[i]);
+	if (binding.type)
+	{
+		declared.push_back(binding.type);
+		for (size_t i = 0; i < binding.overloads.size(); i++)
+			declared.push_back(binding.overloads[i]);
+	}
 	vector<TypePtr> candidates;
 	vector<size_t> positions;
 	vector<size_t> min_arity;
+	vector<bool> is_template;
 	for (size_t c = 0; c < declared.size(); c++)
 	{
 		if (c >= binding.fn_static.size() || !binding.fn_static[c])
@@ -787,47 +865,96 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 		       && (*defaults)[required - 1])
 			required--;
 		min_arity.push_back(required);
+		is_template.push_back(false);
 	}
-	if (candidates.empty())
-		throw runtime_error("member function " + binding.name +
-		                    " called without an object");
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
 	AnalyzeArgumentList(expr.arguments, args);
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
+	// PA21: static member-template specializations join as candidates.
+	vector<const FunctionSpecialization*> specs(candidates.size(),
+	                                            (const FunctionSpecialization*)0);
+	if (!binding.fn_templates.empty())
+	{
+		std::set<const void*> seen;
+		vector<OperatorCandidate> deduced;
+		AppendTemplateCandidates(binding, args, deduced, seen,
+		                         explicit_part);
+		for (size_t i = 0; i < deduced.size(); i++)
+		{
+			if (!deduced[i].spec->owner ||
+			    !deduced[i].spec->owner->member_static)
+				continue;
+			candidates.push_back(deduced[i].declared);
+			positions.push_back(declared.size());
+			declared.push_back(deduced[i].declared);
+			specs.push_back(deduced[i].spec);
+			min_arity.push_back(
+				deduced[i].declared->parameters.size());
+			is_template.push_back(true);
+		}
+	}
+	if (candidates.empty())
+		throw runtime_error("member function " + binding.name +
+		                    " called without an object");
 	vector<ImplicitConversion> conversions;
+	SpecOverloadOrder order(host_, specs, args.size());
 	size_t best = SelectBestOverload(candidates, sources, conversions,
-	                                 &min_arity);
-	size_t winner = positions[best];
-	if (winner < binding.fn_deleted.size() && binding.fn_deleted[winner])
+	                                 &min_arity, &is_template, &order);
+	const FunctionSpecialization* spec =
+		best < specs.size() ? specs[best] : 0;
+	size_t winner = spec ? 0 : positions[best];
+	if (!spec && winner < binding.fn_deleted.size() &&
+	    binding.fn_deleted[winner])
 		throw runtime_error("use of deleted member function");
-	EMemberAccess access = winner < binding.fn_access.size()
-		? binding.fn_access[winner] : MA_PUBLIC;
+	EMemberAccess access = MA_PUBLIC;
+	if (spec)
+		access = spec->owner->member_access;
+	else if (winner < binding.fn_access.size())
+		access = binding.fn_access[winner];
 	host_.CheckMemberAccess(binding.home, access, binding.name);
-	const TypePtr& fn = declared[winner];
+	const TypePtr& fn = spec ? spec->type : declared[winner];
 	for (size_t i = 0; i < args.size(); i++)
 		if (i < fn->parameters.size())
 			ApplyConversion(args[i], conversions[i],
 			                fn->parameters[i]);
 	for (size_t i = args.size(); i < fn->parameters.size(); i++)
 	{
-		SemValue filled = Analyze(*binding.fn_defaults[winner][i]);
-		CopyInitialize(filled, fn->parameters[i], "default argument");
-		args.push_back(std::move(filled));
+		const ScopeBinding& chosen = spec ? spec->self : binding;
+		args.push_back(SynthesizeDefaultArgument(
+			chosen, spec ? 0 : winner, i, fn->parameters[i]));
 	}
 	SemValue value = CallResult(fn);
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
-	callee->type = fn;
-	callee->entity_scope = binding.owner;
-	callee->entity_name = binding.name;
-	if (winner < binding.fn_unwind_no.size() &&
-	    binding.fn_unwind_no[winner])
-		callee->unwind_no = true;
-	if (winner < binding.fn_noexcept_decl.size() &&
-	    binding.fn_noexcept_decl[winner])
-		callee->noexcept_decl = true;
+	if (spec)
+	{
+		callee->name = CanonicalQualifiedName(spec->self.owner,
+		                                      spec->name);
+		callee->type = fn;
+		callee->entity_scope = spec->self.owner;
+		callee->entity_name = spec->name;
+		callee->fn_spec = spec;
+		host_.OnSpecializationOdrUsed(spec);
+		if (spec->self.fn_unwind_no[0])
+			callee->unwind_no = true;
+		if (spec->self.fn_noexcept_decl[0])
+			callee->noexcept_decl = true;
+	}
+	else
+	{
+		callee->name = CanonicalQualifiedName(binding.owner,
+		                                      binding.name);
+		callee->type = fn;
+		callee->entity_scope = binding.owner;
+		callee->entity_name = binding.name;
+		if (winner < binding.fn_unwind_no.size() &&
+		    binding.fn_unwind_no[winner])
+			callee->unwind_no = true;
+		if (winner < binding.fn_noexcept_decl.size() &&
+		    binding.fn_noexcept_decl[winner])
+			callee->noexcept_decl = true;
+	}
 	value.node->children.push_back(std::move(callee));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));

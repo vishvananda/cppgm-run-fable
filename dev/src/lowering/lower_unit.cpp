@@ -533,6 +533,21 @@ string LowerProgram::MemberDefinitionKey(const Scope* scope,
 		"#" + kind;
 }
 
+// PA21: whether a declared constructor type matches a this-adjusted
+// member entry type (the entry's leading object pointer dropped).
+static bool CtorEntryMatches(const TypePtr& declared,
+                             const TypePtr& adjusted)
+{
+	if (!declared || adjusted->parameters.empty() ||
+	    declared->parameters.size() + 1 != adjusted->parameters.size())
+		return false;
+	for (size_t i = 0; i < declared->parameters.size(); i++)
+		if (!TypeEquals(declared->parameters[i],
+		                adjusted->parameters[i + 1]))
+			return false;
+	return true;
+}
+
 LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	const Scope* scope, const string& name, const TypePtr& type,
 	const string& special_code)
@@ -560,16 +575,38 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		base += "__deleting_entry";
 	info.low_name = UniqueSymbol(base);
 	info.internal = LowerInUnnamedNamespace(scope);
-	info.object_name = MangleMemberFunctionObjectName(scope, name, type,
-	                                                  special_code);
-	// Complete and base entries are identical without virtual bases;
-	// an emitted complete entry carries the base-entry alias.
-	if (special_code == "C1")
-		info.alias_object =
-			MangleMemberFunctionObjectName(scope, name, type, "C2");
-	else if (special_code == "D1")
-		info.alias_object =
-			MangleMemberFunctionObjectName(scope, name, type, "D2");
+	// PA21: a constructor-template specialization entry mangles with
+	// its template-argument list (C1I<args>E).
+	const FunctionSpecialization* ctor_spec = 0;
+	if (special_code == "C1" || special_code == "C2")
+		if (const ClassInfo* cls = MethodClass(type))
+			for (size_t i = 0; i < cls->ctors.size(); i++)
+				if (cls->ctors[i].tmpl_spec &&
+				    CtorEntryMatches(cls->ctors[i].type, type))
+					ctor_spec = cls->ctors[i].tmpl_spec;
+	if (ctor_spec)
+	{
+		info.fn_spec = ctor_spec;
+		info.object_name = MangleMemberFunctionTemplateObjectName(
+			scope, *ctor_spec, special_code);
+		if (special_code == "C1")
+			info.alias_object = MangleMemberFunctionTemplateObjectName(
+				scope, *ctor_spec, "C2");
+	}
+	else
+	{
+		info.object_name = MangleMemberFunctionObjectName(
+			scope, name, type, special_code);
+		// Complete and base entries are identical without virtual
+		// bases; an emitted complete entry carries the base-entry
+		// alias.
+		if (special_code == "C1")
+			info.alias_object =
+				MangleMemberFunctionObjectName(scope, name, type, "C2");
+		else if (special_code == "D1")
+			info.alias_object =
+				MangleMemberFunctionObjectName(scope, name, type, "D2");
+	}
 	ESpecialFunction special = SF_NONE;
 	if (special_code == "C1" || special_code == "C2")
 		special = SF_CONSTRUCTOR;

@@ -55,6 +55,18 @@ void CollectIdentifier(const string& identifier, Scope* scope,
 		out.Add(found);
 }
 
+// Whether a template-argument type-id carries its own `...` marker (a
+// nested expansion that consumes its packs at its own level).
+static bool ArgumentTypeIdHasPackMarker(const AstTypeId& type_id)
+{
+	if (!type_id.declarator)
+		return false;
+	for (size_t i = 0; i < type_id.declarator->items.size(); i++)
+		if (type_id.declarator->items[i].kind == DI_PACK)
+			return true;
+	return false;
+}
+
 void CollectFromName(const AstName& name, Scope* scope, PackMentions& out)
 {
 	for (size_t i = 0; i < name.parts.size(); i++)
@@ -67,6 +79,12 @@ void CollectFromName(const AstName& name, Scope* scope, PackMentions& out)
 		for (size_t a = 0; a < part.arguments.size(); a++)
 		{
 			const AstTemplateArgument& argument = part.arguments[a];
+			// 14.5.3p4: a pack mentioned only inside a nested expansion
+			// is expanded there, not by the outer expansion.
+			if (argument.pack ||
+			    (argument.is_type && argument.type &&
+			     ArgumentTypeIdHasPackMarker(*argument.type)))
+				continue;
 			if (argument.type)
 				CollectFromTypeId(*argument.type, scope, out);
 			if (argument.expr)

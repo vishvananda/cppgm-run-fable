@@ -188,6 +188,21 @@ static void AppendArgKey(const TemplateArg& arg, string& out)
 {
 	if (arg.pack_pattern)
 		out += "pk";
+	// PA21 template-template arguments key by template identity (or
+	// pattern slot).
+	if (arg.template_entity)
+	{
+		char buffer[32];
+		snprintf(buffer, sizeof(buffer), "t%p",
+		         (const void*)arg.template_entity);
+		out += buffer;
+		return;
+	}
+	if (arg.template_param >= 0)
+	{
+		out += "tp" + to_string(arg.template_param);
+		return;
+	}
 	if (!arg.is_value)
 	{
 		AppendKey(arg.type, out);
@@ -209,6 +224,30 @@ static void AppendArgKey(const TemplateArg& arg, string& out)
 	out += "v";
 	AppendKey(arg.type, out);
 	out += ":" + to_string(arg.value_bits);
+}
+
+bool TemplateTemplateParamsMatch(const vector<TemplateParam>& formal,
+                                 const vector<TemplateParam>& actual)
+{
+	size_t a = 0;
+	for (size_t f = 0; f < formal.size(); f++)
+	{
+		if (formal[f].pack)
+		{
+			// The formal pack absorbs the remaining actual parameters
+			// (kind-checked).
+			for (; a < actual.size(); a++)
+				if (actual[a].kind != formal[f].kind)
+					return false;
+			return f + 1 == formal.size();
+		}
+		if (a >= actual.size())
+			return false;
+		if (actual[a].kind != formal[f].kind || actual[a].pack)
+			return false;
+		a++;
+	}
+	return a == actual.size();
 }
 
 string TemplateArgumentKey(const vector<TemplateArg>& args)
@@ -249,7 +288,11 @@ string TemplateArgumentSpelling(const vector<TemplateArg>& args)
 		if (i > 0)
 			text += ", ";
 		const TemplateArg& arg = args[i];
-		if (!arg.is_value)
+		if (arg.template_entity)
+			text += arg.template_entity->name;
+		else if (arg.template_param >= 0)
+			text += "#t" + to_string(arg.template_param);
+		else if (!arg.is_value)
 			text += ArgSpelling(arg.type);
 		else if (arg.value_param >= 0)
 			text += "#v" + to_string(arg.value_param);

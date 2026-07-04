@@ -39,22 +39,48 @@ TypePtr StripPatternCv(const TypePtr& pattern, const TypePtr& deduced)
 	return TypePtr(new Type(stripped));
 }
 
-// Whether a deduction slot has been bound (a type or a value).
+// Whether a deduction slot has been bound (a type, a value, a
+// template, or a completed pack run).
 bool ArgBound(const TemplateArg& arg)
 {
-	return arg.is_value || bool(arg.type);
+	if (arg.is_pack_slot)
+		return arg.pack_done;
+	return arg.is_value || bool(arg.type) || arg.template_entity;
 }
 
 bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
                     vector<TemplateArg>& bound);
+bool DeduceFromArgList(const vector<TemplateArg>& pattern,
+                       const vector<TemplateArg>& args,
+                       vector<TemplateArg>& bound, bool allow_trailing);
 
 // Unification of one template-argument slot of a specialization
 // pattern against the corresponding concrete argument. Value slots
 // bind through the pattern's value-parameter reference or compare by
-// value; type slots recurse.
+// value; template-template slots bind by template identity; type
+// slots recurse.
 bool DeduceFromArg(const TemplateArg& pattern, const TemplateArg& arg,
                    vector<TemplateArg>& bound)
 {
+	// PA21 template-template slots: a pattern slot forwarding a
+	// template-template parameter binds the argument's template; a
+	// concrete template in the pattern must match exactly.
+	if (pattern.template_param >= 0)
+	{
+		if (!arg.template_entity ||
+		    (size_t)pattern.template_param >= bound.size())
+			return false;
+		TemplateArg& slot = bound[pattern.template_param];
+		if (ArgBound(slot))
+			return slot.template_entity == arg.template_entity;
+		TemplateArg fresh;
+		fresh.template_entity = arg.template_entity;
+		fresh.is_pack_slot = slot.is_pack_slot;
+		bound[pattern.template_param] = fresh;
+		return true;
+	}
+	if (pattern.template_entity || arg.template_entity)
+		return pattern.template_entity == arg.template_entity;
 	if (!pattern.is_value && !arg.is_value)
 		return DeduceFromType(pattern.type, arg.type, bound);
 	if (!pattern.is_value || !arg.is_value)
@@ -66,11 +92,170 @@ bool DeduceFromArg(const TemplateArg& pattern, const TemplateArg& arg,
 		TemplateArg& slot = bound[pattern.value_param];
 		if (ArgBound(slot))
 			return TemplateArgEquals(slot, arg);
+		bool keep_pack = slot.is_pack_slot;
 		slot = arg;
+		slot.is_pack_slot = keep_pack;
 		return true;
 	}
 	// A concrete value in the pattern must match exactly.
 	return TemplateArgEquals(pattern, arg);
+}
+
+// The pack slots a pattern type mentions (TK_TYPE_PARAM placeholders
+// whose bound slot is a pack).
+void CollectPatternPackSlots(const TypePtr& pattern,
+                             const vector<TemplateArg>& bound,
+                             std::vector<size_t>& out)
+{
+	if (!pattern)
+		return;
+	if (pattern->kind == TK_TYPE_PARAM && pattern->named->param_index >= 0)
+	{
+		size_t index = (size_t)pattern->named->param_index;
+		if (index < bound.size() && bound[index].is_pack_slot)
+		{
+			for (size_t i = 0; i < out.size(); i++)
+				if (out[i] == index)
+					return;
+			out.push_back(index);
+		}
+		return;
+	}
+	for (size_t i = 0; i < pattern->parameters.size(); i++)
+		CollectPatternPackSlots(pattern->parameters[i], bound, out);
+	for (size_t i = 0; i < pattern->targs.size(); i++)
+		if (!pattern->targs[i].is_value)
+			CollectPatternPackSlots(pattern->targs[i].type, bound, out);
+	CollectPatternPackSlots(pattern->target, bound, out);
+}
+
+// 14.8.2.5p9 (subset): one `pattern...` slot of a template-id pattern
+// absorbs the argument run [begin, end); each element unifies against
+// the element pattern with the mentioned pack slots accumulating one
+// element per iteration. Repeated expansions of one pack must deduce
+// the same run.
+bool DeducePackPattern(const TemplateArg& pattern,
+                       const vector<TemplateArg>& args, size_t begin,
+                       size_t end, vector<TemplateArg>& bound)
+{
+	// The pack slots this pattern element mentions (accumulation
+	// targets). A direct slot reference is the common fast path.
+	std::vector<size_t> slots;
+	int direct = -1;
+	if (pattern.is_value && pattern.value_param >= 0)
+	{
+		if ((size_t)pattern.value_param >= bound.size() ||
+		    !bound[pattern.value_param].is_pack_slot)
+			return false;
+		direct = pattern.value_param;
+		slots.push_back((size_t)direct);
+	}
+	else if (!pattern.is_value && pattern.type &&
+	         pattern.type->kind == TK_TYPE_PARAM &&
+	         pattern.type->named->param_index >= 0 &&
+	         (size_t)pattern.type->named->param_index < bound.size() &&
+	         bound[pattern.type->named->param_index].is_pack_slot)
+	{
+		direct = pattern.type->named->param_index;
+		slots.push_back((size_t)direct);
+	}
+	else if (!pattern.is_value)
+	{
+		CollectPatternPackSlots(pattern.type, bound, slots);
+		if (slots.empty())
+			return false;
+	}
+	else
+		return false;
+	vector<vector<TemplateArg>> runs(slots.size());
+	for (size_t ai = begin; ai < end; ai++)
+	{
+		const TemplateArg& arg = args[ai];
+		if (direct >= 0)
+		{
+			// The element binds the pack slot wholesale (type or value
+			// element alike, matching the pattern's kind).
+			if (pattern.is_value != arg.is_value)
+				return false;
+			TemplateArg element = arg;
+			element.pack_pattern = false;
+			runs[0].push_back(element);
+			continue;
+		}
+		// Composite element pattern: unify against a probe with the
+		// mentioned pack slots cleared, then collect their elements.
+		vector<TemplateArg> probe = bound;
+		for (size_t s = 0; s < slots.size(); s++)
+		{
+			probe[slots[s]] = TemplateArg();
+			probe[slots[s]].is_pack_slot = false;
+		}
+		TemplateArg element_pattern = pattern;
+		element_pattern.pack_pattern = false;
+		if (!DeduceFromArg(element_pattern, arg, probe))
+			return false;
+		for (size_t s = 0; s < slots.size(); s++)
+		{
+			if (!(probe[slots[s]].is_value || probe[slots[s]].type ||
+			      probe[slots[s]].template_entity))
+				return false;
+			runs[s].push_back(probe[slots[s]]);
+		}
+		// Fixed slots newly bound by the probe propagate.
+		for (size_t j = 0; j < probe.size(); j++)
+			if (!bound[j].is_pack_slot && !ArgBound(bound[j]) &&
+			    ArgBound(probe[j]))
+				bound[j] = probe[j];
+	}
+	for (size_t s = 0; s < slots.size(); s++)
+	{
+		TemplateArg& slot = bound[slots[s]];
+		if (slot.pack_done)
+		{
+			if (slot.pack_elements.size() != runs[s].size())
+				return false;
+			for (size_t k = 0; k < runs[s].size(); k++)
+				if (!TemplateArgEquals(slot.pack_elements[k],
+				                       runs[s][k]))
+					return false;
+			continue;
+		}
+		slot.pack_done = true;
+		slot.pack_elements = runs[s];
+	}
+	return true;
+}
+
+// Unification of a template-id pattern argument list against a
+// resolved argument list: fixed slots one-to-one, a `pattern...` slot
+// absorbing the run the fixed tail leaves. `allow_trailing` accepts
+// concrete arguments beyond the pattern (a defaulted tail).
+bool DeduceFromArgList(const vector<TemplateArg>& pattern,
+                       const vector<TemplateArg>& args,
+                       vector<TemplateArg>& bound, bool allow_trailing)
+{
+	size_t ai = 0;
+	for (size_t pi = 0; pi < pattern.size(); pi++)
+	{
+		const TemplateArg& p = pattern[pi];
+		if (p.pack_pattern)
+		{
+			size_t fixed_tail = pattern.size() - pi - 1;
+			if (args.size() < ai + fixed_tail)
+				return false;
+			size_t end = args.size() - fixed_tail;
+			if (!DeducePackPattern(p, args, ai, end, bound))
+				return false;
+			ai = end;
+			continue;
+		}
+		if (ai >= args.size())
+			return false;
+		if (!DeduceFromArg(p, args[ai], bound))
+			return false;
+		ai++;
+	}
+	return allow_trailing || ai == args.size();
 }
 
 // 14.8.2.5: structural unification of one parameter pattern against
@@ -143,34 +328,57 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		return DeduceFromType(pattern->target, arg->target, bound);
 	case TK_TEMPLATE_SPEC:
 	{
+		// PA21: a pattern anchored on a template-template parameter
+		// placeholder binds the argument's template into its slot, then
+		// unifies the argument lists.
+		int tt_slot = pattern->named->is_template_anchor &&
+			pattern->named->param_index >= 0
+			? pattern->named->param_index : -1;
 		// A pattern-shaped argument (partial ordering's transformed
 		// parameter types) matches the same template structurally.
 		if (arg->kind == TK_TEMPLATE_SPEC)
 		{
-			if (arg->named->spec_template !=
-			        pattern->named->spec_template ||
-			    arg->targs.size() != pattern->targs.size())
-				return false;
-			for (size_t i = 0; i < pattern->targs.size(); i++)
-				if (!DeduceFromArg(pattern->targs[i], arg->targs[i],
-				                   bound))
+			if (tt_slot >= 0)
+			{
+				TemplateArg as_template;
+				if (arg->named->spec_template)
+					as_template.template_entity =
+						arg->named->spec_template;
+				TemplateArg slot_pattern;
+				slot_pattern.template_param = tt_slot;
+				if (!DeduceFromArg(slot_pattern, as_template, bound))
 					return false;
-			return true;
+			}
+			else if (arg->named->spec_template !=
+			         pattern->named->spec_template)
+				return false;
+			return DeduceFromArgList(pattern->targs, arg->targs, bound,
+			                         false);
 		}
 		// Match a specialization of the same template, walking the
 		// single-inheritance chain for the derived-to-base case.
 		const NamedTypeInfo* entity =
 			arg->kind == TK_CLASS ? arg->named : 0;
+		if (tt_slot >= 0)
+		{
+			if (!entity || !entity->spec_template)
+				return false;
+			TemplateArg as_template;
+			as_template.template_entity = entity->spec_template;
+			TemplateArg slot_pattern;
+			slot_pattern.template_param = tt_slot;
+			if (!DeduceFromArg(slot_pattern, as_template, bound))
+				return false;
+			return DeduceFromArgList(pattern->targs, entity->spec_args,
+			                         bound, false);
+		}
 		while (entity &&
 		       entity->spec_template != pattern->named->spec_template)
 			entity = entity->base_entity;
-		if (!entity || entity->spec_args.size() != pattern->targs.size())
+		if (!entity)
 			return false;
-		for (size_t i = 0; i < pattern->targs.size(); i++)
-			if (!DeduceFromArg(pattern->targs[i], entity->spec_args[i],
-			                   bound))
-				return false;
-		return true;
+		return DeduceFromArgList(pattern->targs, entity->spec_args,
+		                         bound, false);
 	}
 	default:
 		return false;
@@ -239,9 +447,61 @@ TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
 		}
 		return TypePtr(new Type(copy));
 	}
+	case TK_ARRAY:
+	{
+		TypePtr element = SubstituteOrderingTypes(pattern->target,
+		                                          uniques);
+		if (!element)
+			return TypePtr();
+		Type copy = *pattern;
+		copy.target = element;
+		return TypePtr(new Type(copy));
+	}
+	case TK_FUNCTION:
+	{
+		Type copy = *pattern;
+		copy.target = SubstituteOrderingTypes(pattern->target, uniques);
+		if (!copy.target)
+			return TypePtr();
+		for (size_t i = 0; i < copy.parameters.size(); i++)
+		{
+			copy.parameters[i] = SubstituteOrderingTypes(
+				copy.parameters[i], uniques);
+			if (!copy.parameters[i])
+				return TypePtr();
+		}
+		return TypePtr(new Type(copy));
+	}
+	case TK_MEMBER_POINTER:
+	{
+		TypePtr member = SubstituteOrderingTypes(pattern->target,
+		                                         uniques);
+		if (!member)
+			return TypePtr();
+		Type copy = *pattern;
+		copy.target = member;
+		return TypePtr(new Type(copy));
+	}
 	default:
 		return TypePtr();
 	}
+}
+
+// PA21 constructor templates: the pattern declaration is a special
+// member (no decl-specifier-seq; the composed base type is void).
+bool PatternIsSpecialMember(const AstDecl& inner)
+{
+	return inner.kind == DK_SPECIAL_MEMBER_DEFINITION ||
+		inner.kind == DK_SPECIAL_MEMBER_DECLARATION;
+}
+
+// The declarator of a function-template pattern declaration.
+const AstDeclarator* PatternDeclarator(const AstDecl& inner)
+{
+	if (inner.kind == DK_SIMPLE)
+		return inner.declarators.empty()
+			? 0 : inner.declarators[0].declarator.get();
+	return inner.declarator.get();
 }
 
 // The parameter clause of a function declarator (the first DI_PARAMS
@@ -364,6 +624,13 @@ bool SemBinder::ComposeFunctionPattern(
 			binding.kind = SB_TYPE;
 			binding.type = PlaceholderType(i);
 		}
+		else if (params[i].kind == TPK_TEMPLATE)
+		{
+			// PA21: the parameter binds a placeholder template whose
+			// anchor carries the slot for deduction.
+			binding.kind = SB_CLASS_TEMPLATE;
+			binding.templ = TemplateParamPlaceholder(params[i], i);
+		}
 		else
 		{
 			// An abstract value parameter: uses of the name inside the
@@ -377,9 +644,7 @@ bool SemBinder::ComposeFunctionPattern(
 		binding.is_pack = params[i].pack;
 		AddBinding(*scope, binding);
 	}
-	const AstDeclarator* declarator = inner.kind == DK_FUNCTION
-		? inner.declarator.get()
-		: inner.declarators[0].declarator.get();
+	const AstDeclarator* declarator = PatternDeclarator(inner);
 	Scope* saved = current_;
 	current_ = scope;
 	bool composed_full = false;
@@ -388,8 +653,11 @@ bool SemBinder::ComposeFunctionPattern(
 	pattern_packs.clear();
 	try
 	{
-		DeclSpecifierInfo specs =
-			builder_.ProcessSpecifiers(inner.specifiers, true);
+		DeclSpecifierInfo specs;
+		if (PatternIsSpecialMember(inner))
+			specs.type = MakeFundamentalType(FT_VOID);
+		else
+			specs = builder_.ProcessSpecifiers(inner.specifiers, true);
 		DeclaratorInfo composed =
 			builder_.ComposeDeclarator(declarator, specs.type);
 		if (composed.declares_function &&
@@ -499,18 +767,14 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 }
 
 // Structural deduction of a partial-specialization pattern list
-// against concrete arguments: leading pattern slots unify one-to-one;
-// trailing concrete arguments (defaulted tails) are accepted.
+// against concrete arguments: fixed pattern slots unify one-to-one,
+// `pattern...` slots absorb their run; trailing concrete arguments
+// (defaulted tails) are accepted.
 bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
                                    const vector<TemplateArg>& args,
                                    vector<TemplateArg>& bound)
 {
-	if (pattern.size() > args.size())
-		return false;
-	for (size_t i = 0; i < pattern.size(); i++)
-		if (!DeduceFromArg(pattern[i], args[i], bound))
-			return false;
-	return true;
+	return DeduceFromArgList(pattern, args, bound, true);
 }
 
 // 14.5.5.2 (subset): `a` is at least as specialized as `b` when `b`'s
@@ -523,8 +787,6 @@ bool SemBinder::DeduceTemplateArgs(const vector<TemplateArg>& pattern,
 bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
                                             const PartialSpecialization& b)
 {
-	if (a.pattern.size() != b.pattern.size())
-		return false;
 	vector<TypePtr> uniques;
 	for (size_t i = 0; i < a.params.size(); i++)
 		uniques.push_back(OrderingUniqueType(i));
@@ -532,18 +794,25 @@ bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
 	for (size_t i = 0; i < a.pattern.size(); i++)
 	{
 		TemplateArg arg = a.pattern[i];
-		if (arg.pack_pattern)
-			return false;
-		if (!arg.is_value)
+		if (!arg.is_value && arg.type)
 		{
 			arg.type = SubstituteOrderingTypes(arg.type, uniques);
 			if (!arg.type)
 				return false;
 		}
+		else if (arg.pack_pattern && !arg.is_value)
+			return false;
 		transformed.push_back(arg);
 	}
 	vector<TemplateArg> bound(b.params.size());
-	return DeduceTemplateArgs(b.pattern, transformed, bound);
+	for (size_t i = 0; i < b.params.size(); i++)
+		bound[i].is_pack_slot = b.params[i].pack;
+	if (!DeduceFromArgList(b.pattern, transformed, bound, false))
+		return false;
+	// A pack pattern in `b` deducing from a fixed run in `a` (or the
+	// reverse absorption) already decided; a leftover fixed slot in
+	// `b` only matters for completeness, which ordering ignores.
+	return true;
 }
 
 // --- deduction ---------------------------------------------------------------
@@ -816,17 +1085,18 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	// parameters bind into a scratch scope so a trailing-return
 	// decltype can name them (8.3.5p2).
 	const AstDecl& inner = *tmpl.pattern_decl;
-	const AstDeclarator* declarator = inner.kind == DK_FUNCTION
-		? inner.declarator.get()
-		: inner.declarators[0].declarator.get();
+	const AstDeclarator* declarator = PatternDeclarator(inner);
 	Scope* capture = model_.CreateScope(SCOPE_FUNCTION, tmpl.name,
 	                                    spec->param_scope);
 	InstantiationContext context(*this, capture);
 	param_capture_scope_ = capture;
 	PreBindDeclaredParameters(declarator);
 	last_pack_param_ = PackParamRecord();
-	DeclSpecifierInfo specs =
-		builder_.ProcessSpecifiers(inner.specifiers, true);
+	DeclSpecifierInfo specs;
+	if (PatternIsSpecialMember(inner))
+		specs.type = MakeFundamentalType(FT_VOID);
+	else
+		specs = builder_.ProcessSpecifiers(inner.specifiers, true);
 	DeclaratorInfo composed =
 		builder_.ComposeDeclarator(declarator, specs.type);
 	BindCapturedPackParameter(capture);
@@ -849,8 +1119,8 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->self.home = spec->param_scope;
 	spec->self.fn_defaults.resize(1);
 	spec->self.fn_deleted.resize(1, false);
-	spec->self.fn_access.resize(1, MA_PUBLIC);
-	spec->self.fn_static.resize(1, false);
+	spec->self.fn_access.resize(1, tmpl.member_access);
+	spec->self.fn_static.resize(1, tmpl.member_static);
 	spec->self.fn_inline_def.resize(1, false);
 	spec->self.fn_adl_only.resize(1, false);
 	spec->self.fn_unwind_no.resize(1, composed.noexcept_simple);
@@ -933,6 +1203,29 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 		item->is_constexpr_fn = true;
 		item->inline_def = true;
 	}
+	// PA21 member function templates: the body binds as a method (the
+	// implicit object parameter first, the class as `this` context).
+	const ClassInfo* member_cls = 0;
+	if (tmpl.member_of && !tmpl.member_static)
+		member_cls = unit_.classes.Find(tmpl.member_of);
+	if (member_cls)
+	{
+		item->type = MethodAdjustedType(*member_cls, composed.type);
+		SemNodePtr this_param = MakeSemNode(SN_PARAMETER);
+		this_param->name = "this";
+		this_param->type = item->type->parameters[0];
+		this_param->entity_scope = fn_scope;
+		this_param->entity_name = "this";
+		item->children.push_back(std::move(this_param));
+		if (!FindOwnBinding(*fn_scope, "this"))
+		{
+			ScopeBinding this_binding;
+			this_binding.kind = SB_PARAMETER;
+			this_binding.name = "this";
+			this_binding.type = item->type->parameters[0];
+			AddBinding(*fn_scope, this_binding);
+		}
+	}
 	// Slot names follow the first declaration (the primary pattern);
 	// an explicit definition's renamed parameters redirect their body
 	// bindings onto the primary-named slots.
@@ -957,6 +1250,12 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	method_.fn_scope = fn_scope;
 	method_.fn_owner = tmpl.declaring;
 	method_.fn_name = spec.name;
+	if (tmpl.member_of)
+	{
+		method_.cls = unit_.classes.Find(tmpl.member_of);
+		if (member_cls)
+			method_.this_type = item->type->parameters[0];
+	}
 	current_return_ = composed.type->target;
 	parents_.push_back(node);
 	BindStatement(*inner.body);

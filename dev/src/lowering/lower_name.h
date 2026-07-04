@@ -66,6 +66,12 @@ string MangleMemberFunctionObjectName(const Scope* scope,
                                       const TypePtr& type,
                                       const string& special_code);
 
+// PA21: the Itanium spelling of a constructor-template specialization
+// entry (`C1I<args>E` with pattern-based parameters).
+string MangleMemberFunctionTemplateObjectName(
+	const Scope* scope, const FunctionSpecialization& spec,
+	const string& special_code);
+
 // PA17: the bare Itanium encoding of a class entity ("2YD",
 // "N2ns1XE"); vtable/typeinfo object names prefix it with _ZTV, _ZTI,
 // or _ZTS, and the typeinfo-name data holds its characters.

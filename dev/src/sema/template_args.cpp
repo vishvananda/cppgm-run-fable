@@ -86,12 +86,15 @@ const AstName* FunctionalCastOperandName(const AstTypeId& type_id)
 
 }  // namespace
 
-void SemBinder::CollectTemplateParams(const AstDecl& decl,
-                                      vector<TemplateParam>& params)
+// One AST template-parameter list as TemplateParams (recursive for
+// the nested lists of template-template parameters).
+static void CollectParamList(
+	const std::vector<AstTemplateParameter>& source,
+	vector<TemplateParam>& params)
 {
-	for (size_t i = 0; i < decl.template_params.size(); i++)
+	for (size_t i = 0; i < source.size(); i++)
 	{
-		const AstTemplateParameter& parameter = decl.template_params[i];
+		const AstTemplateParameter& parameter = source[i];
 		TemplateParam param;
 		switch (parameter.kind)
 		{
@@ -113,20 +116,30 @@ void SemBinder::CollectTemplateParams(const AstDecl& decl,
 				param.default_expr = parameter.default_expr.get();
 			break;
 		}
-		default:
-			throw OutsideBoundary("template template parameter");
+		case TP_TEMPLATE:
+			// PA21: a template-template parameter; the nested list is
+			// kept for arity/kind matching (14.3.3) and the default (a
+			// template-name spelled as a type-id) resolves on demand.
+			param.kind = TPK_TEMPLATE;
+			param.name = parameter.name;
+			if (parameter.has_default_type)
+				param.default_type = parameter.default_type.get();
+			CollectParamList(parameter.template_params, param.tt_params);
+			break;
 		}
 		param.pack = parameter.pack;
 		params.push_back(param);
 	}
-	// At most one parameter pack per list (14.1: the supported PA19
-	// shape - later parameters can only be defaulted or deduced).
-	size_t packs = 0;
-	for (size_t i = 0; i < params.size(); i++)
-		if (params[i].pack)
-			packs++;
-	if (packs > 1)
-		throw OutsideBoundary("multiple template parameter packs");
+}
+
+void SemBinder::CollectTemplateParams(const AstDecl& decl,
+                                      vector<TemplateParam>& params)
+{
+	// PA21: multiple parameter packs are legal where each is deducible
+	// (partial specializations, function templates); the class/variable
+	// -template primary capture enforces the 14.1p11 trailing-pack rule
+	// itself.
+	CollectParamList(decl.template_params, params);
 }
 
 // The index of the parameter pack in `params`, or params.size() when
@@ -408,6 +421,17 @@ void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
 		return;
 	ScopeBinding alias;
 	alias.name = param.name;
+	if (param.kind == TPK_TEMPLATE)
+	{
+		// PA21: the parameter name acts as a class-template name bound
+		// to the argument's template entity.
+		alias.kind = SB_CLASS_TEMPLATE;
+		alias.templ = const_cast<TemplateInfo*>(arg.template_entity);
+		if (!alias.templ)
+			return;
+		AddBinding(scope, alias);
+		return;
+	}
 	if (param.kind == TPK_TYPE)
 	{
 		alias.kind = SB_TYPE_ALIAS;
@@ -435,6 +459,18 @@ void SemBinder::BindPackAlias(Scope& scope, const TemplateParam& param,
                               const vector<TemplateArg>& args,
                               size_t begin, size_t end)
 {
+	vector<TemplateArg> elements;
+	for (size_t i = begin; i < end && i < args.size(); i++)
+		elements.push_back(args[i]);
+	BindPackAliasElements(scope, param, elements);
+}
+
+// Binds a parameter pack's alias from an explicit element run (the
+// deduced slot form of a partial specialization).
+void SemBinder::BindPackAliasElements(Scope& scope,
+                                      const TemplateParam& param,
+                                      const vector<TemplateArg>& elements)
+{
 	if (param.name.empty())
 		return;
 	ScopeBinding alias;
@@ -442,13 +478,14 @@ void SemBinder::BindPackAlias(Scope& scope, const TemplateParam& param,
 	alias.is_pack = true;
 	if (param.kind == TPK_TYPE)
 		alias.kind = SB_TYPE_ALIAS;
+	else if (param.kind == TPK_TEMPLATE)
+		alias.kind = SB_CLASS_TEMPLATE;
 	else
 	{
 		alias.kind = SB_VARIABLE;
 		alias.no_object = true;
 	}
-	for (size_t i = begin; i < end && i < args.size(); i++)
-		alias.pack_args.push_back(args[i]);
+	alias.pack_args = elements;
 	AddBinding(scope, alias);
 }
 
@@ -478,6 +515,17 @@ TemplateArg SemBinder::ResolveOneArgument(TemplateInfo& tmpl,
                                           const vector<TemplateArg>& so_far,
                                           Scope*& partial)
 {
+	if (param.kind == TPK_TEMPLATE)
+	{
+		// A template-name argument parses as a type-id spelling just
+		// the name.
+		const AstName* name = argument.is_type && argument.type
+			? BareTypeIdName(*argument.type) : 0;
+		if (!name)
+			throw runtime_error("expected a template argument for " +
+			                    tmpl.name);
+		return ResolveTemplateTemplateArgument(*name, param, tmpl.name);
+	}
 	if (param.kind == TPK_TYPE)
 	{
 		if (!argument.is_type || !argument.type)
@@ -488,6 +536,65 @@ TemplateArg SemBinder::ResolveOneArgument(TemplateInfo& tmpl,
 	TypePtr param_type = ValueParamType(
 		param, EnsureArgBindingScope(tmpl, so_far, partial));
 	return ResolveValueArgument(argument, param_type);
+}
+
+// One template-template argument: the named class template (or a
+// bound template-template parameter, giving a dependent slot), arity
+// -and-kind checked against the parameter's own list (14.3.3).
+TemplateArg SemBinder::ResolveTemplateTemplateArgument(
+	const AstName& name, const TemplateParam& param, const string& context)
+{
+	const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
+	TemplateInfo* named = 0;
+	if (found && found->kind == SB_CLASS_TEMPLATE)
+		named = found->templ;
+	// 14.6.1p2: the injected-class-name without an argument list acts
+	// as the template-name.
+	if (!named && found && found->kind == SB_TYPE && found->type &&
+	    (found->type->kind == TK_CLASS ||
+	     found->type->kind == TK_TEMPLATE_SPEC) &&
+	    found->type->named->spec_template)
+		named = const_cast<TemplateInfo*>(found->type->named->spec_template);
+	if (!named)
+		throw runtime_error("template argument of " + context +
+		                    " does not name a template");
+	TemplateArg arg;
+	if (named->tt_param_index >= 0)
+	{
+		// A bound outer template-template parameter forwards its slot.
+		arg.template_param = named->tt_param_index;
+		return arg;
+	}
+	if (named->kind != TMPL_CLASS)
+		throw runtime_error("template argument of " + context +
+		                    " is not a class template");
+	if (!TemplateTemplateParamsMatch(param.tt_params, named->params))
+		throw runtime_error("template argument of " + context +
+		                    " does not match the parameter's template "
+		                    "parameter list");
+	arg.template_entity = named;
+	return arg;
+}
+
+// A pattern-scope placeholder template standing for the enclosing
+// template's template-template parameter `index`; deduction reads the
+// slot off the anchor entity.
+TemplateInfo* SemBinder::TemplateParamPlaceholder(const TemplateParam& param,
+                                                  size_t index)
+{
+	const string display = param.name.empty()
+		? "#tt" + std::to_string(index) : param.name;
+	TemplateInfo* info = unit_.templates.Create(TMPL_CLASS, display,
+	                                            model_.global());
+	info->tt_param_index = (int)index;
+	info->params = param.tt_params;
+	NamedTypeInfo* anchor = model_.CreateNamedTypeInfo(
+		"template-parameter " + display, model_.global(), display);
+	anchor->is_template_anchor = true;
+	anchor->param_index = (int)index;
+	anchor->spec_template = info;
+	info->anchor = anchor;
+	return info;
 }
 
 vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
@@ -567,7 +674,20 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 		current_ = partial;
 		try
 		{
-			if (param.kind == TPK_TYPE)
+			if (param.kind == TPK_TEMPLATE)
+			{
+				if (!param.default_type)
+					throw runtime_error("too few template arguments "
+					                    "for " + tmpl.name);
+				const AstName* name = BareTypeIdName(*param.default_type);
+				if (!name)
+					throw runtime_error("defaulted template-template "
+					                    "argument of " + tmpl.name +
+					                    " does not name a template");
+				arg = ResolveTemplateTemplateArgument(*name, param,
+				                                      tmpl.name);
+			}
+			else if (param.kind == TPK_TYPE)
 			{
 				if (!param.default_type)
 					throw runtime_error("too few template arguments "

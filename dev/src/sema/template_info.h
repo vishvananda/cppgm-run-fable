@@ -28,16 +28,20 @@ enum ETemplateKind
 {
 	TMPL_CLASS,
 	TMPL_FUNCTION,
-	TMPL_VARIABLE
+	TMPL_VARIABLE,
+	// PA21 alias templates: no specializations of their own (14.5.7);
+	// a use substitutes the arguments into the aliased type-id.
+	TMPL_ALIAS
 };
 
-// One parameter of a template head: a type parameter or a PA19
-// integral non-type (value) parameter, optionally defaulted, and
-// optionally a pack.
+// One parameter of a template head: a type parameter, a PA19 integral
+// non-type (value) parameter, or a PA21 template-template parameter,
+// optionally defaulted, and optionally a pack.
 enum ETemplateParamKind
 {
 	TPK_TYPE,
-	TPK_VALUE
+	TPK_VALUE,
+	TPK_TEMPLATE
 };
 
 struct TemplateParam
@@ -56,6 +60,9 @@ struct TemplateParam
 	// T v>`) and the default expression when present.
 	const AstTemplateParameter* source;
 	const AstExpr* default_expr;
+	// TPK_TEMPLATE: the parameter's own template parameter list
+	// (arity/kind matching per 14.3.3; names inside it are unused).
+	vector<TemplateParam> tt_params;
 };
 
 struct TemplateInfo;
@@ -188,6 +195,24 @@ struct TemplateInfo
 	map<string, unique_ptr<FunctionSpecialization>> fn_specs;
 	// PA19 partial specializations in declaration order.
 	vector<PartialSpecialization> partials;
+	// PA21 alias templates: the aliased type-id AST (substitution
+	// target).
+	const AstTypeId* alias_type = 0;
+	// PA21 template-template placeholder: the enclosing template's
+	// parameter slot this pattern-scope template stands for (-1 for
+	// real templates).
+	int tt_param_index = -1;
+	// PA21 member templates: the class-template member scope this
+	// template was captured in during an enclosing instantiation, and
+	// the in-class pattern declaration that captured it (registration
+	// of an out-of-class definition re-finds the record through it).
+	const AstDecl* member_pattern = 0;
+	// PA21 member function templates: the owning class entity (null
+	// for namespace-scope templates), the declared staticness, and the
+	// declared member access.
+	const NamedTypeInfo* member_of = 0;
+	bool member_static = false;
+	EMemberAccess member_access = MA_PUBLIC;
 	// PA19 variable templates: the primary initializer and declared
 	// type AST, explicit-specialization initializers by key, and the
 	// resolved constant binding per argument key.
@@ -228,6 +253,12 @@ private:
 // Cyclic or runaway instantiation guard, far above any supported
 // nesting.
 enum { kTemplateInstantiationDepthLimit = 200 };
+
+// PA21 14.3.3: whether a template with parameter list `actual`
+// matches a template-template parameter declared with `formal`
+// (positional kind/pack matching; a formal pack absorbs the rest).
+bool TemplateTemplateParamsMatch(const vector<TemplateParam>& formal,
+                                 const vector<TemplateParam>& actual);
 
 // PA19 packs: the index of the parameter pack (params.size() when
 // none) and the mapping of a resolved flattened argument list onto

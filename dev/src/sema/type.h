@@ -86,6 +86,18 @@ struct TemplateArg
 	// carried type/expression is the expansion pattern. Instantiation
 	// re-resolves the whole template-id concretely.
 	bool pack_pattern = false;
+	// PA21 template-template argument: the named template entity, or
+	// (in a pattern) the enclosing template's template-template
+	// parameter slot the argument forwards positionally.
+	const struct TemplateInfo* template_entity = 0;
+	int template_param = -1;
+	// PA21 deduction slots only (never part of a specialization
+	// identity): a slot standing for a parameter pack accumulates its
+	// deduced element run; `pack_done` is set once one expansion
+	// completed the run (later expansions must deduce the same run).
+	bool is_pack_slot = false;
+	bool pack_done = false;
+	vector<TemplateArg> pack_elements;
 };
 
 // One record per named-type entity, owned by the semantic model that

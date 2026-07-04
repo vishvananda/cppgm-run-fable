@@ -129,8 +129,14 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 		throw OutsideBoundary("template declaration form");
 	const AstDecl& inner = *decl.inner;
 	if (current_->kind == SCOPE_CLASS)
-		throw OutsideBoundary("member template");
-	if (current_->kind != SCOPE_NAMESPACE)
+	{
+		BindMemberTemplateDeclaration(decl, inner);
+		return;
+	}
+	// Instantiation re-walks bind under argument alias scopes; only a
+	// qualified (member-definition) form is meaningful there.
+	if (current_->kind != SCOPE_NAMESPACE &&
+	    current_->kind != SCOPE_TEMPLATE_PARAMS)
 		throw OutsideBoundary("block-scope template");
 	switch (inner.kind)
 	{
@@ -170,6 +176,20 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 				}
 				current_ = saved;
 				return;
+			}
+			// PA21: a prefix resolving to a concrete class (or
+			// instantiated specialization) scope defines a member
+			// class template of that class out of class.
+			if (inner.class_name.parts.back().kind == NP_IDENTIFIER &&
+			    !TemplateMemberOwnerIsPattern(decl, inner.class_name))
+			{
+				Scope* declaring = ResolvePrefixScope(inner.class_name);
+				if (declaring->kind == SCOPE_CLASS)
+				{
+					CaptureQualifiedMemberTemplate(decl, inner,
+					                               declaring);
+					return;
+				}
 			}
 			RegisterTemplateMember(decl, inner.class_name);
 			return;
@@ -211,6 +231,20 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 		}
 		if (id->parts.size() > 1)
 		{
+			// PA21: a prefix resolving to a concrete class (or
+			// instantiated specialization) scope defines a member
+			// template of that class out of class; a pattern-form
+			// prefix registers on the owner template instead.
+			if (!TemplateMemberOwnerIsPattern(decl, *id))
+			{
+				Scope* declaring = ResolvePrefixScope(*id);
+				if (declaring->kind == SCOPE_CLASS)
+				{
+					CaptureQualifiedMemberTemplate(decl, inner,
+					                               declaring);
+					return;
+				}
+			}
 			RegisterTemplateMember(decl, *id);
 			return;
 		}
@@ -224,18 +258,84 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 			inner.declarator ? inner.declarator->IdName() : 0;
 		if (!id || id->parts.size() < 2)
 			throw OutsideBoundary("template special-member form");
+		if (!TemplateMemberOwnerIsPattern(decl, *id))
+		{
+			Scope* declaring = ResolvePrefixScope(*id);
+			if (declaring->kind == SCOPE_CLASS)
+			{
+				CaptureQualifiedMemberTemplate(decl, inner, declaring);
+				return;
+			}
+		}
 		RegisterTemplateMember(decl, *id);
 		return;
 	}
 	case DK_ALIAS:
-		// Alias templates parse and are otherwise outside the PA19
-		// semantic slice; nothing in the suites instantiates one.
+		// PA21 alias templates: captured like other templates; a use
+		// substitutes into the aliased type-id (14.5.7).
+		CaptureAliasTemplate(decl, inner);
 		return;
 	case DK_TEMPLATE:
-		throw OutsideBoundary("nested template declaration");
+	{
+		// PA21 `template<A> template<B> ...`: an out-of-class member
+		// -template definition. The innermost declarator's qualified
+		// name locates the owner class template; the whole outer
+		// declaration registers as a member definition and re-binds at
+		// each enclosing instantiation.
+		const AstDecl* leaf = inner.inner.get();
+		const AstName* id = 0;
+		if (leaf)
+		{
+			if (leaf->kind == DK_CLASS || leaf->kind == DK_CLASS_FORWARD)
+				id = &leaf->class_name;
+			else if (leaf->kind == DK_FUNCTION ||
+			         leaf->kind == DK_SPECIAL_MEMBER_DEFINITION ||
+			         leaf->kind == DK_SPECIAL_MEMBER_DECLARATION)
+				id = leaf->declarator ? leaf->declarator->IdName() : 0;
+			else if (leaf->kind == DK_SIMPLE &&
+			         leaf->declarators.size() == 1 &&
+			         leaf->declarators[0].declarator)
+				id = leaf->declarators[0].declarator->IdName();
+		}
+		if (!id || id->parts.size() < 2)
+			throw OutsideBoundary("nested template declaration");
+		RegisterTemplateMember(decl, *id);
+		return;
+	}
 	default:
 		throw OutsideBoundary("templated declaration form");
 	}
+}
+
+// Whether a qualified member-definition name mentions the
+// declaration's own template parameters in its qualifier (the
+// pattern form `C<T>::f`, which registers on the owner template
+// rather than resolving to a concrete scope).
+bool SemBinder::TemplateMemberOwnerIsPattern(const AstDecl& decl,
+                                             const AstName& name)
+{
+	std::set<string> params;
+	for (size_t i = 0; i < decl.template_params.size(); i++)
+		if (!decl.template_params[i].name.empty())
+			params.insert(decl.template_params[i].name);
+	if (params.empty())
+		return false;
+	for (size_t i = 0; i + 1 < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		for (size_t a = 0; a < part.arguments.size(); a++)
+		{
+			const AstTemplateArgument& argument = part.arguments[a];
+			if (!argument.is_type || !argument.type)
+				continue;
+			const AstSpecifierSeq& specs = argument.type->specifiers;
+			for (size_t k = 0; k < specs.size(); k++)
+				if (specs[k].kind == SPEC_TYPE_NAME &&
+				    NameMentionsAny(specs[k].name, params))
+					return true;
+		}
+	}
+	return false;
 }
 
 // True when every non-terminal component of `name` is a plain
@@ -268,12 +368,91 @@ void SemBinder::CaptureQualifiedClassTemplate(const AstDecl& decl,
 	CaptureClassTemplate(decl, inner, true);
 }
 
+// PA21 alias templates: `template<..> using X = type-id;` captures
+// the type-id as the substitution pattern; the name binds as a
+// template (SB_CLASS_TEMPLATE with a TMPL_ALIAS record) so template-id
+// uses route through the ordinary seam.
+void SemBinder::CaptureAliasTemplate(const AstDecl& decl,
+                                     const AstDecl& inner)
+{
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+	if (ScopeBinding* existing = FindOwnBinding(*current_, inner.name))
+	{
+		if (existing->kind != SB_CLASS_TEMPLATE || !existing->templ ||
+		    existing->templ->kind != TMPL_ALIAS)
+			throw runtime_error(inner.name +
+			                    " redeclared as an alias template");
+		// An instantiation re-walk re-captures the same declaration.
+		existing->templ->params = params;
+		existing->templ->alias_type = inner.type.get();
+		return;
+	}
+	TemplateInfo* tmpl = unit_.templates.Create(TMPL_ALIAS, inner.name,
+	                                            current_);
+	tmpl->params = params;
+	tmpl->decl = &decl;
+	tmpl->pattern_decl = &inner;
+	tmpl->alias_type = inner.type.get();
+	ScopeBinding binding;
+	binding.kind = SB_CLASS_TEMPLATE;
+	binding.name = inner.name;
+	binding.access = current_access_;
+	binding.templ = tmpl;
+	AddBinding(*current_, binding);
+}
+
+// The substituted type of one alias-template-id use: the arguments
+// bind in an alias scope under the template's declaring context
+// (14.5.7: names in the type-id resolve there, not at the use site)
+// and the type-id resolves through the ordinary builder. Cached per
+// argument key.
+const ScopeBinding* SemBinder::ResolveAliasTemplateId(
+	TemplateInfo& tmpl, const vector<TemplateArg>& args)
+{
+	if (!tmpl.alias_type)
+		throw runtime_error("alias template " + tmpl.name +
+		                    " has no aliased type");
+	string key = TemplateArgumentKey(args);
+	unique_ptr<ScopeBinding>& slot = tmpl.dependent_uses[key];
+	if (slot)
+		return slot.get();
+	Scope* alias_scope = MakeArgumentAliasScope(tmpl, args);
+	Scope* saved = current_;
+	current_ = alias_scope;
+	TypePtr substituted;
+	try
+	{
+		substituted = builder_.ResolveTypeId(*tmpl.alias_type);
+	}
+	catch (...)
+	{
+		current_ = saved;
+		throw;
+	}
+	current_ = saved;
+	slot.reset(new ScopeBinding());
+	slot->kind = SB_TYPE_ALIAS;
+	slot->name = tmpl.name;
+	slot->type = substituted;
+	slot->owner = tmpl.declaring;
+	slot->home = tmpl.declaring;
+	return slot.get();
+}
+
 void SemBinder::CaptureClassTemplate(const AstDecl& decl,
                                      const AstDecl& inner, bool definition)
 {
 	const string& name = inner.class_name.parts.back().identifier;
 	vector<TemplateParam> params;
 	CollectTemplateParams(decl, params);
+	// 14.1p11: a class template's parameter pack must be the last
+	// parameter (partial specializations are exempt; they register
+	// through RegisterClassPartial instead).
+	for (size_t i = 0; i + 1 < params.size(); i++)
+		if (params[i].pack)
+			throw runtime_error("template parameter pack of " + name +
+			                    " is not the last parameter");
 	TemplateInfo* tmpl = 0;
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 	{
@@ -345,8 +524,9 @@ void SemBinder::CaptureClassTemplate(const AstDecl& decl,
 	}
 }
 
-void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
-                                        const AstDecl& inner)
+TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
+                                                 const AstDecl& inner,
+                                                 bool as_friend)
 {
 	const AstName* id = inner.kind == DK_FUNCTION
 		? inner.declarator->IdName()
@@ -379,7 +559,7 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	}
 	if (merged)
 	{
-		if (definition)
+		if (definition && merged->pattern_decl != &inner)
 		{
 			if (merged->has_definition)
 				throw runtime_error("redefinition of function template " +
@@ -391,7 +571,13 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 			merged->pattern_ready = false;
 			InstantiatePendingFunctions(*merged);
 		}
-		return;
+		// A real namespace-scope redeclaration makes a hidden friend
+		// template visible (7.3.1.2p3).
+		if (!as_friend && binding && !binding->fn_adl_only.empty() &&
+		    !binding->type)
+			binding->fn_adl_only.assign(binding->fn_adl_only.size(),
+			                            false);
+		return merged;
 	}
 	TemplateInfo* tmpl = unit_.templates.Create(TMPL_FUNCTION, name,
 	                                            current_);
@@ -415,8 +601,15 @@ void SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 		fresh.name = name;
 		fresh.access = current_access_;
 		binding = &AddBinding(*current_, fresh);
+		// 7.3.1.2p3: a template declared only by friend declarations
+		// stays invisible to ordinary lookup (ADL still finds it).
+		if (as_friend)
+			binding->fn_adl_only.assign(1, true);
 	}
+	else if (!as_friend && !binding->fn_adl_only.empty() && !binding->type)
+		binding->fn_adl_only.assign(binding->fn_adl_only.size(), false);
 	binding->fn_templates.push_back(tmpl);
+	return tmpl;
 }
 
 // --- template-id resolution ------------------------------------------------
@@ -446,7 +639,13 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		                    " does not name a template");
 	TemplateInfo& tmpl = *named_template;
 	vector<TemplateArg> args = ResolveTemplateArgumentList(tmpl, part);
-	bool dependent = false;
+	// PA21 alias templates substitute instead of specializing.
+	if (tmpl.kind == TMPL_ALIAS)
+		return ResolveAliasTemplateId(tmpl, args);
+	// A use through a bound template-template parameter is a pattern
+	// use even with concrete arguments: the real template arrives at
+	// instantiation.
+	bool dependent = tmpl.tt_param_index >= 0;
 	for (size_t i = 0; i < args.size(); i++)
 		if (TemplateArgIsDependent(args[i]))
 			dependent = true;
@@ -478,6 +677,25 @@ Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
 {
 	Scope* scope = model_.CreateScope(SCOPE_TEMPLATE_PARAMS, "",
 	                                  tmpl.declaring);
+	// PA21: a deduction-produced slot list (one slot per parameter,
+	// pack slots carrying their element runs) binds one-to-one; the
+	// span mapping below is for flattened concrete argument lists.
+	bool slot_form = false;
+	for (size_t i = 0; i < args.size(); i++)
+		if (args[i].is_pack_slot)
+			slot_form = true;
+	if (slot_form && args.size() == tmpl.params.size())
+	{
+		for (size_t i = 0; i < tmpl.params.size(); i++)
+		{
+			if (args[i].is_pack_slot)
+				BindPackAliasElements(*scope, tmpl.params[i],
+				                      args[i].pack_elements);
+			else
+				BindParamAlias(*scope, tmpl.params[i], args[i]);
+		}
+		return scope;
+	}
 	std::vector<std::pair<size_t, size_t>> spans;
 	if (!MapParamSpans(tmpl.params, args.size(), spans))
 	{

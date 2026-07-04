@@ -901,23 +901,60 @@ string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 	const TemplateInfo& tmpl = *spec.owner;
 	Substitutions subs;
 	vector<NameComponent> parts = ScopeComponents(tmpl.declaring);
+	// PA21 member function templates: the encoding is the member form
+	// (method cv/ref-qualifiers before the class prefix).
+	bool member = tmpl.declaring && tmpl.declaring->kind == SCOPE_CLASS;
+	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
+	string cv;
+	if (member)
+	{
+		if (pattern->is_volatile)
+			cv += "V";
+		if (pattern->is_const)
+			cv += "K";
+		if (pattern->ref_qual == 1)
+			cv += "R";
+		else if (pattern->ref_qual == 2)
+			cv += "O";
+	}
 	string prefix;
 	string prev = ManglePrefixComponents(parts, subs, prefix);
 	string name_key = (prev.empty() ? string("T:") : prev + "::") +
 		tmpl.name;
 	subs.Add(name_key);
-	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
 	string terminal =
-		MangleTerminalName(tmpl.name, pattern->parameters.size());
+		MangleTerminalName(tmpl.name, pattern->parameters.size() +
+		                              (member ? 1 : 0));
 	string targs;
 	for (size_t i = 0; i < spec.args.size(); i++)
 		targs += MangleTemplateArg(spec.args[i], subs);
 	string result = MangleType(pattern->target, subs);
 	string params = MangleBareParameters(pattern, subs);
 	string encoding = terminal + "I" + targs + "E";
-	if (!parts.empty())
-		encoding = "N" + prefix + encoding + "E";
+	if (!parts.empty() || member)
+		encoding = "N" + cv + prefix + encoding + "E";
 	return "_Z" + encoding + result + params;
+}
+
+// PA21 constructor-template specializations: C1/C2 followed by the
+// template-argument list, with the parameters mangled from the
+// pattern (`_ZN4pairIiEC1IiiLi0EEEOT_OT0_`).
+string MangleMemberFunctionTemplateObjectName(
+	const Scope* scope, const FunctionSpecialization& spec,
+	const string& special_code)
+{
+	const TemplateInfo& tmpl = *spec.owner;
+	Substitutions subs;
+	vector<NameComponent> parts = ScopeComponents(scope);
+	string encoding = "N";
+	ManglePrefixComponents(parts, subs, encoding);
+	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
+	string targs;
+	for (size_t i = 0; i < spec.args.size(); i++)
+		targs += MangleTemplateArg(spec.args[i], subs);
+	encoding += special_code + "I" + targs + "E";
+	encoding += "E";
+	return "_Z" + encoding + MangleBareParameters(pattern, subs);
 }
 
 string MangleVariableObjectName(const Scope* scope, const string& name)

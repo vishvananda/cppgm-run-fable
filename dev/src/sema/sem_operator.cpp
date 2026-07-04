@@ -191,6 +191,42 @@ void SemExprAnalyzer::AppendTemplateCandidates(
 	}
 }
 
+// PA21 member templates: deduce a class scope's member operator (or
+// member function) templates against the explicit operands (the
+// object binds as the implicit parameter during ranking).
+void SemExprAnalyzer::AppendMemberTemplateCandidates(
+	const ScopeBinding& binding, const vector<SemValue>& operands,
+	vector<OperatorCandidate>& out, set<const void*>& seen)
+{
+	if (binding.fn_templates.empty() || operands.empty())
+		return;
+	vector<SemValue> shells;
+	for (size_t i = 1; i < operands.size(); i++)
+	{
+		SemValue shell;
+		shell.type = operands[i].type;
+		shell.category = operands[i].category;
+		shells.push_back(std::move(shell));
+	}
+	for (size_t t = 0; t < binding.fn_templates.size(); t++)
+	{
+		const FunctionSpecialization* spec =
+			host_.DeduceFunctionTemplate(*binding.fn_templates[t],
+			                             shells, 0);
+		if (!spec)
+			continue;
+		if (!seen.insert(&spec->self).second)
+			continue;
+		OperatorCandidate candidate;
+		candidate.binding = &spec->self;
+		candidate.index = 0;
+		candidate.is_member = true;
+		candidate.declared = spec->type;
+		candidate.spec = spec;
+		out.push_back(candidate);
+	}
+}
+
 // PA18 13.4p2: a function set used against a function-typed target
 // gains the specializations its templates deduce from that target.
 void SemExprAnalyzer::AddTargetDeducedOverloads(SemValue& value,
@@ -267,6 +303,10 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 			if (const ScopeBinding* own = FindOwnBinding(*link, op_name))
 			{
 				AppendBindingOverloads(*own, true, true, out, seen);
+				// PA21: member operator templates deduce against the
+				// explicit operands.
+				AppendMemberTemplateCandidates(*own, operands, out,
+				                               seen);
 				break;  // derived declarations hide base ones (10.2)
 			}
 	}
@@ -543,7 +583,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	host_.CheckMemberAccess(binding.home, access, op_name);
 	// PA16: an implicitly declared copy/move assignment synthesizes its
 	// definition on first selection.
-	if (chosen.is_member && binding.name == "operator =")
+	if (chosen.is_member && !chosen.spec && binding.name == "operator =")
 		if (const NamedTypeInfo* owner_entity =
 		        host_.Model().ScopeEntity(binding.owner))
 			host_.EnsureAssignSpecial(owner_entity, chosen.index);
@@ -561,15 +601,24 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	result = CallResult(fn);
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
 	callee->name = CanonicalQualifiedName(binding.owner, binding.name);
-	const NamedTypeInfo* member_owner = chosen.is_member
-		? host_.Model().ScopeEntity(binding.owner) : 0;
+	// PA21: a member-template specialization declares its owner class
+	// through the template record (its binding owner is the argument
+	// alias scope).
+	const NamedTypeInfo* member_owner = 0;
+	if (chosen.is_member)
+		member_owner = chosen.spec && chosen.spec->owner
+			? chosen.spec->owner->member_of
+			: host_.Model().ScopeEntity(binding.owner);
 	callee->type = chosen.is_member
 		? ThisAdjustedType(member_owner ? member_owner
 		                                : operands[0].type->named, fn)
 		: fn;
 	callee->entity_scope = binding.owner;
 	callee->entity_name = binding.name;
-	callee->is_method = chosen.is_member;
+	// A member-template specialization routes through its own entry
+	// (keyed on the alias scope) like a namespace-scope one; the
+	// object address stays the leading argument.
+	callee->is_method = chosen.is_member && !chosen.spec;
 	callee->fn_spec = chosen.spec;
 	host_.OnSpecializationOdrUsed(chosen.spec);
 	if (chosen.index < binding.fn_unwind_no.size() &&

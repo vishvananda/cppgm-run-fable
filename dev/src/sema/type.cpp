@@ -314,6 +314,11 @@ bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b)
 {
 	if (a.is_value != b.is_value || a.pack_pattern != b.pack_pattern)
 		return false;
+	// PA21 template-template arguments compare by template identity.
+	if (a.template_entity || b.template_entity ||
+	    a.template_param >= 0 || b.template_param >= 0)
+		return a.template_entity == b.template_entity &&
+			a.template_param == b.template_param;
 	if (!a.is_value)
 		return TypeEquals(a.type, b.type);
 	if (a.value_param != b.value_param ||
@@ -328,6 +333,10 @@ bool TemplateArgIsDependent(const TemplateArg& arg)
 {
 	if (arg.value_param >= 0 || arg.dependent_value || arg.pack_pattern)
 		return true;
+	if (arg.template_param >= 0)
+		return true;
+	if (arg.template_entity)
+		return false;
 	return TypeIsDependent(arg.type);
 }
 

@@ -48,6 +48,13 @@ vector<TemplateArg> SemBinder::ComposePartialPattern(
 			binding.kind = SB_TYPE;
 			binding.type = PlaceholderType(i);
 		}
+		else if (params[i].kind == TPK_TEMPLATE)
+		{
+			// PA21: the parameter binds a placeholder template whose
+			// anchor carries the slot for deduction.
+			binding.kind = SB_CLASS_TEMPLATE;
+			binding.templ = TemplateParamPlaceholder(params[i], i);
+		}
 		else
 		{
 			binding.kind = SB_VARIABLE;
@@ -85,15 +92,20 @@ int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
 	for (size_t p = 0; p < tmpl.partials.size(); p++)
 	{
 		const PartialSpecialization& partial = tmpl.partials[p];
-		if (partial.pattern.size() > args.size())
-			continue;
 		vector<TemplateArg> candidate(partial.params.size());
+		for (size_t i = 0; i < partial.params.size(); i++)
+			candidate[i].is_pack_slot = partial.params[i].pack;
 		if (!DeduceTemplateArgs(partial.pattern, args, candidate))
 			continue;
 		bool complete = true;
 		for (size_t i = 0; i < candidate.size(); i++)
-			if (!candidate[i].is_value && !candidate[i].type)
+		{
+			if (candidate[i].is_pack_slot)
+				complete = complete && candidate[i].pack_done;
+			else if (!candidate[i].is_value && !candidate[i].type &&
+			         !candidate[i].template_entity)
 				complete = false;
+		}
 		if (complete)
 			matches.push_back(p);
 	}
@@ -123,6 +135,8 @@ int SemBinder::MatchPartialSpecialization(TemplateInfo& tmpl,
 			                    tmpl.name);
 	}
 	bound.assign(tmpl.partials[best].params.size(), TemplateArg());
+	for (size_t i = 0; i < bound.size(); i++)
+		bound[i].is_pack_slot = tmpl.partials[best].params[i].pack;
 	DeduceTemplateArgs(tmpl.partials[best].pattern, args, bound);
 	return (int)best;
 }

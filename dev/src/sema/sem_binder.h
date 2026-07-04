@@ -295,8 +295,48 @@ private:
 	bool QualifierIsNamespacePath(const AstName& name);
 	void CaptureQualifiedClassTemplate(const AstDecl& decl,
 	                                   const AstDecl& inner);
-	void CaptureFunctionTemplate(const AstDecl& decl,
-	                             const AstDecl& inner);
+	// Returns the merged or fresh record; `as_friend` captures a
+	// hidden (ADL-only) namespace-scope friend template.
+	TemplateInfo* CaptureFunctionTemplate(const AstDecl& decl,
+	                                      const AstDecl& inner,
+	                                      bool as_friend = false);
+	// --- PA21 member templates (sem_member_template.cpp) ---
+	// Class-scope template-declaration dispatch (member function /
+	// constructor / class / alias / friend templates).
+	void BindMemberTemplateDeclaration(const AstDecl& decl,
+	                                   const AstDecl& inner);
+	void CaptureMemberFunctionTemplate(const AstDecl& decl,
+	                                   const AstDecl& inner);
+	void CaptureConstructorTemplate(const AstDecl& decl,
+	                                const AstDecl& inner);
+	// A friend template declaration/definition inside a class (11.3):
+	// captures into the enclosing namespace, hidden until a matching
+	// namespace-scope declaration appears.
+	void BindFriendTemplate(const AstDecl& decl, const AstDecl& inner);
+	// Constructor-template support for construction sites: deduces the
+	// class's constructor templates against the argument list and
+	// synthesizes ClassCtor entries for the winners.
+	void AppendCtorTemplateCandidates(const ClassInfo& cls,
+	                                  vector<SemValue>& args,
+	                                  vector<TypePtr>& candidates,
+	                                  vector<size_t>& min_arity,
+	                                  vector<size_t>& positions,
+	                                  vector<bool>* is_template = 0);
+	// The ClassCtor entry (existing or fresh, body instantiated) for a
+	// deduced constructor-template specialization.
+	int EnsureCtorTemplateEntry(ClassInfo& cls,
+	                            const FunctionSpecialization* spec);
+	// An out-of-class member-template definition qualified by a class
+	// (or instantiated specialization) scope: captures/merges in that
+	// scope.
+	void CaptureQualifiedMemberTemplate(const AstDecl& decl,
+	                                    const AstDecl& inner,
+	                                    Scope* declaring);
+	void CaptureQualifiedMemberClassTemplate(const AstDecl& decl,
+	                                         const AstDecl& inner);
+	// The instantiated (weak, demand-emitted) body of a selected
+	// constructor-template specialization.
+	void InstantiateCtorTemplateBody(ClassInfo& cls, int index);
 	// Collects the type-parameter list of a template head (throws on
 	// the out-of-scope parameter forms).
 	static void CollectTemplateParams(const AstDecl& decl,
@@ -321,10 +361,30 @@ private:
 	// aliases and constant-value bindings).
 	Scope* MakeArgumentAliasScope(const TemplateInfo& tmpl,
 	                              const vector<TemplateArg>& args);
-	// One parameter-name alias in such a scope (type alias or
-	// objectless constant).
+	// One parameter-name alias in such a scope (type alias, objectless
+	// constant, or PA21 template-name alias).
 	void BindParamAlias(Scope& scope, const TemplateParam& param,
 	                    const TemplateArg& arg);
+	// A parameter pack's alias from an explicit element run (the
+	// deduced slot form of a partial specialization).
+	void BindPackAliasElements(Scope& scope, const TemplateParam& param,
+	                           const vector<TemplateArg>& elements);
+	// --- PA21 alias templates and template-template parameters ---
+	void CaptureAliasTemplate(const AstDecl& decl, const AstDecl& inner);
+	// The substituted type of one alias-template-id use (cached per
+	// argument key; 14.5.7: aliases have no specializations of their
+	// own).
+	const ScopeBinding* ResolveAliasTemplateId(TemplateInfo& tmpl,
+	                                           const vector<TemplateArg>& args);
+	// A pattern-scope placeholder template standing for the enclosing
+	// template's template-template parameter `index`.
+	TemplateInfo* TemplateParamPlaceholder(const TemplateParam& param,
+	                                       size_t index);
+	// One template-template argument (a template-name re-read from the
+	// type-form argument) against a TPK_TEMPLATE parameter.
+	TemplateArg ResolveTemplateTemplateArgument(const AstName& name,
+	                                            const TemplateParam& param,
+	                                            const string& context);
 	// --- PA19 value arguments (template_args.cpp) ---
 	// Whether abstract pattern bindings are in scope (unevaluable
 	// value arguments are then dependent, not ill-formed).
@@ -534,6 +594,11 @@ private:
 	bool BaseClauseIsDependent(const AstName& name);
 	bool NameMentionsAny(const AstName& name,
 	                     const std::set<string>& params);
+	// PA21: whether a qualified member-definition name's qualifier
+	// mentions the declaration's own template parameters (the pattern
+	// form that registers on the owner template).
+	bool TemplateMemberOwnerIsPattern(const AstDecl& decl,
+	                                  const AstName& name);
 
 	// --- PA17 virtual members (sem_virtual.cpp) ---
 	// Declaration-time slot recording for an ordinary member function

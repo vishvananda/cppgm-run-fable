@@ -351,12 +351,16 @@ private:
 	const NamedTypeInfo* ResolveMemberQualifier(
 		const AstName& name, const NamedTypeInfo* object_entity);
 	// PA17: `qualified` suppresses dynamic dispatch (10.3p15 explicit
-	// scope qualification calls the named function directly).
+	// scope qualification calls the named function directly). PA21:
+	// `explicit_part` carries an explicit member template-id's
+	// argument list.
 	SemValue AnalyzeMethodCall(SemValue object, const ScopeBinding& binding,
 	                           const vector<AstExprPtr>& arguments,
-	                           bool qualified = false);
+	                           bool qualified = false,
+	                           const AstNamePart* explicit_part = 0);
 	SemValue AnalyzeStaticMethodCall(const AstExpr& expr,
-	                                 const ScopeBinding& binding);
+	                                 const ScopeBinding& binding,
+	                                 const AstNamePart* explicit_part = 0);
 	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,
 	                                  const string& written);
 
@@ -383,6 +387,12 @@ private:
 	                              vector<OperatorCandidate>& out,
 	                              std::set<const void*>& seen,
 	                              const AstNamePart* explicit_part = 0);
+	// PA21: member (operator) templates deduce against the explicit
+	// operands; the object binds as the implicit parameter in ranking.
+	void AppendMemberTemplateCandidates(const ScopeBinding& binding,
+	                                    const vector<SemValue>& operands,
+	                                    vector<OperatorCandidate>& out,
+	                                    std::set<const void*>& seen);
 	// PA18 13.4p2: extends a target-directed function set with the
 	// specializations deduced from the destination type.
 	void AddTargetDeducedOverloads(SemValue& value, const TypePtr& dest);

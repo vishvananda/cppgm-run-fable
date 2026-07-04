@@ -1191,7 +1191,7 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
                                        vector<SemValue>& args,
                                        bool copy_init, const char* what)
 {
-	if (cls.ctors.empty())
+	if (cls.ctors.empty() && cls.ctor_templates.empty())
 	{
 		if (!args.empty())
 			throw NoViableOverloadError(
@@ -1201,10 +1201,12 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 	vector<TypePtr> candidates;
 	vector<size_t> min_arity;
 	vector<size_t> positions;
+	vector<bool> is_template;
 	bool any_default_form = false;
 	for (size_t i = 0; i < cls.ctors.size(); i++)
 	{
-		if (cls.ctors[i].ignore_in_overload)
+		if (cls.ctors[i].ignore_in_overload ||
+		    cls.ctors[i].tmpl_spec)
 			continue;
 		size_t required = cls.ctors[i].type->parameters.size();
 		const vector<const AstExpr*>& defaults = cls.ctors[i].defaults;
@@ -1216,6 +1218,18 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		candidates.push_back(cls.ctors[i].type);
 		min_arity.push_back(required);
 		positions.push_back(i);
+		is_template.push_back(false);
+	}
+	// PA21: constructor templates deduce against the argument list and
+	// join as candidates (synthesizing their ClassCtor entries).
+	AppendCtorTemplateCandidates(cls, args, candidates, min_arity,
+	                             positions, &is_template);
+	if (candidates.empty())
+	{
+		if (!args.empty())
+			throw NoViableOverloadError(
+				string("no matching constructor for ") + what);
+		return -1;
 	}
 	// Default-initialization of a class whose only constructor entries
 	// are the implicitly declared copy/move members uses the implicit
@@ -1226,8 +1240,13 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
 	vector<ImplicitConversion> conversions;
-	size_t winner = positions[SelectBestOverload(candidates, sources,
-	                                             conversions, &min_arity)];
+	vector<const FunctionSpecialization*> specs(candidates.size(), 0);
+	for (size_t c = 0; c < positions.size(); c++)
+		specs[c] = cls.ctors[positions[c]].tmpl_spec;
+	SpecOverloadOrder order(*this, specs, args.size());
+	size_t winner = positions[SelectBestOverload(
+		candidates, sources, conversions, &min_arity, &is_template,
+		&order)];
 	const ClassCtor& ctor = cls.ctors[winner];
 	if (ctor.deleted)
 		throw runtime_error(string("use of deleted constructor for ") +

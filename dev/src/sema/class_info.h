@@ -88,6 +88,14 @@ struct ClassCtor
 	// one forwards to (null for ordinary constructors).
 	const NamedTypeInfo* inherited_base;
 
+	// PA21: the constructor-template specialization this entry was
+	// synthesized for (null for declared constructors); the lowering
+	// mangles the C1/C2 object names with its template arguments.
+	const struct FunctionSpecialization* tmpl_spec = 0;
+	// The specialization's argument alias scope (the body and
+	// mem-initializers bind under it).
+	Scope* tmpl_param_scope = 0;
+
 	// --- PA16 special-member facts ---
 	ECtorKind kind;   // classified by parameter shape (12.8p2/p3)
 	bool implicit;    // implicitly declared at class completion
@@ -190,6 +198,10 @@ struct ClassInfo
 	// included) and the declared (scope, name) of friend functions.
 	vector<const NamedTypeInfo*> friend_classes;
 	vector<std::pair<const Scope*, string>> friend_functions;
+	// PA21: declared constructor templates (deduced against argument
+	// lists at construction sites; selected specializations synthesize
+	// ClassCtor entries).
+	vector<struct TemplateInfo*> ctor_templates;
 	// PA16 conversion functions in declaration order (12.3.2).
 	vector<ClassConversion> conversions;
 
