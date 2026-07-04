@@ -385,6 +385,89 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 	return &resolved->self;
 }
 
+// The function-template specialization an explicit instantiation
+// names (14.7.2): explicit template-id arguments resolve directly;
+// omitted trailing arguments (`f<>`) and the plain-declarator form
+// deduce from the declared signature (14.8.2.2), with the explicit
+// prefix required to agree with the deduction.
+const FunctionSpecialization* SemBinder::ResolveExplicitInstantiationSpec(
+	const ScopeBinding& binding, const AstNamePart& terminal,
+	const TypePtr& declared)
+{
+	const FunctionSpecialization* resolved = 0;
+	bool named_args = terminal.kind == NP_TEMPLATE_ID ||
+		!terminal.arguments.empty();
+	if (!named_args)
+	{
+		if (!declared)
+			throw runtime_error("explicit instantiation of a "
+			                    "non-function");
+		// Deduce the template arguments from the declared types.
+		for (size_t t = 0;
+		     t < binding.fn_templates.size() && !resolved; t++)
+			resolved = DeduceFunctionTemplateFromTarget(
+				*binding.fn_templates[t], declared);
+		return resolved;
+	}
+	for (size_t t = 0; t < binding.fn_templates.size() && !resolved; t++)
+	{
+		TemplateInfo& tmpl = *binding.fn_templates[t];
+		if (TemplatePackIndex(tmpl.params) < tmpl.params.size())
+			continue;
+		vector<TemplateArg> args;
+		bool have_args = true;
+		try
+		{
+			args = ResolveTemplateArgumentList(tmpl, terminal);
+		}
+		catch (const std::exception&)
+		{
+			have_args = false;
+		}
+		FunctionSpecialization* spec = 0;
+		if (have_args)
+		{
+			try
+			{
+				spec = EnsureFunctionSpecialization(tmpl, args);
+			}
+			catch (const std::exception&)
+			{
+				spec = 0;
+			}
+		}
+		if (!spec)
+		{
+			if (!declared ||
+			    terminal.arguments.size() >= tmpl.params.size())
+				continue;
+			const FunctionSpecialization* deduced =
+				DeduceFunctionTemplateFromTarget(tmpl, declared);
+			if (!deduced)
+				continue;
+			if (have_args)
+			{
+				if (deduced->args.size() < args.size())
+					continue;
+				vector<TemplateArg> lead(
+					deduced->args.begin(),
+					deduced->args.begin() + args.size());
+				if (TemplateArgumentKey(lead) !=
+				    TemplateArgumentKey(args))
+					continue;
+			}
+			else if (!terminal.arguments.empty())
+				continue;
+			resolved = deduced;
+			continue;
+		}
+		if (declared && !TypeEquals(spec->type, declared))
+			continue;
+		resolved = spec;
+	}
+	return resolved;
+}
+
 void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner,
                                                   bool is_extern)
 {
@@ -458,83 +541,8 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner,
 	{
 		declared = TypePtr();
 	}
-	const FunctionSpecialization* resolved = 0;
-	bool has_args = terminal.kind == NP_TEMPLATE_ID ||
-		!terminal.arguments.empty();
-	if (has_args)
-	{
-		for (size_t t = 0;
-		     t < binding->fn_templates.size() && !resolved; t++)
-		{
-			TemplateInfo& tmpl = *binding->fn_templates[t];
-			if (TemplatePackIndex(tmpl.params) < tmpl.params.size())
-				continue;
-			vector<TemplateArg> args;
-			bool have_args = true;
-			try
-			{
-				args = ResolveTemplateArgumentList(tmpl, terminal);
-			}
-			catch (const std::exception&)
-			{
-				have_args = false;
-			}
-			FunctionSpecialization* spec = 0;
-			if (have_args)
-			{
-				try
-				{
-					spec = EnsureFunctionSpecialization(tmpl, args);
-				}
-				catch (const std::exception&)
-				{
-					spec = 0;
-				}
-			}
-			if (!spec)
-			{
-				// 14.7.2 with 14.8.2.2: arguments the template-id
-				// omits (`f<>`) deduce from the declared signature;
-				// the explicit prefix must agree with the deduction.
-				if (!declared ||
-				    terminal.arguments.size() >= tmpl.params.size())
-					continue;
-				const FunctionSpecialization* deduced =
-					DeduceFunctionTemplateFromTarget(tmpl, declared);
-				if (!deduced)
-					continue;
-				if (have_args)
-				{
-					if (deduced->args.size() < args.size())
-						continue;
-					vector<TemplateArg> lead(
-						deduced->args.begin(),
-						deduced->args.begin() + args.size());
-					if (TemplateArgumentKey(lead) !=
-					    TemplateArgumentKey(args))
-						continue;
-				}
-				else if (!terminal.arguments.empty())
-					continue;
-				resolved = deduced;
-				continue;
-			}
-			if (declared && !TypeEquals(spec->type, declared))
-				continue;
-			resolved = spec;
-		}
-	}
-	else
-	{
-		if (!declared)
-			throw runtime_error("explicit instantiation of a "
-			                    "non-function");
-		// Deduce the template arguments from the declared types.
-		for (size_t t = 0;
-		     t < binding->fn_templates.size() && !resolved; t++)
-			resolved = DeduceFunctionTemplateFromTarget(
-				*binding->fn_templates[t], declared);
-	}
+	const FunctionSpecialization* resolved =
+		ResolveExplicitInstantiationSpec(*binding, terminal, declared);
 	if (!resolved)
 		throw runtime_error("explicit instantiation matches no template");
 	FunctionSpecialization& spec =
