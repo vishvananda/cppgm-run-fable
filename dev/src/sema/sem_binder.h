@@ -856,6 +856,7 @@ public:
 		TemplateInfo& tmpl, const TypePtr& target);
 	virtual void OnSpecializationOdrUsed(const FunctionSpecialization* spec);
 	virtual void OnStaticMemberReferenced(const ScopeBinding& binding);
+	virtual bool IsInstantiating() const { return instantiating_; }
 	virtual const FunctionSpecialization* InstantiateCharPackLiteral(
 		const ScopeBinding& binding, const string& chars);
 	virtual bool SwapUnevaluatedOperand(bool active);

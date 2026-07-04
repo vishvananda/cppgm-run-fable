@@ -970,12 +970,19 @@ ClassSpecialization* SemBinder::FindSpecializationRecord(
 // this demand shape; constant-context reads alone leave no storage).
 void SemBinder::DemandSpecializationStatics(const NamedTypeInfo* entity)
 {
-	ClassSpecialization* spec = FindSpecializationRecord(entity);
-	if (!spec || spec->statics_demanded)
-		return;
-	spec->statics_demanded = true;
-	InstantiateStaticMembers(
-		*const_cast<TemplateInfo*>(entity->spec_template), *spec, 0);
+	// The demand covers the base-subobject chain: an object of the
+	// derived specialization gives every inherited static member
+	// storage too (the checked reference shape).
+	for (; entity; entity = entity->base_entity)
+	{
+		ClassSpecialization* spec = FindSpecializationRecord(entity);
+		if (!spec || spec->statics_demanded)
+			continue;
+		spec->statics_demanded = true;
+		InstantiateStaticMembers(
+			*const_cast<TemplateInfo*>(entity->spec_template), *spec,
+			0);
+	}
 }
 
 // A non-folding reference to a static data member: instantiate its

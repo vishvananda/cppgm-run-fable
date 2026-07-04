@@ -269,10 +269,12 @@ SemValue SemExprAnalyzer::AnalyzeStaticMemberValue(
 	const ScopeBinding& binding, const string& written)
 {
 	SemValue value;
-	// A member without a recorded constant demands its registered
-	// out-of-class definition first: the definition may carry the
-	// in-TU constant that lets this read fold (9.4.2p2 with 14.7.1p8).
-	if (!binding.has_value)
+	// A read demands the member's registered out-of-class definition
+	// even when it folds: the checked references keep the weak
+	// storage of a read instantiated member (9.4.2p2 with 14.7.1p8).
+	// A fold inside an instantiated pattern body is the exception -
+	// it leaves no storage (the pinned constexpr-conversion shape).
+	if (!binding.has_value || !host_.IsInstantiating())
 		host_.OnStaticMemberReferenced(binding);
 	if (binding.has_value)
 	{

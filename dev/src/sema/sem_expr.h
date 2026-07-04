@@ -126,6 +126,9 @@ struct ISemExprHost
 	{
 		(void)binding;
 	}
+	// PA21: whether the host is binding an instantiated pattern body
+	// (folded static-member reads there leave no storage).
+	virtual bool IsInstantiating() const { return false; }
 	// PA19 5.3.3p5: sizeof...(name).
 	virtual size_t PackSize(const string& name) = 0;
 	// PA19 13.5.8: the numeric literal-operator template of `binding`
