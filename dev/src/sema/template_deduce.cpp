@@ -1231,6 +1231,10 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	if (!pack_pattern_last && tmpl.param_patterns.size() < args.size())
 		return 0;
 	vector<TemplateArg> bound(tmpl.params.size());
+	// Pack slots absorb runs when a template-id pattern (tuple<T...>)
+	// deduces against a specialization's arguments.
+	for (size_t i = 0; i < bound.size(); i++)
+		bound[i].is_pack_slot = tmpl.params[i].pack;
 	vector<TemplateArg> pack_elements;
 	if (explicit_part &&
 	    !BindExplicitDeductionArgs(tmpl, *explicit_part, bound,
@@ -1287,6 +1291,11 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 			pack_elements.push_back(element);
 		deduced_elements++;
 	}
+	// A pack deduced through a template-id pattern (tuple<T...>)
+	// accumulates on its slot; splice it like the trailing-parameter
+	// run.
+	if (has_pack && pack_elements.empty() && bound[pack_index].pack_done)
+		pack_elements = bound[pack_index].pack_elements;
 	// Unbound parameters fill from default template arguments; any
 	// remaining hole is a deduction failure.
 	for (size_t i = 0; i < bound.size(); i++)
