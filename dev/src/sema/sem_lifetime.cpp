@@ -888,10 +888,23 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		vector<SemNodePtr> arg_nodes;
 		for (size_t j = 0; j < no_args.size(); j++)
 			arg_nodes.push_back(std::move(no_args[j].node));
-		item.children.push_back(MakeConstructorCall(
+		SemNodePtr action = MakeConstructorCall(
 			cls, index, false,
 			AddressOfNode(VariableObjectExpr(binding)),
-			std::move(arg_nodes)));
+			std::move(arg_nodes));
+		// An implicitly-declared default constructor over an
+		// effect-free chain (empty user default-constructor bodies in
+		// the members included) elides its call; the selected
+		// constructor stays odr-used. A user-provided constructor
+		// selected directly keeps its explicit call (the reference
+		// pins both shapes).
+		bool implicit_selected = index < 0 ||
+			(index < (int)cls.ctors.size() &&
+			 (cls.ctors[index].implicit || cls.ctors[index].defaulted));
+		if (implicit_selected &&
+		    !unit_.classes.DefaultConstructionHasSyntacticEffects(cls))
+			action->elided = true;
+		item.children.push_back(std::move(action));
 		return;
 	}
 	// Initialized class object: direct (paren), list (braced), or

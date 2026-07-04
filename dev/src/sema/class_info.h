@@ -305,6 +305,9 @@ public:
 	// synthesized lifetime code when the whole chain is empty.
 	bool DestructionHasEffects(const ClassInfo& info) const;
 	bool DefaultConstructionHasEffects(const ClassInfo& info) const;
+	// The order-independent variant: instantiated user constructors
+	// read their captured pattern bodies (whole-object elision).
+	bool DefaultConstructionHasSyntacticEffects(const ClassInfo& info) const;
 
 	// Whether default-initialization requires constructor code (a user
 	// constructor, a default member initializer, or a base or member
@@ -316,7 +319,8 @@ public:
 	const ClassInfo* MemberClass(const TypePtr& type) const;
 
 private:
-	bool ComputeDefaultConstructionEffects(const ClassInfo& info) const;
+	bool ComputeDefaultConstructionEffects(const ClassInfo& info,
+	                                       bool syntactic) const;
 
 	map<const NamedTypeInfo*, unique_ptr<ClassInfo>> infos_;
 	vector<const ClassInfo*> order_;  // creation order

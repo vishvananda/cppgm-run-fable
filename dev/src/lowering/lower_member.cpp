@@ -658,6 +658,17 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 		case SN_CONSTRUCTOR_ACTION:
 			if (child.trivial_init)
 				break;
+			if (child.elided)
+			{
+				// The selected constructor stays odr-used even though
+				// the effect-free call drops (3.2p3).
+				if (!child.children.empty() &&
+				    child.children[0]->kind == SN_CALL_EXPRESSION &&
+				    !child.children[0]->children.empty())
+					program_.DemandElidedCtor(
+						*child.children[0]->children[0]);
+				break;
+			}
 			if (child.trivial_copy)
 			{
 				LowerTrivialCopyAction(child, decl_address);

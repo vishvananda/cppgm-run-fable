@@ -21,7 +21,8 @@ enum EClassFact
 	CF_TRIVIAL_COPY_CTOR,
 	CF_TRIVIAL_MOVE_CTOR,
 	CF_TRIVIAL_COPY_ASSIGN,
-	CF_TRIVIAL_MOVE_ASSIGN
+	CF_TRIVIAL_MOVE_ASSIGN,
+	CF_DEFAULT_CTOR_EFFECTS_SYNTAX
 };
 
 unsigned long long g_class_facts_version = 1;
@@ -219,11 +220,27 @@ bool ClassRegistry::DefaultConstructionHasEffects(const ClassInfo& info) const
 	if (FactCached(info, CF_DEFAULT_CTOR_EFFECTS, value))
 		return value;
 	return FactStore(info, CF_DEFAULT_CTOR_EFFECTS,
-	                 ComputeDefaultConstructionEffects(info));
+	                 ComputeDefaultConstructionEffects(info, false));
+}
+
+// The order-independent variant: an instantiated user constructor
+// reads its captured pattern body instead of staying conservative.
+// Whole-object elision decisions (a local `S s;` through the implicit
+// chain) run where the pattern is available; member-initialization
+// inside synthesized bodies keeps the conservative fact above (the
+// reference pins the member call there).
+bool ClassRegistry::DefaultConstructionHasSyntacticEffects(
+	const ClassInfo& info) const
+{
+	bool value;
+	if (FactCached(info, CF_DEFAULT_CTOR_EFFECTS_SYNTAX, value))
+		return value;
+	return FactStore(info, CF_DEFAULT_CTOR_EFFECTS_SYNTAX,
+	                 ComputeDefaultConstructionEffects(info, true));
 }
 
 bool ClassRegistry::ComputeDefaultConstructionEffects(
-	const ClassInfo& info) const
+	const ClassInfo& info, bool syntactic) const
 {
 	// PA17: the vpointer store is emitted construction work.
 	if (info.is_polymorphic)
@@ -254,8 +271,9 @@ bool ClassRegistry::ComputeDefaultConstructionEffects(
 			// definition may do anything. PA18: an instantiated user
 			// constructor keeps its call (the reference outputs pin
 			// point-of-instantiation ordering, where the body is not
-			// yet analyzed when the enclosing constructor lowers).
-			if (EntityInInstantiation(info.entity))
+			// yet analyzed when the enclosing constructor lowers)
+			// unless the caller asked for the syntactic walk.
+			if (!syntactic && EntityInInstantiation(info.entity))
 				return true;
 			if (!found->type->parameters.empty())
 				return true;
@@ -265,14 +283,18 @@ bool ClassRegistry::ComputeDefaultConstructionEffects(
 				return true;
 		}
 	}
-	if (info.base && DefaultConstructionHasEffects(*info.base))
+	if (info.base &&
+	    (syntactic ? DefaultConstructionHasSyntacticEffects(*info.base)
+	               : DefaultConstructionHasEffects(*info.base)))
 		return true;
 	for (size_t i = 0; i < info.fields.size(); i++)
 	{
 		if (info.fields[i].default_init)
 			return true;
 		const ClassInfo* member = MemberClass(info.fields[i].type);
-		if (member && DefaultConstructionHasEffects(*member))
+		if (member &&
+		    (syntactic ? DefaultConstructionHasSyntacticEffects(*member)
+		               : DefaultConstructionHasEffects(*member)))
 			return true;
 	}
 	return false;
