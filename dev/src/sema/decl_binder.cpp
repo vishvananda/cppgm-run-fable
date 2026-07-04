@@ -72,9 +72,9 @@ ConstValue SuccessorValue(const ConstValue& value, EFundamentalType type)
 
 DeclBinder::DeclBinder(TypesModel& model)
 	: model_(model), builder_(*this), current_(model.global()),
-	  current_fields_(0), anonymous_enums_(0), in_c_linkage_(false),
-	  current_access_(MA_PUBLIC),
-	  allow_qualified_class_name_(false)
+	  allow_qualified_class_name_(false), current_fields_(0),
+	  anonymous_enums_(0), in_c_linkage_(false),
+	  current_access_(MA_PUBLIC)
 {
 }
 

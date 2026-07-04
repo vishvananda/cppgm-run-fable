@@ -3,6 +3,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -490,6 +491,19 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 
 // --- out-of-class member-template definitions ------------------------------
 
+// The canonical positional spelling of a conversion-type-id: a
+// conversion template's identity rides this id (every conversion
+// signature composes as `void() cv`), so definition pairing compares
+// it with the parameter names positionalized (14.5.6.1).
+static string ConversionTypeIdSpelling(const AstTypeId& id,
+                                       const vector<TemplateParam>& params)
+{
+	string text = FlattenSpecifierSeq(id.specifiers);
+	if (id.declarator)
+		text += " | " + FlattenDeclarator(*id.declarator);
+	return PositionalizeTemplateNames(text, params);
+}
+
 // A member-template definition whose qualifier resolved to a concrete
 // class (or instantiated specialization) member scope: capture/merge
 // there, pairing with the in-class declaration.
@@ -544,11 +558,43 @@ void SemBinder::CaptureQualifiedMemberTemplate(const AstDecl& decl,
 				sm_id->parts.back().kind == NP_CONVERSION_FUNCTION;
 			vector<TemplateInfo*>& pool = conversion
 				? cls->conversion_templates : cls->ctor_templates;
+			// Pairing prefers a signature match among the same-arity
+			// definition-less declarations (a conversion template's
+			// identity is its conversion-type-id; a constructor
+			// template's is its parameter clause). A lone same-arity
+			// candidate keeps the tolerant match: its head may spell
+			// types through class typedefs the comparison cannot chase.
 			TemplateInfo* merged = 0;
+			TemplateInfo* lone = 0;
+			size_t open = 0;
 			for (size_t i = 0; i < pool.size(); i++)
-				if (pool[i]->params.size() == params.size() &&
-				    !pool[i]->has_definition)
-					merged = pool[i];
+			{
+				TemplateInfo& cand = *pool[i];
+				if (cand.params.size() != params.size() ||
+				    cand.has_definition || !cand.pattern_decl)
+					continue;
+				lone = &cand;
+				open++;
+				if (merged || !SameTemplateParameterKinds(params,
+				                                          cand.params))
+					continue;
+				if (conversion)
+				{
+					if (cand.conversion_type &&
+					    sm_id->parts.back().conversion_type &&
+					    ConversionTypeIdSpelling(
+					        *sm_id->parts.back().conversion_type,
+					        params) ==
+					        ConversionTypeIdSpelling(
+					            *cand.conversion_type, cand.params))
+						merged = &cand;
+				}
+				else if (SameFunctionTemplateSignature(cand, decl, inner,
+				                                       false))
+					merged = &cand;
+			}
+			if (!merged && open == 1)
+				merged = lone;
 			if (!merged)
 				throw runtime_error("special member template "
 				                    "definition matches no declaration");
@@ -612,12 +658,8 @@ void SemBinder::CaptureQualifiedMemberClassTemplate(const AstDecl& decl,
 	tmpl->pattern_decl = &inner;
 	tmpl->has_definition = true;
 	// Specializations named while only the declaration was visible
-	// upgrade now.
-	for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
-	         tmpl->class_specs.begin();
-	     it != tmpl->class_specs.end(); ++it)
-		if (!it->second->instantiated)
-			InstantiateClassSpecialization(*tmpl, *it->second);
+	// stay dormant (14.7.1p1): the first completeness demand
+	// instantiates them through the ordinary body path.
 }
 
 // --- constructor templates at construction sites ---------------------------

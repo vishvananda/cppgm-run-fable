@@ -33,15 +33,6 @@ TypePtr StripPatternCv(const TypePtr& pattern, const TypePtr& deduced)
 	return TypePtr(new Type(stripped));
 }
 
-// Whether a deduction slot has been bound (a type, a value, a
-// template, or a completed pack run).
-bool ArgBound(const TemplateArg& arg)
-{
-	if (arg.is_pack_slot)
-		return arg.pack_done;
-	return arg.is_value || bool(arg.type) || arg.template_entity;
-}
-
 bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
                     vector<TemplateArg>& bound, bool exact_cv = true);
 bool DeduceFromArgList(const vector<TemplateArg>& pattern,
@@ -888,31 +879,6 @@ bool SemBinder::DeducePatternType(const TypePtr& pattern,
 
 // --- deduction ---------------------------------------------------------------
 
-// The flattened concrete argument list of a deduction result: the
-// per-parameter slots with each pack's deduced run spliced into its
-// position (a completed slot run wins; the shared trailing-parameter
-// run serves the classic single trailing pack).
-static vector<TemplateArg> FlattenDeduced(
-	const vector<TemplateParam>& params, const vector<TemplateArg>& bound,
-	const vector<TemplateArg>& pack_elements)
-{
-	vector<TemplateArg> flattened;
-	for (size_t i = 0; i < params.size(); i++)
-	{
-		if (params[i].pack)
-		{
-			const vector<TemplateArg>& run =
-				i < bound.size() && bound[i].pack_done
-					? bound[i].pack_elements : pack_elements;
-			for (size_t k = 0; k < run.size(); k++)
-				flattened.push_back(run[k]);
-		}
-		else
-			flattened.push_back(bound[i]);
-	}
-	return flattened;
-}
-
 // 14.8.1: explicit template arguments bind the leading parameters;
 // the pack absorbs the remaining explicit arguments. False on any
 // unresolvable or dependent argument (the template contributes no
@@ -985,6 +951,10 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 				resolved = ResolveValueArgument(
 					argument, ValueParamType(param, partial));
 			}
+		}
+		catch (const InstantiationBodyFault&)
+		{
+			throw;
 		}
 		catch (const std::exception&)
 		{
@@ -1134,6 +1104,11 @@ bool SemBinder::FillDeducedDefaults(TemplateInfo& tmpl,
 					*param.default_expr,
 					ValueParamType(param, partial));
 		}
+		catch (const InstantiationBodyFault&)
+		{
+			current_ = saved;
+			throw;
+		}
 		catch (const std::exception&)
 		{
 			current_ = saved;
@@ -1255,6 +1230,10 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		return EnsureFunctionSpecialization(
 			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements),
 			&bound);
+	}
+	catch (const InstantiationBodyFault&)
+	{
+		throw;
 	}
 	catch (const std::exception&)
 	{
@@ -1418,6 +1397,10 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
 	try
 	{
 		return EnsureFunctionSpecialization(tmpl, bound);
+	}
+	catch (const InstantiationBodyFault&)
+	{
+		throw;
 	}
 	catch (const std::exception&)
 	{

@@ -358,6 +358,8 @@ string FlattenExpr(const AstExpr& expr)
 		return "sizeof " + FlattenExpr(*expr.operands[0]);
 	case EK_SIZEOF_TYPE:
 		return "sizeof(" + FlattenTypeId(*expr.type) + ")";
+	case EK_SIZEOF_PACK:
+		return "sizeof...(" + FlattenName(expr.name) + ")";
 	case EK_TYPE_TRAIT:
 		if (expr.is_type_operand)
 			return expr.op_spelling + "(" + FlattenTypeId(*expr.type) + ")";

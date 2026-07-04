@@ -11,16 +11,6 @@ using std::to_string;
 // explicit storage, the count-header convention for class arrays, and
 // delete / delete[] with element destruction.
 
-namespace {
-
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA16 assignment boundary");
-}
-
-}  // namespace
-
 // Scalar new of a class object: the allocation call provides the
 // object address; the constructor runs on it (a non-throwing
 // allocation branches around construction on null).

@@ -14,12 +14,6 @@ using std::to_string;
 
 namespace {
 
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA14 assignment boundary");
-}
-
 TypePtr StripRef(const TypePtr& type)
 {
 	return IsReferenceType(type) ? type->target : type;

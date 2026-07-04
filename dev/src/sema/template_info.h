@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,6 +33,18 @@ enum ETemplateKind
 	// PA21 alias templates: no specializations of their own (14.5.7);
 	// a use substitutes the arguments into the aliased type-id.
 	TMPL_ALIAS
+};
+
+// 14.8.2p8: an error while analyzing an instantiated class body is
+// outside the immediate context of any enclosing substitution probe,
+// so it stays hard. SFINAE catch sites rethrow this type instead of
+// dropping the candidate.
+class InstantiationBodyFault : public std::runtime_error
+{
+public:
+	explicit InstantiationBodyFault(const string& what)
+		: std::runtime_error(what)
+	{}
 };
 
 // One parameter of a template head: a type parameter, a PA19 integral
@@ -343,6 +356,18 @@ bool MapParamSpans(const vector<TemplateParam>& params, size_t argc,
 // printed; entity pointers keep it unique within the translation
 // unit).
 string TemplateArgumentKey(const vector<TemplateArg>& args);
+
+// Whether a deduction slot has been bound (a type, a value, a
+// template, or a completed pack run).
+bool ArgBound(const TemplateArg& arg);
+
+// The flattened concrete argument list of a deduction result: the
+// per-parameter slots with each pack's deduced run spliced into its
+// position (a completed slot run wins; the shared trailing-parameter
+// run serves the classic single trailing pack).
+vector<TemplateArg> FlattenDeduced(const vector<TemplateParam>& params,
+                                   const vector<TemplateArg>& bound,
+                                   const vector<TemplateArg>& pack_elements);
 
 // The flattened `text` with each template-parameter name replaced by
 // its positional marker (14.1: parameter identity is positional).

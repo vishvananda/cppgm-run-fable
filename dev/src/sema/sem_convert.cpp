@@ -285,7 +285,6 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 
 	bool function_source = source.type->kind == TK_FUNCTION;
 	bool lvalue_source = source.category == VC_LVALUE;
-	bool rvalue_source = !lvalue_source;
 	if (rvalue_ref)
 	{
 		// 8.5.3p5: an rvalue reference never binds an lvalue directly;

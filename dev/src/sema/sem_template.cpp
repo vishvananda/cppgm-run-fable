@@ -3,6 +3,8 @@
 #include <set>
 #include <stdexcept>
 
+#include "exceptions.h"
+
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -635,16 +637,36 @@ void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
 		throw;
 	}
 	spec.match_in_flight = false;
-	if (partial >= 0)
+	// 14.8.2p8: a fault while the selected body analyzes is outside
+	// the immediate context of any enclosing substitution probe, so it
+	// rethrows as the hard-error type SFINAE catch sites refuse to
+	// swallow. (The recursive-demand throw above stays soft: in that
+	// context the class is merely incomplete.)
+	try
 	{
-		InstantiateClassFromPartial(tmpl, spec, partial, bound);
-		InstantiateReadyMembers(tmpl);
-		InstantiateReadyPartialMembers(tmpl);
+		if (partial >= 0)
+		{
+			InstantiateClassFromPartial(tmpl, spec, partial, bound);
+			InstantiateReadyMembers(tmpl);
+			InstantiateReadyPartialMembers(tmpl);
+		}
+		else if (tmpl.has_definition)
+		{
+			InstantiateClassSpecialization(tmpl, spec);
+			InstantiateReadyMembers(tmpl);
+		}
 	}
-	else if (tmpl.has_definition)
+	catch (const NotImplementedException&)
 	{
-		InstantiateClassSpecialization(tmpl, spec);
-		InstantiateReadyMembers(tmpl);
+		throw;
+	}
+	catch (const InstantiationBodyFault&)
+	{
+		throw;
+	}
+	catch (const std::exception& e)
+	{
+		throw InstantiationBodyFault(e.what());
 	}
 }
 
@@ -1028,7 +1050,7 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	TemplateInfo shadow;
 	shadow.params = params;
 	shadow.declaring = tmpl.declaring;
-			shadow.capture_seq = tmpl.capture_seq;
+	shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, spec.args);
 	InstantiationContext context(*this, alias_scope, true);
 	BindDeclaration(*decl.inner);

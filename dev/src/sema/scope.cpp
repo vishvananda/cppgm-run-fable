@@ -135,7 +135,8 @@ const char* BindingKeyword(EScopeBindingKind kind)
 	case SB_PARAMETER: return "parameter";
 	case SB_NAMESPACE:
 	case SB_NAMESPACE_ALIAS:
-	case SB_CLASS_TEMPLATE:  // PA18: never printed by the PA11 dump
+	case SB_CLASS_TEMPLATE:      // PA18: never printed by the PA11 dump
+	case SB_VARIABLE_TEMPLATE:   // PA19: likewise
 		break;
 	}
 	return 0;

@@ -200,8 +200,11 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 			: FindOwnBinding(*scope, name);
 		if (own && !BindingPassesFilter(*own, filter))
 			own = 0;
+		// The capture stamp is the seq the NEXT binding receives, so a
+		// binding stamped == seq_limit was also declared after the
+		// capture (a merged redeclaration consumes no stamp of its own).
 		if (own && seq_limit && scope->kind == SCOPE_NAMESPACE &&
-		    own->kind == SB_VARIABLE && own->seq > seq_limit)
+		    own->kind == SB_VARIABLE && own->seq >= seq_limit)
 			own = 0;
 		if (scope->kind != SCOPE_NAMESPACE)
 		{
@@ -223,7 +226,7 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 			const ScopeBinding* member =
 				FindOwnBinding(*closure[i].nominated, name);
 			if (member && seq_limit && member->kind == SB_VARIABLE &&
-			    member->seq > seq_limit)
+			    member->seq >= seq_limit)
 				member = 0;
 			if (member && BindingPassesFilter(*member, filter))
 				MergeFound(member, found, functions);

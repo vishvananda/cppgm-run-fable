@@ -167,8 +167,9 @@ PA14-PA21 lowering path.
 
 ## Status (2026-07-04)
 
-COMPLETE: 176/176 pa22 tests pass and the root
-`make test-report-through-pa22` gate is fully green (1907/1907).
+COMPLETE: 176/176 pa22 fixture tests (plus the audit's course
+regression test) pass and the root `make test-report-through-pa22`
+gate is fully green (1908/1908).
 
 Landed: SFINAE candidate dropping (tasks 1-2), template-head identity
 with out-of-class pairing tolerance, template-id overload sets,
@@ -227,3 +228,70 @@ argument instead of running the body).
 - The three segfaulting inputs (default-argument prefix deduction through
   operator templates) get fixed before feature batches continue, since a
   crash can hide any number of later failures.
+
+## Architecture Review
+
+The as-built implementation matches the planned ownership boundaries:
+
+- Unification, candidate formation, and the SFINAE catch boundary live
+  in `template_deduce.cpp`; partial ordering and conversion/constructor
+  template participation split into `template_order.cpp` (a real unit,
+  not a size dodge — it owns the 14.5.6.2/14.8.2.4 transformed-type
+  walks and the sem_convert hooks). Argument resolution, including
+  entity-address non-type arguments and the reference-dialect
+  tuple-constraints intrinsic, stays in `template_args.cpp`. Overload
+  resolution (`sem_call`/`sem_operator`/`sem_member*`) consumes
+  candidate sets and the `TemplateCandidateMoreSpecialized` tie-break
+  only. Instantiation timing is `sem_template.cpp`'s: naming creates a
+  dormant record, completeness demand instantiates through
+  `InstantiateSpecializationBody` (partial-spec match included).
+  Mangling — including task 9's written-form dependent signatures — is
+  contained in `lowering/lower_name{,_template}.cpp` behind
+  `lower_name_parts.h`; its substitution keys never escape the mangler.
+- Deduction bindings are typed (`TemplateArg` slots indexed by
+  parameter position, pack runs as element vectors); the only
+  spelling-based identity is the 14.5.6.1 positionalized template-head
+  comparison, contained in `template_info.cpp` by design, plus the
+  dependent-signature pairing spellings for non-composable patterns.
+- Substitution failure is represented as candidate state (a dropped
+  candidate), and — after the audit — hard faults from class-body
+  instantiation travel as a distinct `InstantiationBodyFault` type that
+  probe catches rethrow, giving the plan's promised hard-error boundary
+  a real mechanism.
+
+Two behaviors reviewed in depth deserve a note: the
+`__is_implicitly_constructible` intrinsic and the
+integral_constant-style conditional fold both reproduce
+reference-dialect behavior verified by direct observation of
+`cppgm++-ref` on counter-probes (see `audit.md` Findings 1–2); both key
+on structure and implementation-reserved names, not on tests.
+
+## Final Architecture Review
+
+Post-audit state (all suites green, 1908/1908 through-pa22):
+
+- The audit removed the last two eager-instantiation paths (the
+  definition-upgrade loops), so 14.7.1p1 no-eager-instantiation now
+  holds unconditionally: instantiation happens only at completeness
+  demand, faults surface only at demand sites, and every instantiation
+  routes through the partial-spec match.
+- The SFINAE boundary is now two-sided: immediate-context composition
+  failures drop candidates; class-body analysis faults below any probe
+  (deduction, target deduction, explicit-argument binding, default
+  fill, partial-spec re-substitution, conversion deduction,
+  template-id resolution) propagate as hard errors per 14.8.2p8. The
+  recursive-completeness-demand SFINAE case (a131b86f7) is preserved by
+  construction: its throw precedes body instantiation.
+- Per-template facts are computed once: function patterns behind
+  `pattern_ready`, conversion patterns behind `conversion_pattern`,
+  alias uses behind `dependent_uses`, class facts in the fact cache,
+  decl-order stamps as integers assigned at bind time. No hot path
+  re-derives a stored fact; the remaining known rebuild
+  (`SubstituteOrderingTypes` per ordering direction) is bounded by the
+  tournament shape of overload selection.
+- Handoff to PA23/PA24: instantiated declarations lower through the
+  ordinary LowIR path with no template-subset special cases in
+  lowering beyond reference-presentation rules (elisions provably
+  no-op, weak-emission linkage rules), and the deduction engine
+  carries no test-specific gates — the audit verified the two
+  dialect-keyed behaviors against the reference binary directly.

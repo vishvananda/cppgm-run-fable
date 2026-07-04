@@ -328,6 +328,34 @@ string TemplateArgumentKey(const vector<TemplateArg>& args)
 	return key;
 }
 
+bool ArgBound(const TemplateArg& arg)
+{
+	if (arg.is_pack_slot)
+		return arg.pack_done;
+	return arg.is_value || bool(arg.type) || arg.template_entity;
+}
+
+vector<TemplateArg> FlattenDeduced(const vector<TemplateParam>& params,
+                                   const vector<TemplateArg>& bound,
+                                   const vector<TemplateArg>& pack_elements)
+{
+	vector<TemplateArg> flattened;
+	for (size_t i = 0; i < params.size(); i++)
+	{
+		if (params[i].pack)
+		{
+			const vector<TemplateArg>& run =
+				i < bound.size() && bound[i].pack_done
+					? bound[i].pack_elements : pack_elements;
+			for (size_t k = 0; k < run.size(); k++)
+				flattened.push_back(run[k]);
+		}
+		else
+			flattened.push_back(bound[i]);
+	}
+	return flattened;
+}
+
 // The source-like spelling of one concrete value: bool parameters
 // spell true/false, enumerations the cast form "(Policy)2", signed
 // types the signed decimal, everything else the unsigned decimal.

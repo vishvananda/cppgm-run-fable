@@ -20,23 +20,6 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA18 assignment boundary");
 }
 
-// PA21 constructor templates: the pattern declaration is a special
-// member (no decl-specifier-seq; the composed base type is void).
-bool PatternIsSpecialMember(const AstDecl& inner)
-{
-	return inner.kind == DK_SPECIAL_MEMBER_DEFINITION ||
-		inner.kind == DK_SPECIAL_MEMBER_DECLARATION;
-}
-
-// The declarator of a function-template pattern declaration.
-const AstDeclarator* PatternDeclarator(const AstDecl& inner)
-{
-	if (inner.kind == DK_SIMPLE)
-		return inner.declarators.empty()
-			? 0 : inner.declarators[0].declarator.get();
-	return inner.declarator.get();
-}
-
 // The parameter clause of a function declarator (the first DI_PARAMS
 // item, through one nesting level).
 const AstParameterClause* FunctionParameterClause(
@@ -379,6 +362,10 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 		try
 		{
 			spec = EnsureFunctionSpecialization(tmpl, args);
+		}
+		catch (const InstantiationBodyFault&)
+		{
+			throw;
 		}
 		catch (const std::exception&)
 		{

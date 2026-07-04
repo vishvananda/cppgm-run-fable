@@ -15,18 +15,6 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA12 assignment boundary");
 }
 
-const AstExpr* StripParens(const AstExpr* expr)
-{
-	while (expr->kind == EK_PAREN)
-		expr = expr->operands[0].get();
-	return expr;
-}
-
-bool IsArithmeticOrEnum(const TypePtr& type)
-{
-	return IsArithmeticType(type) || type->kind == TK_ENUM;
-}
-
 bool IsIntegralOrUnscopedEnum(const TypePtr& type)
 {
 	return IsIntegralType(type) || IsUnscopedEnum(type);

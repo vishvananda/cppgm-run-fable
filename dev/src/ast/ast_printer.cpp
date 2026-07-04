@@ -364,6 +364,9 @@ void PrintExpr(const AstExpr& expr, ostream& out, int depth)
 		Line(out, depth, "sizeof-expression");
 		PrintTypeId(*expr.type, out, depth + 1);
 		break;
+	case EK_SIZEOF_PACK:
+		Line(out, depth, "sizeof-pack-expression " + FlattenName(expr.name));
+		break;
 	case EK_TYPE_TRAIT:
 		Line(out, depth, "type-trait-expression " +
 		     TokenAnno(expr.op, expr.op_spelling));

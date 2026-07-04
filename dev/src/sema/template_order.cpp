@@ -20,38 +20,6 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA22 assignment boundary");
 }
 
-// Whether a deduction slot has been bound (a type, a value, a
-// template, or a completed pack run).
-bool ArgBound(const TemplateArg& arg)
-{
-	if (arg.is_pack_slot)
-		return arg.pack_done;
-	return arg.is_value || bool(arg.type) || arg.template_entity;
-}
-
-// The flattened argument list of a per-slot deduction result (packs
-// splice their completed runs).
-vector<TemplateArg> FlattenDeduced(const vector<TemplateParam>& params,
-                                   const vector<TemplateArg>& bound,
-                                   const vector<TemplateArg>& rest)
-{
-	vector<TemplateArg> flattened;
-	for (size_t i = 0; i < params.size(); i++)
-	{
-		if (params[i].pack)
-		{
-			const vector<TemplateArg>& run =
-				i < bound.size() && bound[i].pack_done
-					? bound[i].pack_elements : rest;
-			for (size_t k = 0; k < run.size(); k++)
-				flattened.push_back(run[k]);
-		}
-		else
-			flattened.push_back(bound[i]);
-	}
-	return flattened;
-}
-
 // 14.5.6.2p3: the transformed parameter type of one partial-ordering
 // candidate - every type parameter replaced by its synthesized unique
 // type. Null when the pattern has a shape outside the ordering subset.
@@ -357,6 +325,10 @@ void SemBinder::DeduceConversionTemplates(const NamedTypeInfo* entity,
 				DeduceOneConversionTemplate(
 					*cls->conversion_templates[t], dest, *cls);
 			}
+			catch (const InstantiationBodyFault&)
+			{
+				throw;
+			}
 			catch (const std::exception&)
 			{
 				// 14.8.2p8: the template contributes no entry.
@@ -387,22 +359,29 @@ void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
                                             ClassInfo& cls)
 {
 	const AstDecl& inner = *tmpl.pattern_decl;
-	const AstName* id = inner.declarator ? inner.declarator->IdName() : 0;
-	if (!id || id->parts.empty() ||
-	    id->parts.back().kind != NP_CONVERSION_FUNCTION ||
-	    !id->parts.back().conversion_type)
-		throw OutsideBoundary("conversion template form");
-	const AstTypeId& conversion_type = *id->parts.back().conversion_type;
-	// The conversion-type-id composes with the parameters bound to
-	// the positional placeholders (the deduction pattern P).
-	Scope* scope = MakePatternParamScope(tmpl.params, tmpl.declaring);
-	TypePtr pattern;
+	if (!tmpl.conversion_type)
 	{
+		const AstName* id = inner.declarator ? inner.declarator->IdName()
+		                                     : 0;
+		if (!id || id->parts.empty() ||
+		    id->parts.back().kind != NP_CONVERSION_FUNCTION ||
+		    !id->parts.back().conversion_type)
+			throw OutsideBoundary("conversion template form");
+		tmpl.conversion_type = id->parts.back().conversion_type.get();
+	}
+	const AstTypeId& conversion_type = *tmpl.conversion_type;
+	// The conversion-type-id composes with the parameters bound to
+	// the positional placeholders (the deduction pattern P) once per
+	// template; the composition doubles as the mangling pattern.
+	if (!tmpl.conversion_pattern)
+	{
+		Scope* scope = MakePatternParamScope(tmpl.params, tmpl.declaring);
 		Scope* saved = current_;
 		current_ = scope;
 		try
 		{
-			pattern = builder_.ResolveTypeId(conversion_type);
+			tmpl.conversion_pattern = builder_.ResolveTypeId(
+				conversion_type);
 		}
 		catch (...)
 		{
@@ -411,9 +390,7 @@ void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
 		}
 		current_ = saved;
 	}
-	// The abstract composition doubles as the mangling pattern.
-	if (!tmpl.conversion_pattern)
-		tmpl.conversion_pattern = pattern;
+	TypePtr pattern = tmpl.conversion_pattern;
 	// 14.8.2.3p2-3: reference types deduce through their referees.
 	TypePtr a = dest;
 	if (IsReferenceType(pattern))

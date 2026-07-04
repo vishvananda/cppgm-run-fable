@@ -243,12 +243,9 @@ void SemBinder::CaptureClassTemplate(const AstDecl& decl,
 		tmpl->has_definition = true;
 		CheckTemplateDefinitionSanity(*tmpl);
 		// Specializations named while only the forward declaration was
-		// visible upgrade now, then any ready member definitions.
-		for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
-		         tmpl->class_specs.begin();
-		     it != tmpl->class_specs.end(); ++it)
-			if (!it->second->instantiated)
-				InstantiateClassSpecialization(*tmpl, *it->second);
+		// visible stay dormant (14.7.1p1): the first completeness
+		// demand instantiates them through the ordinary body path,
+		// which also runs the partial-specialization match.
 		InstantiateReadyMembers(*tmpl);
 	}
 	else if (!tmpl->decl)
@@ -543,7 +540,7 @@ bool SemBinder::CheckDependentPatternSlots(
 	TemplateInfo shadow;
 	shadow.params = partial.params;
 	shadow.declaring = tmpl.declaring;
-			shadow.capture_seq = tmpl.capture_seq;
+	shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, bound);
 	size_t ai = 0;
 	for (size_t i = 0; i < partial.pattern.size(); i++)
@@ -570,6 +567,11 @@ bool SemBinder::CheckDependentPatternSlots(
 			{
 				resolved = builder_.ResolveTypeId(*slot.dependent_type);
 			}
+			catch (const InstantiationBodyFault&)
+			{
+				current_ = saved;
+				throw;
+			}
 			catch (const std::exception&)
 			{
 				current_ = saved;
@@ -590,6 +592,10 @@ bool SemBinder::CheckDependentPatternSlots(
 			{
 				resolved = ResolveDependentAliasUse(slot.type,
 				                                    alias_scope, bound);
+			}
+			catch (const InstantiationBodyFault&)
+			{
+				throw;
 			}
 			catch (const std::exception&)
 			{
@@ -1226,7 +1232,7 @@ void SemBinder::InstantiateClassFromPartial(
 	TemplateInfo shadow;
 	shadow.params = partial.params;
 	shadow.declaring = tmpl.declaring;
-			shadow.capture_seq = tmpl.capture_seq;
+	shadow.capture_seq = tmpl.capture_seq;
 	spec.param_scope = MakeArgumentAliasScope(shadow, bound);
 	ScopeBinding injected;
 	injected.kind = SB_TYPE;
