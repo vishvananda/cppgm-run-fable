@@ -391,7 +391,8 @@ private:
 	// `tmpl` (type-id and constant-value arguments; defaults fill the
 	// tail).
 	vector<TemplateArg> ResolveTemplateArgumentList(TemplateInfo& tmpl,
-	                                                const AstNamePart& part);
+	                                                const AstNamePart& part,
+	                                                size_t* spelled = 0);
 	// A SCOPE_TEMPLATE_PARAMS scope under the template's declaring
 	// scope with each parameter name aliased to its argument (type
 	// aliases and constant-value bindings).

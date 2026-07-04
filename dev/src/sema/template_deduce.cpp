@@ -466,7 +466,18 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 			if (entity->spec_template == pattern->named->spec_template)
 			{
 				vector<TemplateArg> probe = bound;
-				if (DeduceFromArgList(pattern->targs, entity->spec_args,
+				vector<TemplateArg> concrete = entity->spec_args;
+				// 14.8.2.5 (PA23): a defaulted tail the naming use
+				// never spelled stays out of a trailing pack
+				// pattern's run (tuple<T0, Ts...> against
+				// tuple<int, int, int> with defaulted null tail).
+				if (!pattern->targs.empty() &&
+				    pattern->targs.back().pack_pattern &&
+				    entity->spec_spelled != (size_t)-1 &&
+				    entity->spec_spelled < concrete.size() &&
+				    entity->spec_spelled + 1 >= pattern->targs.size())
+					concrete.resize(entity->spec_spelled);
+				if (DeduceFromArgList(pattern->targs, concrete,
 				                      probe, false))
 				{
 					bound.swap(probe);

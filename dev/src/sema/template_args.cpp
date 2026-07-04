@@ -773,7 +773,7 @@ TemplateInfo* SemBinder::TemplateParamPlaceholder(const TemplateParam& param,
 }
 
 vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
-	TemplateInfo& tmpl, const AstNamePart& part)
+	TemplateInfo& tmpl, const AstNamePart& part, size_t* spelled)
 {
 	const std::vector<AstTemplateArgument>& source = part.arguments;
 	size_t pack_at = TemplatePackIndex(tmpl.params);
@@ -794,6 +794,7 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 	// the pack parameter is reached it absorbs every remaining source
 	// argument (post-pack parameters can only be defaulted).
 	size_t cursor = 0;
+	bool elastic_pattern = false;
 	for (size_t s = 0; s < source.size(); s++)
 	{
 		const AstTemplateArgument& argument = source[s];
@@ -823,8 +824,10 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 			if (!param.pack)
 			{
 				// 14.3p1 over a concrete expansion: the expanded
-				// elements fill successive fixed parameters (a
-				// pattern slot cannot).
+				// elements fill successive fixed parameters. An
+				// abstract pack keeps its elastic pattern slot: the
+				// template-id stays dependent, and deduction aligns
+				// the run against the spelled prefix (14.8.2.5).
 				vector<TemplateArg> expanded;
 				ExpandTemplateArgumentPack(tmpl, param, argument,
 				                           expanded, partial);
@@ -835,9 +838,12 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 						                    "arguments for " +
 						                    tmpl.name);
 					if (expanded[k].pack_pattern)
-						throw OutsideBoundary(
-							"pack-expansion argument for a non-pack "
-							"parameter");
+					{
+						args.push_back(expanded[k]);
+						elastic_pattern = true;
+						cursor++;
+						continue;
+					}
 					args.push_back(expanded[k]);
 					if (!tmpl.params[cursor].pack)
 					{
@@ -872,7 +878,12 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 			              args.size());
 		cursor = pack_at + 1;
 	}
-	FillDefaultedTail(tmpl, cursor, args, partial);
+	if (spelled)
+		*spelled = args.size();
+	// An elastic pattern slot covers an unknown parameter run; the
+	// tail resolves when the pattern deduces or substitutes concretely.
+	if (!elastic_pattern)
+		FillDefaultedTail(tmpl, cursor, args, partial);
 	return args;
 }
 

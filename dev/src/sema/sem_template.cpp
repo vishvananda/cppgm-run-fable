@@ -487,7 +487,9 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		throw runtime_error(part.identifier +
 		                    " does not name a template");
 	TemplateInfo& tmpl = *named_template;
-	vector<TemplateArg> args = ResolveTemplateArgumentList(tmpl, part);
+	size_t spelled = (size_t)-1;
+	vector<TemplateArg> args = ResolveTemplateArgumentList(tmpl, part,
+	                                                       &spelled);
 	// PA21 alias templates substitute instead of specializing.
 	if (tmpl.kind == TMPL_ALIAS)
 		return ResolveAliasTemplateId(tmpl, args);
@@ -516,6 +518,12 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		return slot.get();
 	}
 	ClassSpecialization* spec = EnsureClassSpecialization(tmpl, args);
+	// 14.8.2.5 (PA23): the first naming use records how much of the
+	// argument list it spelled; a trailing pack pattern deduces
+	// against that prefix, leaving the defaulted tail out of its run.
+	if (spec->entity && spec->entity->spec_spelled == (size_t)-1 &&
+	    spelled <= args.size())
+		spec->entity->spec_spelled = spelled;
 	return &spec->self;
 }
 

@@ -164,6 +164,11 @@ struct NamedTypeInfo
 	// otherwise).
 	const struct TemplateInfo* spec_template;
 	vector<TemplateArg> spec_args;
+	// PA23 14.8.2.5: how many leading spec_args the first naming use
+	// spelled (the rest came from defaults); a trailing pack pattern
+	// deduces against the spelled prefix only. size_t(-1) when the
+	// specialization arrived with a full argument list.
+	size_t spec_spelled = (size_t)-1;
 	bool is_template_anchor;
 	int param_index;
 };
