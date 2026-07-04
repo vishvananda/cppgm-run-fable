@@ -237,7 +237,7 @@ private:
 	AstDeclPtr ParseMemberDeclarationForms();
 	// PA21: registers later-declared member templates' names before
 	// the members parse (template classification for `<`).
-	void PreScanMemberTemplates();
+	void PreScanMemberTemplates(const std::string& class_name);
 	AstDeclPtr ParseBitFieldDeclaration();
 	AstDeclPtr ParseSpecialMember(bool require_definition,
 	                              bool qualified_default_only = false);

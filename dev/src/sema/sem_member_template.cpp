@@ -420,9 +420,10 @@ int SemBinder::EnsureCtorTemplateEntry(ClassInfo& cls,
 		ctor.definition = tmpl.pattern_decl;
 	cls.ctors.push_back(ctor);
 	int index = (int)(cls.ctors.size() - 1);
-	if (tmpl.has_definition)
-		InstantiateCtorTemplateBody(cls, index);
-	else
+	// 14.7.1p2: the body instantiates only when overload resolution
+	// selects this candidate (ResolveClassConstructor), not when it
+	// merely joins the candidate set.
+	if (!tmpl.has_definition)
 		const_cast<FunctionSpecialization*>(spec)->body_emitted = true;
 	return index;
 }

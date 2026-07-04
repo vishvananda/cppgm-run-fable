@@ -1247,6 +1247,12 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 	size_t winner = positions[SelectBestOverload(
 		candidates, sources, conversions, &min_arity, &is_template,
 		&order)];
+	// PA21: a selected constructor-template specialization's body
+	// instantiates at this first use (which may append further ctor
+	// entries; re-fetch the winner after).
+	if (cls.ctors[winner].tmpl_spec)
+		InstantiateCtorTemplateBody(const_cast<ClassInfo&>(cls),
+		                            (int)winner);
 	const ClassCtor& ctor = cls.ctors[winner];
 	if (ctor.deleted)
 		throw runtime_error(string("use of deleted constructor for ") +

@@ -180,7 +180,7 @@ AstDeclPtr AstParser::ParseClassSpecifier()
 // names must classify as templates for the `<` disambiguation. A
 // token-level pre-scan registers every top-level `template<...>`
 // member's declared name before the members parse.
-void AstParser::PreScanMemberTemplates()
+void AstParser::PreScanMemberTemplates(const string& class_name)
 {
 	size_t depth = 1;
 	for (size_t i = pos_; i < tokens_.size() && depth > 0; i++)
@@ -238,7 +238,10 @@ void AstParser::PreScanMemberTemplates()
 			    tokens_[j + 1].kind == PTOK_SIMPLE &&
 			    tokens_[j + 1].simple_type == OP_LPAREN)
 			{
-				Register(t.spelling, NF_VALUE | NF_TEMPLATE);
+				// A constructor template spells the class name; the
+				// injected-class-name keeps its type classification.
+				if (t.spelling != class_name)
+					Register(t.spelling, NF_VALUE | NF_TEMPLATE);
 				break;
 			}
 			if (t.kind != PTOK_SIMPLE)
@@ -276,7 +279,9 @@ bool AstParser::ParseClassBody(AstDecl& decl)
 	else
 		table = NewTable();
 	PushScope(table, false);
-	PreScanMemberTemplates();
+	PreScanMemberTemplates(
+		decl.has_name && !decl.class_name.parts.empty()
+			? decl.class_name.parts.back().identifier : string());
 	while (!AtSimple(OP_RBRACE))
 	{
 		AstDeclPtr member = ParseMemberDeclaration();
