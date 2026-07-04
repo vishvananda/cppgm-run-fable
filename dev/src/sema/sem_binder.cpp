@@ -282,6 +282,7 @@ TypePtr SemBinder::ResolveDecltype(const AstExpr& expr)
 	// The operand is unevaluated (3.2p2): no odr-use.
 	if (StripParens(&expr)->kind == EK_ID)
 		return DeclBinder::ResolveDecltype(expr);
+	bool member_access = expr.kind == EK_MEMBER;
 	bool saved = in_unevaluated_operand_;
 	in_unevaluated_operand_ = true;
 	SemValue value;
@@ -295,6 +296,10 @@ TypePtr SemBinder::ResolveDecltype(const AstExpr& expr)
 		throw;
 	}
 	in_unevaluated_operand_ = saved;
+	// 7.1.6.2p4: an unparenthesized class member access also yields
+	// the member's declared type, not the lvalue reference.
+	if (member_access)
+		return value.type;
 	if (value.category == VC_LVALUE)
 		return MakeReferenceType(value.type, false, true);
 	if (value.category == VC_XVALUE)
