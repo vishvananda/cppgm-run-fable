@@ -1233,7 +1233,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		callee_text = program_.MemberFunctionRef(callee);
 	else if (direct)
 		callee_text = program_.FunctionRef(callee.entity_scope,
-		                                   callee.entity_name, fn_type);
+		                                   callee.entity_name, fn_type,
+		                                   callee.fn_spec);
 	else if (NodeType(callee)->kind == TK_POINTER)
 		callee_text = LowerValueExpr(callee).text;
 	else

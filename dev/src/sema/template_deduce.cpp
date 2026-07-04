@@ -469,6 +469,48 @@ TypePtr DecayForDeduction(const TypePtr& type)
 	return AdjustParameterType(type);
 }
 
+// The template-parameter slots a parameter pattern mentions (type
+// parameters, array-bound value slots, template-template anchors,
+// forwarded value/template slots). False when the pattern carries a
+// form whose slots cannot be enumerated (deferred dependent
+// type-ids), so callers stay conservative.
+bool CollectPatternSlots(const TypePtr& pattern, std::vector<size_t>& out)
+{
+	if (!pattern)
+		return true;
+	if (pattern->kind == TK_TYPE_PARAM)
+	{
+		if (pattern->named->param_index >= 0)
+			out.push_back((size_t)pattern->named->param_index);
+		return true;
+	}
+	if (pattern->kind == TK_ARRAY && pattern->bound_param >= 0)
+		out.push_back((size_t)pattern->bound_param);
+	if (pattern->kind == TK_TEMPLATE_SPEC)
+	{
+		if (pattern->named->is_template_anchor &&
+		    pattern->named->param_index >= 0)
+			out.push_back((size_t)pattern->named->param_index);
+		for (size_t i = 0; i < pattern->targs.size(); i++)
+		{
+			const TemplateArg& arg = pattern->targs[i];
+			if (arg.dependent_type || arg.dependent_value)
+				return false;
+			if (arg.value_param >= 0)
+				out.push_back((size_t)arg.value_param);
+			if (arg.template_param >= 0)
+				out.push_back((size_t)arg.template_param);
+			if (!arg.is_value && arg.type &&
+			    !CollectPatternSlots(arg.type, out))
+				return false;
+		}
+	}
+	for (size_t i = 0; i < pattern->parameters.size(); i++)
+		if (!CollectPatternSlots(pattern->parameters[i], out))
+			return false;
+	return !pattern->target || CollectPatternSlots(pattern->target, out);
+}
+
 // 14.5.6.2p3: the transformed parameter type of one partial-ordering
 // candidate - every type parameter replaced by its synthesized unique
 // type. Null when the pattern has a shape outside the ordering subset.
@@ -531,6 +573,14 @@ TypePtr SubstituteOrderingTypes(const TypePtr& pattern,
 			return TypePtr();
 		Type copy = *pattern;
 		copy.target = element;
+		// 14.5.6.2p3: a deducible bound slot synthesizes a unique
+		// value (consistent per slot, improbable as a written bound).
+		if (copy.bound_param >= 0)
+		{
+			copy.bound_known = true;
+			copy.bound = 0x7fffff00ull + (size_t)copy.bound_param;
+			copy.bound_param = -1;
+		}
 		return TypePtr(new Type(copy));
 	}
 	case TK_FUNCTION:
@@ -681,8 +731,58 @@ bool SemBinder::TemplateCandidateMoreSpecialized(
 {
 	if (!a || !b || !a->owner || !b->owner || a->owner == b->owner)
 		return false;
-	return OrderingAtLeastAsSpecialized(*a->owner, *b->owner, argc) &&
-		!OrderingAtLeastAsSpecialized(*b->owner, *a->owner, argc);
+	bool a_at_least = OrderingAtLeastAsSpecialized(*a->owner, *b->owner,
+	                                               argc);
+	bool b_at_least = OrderingAtLeastAsSpecialized(*b->owner, *a->owner,
+	                                               argc);
+	if (a_at_least != b_at_least)
+		return a_at_least;
+	if (!a_at_least)
+		return false;
+	// 14.8.2.4p9: deduction succeeded in both directions; positions
+	// where both parameters were reference types tie-break on the
+	// remembered lvalue-ness and cv-qualification. `a` wins when some
+	// position prefers it and none prefers `b`.
+	TemplateInfo& ta = *a->owner;
+	TemplateInfo& tb = *b->owner;
+	bool prefer_a = false;
+	bool prefer_b = false;
+	for (size_t i = 0;
+	     i < argc && i < ta.param_patterns.size() &&
+	     i < tb.param_patterns.size(); i++)
+	{
+		const TypePtr& pa = ta.param_patterns[i];
+		const TypePtr& pb = tb.param_patterns[i];
+		if (!pa || !pb || !IsReferenceType(pa) || !IsReferenceType(pb))
+			continue;
+		bool a_lref = pa->kind == TK_LVALUE_REFERENCE;
+		bool b_lref = pb->kind == TK_LVALUE_REFERENCE;
+		if (a_lref != b_lref)
+		{
+			(a_lref ? prefer_a : prefer_b) = true;
+			continue;
+		}
+		// An array's top-level cv lives on its element type (3.9.3p2).
+		TypePtr ra = pa->target;
+		TypePtr rb = pb->target;
+		while (ra->kind == TK_ARRAY)
+			ra = ra->target;
+		while (rb->kind == TK_ARRAY)
+			rb = rb->target;
+		bool a_more_cv = (ra->is_const || !rb->is_const) &&
+			(ra->is_volatile || !rb->is_volatile) &&
+			(ra->is_const != rb->is_const ||
+			 ra->is_volatile != rb->is_volatile);
+		bool b_more_cv = (rb->is_const || !ra->is_const) &&
+			(rb->is_volatile || !ra->is_volatile) &&
+			(ra->is_const != rb->is_const ||
+			 ra->is_volatile != rb->is_volatile);
+		if (a_more_cv)
+			prefer_a = true;
+		if (b_more_cv)
+			prefer_b = true;
+	}
+	return prefer_a && !prefer_b;
 }
 
 // Composes the declarator of a function-template declaration with the
@@ -1018,6 +1118,32 @@ bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
 		return true;  // non-deduced context
 	if (!TypeIsDependent(pattern))
 		return true;  // ordinary conversion checking applies later
+	// 14.8.2.1p6: an overload-set argument tries deduction per
+	// member; exactly one success binds, anything else leaves the
+	// parameter non-deduced (a set with function templates is
+	// non-deduced outright).
+	if (arg.function_set && arg.overloads.size() > 1)
+	{
+		if (!arg.fn_templates.empty())
+			return true;
+		vector<TemplateArg> chosen;
+		size_t successes = 0;
+		for (size_t i = 0; i < arg.overloads.size(); i++)
+		{
+			SemValue shell;
+			shell.type = arg.overloads[i];
+			shell.category = VC_LVALUE;
+			vector<TemplateArg> probe = bound;
+			if (DeduceFixedParameter(pattern, shell, probe))
+			{
+				successes++;
+				chosen.swap(probe);
+			}
+		}
+		if (successes == 1)
+			bound.swap(chosen);
+		return true;
+	}
 	TypePtr arg_type = arg.type;
 	if (!arg_type)
 		return false;
@@ -1105,6 +1231,12 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 	    !BindExplicitDeductionArgs(tmpl, *explicit_part, bound,
 	                               pack_elements))
 		return 0;
+	// 14.8.2p2: explicit arguments substitute into P before deduction;
+	// a parameter type mentioning only explicitly bound slots is a
+	// concrete type checked by conversion, not unification.
+	vector<bool> explicit_bound(bound.size(), false);
+	for (size_t i = 0; i < bound.size(); i++)
+		explicit_bound[i] = ArgBound(bound[i]);
 	size_t explicit_elements = pack_elements.size();
 	size_t deduced_elements = 0;
 	size_t p = 0;
@@ -1119,7 +1251,18 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		{
 			p++;
 			if (!DeduceFixedParameter(pattern, args[i], bound))
-				return 0;
+			{
+				std::vector<size_t> slots;
+				if (!CollectPatternSlots(pattern, slots))
+					return 0;
+				bool all_explicit = true;
+				for (size_t s = 0; s < slots.size(); s++)
+					if (slots[s] >= explicit_bound.size() ||
+					    !explicit_bound[slots[s]])
+						all_explicit = false;
+				if (!all_explicit)
+					return 0;
+			}
 			continue;
 		}
 		// The trailing pack pattern: each remaining argument deduces

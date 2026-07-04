@@ -1471,8 +1471,11 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 		meta.push_back("arity=variadic");
 	if (info.c_linkage)
 		meta.push_back("linkage=c");
+	// A declared-but-undefined template specialization keeps its
+	// vague linkage: any translation unit may carry the definition.
 	meta.push_back(info.internal ? "binding=internal"
-	                             : "binding=strong");
+	               : info.fn_spec ? "binding=weak"
+	                              : "binding=strong");
 	if (!info.object_name.empty())
 		meta.push_back("object=" + info.object_name);
 	string metadata;
