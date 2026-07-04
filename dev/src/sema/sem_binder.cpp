@@ -37,6 +37,18 @@ bool SameParameterList(const Type& a, const Type& b)
 
 }  // namespace
 
+namespace {
+
+// Trampoline for the conversion classification's completeness demand
+// (sem_convert has no binder dependency).
+void ConversionCompletionTrampoline(void* context,
+                                    const NamedTypeInfo* info)
+{
+	static_cast<SemBinder*>(context)->RequireCompleteType(info);
+}
+
+}  // namespace
+
 SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	: DeclBinder(model), unit_(unit), analyzer_(*this), engine_(unit),
 	  local_types_(0), pending_local_type_(false), in_bit_field_(false),
@@ -44,6 +56,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	  in_implicit_type_context_(false), in_unevaluated_operand_(false),
 	  param_capture_scope_(0)
 {
+	SetConversionCompletionHook(&ConversionCompletionTrampoline, this);
 	builder_.SetParameterAdjustment(true);
 	// The PA12 grammar uses nullptr_t as a built-in type name.
 	ScopeBinding nullptr_alias;
@@ -92,6 +105,11 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 		dealloc.fn_noexcept_decl.resize(1, true);
 		AddBinding(*model.global(), dealloc);
 	}
+}
+
+SemBinder::~SemBinder()
+{
+	SetConversionCompletionHook(0, 0);
 }
 
 // --- ISemExprHost ----------------------------------------------------------
@@ -1083,6 +1101,7 @@ SemNodePtr SemBinder::WrapReturnValue(SemValue value, const TypePtr& bare)
 		}
 		return std::move(value.node);
 	}
+	EnsureTypeCompleteness(bare->named);
 	const ClassInfo* cls = unit_.classes.Find(bare->named);
 	if (!cls)
 		throw runtime_error("class record missing for return value");

@@ -649,10 +649,37 @@ ImplicitConversion ClassifySourceConversionFunction(
 
 namespace {
 
+// The active binder's instantiation entry point (thread-local: each
+// translation unit binds on its own worker thread).
+thread_local void (*completion_hook)(void*, const NamedTypeInfo*) = 0;
+thread_local void* completion_context = 0;
+
+// 14.7.1p4: a class endpoint (or referee) of a conversion that is a dormant
+// specialization instantiates before its constructors and conversion
+// functions are consulted.
+void DemandClassCompleteness(const TypePtr& dest)
+{
+	if (!completion_hook)
+		return;
+	TypePtr bare = dest;
+	if (IsReferenceType(bare))
+		bare = bare->target;
+	bare = RemoveTopCv(bare);
+	if (bare->kind == TK_CLASS && !bare->named->complete)
+		completion_hook(completion_context, bare->named);
+}
+
 ImplicitConversion ClassifyConversionImpl(const ConversionSource& source,
                                           const TypePtr& dest,
                                           bool contextual, bool allow_user)
 {
+	if (allow_user)
+	{
+		DemandClassCompleteness(dest);
+		// A class source consults its conversion functions.
+		if (source.type && !source.function_set)
+			DemandClassCompleteness(source.type);
+	}
 	ImplicitConversion result = IsReferenceType(dest)
 		? ClassifyReferenceBinding(source, dest, allow_user)
 		: ClassifyValueConversion(source, dest, allow_user);
@@ -666,6 +693,14 @@ ImplicitConversion ClassifyConversionImpl(const ConversionSource& source,
 }
 
 }  // namespace
+
+void SetConversionCompletionHook(void (*hook)(void* context,
+                                              const NamedTypeInfo* info),
+                                 void* context)
+{
+	completion_hook = hook;
+	completion_context = context;
+}
 
 ImplicitConversion ClassifyConversion(const ConversionSource& source,
                                       const TypePtr& dest)

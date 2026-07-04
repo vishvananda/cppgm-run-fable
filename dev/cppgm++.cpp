@@ -606,15 +606,18 @@ int run_emit_lowir_mode(const vector<string> & args)
 
   vector<pair<string, string>> predefined = PredefinedObjectMacros();
   vector<unique_ptr<SemUnit>> units;
-  // The lowering reads scope identities out of each unit's model, so
-  // the models must outlive the LowIR emission below.
+  // The lowering reads scope identities out of each unit's model and
+  // deferred written forms (dependent template arguments) out of each
+  // unit's AST, so both must outlive the LowIR emission below.
   vector<unique_ptr<TypesModel>> models;
+  vector<AstDeclPtr> asts;
   for(size_t i = 0; i < invocation.inputs.size(); ++i) {
     EmitAstTask task = run_unit_on_large_stack(invocation.inputs[i],
                                                predefined,
                                                BindMode::Semantics);
     units.push_back(std::move(task.semantics));
     models.push_back(std::move(task.model));
+    asts.push_back(std::move(task.unit));
   }
 
   LowerProgram program;

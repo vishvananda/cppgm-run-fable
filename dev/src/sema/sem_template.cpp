@@ -597,31 +597,11 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 		spec->self.home = tmpl.declaring;
 	}
 	ClassSpecialization* spec = slot.get();
-	// 14.7.3: a declared explicit specialization owns its key; uses
-	// see an incomplete type until its definition arrives. 14.7.1p4:
-	// an argument type still mid-instantiation defers the body to the
-	// first completeness demand (EnsureTypeCompleteness).
-	if (!spec->instantiated && !spec->explicit_spec &&
-	    !SpecializationArgsOpen(*spec))
-		InstantiateSpecializationBody(tmpl, *spec);
+	// 14.7.1p1 (PA22): naming a specialization never instantiates it.
+	// Every use that requires a complete type demands the body through
+	// EnsureTypeCompleteness; a typedef, template argument, signature,
+	// or pointer/reference use leaves the record dormant.
 	return spec;
-}
-
-// Whether an argument names a class whose body is still binding (its
-// member scope exists but the entity is incomplete).
-bool SemBinder::SpecializationArgsOpen(const ClassSpecialization& spec)
-{
-	for (size_t i = 0; i < spec.args.size(); i++)
-	{
-		const TemplateArg& arg = spec.args[i];
-		if (arg.is_value || !arg.type)
-			continue;
-		TypePtr bare = RemoveTopCv(arg.type);
-		if (bare->kind == TK_CLASS && !bare->named->complete &&
-		    model_.MemberScope(bare->named))
-			return true;
-	}
-	return false;
 }
 
 // The deferred body path shared by first resolution and the
@@ -1163,6 +1143,10 @@ void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 		    !spec->second->explicit_spec)
 		{
 			InstantiateSpecializationBody(tmpl, *spec->second);
+			// The demand that caused the instantiation pins it
+			// (14.7.3p6) like a demand on an existing one.
+			if (spec->second->instantiated)
+				spec->second->hard_used = true;
 			return;
 		}
 	}
@@ -1212,6 +1196,10 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 				spec->extern_declared = true;
 			return;
 		}
+		// 14.7.2p7: the explicit-instantiation definition is itself
+		// the completeness demand (naming alone no longer
+		// instantiates).
+		EnsureTypeCompleteness(binding->type->named);
 		if (!binding->type->named->complete)
 			throw runtime_error("explicit instantiation of an "
 			                    "undefined class template");
@@ -1238,6 +1226,8 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 		if (!declaring || declaring->kind != SCOPE_CLASS)
 			throw runtime_error("explicit instantiation of a "
 			                    "non-member special member");
+		if (!is_extern)
+			EnsureTypeCompleteness(model_.ScopeEntity(declaring));
 		return;
 	}
 	throw OutsideBoundary("explicit instantiation form");

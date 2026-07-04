@@ -1,0 +1,2 @@
+-std=gnu++11 -Wall -O1 -g -fsanitize=address -fno-omit-frame-pointer
+-std=gnu++11 -Wall -O1 -g -fsanitize=address -fno-omit-frame-pointer -Dmain=test_runner_real_main

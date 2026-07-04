@@ -427,11 +427,16 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 	// binding as instantiated bodies (14.7.1 demand semantics).
 	for (size_t i = 0; i < retry_bodies_.size(); i++)
 	{
+		// The re-bind may poison further bodies, appending retry
+		// entries; copy the entry out so the vector may reallocate
+		// mid-bind (newly appended entries retry in this same loop).
+		DeferredBody body = retry_bodies_[i].body;
+		const size_t deferred_index = retry_bodies_[i].deferred_index;
 		bool saved_instantiating = instantiating_;
 		instantiating_ = true;
 		try
 		{
-			AnalyzeDeferredBody(retry_bodies_[i].body);
+			AnalyzeDeferredBody(body);
 		}
 		catch (const std::exception&)
 		{
@@ -439,9 +444,13 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 			continue;
 		}
 		instantiating_ = saved_instantiating;
-		unit_.deferred[retry_bodies_[i].deferred_index].swap(
-			unit_.deferred.back());
+		const size_t last = unit_.deferred.size() - 1;
+		unit_.deferred[deferred_index].swap(unit_.deferred[last]);
 		unit_.deferred.pop_back();
+		// A pending entry pointing at the moved back item follows it.
+		for (size_t j = i + 1; j < retry_bodies_.size(); j++)
+			if (retry_bodies_[j].deferred_index == last)
+				retry_bodies_[j].deferred_index = deferred_index;
 	}
 	retry_bodies_.clear();
 	FinishTemplateChecks();

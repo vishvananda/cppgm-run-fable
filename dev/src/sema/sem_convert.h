@@ -151,3 +151,12 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
                           const vector<size_t>* min_arity = 0,
                           const vector<bool>* is_template = 0,
                           const OverloadOrder* order = 0);
+
+// PA22 no-eager-instantiation: classifying a conversion to a class
+// destination is a completeness demand (14.7.1p4), but the
+// classification has no binder dependency. The active binder
+// registers its instantiation entry point for the classification to
+// call on dormant specializations (null clears it).
+void SetConversionCompletionHook(void (*hook)(void* context,
+                                              const NamedTypeInfo* info),
+                                 void* context);

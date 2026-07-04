@@ -4,6 +4,9 @@
 #include <stdexcept>
 #include <vector>
 
+#include "ast/ast_names.h"
+#include "ast/ast_text.h"
+
 using std::runtime_error;
 using std::to_string;
 using std::vector;
@@ -209,6 +212,13 @@ private:
 	}
 
 	vector<string> seen_;
+
+public:
+	// The enclosing function template's parameters while its abstract
+	// pattern mangles: deferred dependent type-ids (14.5.2 written
+	// forms kept as ASTs) spell parameter references T_/Tn_ through
+	// this list.
+	const vector<TemplateParam>* pattern_params = 0;
 };
 
 string SourceName(const string& name)
@@ -257,6 +267,120 @@ string MangleSubstitutable(const string& key, const string& spelling,
 	return spelling;
 }
 
+string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
+                             string* key_out);
+
+// 5.1.8 dependent names: a deferred type-id argument kept as its
+// written form (`typename C::value_type`, `less<typename
+// C::value_type>`) mangles syntactically - the Itanium rule for
+// dependent names - with template-parameter references spelled
+// T_/Tn_ and each prefix a substitution candidate.
+string MangleDependentName(const AstName& name, Substitutions& subs,
+                           string* key_out)
+{
+	if (name.parts.empty())
+		throw OutsideBoundary("mangled dependent name form");
+	string body;
+	string prev_key;
+	for (size_t i = 0; i < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		if ((part.kind != NP_IDENTIFIER && part.kind != NP_TEMPLATE_ID) ||
+		    part.tilde)
+			throw OutsideBoundary("mangled dependent name form");
+		if (i == 0 && part.kind == NP_IDENTIFIER && subs.pattern_params)
+		{
+			// A leading template-parameter reference.
+			const vector<TemplateParam>& params = *subs.pattern_params;
+			int index = -1;
+			for (size_t p = 0; p < params.size(); p++)
+				if (params[p].kind == TPK_TYPE &&
+				    params[p].name == part.identifier)
+					index = (int)p;
+			if (index >= 0)
+			{
+				prev_key = "TP:" + to_string(index);
+				string spelling = index == 0
+					? string("T_")
+					: "T" + to_string(index - 1) + "_";
+				body = MangleSubstitutable(prev_key, spelling, subs);
+				continue;
+			}
+		}
+		string name_key = (prev_key.empty() ? string("T:")
+		                                    : prev_key + "::") +
+			part.identifier;
+		string full_key = name_key;
+		if (part.kind == NP_TEMPLATE_ID)
+		{
+			full_key += "<";
+			for (size_t a = 0; a < part.arguments.size(); a++)
+			{
+				const AstTemplateArgument& argument = part.arguments[a];
+				if (!argument.is_type || !argument.type ||
+				    argument.pack)
+					throw OutsideBoundary(
+						"mangled dependent argument form");
+				full_key += "dep:" +
+					FlattenSpecifierSeq(argument.type->specifiers) +
+					",";
+			}
+			full_key += ">";
+		}
+		string found = subs.Find(full_key);
+		if (!found.empty())
+		{
+			body = found;
+			prev_key = full_key;
+			continue;
+		}
+		if (part.kind == NP_IDENTIFIER)
+			body += SourceName(part.identifier);
+		else
+		{
+			// The template name is its own substitution candidate; a
+			// registered one opens the spelling compressed ("S_IiE").
+			string tname = body.empty() ? subs.Find(name_key) : string();
+			if (tname.empty())
+			{
+				subs.Add(name_key);
+				tname = SourceName(part.identifier);
+			}
+			body += tname + "I";
+			for (size_t a = 0; a < part.arguments.size(); a++)
+				body += MangleDependentTypeId(*part.arguments[a].type,
+				                              subs, 0);
+			body += "E";
+		}
+		subs.Add(full_key);
+		prev_key = full_key;
+	}
+	if (key_out)
+		*key_out = prev_key;
+	if (name.parts.size() > 1)
+		body = "N" + body + "E";
+	return body;
+}
+
+string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
+                             string* key_out)
+{
+	if (id.declarator && !id.declarator->items.empty())
+		throw OutsideBoundary("mangled dependent type form");
+	const AstName* name = 0;
+	for (size_t i = 0; i < id.specifiers.size(); i++)
+	{
+		const AstSpecifier& specifier = id.specifiers[i];
+		if (specifier.kind == SPEC_TYPE_NAME && !name)
+			name = &specifier.name;
+		else
+			throw OutsideBoundary("mangled dependent type form");
+	}
+	if (!name)
+		throw OutsideBoundary("mangled dependent type form");
+	return MangleDependentName(*name, subs, key_out);
+}
+
 // The structural key of a type, independent of any substitution state.
 string TypeKey(const TypePtr& type)
 {
@@ -279,6 +403,12 @@ string ArgKey(const TemplateArg& arg)
 			arg.template_entity->name;
 	if (arg.template_param >= 0)
 		return "ttp" + to_string(arg.template_param);
+	// A deferred dependent type-id (kept as its written AST) keys by
+	// its spelling: repeatable, and distinct written forms stay
+	// distinct.
+	if (!arg.is_value && arg.dependent_type)
+		return "tdep:" +
+			FlattenSpecifierSeq(arg.dependent_type->specifiers);
 	if (!arg.is_value)
 		return TypeKey(arg.type);
 	if (arg.value_param >= 0)
@@ -328,6 +458,8 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 		return arg.template_param == 0
 			? string("T_")
 			: "T" + to_string(arg.template_param - 1) + "_";
+	if (!arg.is_value && arg.dependent_type)
+		return MangleDependentTypeId(*arg.dependent_type, subs, 0);
 	if (!arg.is_value)
 		return MangleType(arg.type, subs);
 	if (arg.value_param >= 0)
@@ -985,6 +1117,7 @@ string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 	// when the pattern has non-composing dependent forms).
 	const TemplateInfo& tmpl = *spec.owner;
 	Substitutions subs;
+	subs.pattern_params = &tmpl.params;
 	vector<NameComponent> parts = ScopeComponents(tmpl.declaring);
 	// PA21 member function templates: the encoding is the member form
 	// (method cv/ref-qualifiers before the class prefix).
@@ -1037,6 +1170,7 @@ string MangleMemberFunctionTemplateObjectName(
 {
 	const TemplateInfo& tmpl = *spec.owner;
 	Substitutions subs;
+	subs.pattern_params = &tmpl.params;
 	vector<NameComponent> parts = ScopeComponents(scope);
 	string encoding = "N";
 	ManglePrefixComponents(parts, subs, encoding);

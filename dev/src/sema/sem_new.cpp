@@ -126,6 +126,8 @@ SemValue SemExprAnalyzer::AnalyzeNewArray(const AstExpr& expr,
 	const AstExpr& count_expr =
 		*declarator.items[bound_item].array_bound;
 
+	if (RemoveTopCv(element)->kind == TK_CLASS)
+		host_.RequireCompleteType(RemoveTopCv(element)->named);
 	const ClassInfo* cls = RemoveTopCv(element)->kind == TK_CLASS
 		? host_.Classes().Find(RemoveTopCv(element)->named) : 0;
 	if (RemoveTopCv(element)->kind == TK_CLASS &&
@@ -201,6 +203,8 @@ SemValue SemExprAnalyzer::AnalyzeNew(const AstExpr& expr)
 	if (bound_item != (size_t)-1)
 		return AnalyzeNewArray(expr, bound_item);
 	TypePtr allocated = RemoveTopCv(host_.ResolveCastTypeId(*expr.type));
+	if (allocated->kind == TK_CLASS)
+		host_.RequireCompleteType(allocated->named);
 	const ClassInfo* cls = allocated->kind == TK_CLASS
 		? host_.Classes().Find(allocated->named) : 0;
 	if (allocated->kind == TK_CLASS &&

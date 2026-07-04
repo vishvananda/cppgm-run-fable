@@ -17,6 +17,7 @@ class SemBinder : public DeclBinder, public ISemExprHost
 {
 public:
 	SemBinder(TypesModel& model, SemUnit& unit);
+	~SemBinder();
 
 	// PA18: the end-of-unit template re-checks run after the forward
 	// pass (definition-time sanity, 14.6p7).
@@ -544,7 +545,6 @@ private:
 	ClassSpecialization* EnsureClassSpecialization(
 		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	// PA21: deferred-body helpers (14.7.1p4).
-	bool SpecializationArgsOpen(const ClassSpecialization& spec);
 	void InstantiateSpecializationBody(TemplateInfo& tmpl,
 	                                   ClassSpecialization& spec);
 	void InstantiateClassSpecialization(TemplateInfo& tmpl,

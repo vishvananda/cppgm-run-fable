@@ -696,6 +696,7 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 
 void SemExprAnalyzer::WrapClassValueInit(SemValue& value, const TypePtr& bare)
 {
+	host_.RequireCompleteType(bare->named);
 	const ClassInfo* cls = host_.Classes().Find(bare->named);
 	if (!cls || !bare->named->complete)
 		throw runtime_error("copy of an incomplete class object");
