@@ -410,6 +410,22 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner,
 	const ScopeBinding* binding = prefix
 		? QualifiedLookup(*prefix, terminal_name, SLF_ANY)
 		: UnqualifiedLookup(current_, terminal_name, SLF_ANY);
+	// 14.7.2: a static data member of a specialization (`extern
+	// template const int box<int>::n;`). Member definitions
+	// instantiate on demand only, so the extern declaration needs no
+	// suppression record; the definition form roots the member's
+	// already-registered definition like a member function's.
+	if (binding && binding->kind == SB_VARIABLE && prefix &&
+	    prefix->kind == SCOPE_CLASS)
+	{
+		if (is_extern)
+			return;
+		SemUnit::ExplicitMemberInstantiation record;
+		record.scope = prefix;
+		record.name = terminal_name;
+		unit_.explicit_member_instantiations.push_back(record);
+		return;
+	}
 	if (!binding || binding->kind != SB_FUNCTION)
 		throw runtime_error("explicit instantiation of a non-function");
 	// A member of a class-template specialization (`template int
@@ -454,21 +470,53 @@ void SemBinder::BindExplicitFunctionInstantiation(const AstDecl& inner,
 			if (TemplatePackIndex(tmpl.params) < tmpl.params.size())
 				continue;
 			vector<TemplateArg> args;
+			bool have_args = true;
 			try
 			{
 				args = ResolveTemplateArgumentList(tmpl, terminal);
 			}
 			catch (const std::exception&)
 			{
-				continue;
+				have_args = false;
 			}
-			FunctionSpecialization* spec;
-			try
+			FunctionSpecialization* spec = 0;
+			if (have_args)
 			{
-				spec = EnsureFunctionSpecialization(tmpl, args);
+				try
+				{
+					spec = EnsureFunctionSpecialization(tmpl, args);
+				}
+				catch (const std::exception&)
+				{
+					spec = 0;
+				}
 			}
-			catch (const std::exception&)
+			if (!spec)
 			{
+				// 14.7.2 with 14.8.2.2: arguments the template-id
+				// omits (`f<>`) deduce from the declared signature;
+				// the explicit prefix must agree with the deduction.
+				if (!declared ||
+				    terminal.arguments.size() >= tmpl.params.size())
+					continue;
+				const FunctionSpecialization* deduced =
+					DeduceFunctionTemplateFromTarget(tmpl, declared);
+				if (!deduced)
+					continue;
+				if (have_args)
+				{
+					if (deduced->args.size() < args.size())
+						continue;
+					vector<TemplateArg> lead(
+						deduced->args.begin(),
+						deduced->args.begin() + args.size());
+					if (TemplateArgumentKey(lead) !=
+					    TemplateArgumentKey(args))
+						continue;
+				}
+				else if (!terminal.arguments.empty())
+					continue;
+				resolved = deduced;
 				continue;
 			}
 			if (declared && !TypeEquals(spec->type, declared))

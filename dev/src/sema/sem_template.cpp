@@ -1279,7 +1279,12 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 			throw runtime_error("explicit instantiation of an "
 			                    "undefined class template");
 		if (!spec || !spec->extern_declared)
-			unit_.explicit_instantiations.push_back(binding->type->named);
+		{
+			SemUnit::ExplicitClassInstantiation record;
+			record.entity = binding->type->named;
+			record.deferred_end = unit_.deferred.size();
+			unit_.explicit_instantiations.push_back(record);
+		}
 		return;
 	}
 	if (inner.kind == DK_SIMPLE)

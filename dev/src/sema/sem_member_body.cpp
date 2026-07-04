@@ -6,6 +6,9 @@
 
 using std::runtime_error;
 
+// sem_class.cpp: whether a member definition spells `inline`.
+bool DeclSpellsInline(const AstDecl& decl);
+
 // PA15 member-function-body machinery, split from sem_class.cpp: the
 // deferred in-class bodies (analyzed once the outermost class
 // completes, 9.2p2), the shared function-node builder, and the
@@ -46,8 +49,10 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 		return;
 	}
 	// An out-of-class member definition: the class is complete, so the
-	// body analyzes immediately (and emits as a strong definition).
+	// body analyzes immediately (and emits as a strong definition
+	// unless spelled inline, 7.1.2p4).
 	body.out_of_class = true;
+	body.spelled_inline = DeclSpellsInline(decl);
 	// PA17: defining the class's key function anchors its vtable in
 	// this translation unit (emitted strong by the lowering). An
 	// instantiated member definition anchors nothing: specialization
@@ -277,12 +282,17 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 
 	PublishBodyUnwindFact(body, special, *node);
 	// PA18: an instantiated out-of-class member definition emits weak
-	// and on demand, like an in-class one (14.7.1).
-	if (body.out_of_class && special == SF_NONE && !instantiating_)
+	// and on demand, like an in-class one (14.7.1). PA23: a
+	// source-owned spelled-inline one does too (7.1.2 with 3.2; the
+	// explicit-specialization member shape emits nothing unused).
+	if (body.out_of_class && special == SF_NONE && !instantiating_ &&
+	    !body.spelled_inline)
 		AppendItem(std::move(item));
 	else
 	{
-		if (body.out_of_class && !instantiating_)
+		if (body.out_of_class && special == SF_NONE && !instantiating_)
+			node->inline_def = true;
+		else if (body.out_of_class && !instantiating_)
 		{
 			// A source-owned constructor prints unconditionally; a
 			// spelled-inline one prints weak but still prints.

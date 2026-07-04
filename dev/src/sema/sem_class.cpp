@@ -11,16 +11,9 @@ using std::runtime_error;
 // bit-fields, and the deferred analysis of in-class member-function
 // bodies (9.2p2: the class is complete within them).
 
-namespace {
-
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA15 assignment boundary");
-}
-
 // Whether an out-of-class member definition spells `inline` (7.1.2p4:
-// weak, on-demand emission like an in-class definition).
+// weak, on-demand emission like an in-class definition). Shared with
+// the member-body unit (sem_member_body.cpp).
 bool DeclSpellsInline(const AstDecl& decl)
 {
 	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
@@ -31,6 +24,14 @@ bool DeclSpellsInline(const AstDecl& decl)
 		    decl.specifiers[i].keyword == KW_INLINE)
 			return true;
 	return false;
+}
+
+namespace {
+
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA15 assignment boundary");
 }
 
 }  // namespace

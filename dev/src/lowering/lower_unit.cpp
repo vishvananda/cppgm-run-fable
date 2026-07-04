@@ -229,11 +229,16 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 	for (size_t i = 0; i < unit.deferred.size(); i++)
 		RegisterDeferred(*unit.deferred[i]);
 	// PA18 14.7.2p8: an explicit instantiation definition emits every
-	// instantiated member definition of its class unconditionally.
+	// member definition its class had instantiated by that point
+	// unconditionally (later-registered definitions stay on-demand,
+	// 14.7.2p9).
 	for (size_t e = 0; e < unit.explicit_instantiations.size(); e++)
 	{
-		const NamedTypeInfo* entity = unit.explicit_instantiations[e];
-		for (size_t i = 0; i < unit.deferred.size(); i++)
+		const NamedTypeInfo* entity =
+			unit.explicit_instantiations[e].entity;
+		size_t deferred_end = unit.explicit_instantiations[e].deferred_end;
+		for (size_t i = 0; i < deferred_end && i < unit.deferred.size();
+		     i++)
 		{
 			const SemNode& item = *unit.deferred[i];
 			if (item.kind != SN_FUNCTION_DEFINITION ||

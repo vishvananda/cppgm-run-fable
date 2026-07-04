@@ -318,7 +318,16 @@ struct SemUnit
 	// instantiation definitions (their members emit unconditionally,
 	// 14.7.2p8).
 	TemplateRegistry templates;
-	vector<const NamedTypeInfo*> explicit_instantiations;
+	// 14.7.2p9: only member definitions instantiated by the explicit
+	// instantiation itself become emission roots; `deferred_end`
+	// bounds the chronological deferred-body list at that point (a
+	// member defined later stays an ordinary on-demand member).
+	struct ExplicitClassInstantiation
+	{
+		const NamedTypeInfo* entity = 0;
+		size_t deferred_end = 0;
+	};
+	vector<ExplicitClassInstantiation> explicit_instantiations;
 	// PA21 14.7.2 function forms: explicit-instantiation definitions
 	// (emitted unconditionally as object roots) and extern-template
 	// declarations (declare-only; the strong definition lives in
