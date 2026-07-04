@@ -641,14 +641,28 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 	size_t cursor = 0;
 	for (size_t s = 0; s < source.size(); s++)
 	{
-		if (cursor >= tmpl.params.size())
-			throw runtime_error("too many template arguments for " +
-			                    tmpl.name);
-		const TemplateParam& param = tmpl.params[cursor];
 		const AstTemplateArgument& argument = source[s];
 		bool is_expansion = argument.pack ||
 			(argument.is_type && argument.type &&
 			 TypeIdHasPackMarker(*argument.type));
+		if (cursor >= tmpl.params.size())
+		{
+			// PA21: a trailing expansion past the parameter list is
+			// fine when it expands to nothing (`Alloc<U, Args...>`
+			// with an empty Args against a fixed-arity template).
+			if (is_expansion)
+			{
+				vector<TemplateArg> extra;
+				TemplateParam dummy;
+				ExpandTemplateArgumentPack(tmpl, dummy, argument,
+				                           extra, partial);
+				if (extra.empty())
+					continue;
+			}
+			throw runtime_error("too many template arguments for " +
+			                    tmpl.name);
+		}
+		const TemplateParam& param = tmpl.params[cursor];
 		if (is_expansion)
 		{
 			if (!param.pack)
