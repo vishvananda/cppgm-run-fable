@@ -540,10 +540,26 @@ bool ClassTriviallyCopyable(const ClassInfo& info)
 		ClassHasTrivialDtor(info);
 }
 
+// The reference's trivial-for-the-purposes-of-calls walk: subobjects
+// recurse, but a class's OWN user-provided copy/move constructor
+// counts only when it has no base class (the pa16 direct-object
+// passthrough pins the with-base form direct; the pa22
+// conversion-target fixtures pin the base-less form by-address).
+static bool ClassPassesDirect(const ClassInfo& info)
+{
+	if (info.is_polymorphic || info.is_union)
+		return false;
+	if (!info.base && (UserProvidedCtor(info, CK_COPY) ||
+	                   UserProvidedCtor(info, CK_MOVE)))
+		return false;
+	return SubobjectsSatisfy<ClassPassesDirect>(info);
+}
+
 bool ClassParamDirect(const ClassInfo& info)
 {
 	return info.size <= 16 && !info.is_union &&
-		ClassHasTrivialMoveCtor(info) && ClassHasTrivialDtor(info);
+		ClassHasTrivialMoveCtor(info) && ClassHasTrivialDtor(info) &&
+		ClassPassesDirect(info);
 }
 
 bool ClassReturnDirect(const ClassInfo& info)
