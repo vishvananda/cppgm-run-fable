@@ -383,6 +383,10 @@ SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 			host_.SwapUnevaluatedOperand(saved);
 		}
 	}
+	// 5.3.3p2 / 3.11: applied to a reference type, the result is that
+	// of the referenced type.
+	if (IsReferenceType(operand_type))
+		operand_type = operand_type->target;
 	// 5.3.3p1 / 5.3.6p1: requires a complete object type; the size (or
 	// alignment) is the value. PA18: deferred nested member-class
 	// definitions complete here.

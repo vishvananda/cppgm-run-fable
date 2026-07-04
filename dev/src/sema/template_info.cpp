@@ -131,6 +131,10 @@ void AppendKey(const TypePtr& type, string& out)
 		{
 			if (i > 0)
 				out += ",";
+			// A pack-expansion parameter (`Args...` in a function-type
+			// pattern) is a distinct pattern from a fixed parameter.
+			if (type->parameters[i]->pack_expansion)
+				out += "..";
 			AppendKey(type->parameters[i], out);
 		}
 		out += ")";

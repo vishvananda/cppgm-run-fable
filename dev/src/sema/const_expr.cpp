@@ -384,6 +384,11 @@ ConstValue EvaluateSizeofExpr(const AstExpr& expr,
 		TypePtr named = context.TryResolveTypeFromName(*name);
 		if (named)
 		{
+			// 5.3.3p2: applied to a reference type, the result is
+			// that of the referenced type.
+			if (named->kind == TK_LVALUE_REFERENCE ||
+			    named->kind == TK_RVALUE_REFERENCE)
+				named = named->target;
 			context.RequireCompleteForLayout(named);
 			return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(named));
 		}
@@ -598,6 +603,11 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	case EK_SIZEOF_TYPE:
 	{
 		TypePtr sized = context.ResolveTypeId(*expr.type);
+		// 5.3.3p2: applied to a reference type, the result is that of
+		// the referenced type.
+		if (sized->kind == TK_LVALUE_REFERENCE ||
+		    sized->kind == TK_RVALUE_REFERENCE)
+			sized = sized->target;
 		context.RequireCompleteForLayout(sized);
 		return ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(sized));
 	}
