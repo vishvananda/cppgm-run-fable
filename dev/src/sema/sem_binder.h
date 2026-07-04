@@ -216,7 +216,8 @@ private:
 	                            const ClassField& field,
 	                            vector<SemNodePtr>& out);
 	void AppendBaseDefaultInit(const ClassInfo& cls,
-	                           vector<SemNodePtr>& out);
+	                           vector<SemNodePtr>& out,
+	                           bool syntactic);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,

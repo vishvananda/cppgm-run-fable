@@ -423,14 +423,20 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 // 12.6.2p8 implicit default-initialization of the base subobject. A
 // chain that performs no observable work is elided from the synthesized
 // body (the reference emission); the user-provided constructors it
-// would have reached are still resolved and demanded.
+// would have reached are still resolved and demanded. A user-written
+// constructor body elides through the syntactic walk (instantiated
+// pattern bodies count); synthesized bodies keep the conservative
+// point-of-instantiation fact (the pinned member-call shape).
 void SemBinder::AppendBaseDefaultInit(const ClassInfo& cls,
-                                      vector<SemNodePtr>& out)
+                                      vector<SemNodePtr>& out,
+                                      bool syntactic)
 {
 	const ClassInfo& base = *cls.base;
 	if (!base.has_user_ctor && !unit_.classes.NeedsConstruction(base))
 		return;
-	if (!unit_.classes.DefaultConstructionHasEffects(base))
+	if (syntactic
+	        ? !unit_.classes.DefaultConstructionHasSyntacticEffects(base)
+	        : !unit_.classes.DefaultConstructionHasEffects(base))
 	{
 		AppendElidedCtorDemand(base, true, out);
 		return;
@@ -581,7 +587,7 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 			                                      std::move(arg_nodes)));
 		}
 		else
-			AppendBaseDefaultInit(cls, actions);
+			AppendBaseDefaultInit(cls, actions, true);
 	}
 	else if (base_init)
 		throw runtime_error("base initializer without a base class");
@@ -755,7 +761,7 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 	try
 	{
 		if (cls.base)
-			AppendBaseDefaultInit(cls, actions);
+			AppendBaseDefaultInit(cls, actions, false);
 		if (cls.is_polymorphic)
 			actions.push_back(MakeVPointerStore(cls));
 		for (size_t i = 0; i < cls.fields.size(); i++)
