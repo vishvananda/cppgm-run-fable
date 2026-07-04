@@ -952,6 +952,28 @@ TemplateArg SemBinder::ResolveDefaultValueExpr(const AstExpr& expr,
 	TemplateArg arg;
 	arg.is_value = true;
 	arg.type = param_type;
+	// 14.3.2: a pointer parameter's null default (`nullptr`, `0`);
+	// entity-address defaults resolve like written arguments.
+	if (param_type && param_type->kind == TK_POINTER)
+	{
+		bool null_form = expr.kind == EK_KEYWORD_LITERAL &&
+			expr.literal == "nullptr";
+		if (!null_form)
+			try
+			{
+				ConstValue value = EvaluateConstExpr(expr, *this);
+				null_form = value.bits == 0;
+			}
+			catch (const std::exception&)
+			{
+			}
+		if (!null_form)
+			throw runtime_error("pointer parameter default is not "
+			                    "a null pointer constant");
+		arg.value_type = FT_UNSIGNED_LONG_INT;
+		arg.value_bits = 0;
+		return arg;
+	}
 	if (!TypeIsDependent(param_type))
 	{
 		try
