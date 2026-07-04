@@ -44,7 +44,11 @@ namespace {
 void ConversionCompletionTrampoline(void* context,
                                     const NamedTypeInfo* info)
 {
-	static_cast<SemBinder*>(context)->RequireCompleteType(info);
+	SemBinder* binder = static_cast<SemBinder*>(context);
+	binder->RequireCompleteType(info);
+	// 14.7.1p4 (PA23): the conversion consults the class's members as
+	// an object endpoint, which gives its statics storage.
+	binder->OnClassObjectMaterialized(info);
 }
 
 void ConversionTemplateTrampoline(void* context,
@@ -250,6 +254,25 @@ bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 	{
 		return false;
 	}
+}
+
+// The fast constant path reads static members without the analyzer:
+// the same storage demand applies (14.7.1p8), and a value that arrived
+// with an instantiated out-of-class definition is visible only to
+// instantiated bodies (14.6.4.1) like the analyzer's reads.
+ConstValue SemBinder::LookupConstant(const AstName& name)
+{
+	const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
+	if (!found)
+		throw runtime_error("undeclared name " + TerminalName(name));
+	if (found->kind == SB_VARIABLE && found->owner &&
+	    found->owner->kind == SCOPE_CLASS)
+		OnStaticMemberReferenced(*found, found->has_value);
+	if (!found->has_value ||
+	    (found->value_from_def && !instantiating_))
+		throw runtime_error(found->name +
+		                    " is not a constant of the PA11 subset");
+	return found->value;
 }
 
 bool SemBinder::TryFullConstant(const AstExpr& expr, ConstValue& out)

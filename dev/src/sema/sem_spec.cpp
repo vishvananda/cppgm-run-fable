@@ -1226,6 +1226,7 @@ void SemBinder::InstantiateClassFromPartial(
 		                    "exceeded for " + tmpl.name);
 	const PartialSpecialization& partial = tmpl.partials[partial_index];
 	spec.instantiated = true;
+	spec.lazily_instantiated = instantiating_;
 	spec.from_partial = true;
 	spec.partial_index = partial_index;
 	spec.partial_bound = bound;

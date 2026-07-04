@@ -677,6 +677,7 @@ void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
 		throw runtime_error("template instantiation depth limit "
 		                    "exceeded for " + tmpl.name);
 	spec.instantiated = true;
+	spec.lazily_instantiated = instantiating_;
 	spec.param_scope = MakeArgumentAliasScope(tmpl, spec.args);
 	// The injected pattern name: `Foo` inside the body names this
 	// specialization (14.6.1p1), and BindClass completes this entity
@@ -948,10 +949,13 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 }
 
 // Instantiates the pending static-data-member definitions of `spec`
-// (all of them, or just those declaring `name`).
+// (all of them: a demand on one member gives every registered static
+// of the specialization its storage, the checked-reference shape).
+// Folding-read demands skip constexpr members: those get storage only
+// from odr-use or an object definition (the pinned pa21 ratio shape).
 void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
                                          ClassSpecialization& spec,
-                                         const string* name)
+                                         bool skip_constexpr)
 {
 	if (!spec.instantiated || !spec.entity->complete ||
 	    spec.explicit_spec || spec.from_partial)
@@ -963,7 +967,7 @@ void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
 		const AstDecl& decl = *tmpl.member_defs[i];
 		if (!MemberDefIsStaticData(decl))
 			continue;
-		if (name && MemberDefName(decl) != *name)
+		if (skip_constexpr && DeclHasConstexpr(*decl.inner))
 			continue;
 		// 14.7.3: an explicit member specialization owns its name.
 		spec.members_done[i] = true;
@@ -1003,21 +1007,36 @@ void SemBinder::DemandSpecializationStatics(const NamedTypeInfo* entity)
 		if (!spec || spec->statics_demanded)
 			continue;
 		spec->statics_demanded = true;
+		// constexpr members wait for odr-use (a non-folding
+		// reference); an object alone leaves them storage-free (the
+		// pinned constexpr-conversion shape).
 		InstantiateStaticMembers(
 			*const_cast<TemplateInfo*>(entity->spec_template), *spec,
-			0);
+			true);
 	}
 }
 
-// A non-folding reference to a static data member: instantiate its
-// registered out-of-class definition (14.7.1p8 odr-use demand). The
-// owning specialization is found from the member's declaring scope
-// chain (the member may live in a nested class of the
-// specialization).
-void SemBinder::OnStaticMemberReferenced(const ScopeBinding& binding)
+// A constructed temporary or a conversion endpoint is an object of the
+// class like a declared variable: the specialization chain's statics
+// become emittable, even when an overload candidate consulting the
+// conversion loses (the checked-reference overload shapes).
+void SemBinder::OnClassObjectMaterialized(const NamedTypeInfo* info)
 {
-	if (in_unevaluated_operand_)
-		return;
+	DemandSpecializationStatics(info);
+}
+
+// A reference to a static data member: instantiate the specialization's
+// registered out-of-class definitions (14.7.1p8 demand). A non-folding
+// reference always demands (odr-use). A folding read demands only when
+// the owner specialization itself instantiated lazily inside another
+// instantiation; the genuine value read carries that demand through
+// unevaluated contexts, while parse-scope specializations fold with no
+// storage. The owning specialization is found from the member's
+// declaring scope chain (the member may live in a nested class of the
+// specialization).
+void SemBinder::OnStaticMemberReferenced(const ScopeBinding& binding,
+                                         bool folding_read)
+{
 	for (const Scope* scope = binding.owner; scope;
 	     scope = scope->parent)
 	{
@@ -1027,9 +1046,14 @@ void SemBinder::OnStaticMemberReferenced(const ScopeBinding& binding)
 			FindSpecializationRecord(scope->entity);
 		if (!spec)
 			continue;
+		bool lazy_fold = folding_read && IsInstantiating();
+		if (lazy_fold && !spec->lazily_instantiated)
+			return;
+		if (in_unevaluated_operand_ && !lazy_fold)
+			return;
 		InstantiateStaticMembers(
 			*const_cast<TemplateInfo*>(scope->entity->spec_template),
-			*spec, &binding.name);
+			*spec, folding_read);
 		return;
 	}
 }

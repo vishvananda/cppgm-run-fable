@@ -93,6 +93,11 @@ struct ScopeBinding
 	TypePtr type;    // entity / alias target type (null for namespaces)
 	Scope* target;   // SB_NAMESPACE / SB_NAMESPACE_ALIAS
 	bool has_value;  // SB_ENUMERATOR and constant SB_VARIABLE
+	// PA23 14.6.4.1: the constant arrived with an instantiated
+	// out-of-class member definition, which sits after every
+	// parse-scope use in instantiation order. Only instantiated
+	// bodies fold it; parse-scope reads keep loading the storage.
+	bool value_from_def = false;
 	// PA19: a constant binding with no object behind it (a non-type
 	// template parameter): every use folds to `value`; odr-use
 	// (address, reference binding) is ill-formed. In an abstract

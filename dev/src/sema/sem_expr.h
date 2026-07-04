@@ -129,12 +129,22 @@ struct ISemExprHost
 	// Marks an unevaluated operand (3.2p2: no odr-use inside); returns
 	// the previous state for restoring.
 	virtual bool SwapUnevaluatedOperand(bool active) = 0;
-	// PA19 14.7.1: a non-folding reference to a static data member of
-	// a class-template specialization - the host instantiates the
-	// member's registered out-of-class definition on this demand.
-	virtual void OnStaticMemberReferenced(const ScopeBinding& binding)
+	// PA19 14.7.1: a reference to a static data member of a
+	// class-template specialization - the host instantiates the
+	// specialization's registered out-of-class definitions on this
+	// demand (folding reads demand more narrowly, see the host).
+	virtual void OnStaticMemberReferenced(const ScopeBinding& binding,
+	                                      bool folding_read)
 	{
 		(void)binding;
+		(void)folding_read;
+	}
+	// PA23 14.7.1: a constructed temporary is an object of the class
+	// like a declared variable; the host gives the specialization
+	// chain's static-data-member definitions their storage.
+	virtual void OnClassObjectMaterialized(const NamedTypeInfo* info)
+	{
+		(void)info;
 	}
 	// PA21: whether the host is binding an instantiated pattern body
 	// (folded static-member reads there leave no storage).
@@ -377,6 +387,10 @@ private:
 	                                 const AstNamePart* explicit_part = 0);
 	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,
 	                                  const string& written);
+	// PA23 14.6.4.1: whether a static-member constant is visible to
+	// this read (a value from an instantiated out-of-class definition
+	// folds only inside instantiated bodies).
+	bool StaticMemberValueFolds(const ScopeBinding& binding);
 
 	// --- PA16 allocation expressions (sem_new.cpp) ---
 	SemValue AnalyzeNew(const AstExpr& expr);

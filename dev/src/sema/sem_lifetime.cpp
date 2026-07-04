@@ -1059,9 +1059,15 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	current_ = init_scope;
 	// PA18: the instantiated definition's constant value folds at
 	// later uses within this translation unit (the checked outputs
-	// pin the fold), and the object emits weak (14.7.1).
-	if (instantiating_ && declarator.init)
+	// pin the fold), and the object emits weak (14.7.1). PA23: the
+	// fold is visible only to instantiated bodies - the definition's
+	// point of instantiation sits after every parse-scope use
+	// (14.6.4.1), so those keep loading the storage.
+	if (instantiating_ && declarator.init && !member->has_value)
+	{
 		RecordConstantValue(*member, declarator.init.get());
+		member->value_from_def = member->has_value;
+	}
 	// The definition emits like a namespace-scope object owned by the
 	// declaring scope. A qualified definition completes an earlier
 	// (extern) declaration, so const-ness does not make it internal.

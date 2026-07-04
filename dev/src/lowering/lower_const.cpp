@@ -220,7 +220,11 @@ bool EvaluateLowerConst(const SemNode& node, LowerConst& out)
 		const ScopeBinding* binding = NodeBinding(node);
 		if (!binding)
 			return false;
-		if (binding->has_value)
+		// A value that arrived with an instantiated out-of-class
+		// member definition stays a load here: an unfolded read
+		// reaching the lowering is a parse-scope read, which precedes
+		// the definition's point of instantiation (14.6.4.1).
+		if (binding->has_value && !binding->value_from_def)
 		{
 			out.kind = LC_INT;
 			out.ival = binding->value;

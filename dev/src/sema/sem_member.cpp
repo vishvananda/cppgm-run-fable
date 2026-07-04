@@ -263,6 +263,16 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 	return value;
 }
 
+// Whether a static-member constant folds for this read: a value that
+// arrived with an instantiated out-of-class definition sits after
+// every parse-scope use in instantiation order (14.6.4.1), so only
+// instantiated bodies fold it.
+bool SemExprAnalyzer::StaticMemberValueFolds(const ScopeBinding& binding)
+{
+	return binding.has_value &&
+		(!binding.value_from_def || host_.IsInstantiating());
+}
+
 // A static data member (or recorded constant) named through an object
 // or a qualified name: behaves as the namespace-scope entity.
 SemValue SemExprAnalyzer::AnalyzeStaticMemberValue(
@@ -272,11 +282,13 @@ SemValue SemExprAnalyzer::AnalyzeStaticMemberValue(
 	// A read demands the member's registered out-of-class definition
 	// even when it folds: the checked references keep the weak
 	// storage of a read instantiated member (9.4.2p2 with 14.7.1p8).
-	// A fold inside an instantiated pattern body is the exception -
-	// it leaves no storage (the pinned constexpr-conversion shape).
-	if (!binding.has_value || !host_.IsInstantiating())
-		host_.OnStaticMemberReferenced(binding);
-	if (binding.has_value)
+	// The host narrows folding-read demands (lazily-instantiated
+	// owners keep storage, parse-scope folds and constexpr members
+	// leave none - the pinned pa19/pa21 shapes). The demand can hand
+	// the binding its value (a first read instantiating the
+	// definition), so foldability rechecks after it.
+	host_.OnStaticMemberReferenced(binding, StaticMemberValueFolds(binding));
+	if (StaticMemberValueFolds(binding))
 	{
 		// Constant static members fold like enumerators.
 		value.node = MakeSemNode(SN_LITERAL);
@@ -404,6 +416,7 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	const ClassInfo* cls = host_.Classes().Find(class_type->named);
 	if (!cls || !class_type->named->complete)
 		throw runtime_error("temporary of an incomplete class");
+	host_.OnClassObjectMaterialized(class_type->named);
 	vector<SemValue> args;
 	AnalyzeArgumentList(arguments, args);
 	if (cls->is_aggregate && !cls->has_user_ctor && !args.empty())

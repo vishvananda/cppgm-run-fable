@@ -126,13 +126,16 @@ EvalValue ConstEvalEngine::EvalId(const SemNode& node)
 		throw NotConstant("this outside a constant call");
 	}
 	// A recorded constant binding folds without an object image
-	// (enumerators, const integral variables, static members).
+	// (enumerators, const integral variables, static members). A value
+	// that arrived with an instantiated out-of-class definition stays
+	// invisible here: the engine evaluates parse-scope contexts, which
+	// precede the definition's point of instantiation (14.6.4.1).
 	if (node.entity_scope)
 	{
 		const ScopeBinding* binding =
 			FindOwnBinding(*(const Scope*)node.entity_scope,
 			               node.entity_name);
-		if (binding && binding->has_value &&
+		if (binding && binding->has_value && !binding->value_from_def &&
 		    !FindObject(node.entity_scope, node.entity_name))
 		{
 			Frame* frame = CurrentFrame();

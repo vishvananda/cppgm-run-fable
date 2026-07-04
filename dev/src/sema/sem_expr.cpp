@@ -345,7 +345,7 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		// like an enumerator (9.4.2p4 constant initializer). A
 		// decltype-scoped qualified-id reads the entity itself (the
 		// reference resolution keeps the odr-use).
-		if (member_class && binding->has_value &&
+		if (member_class && StaticMemberValueFolds(*binding) &&
 		    (expr.name.parts.empty() ||
 		     expr.name.parts[0].kind != NP_DECLTYPE))
 			return AnalyzeStaticMemberValue(*binding, written);
@@ -414,7 +414,7 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	}
 	if (binding->kind == SB_VARIABLE && !binding->has_value &&
 	    binding->owner && binding->owner->kind == SCOPE_CLASS)
-		host_.OnStaticMemberReferenced(*binding);
+		host_.OnStaticMemberReferenced(*binding, false);
 	value.node = MakeSemNode(SN_ID_EXPRESSION);
 	value.node->name = written;
 	value.node->type = value.type;

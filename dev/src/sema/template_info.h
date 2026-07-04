@@ -114,6 +114,11 @@ struct ClassSpecialization
 	// this specialization); set once an object definition demanded
 	// them all so later-registered definitions instantiate on sight.
 	bool statics_demanded = false;
+	// PA23: the body bound while another instantiation was in flight
+	// (a dependent use forced it). Folding reads of such members keep
+	// their storage demand; parse-scope specializations fold with no
+	// storage (the pinned pa19 `traits::const_min` shape).
+	bool lazily_instantiated = false;
 	// PA21 14.7.2: named by an `extern template` declaration (a later
 	// explicit-instantiation definition emits on ordinary demand
 	// without the emission-root marking).

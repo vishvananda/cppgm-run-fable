@@ -601,7 +601,7 @@ private:
 	// specialization type).
 	void InstantiateStaticMembers(TemplateInfo& tmpl,
 	                              ClassSpecialization& spec,
-	                              const string* name);
+	                              bool skip_constexpr);
 	ClassSpecialization* FindSpecializationRecord(
 		const NamedTypeInfo* entity);
 	void DemandSpecializationStatics(const NamedTypeInfo* entity);
@@ -958,7 +958,10 @@ public:
 	virtual const FunctionSpecialization* DeduceFunctionTemplateFromTarget(
 		TemplateInfo& tmpl, const TypePtr& target);
 	virtual void OnSpecializationOdrUsed(const FunctionSpecialization* spec);
-	virtual void OnStaticMemberReferenced(const ScopeBinding& binding);
+	virtual void OnStaticMemberReferenced(const ScopeBinding& binding,
+	                                      bool folding_read);
+	virtual void OnClassObjectMaterialized(const NamedTypeInfo* info);
+	virtual ConstValue LookupConstant(const AstName& name);
 	virtual bool IsInstantiating() const { return instantiating_; }
 	virtual const FunctionSpecialization* InstantiateCharPackLiteral(
 		const ScopeBinding& binding, const string& chars);
