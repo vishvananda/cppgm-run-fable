@@ -185,7 +185,8 @@ static bool ParameterIsPackExpanded(const AstParameter& parameter)
 
 void TypeBuilder::BuildParameters(const AstParameterClause& clause,
                                   vector<ParameterInfo>& parameters,
-                                  vector<TypePtr>& types)
+                                  vector<TypePtr>& types,
+                                  bool* extra_variadic)
 {
 	for (size_t i = 0; i < clause.parameters.size(); i++)
 	{
@@ -208,11 +209,30 @@ void TypeBuilder::BuildParameters(const AstParameterClause& clause,
 				continue;
 			}
 			ParameterInfo pattern;
-			if (!host_.ComposeAbstractPackParameter(parameter, pattern))
-				throw runtime_error("parameter pack outside an "
-				                    "expandable context");
-			parameters.push_back(pattern);
-			continue;
+			if (host_.ComposeAbstractPackParameter(parameter, pattern))
+			{
+				parameters.push_back(pattern);
+				continue;
+			}
+			// 8.3.5p4: `T...` where T names no parameter pack is an
+			// ordinary parameter followed by an ellipsis.
+			if (extra_variadic)
+			{
+				DeclSpecifierInfo pspecs =
+					ProcessSpecifiers(parameter.specifiers, false);
+				DeclaratorInfo pcomposed = ComposeDeclarator(
+					parameter.declarator.get(), pspecs.type);
+				ParameterInfo plain;
+				plain.type = pcomposed.type;
+				if (pcomposed.id && pcomposed.id->IsPlainIdentifier())
+					plain.name = pcomposed.id->parts[0].identifier;
+				host_.OnParameterComposed(plain.name, plain.type);
+				parameters.push_back(plain);
+				*extra_variadic = true;
+				continue;
+			}
+			throw runtime_error("parameter pack outside an "
+			                    "expandable context");
 		}
 		DeclSpecifierInfo specs =
 			ProcessSpecifiers(parameter.specifiers, false);
@@ -275,7 +295,9 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	{
 		vector<ParameterInfo> parameters;
 		vector<TypePtr> types;
-		BuildParameters(*item.params, parameters, types);
+		bool extra_variadic = false;
+		BuildParameters(*item.params, parameters, types,
+		                &extra_variadic);
 		if (out.trailing_return)
 		{
 			// 8.3.5p2: the trailing-return-type replaces the `auto`
@@ -283,7 +305,9 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 			out.type = out.trailing_return;
 			out.trailing_return = TypePtr();
 		}
-		out.type = MakeFunctionType(out.type, types, item.params->variadic);
+		out.type = MakeFunctionType(out.type, types,
+		                            item.params->variadic ||
+		                                extra_variadic);
 		// 8.3.5p6: trailing cv-qualifiers and the ref-qualifier belong
 		// to the function type (member functions; the binder rejects
 		// them elsewhere).

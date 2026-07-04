@@ -179,9 +179,12 @@ private:
 	void ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 	                           bool fn_const, bool fn_volatile,
 	                           int fn_ref, DeclaratorInfo& out);
+	// `extra_variadic` reports a `T...` parameter whose T names no
+	// pack (8.3.5p4: an ordinary parameter followed by an ellipsis).
 	void BuildParameters(const AstParameterClause& clause,
 	                     vector<ParameterInfo>& parameters,
-	                     vector<TypePtr>& types);
+	                     vector<TypePtr>& types,
+	                     bool* extra_variadic = 0);
 
 	ITypeBuilderHost& host_;
 	bool adjust_parameters_;
