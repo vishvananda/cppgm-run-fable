@@ -698,9 +698,15 @@ bool SemBinder::ComposeFunctionPattern(
 		    composed.type->kind == TK_FUNCTION)
 		{
 			full = composed.type;
+			// PA21: pack-expanded parameters compose as unexpanded
+			// element patterns; the per-parameter pack flags keep the
+			// deduction loop's run-absorption behavior.
 			for (size_t i = 0; i < composed.parameters.size(); i++)
+			{
 				param_patterns.push_back(composed.parameters[i].type);
-			pattern_packs.resize(param_patterns.size(), false);
+				pattern_packs.push_back(
+					composed.parameters[i].pack_pattern);
+			}
 			composed_full = true;
 		}
 	}

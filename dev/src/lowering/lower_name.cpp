@@ -905,6 +905,12 @@ string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 	// (method cv/ref-qualifiers before the class prefix).
 	bool member = tmpl.declaring && tmpl.declaring->kind == SCOPE_CLASS;
 	TypePtr pattern = tmpl.pattern ? tmpl.pattern : spec.type;
+	// A pattern with an unexpanded pack parameter mangles from the
+	// concrete signature (the pinned PA19 spellings).
+	for (size_t i = 0; pattern.get() != spec.type.get() &&
+	     i < pattern->parameters.size(); i++)
+		if (pattern->parameters[i]->pack_expansion)
+			pattern = spec.type;
 	string cv;
 	if (member)
 	{
