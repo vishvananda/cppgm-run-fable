@@ -400,6 +400,12 @@ AstDeclPtr AstParser::ParseEnumSpecifier()
 				}
 			}
 			Register(enumerator.name, NF_VALUE);
+			// PA21: qualified enumerator names (`errc::value`)
+			// classify as values so the 8.2 declaration-vs-expression
+			// choice reads them as call arguments.
+			if (!decl->name.empty())
+				GetOrCreateChild(DeclScopeTable(), decl->name)
+					->entries[enumerator.name] = NF_VALUE;
 			decl->enumerators.push_back(move(enumerator));
 			if (!MatchSimple(OP_COMMA))
 				break;
