@@ -1346,6 +1346,18 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 			return;
 		}
 		break;
+	case SN_BRACED_INIT_LIST:
+		if (NodeType(node)->kind == TK_ARRAY)
+		{
+			// 5.2.3p3: a discarded array temporary still
+			// materializes; its element initializers evaluate in
+			// order.
+			string slot = AddMatSlot("discardarr",
+			                         LowerSlotType(NodeType(node)));
+			LowerLocalArrayInit(node, slot, NodeType(node));
+			return;
+		}
+		break;
 	case SN_BINARY_EXPRESSION:
 		if (node.op == OP_COMMA)
 		{

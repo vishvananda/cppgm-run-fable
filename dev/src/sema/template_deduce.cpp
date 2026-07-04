@@ -1203,6 +1203,37 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	    composed.type->kind != TK_FUNCTION)
 		throw runtime_error("function template " + tmpl.name +
 		                    " does not declare a function");
+	// 13.5p6: a namespace-scope operator function must take at least
+	// one class or enumeration operand, so a specialization over
+	// builtin operand types only is ill-formed (allocation and
+	// literal operators are exempt).
+	if (!tmpl.member_of && tmpl.name.compare(0, 9, "operator ") == 0 &&
+	    tmpl.name.compare(0, 10, "operator \"") != 0)
+	{
+		const string text = tmpl.name.substr(9);
+		if (text != "new" && text != "new[]" && text != "delete" &&
+		    text != "delete[]")
+		{
+			bool class_or_enum = false;
+			bool dependent = false;
+			for (size_t i = 0;
+			     i < composed.type->parameters.size(); i++)
+			{
+				TypePtr param = composed.type->parameters[i];
+				if (IsReferenceType(param))
+					param = param->target;
+				param = RemoveTopCv(param);
+				if (TypeIsDependent(param))
+					dependent = true;
+				if (param->kind == TK_CLASS || param->kind == TK_ENUM)
+					class_or_enum = true;
+			}
+			if (!class_or_enum && !dependent)
+				throw runtime_error(
+					"operator function specialization without a "
+					"class or enumeration parameter");
+		}
+	}
 	spec->type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		spec->declared_params.push_back(composed.parameters[i].type);

@@ -29,11 +29,75 @@ struct BodyNames
 	// parameters, and every name declared anywhere in the walked body.
 	set<string> params;
 	set<string> known;
+	// Values (parameters, locals) declared with a type that names a
+	// template parameter: member accesses through them are dependent
+	// for the 14.2p4 keyword requirement.
+	set<string> dependent;
 	// A body-level using-directive or using-declaration makes local
 	// visibility unknowable here; ids stop being collected (the
 	// parameter-shadow check still runs).
 	bool give_up;
 };
+
+bool TypeIdMentionsParam(const AstTypeId& type, const BodyNames& names);
+
+bool NameMentionsParam(const AstName& name, const BodyNames& names)
+{
+	for (size_t i = 0; i < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		if ((part.kind == NP_IDENTIFIER || part.kind == NP_TEMPLATE_ID) &&
+		    names.params.count(part.identifier))
+			return true;
+		for (size_t a = 0; a < part.arguments.size(); a++)
+		{
+			const AstTemplateArgument& arg = part.arguments[a];
+			if (arg.is_type && arg.type &&
+			    TypeIdMentionsParam(*arg.type, names))
+				return true;
+			if (!arg.is_type && arg.expr && arg.expr->kind == EK_ID &&
+			    NameMentionsParam(arg.expr->name, names))
+				return true;
+		}
+	}
+	return false;
+}
+
+bool SpecifiersMentionParam(const AstSpecifierSeq& specifiers,
+                            const BodyNames& names)
+{
+	for (size_t i = 0; i < specifiers.size(); i++)
+		if (specifiers[i].kind == SPEC_TYPE_NAME &&
+		    NameMentionsParam(specifiers[i].name, names))
+			return true;
+	return false;
+}
+
+bool TypeIdMentionsParam(const AstTypeId& type, const BodyNames& names)
+{
+	return SpecifiersMentionParam(type.specifiers, names);
+}
+
+// Whether an object expression certainly depends on a template
+// parameter (the conservative subset: rooted at a value whose declared
+// type names one).
+bool ObjectIsDependent(const AstExpr& expr, const BodyNames& names)
+{
+	switch (expr.kind)
+	{
+	case EK_ID:
+		return !expr.name.global_scope && expr.name.parts.size() == 1 &&
+			expr.name.parts[0].kind == NP_IDENTIFIER &&
+			names.dependent.count(expr.name.parts[0].identifier) != 0;
+	case EK_PAREN:
+	case EK_MEMBER:
+	case EK_SUBSCRIPT:
+		return !expr.operands.empty() && expr.operands[0] &&
+			ObjectIsDependent(*expr.operands[0], names);
+	default:
+		return false;
+	}
+}
 
 void CollectDeclaratorName(const AstDeclarator* declarator,
                            BodyNames& names, bool check_shadow)
@@ -63,9 +127,16 @@ void CollectParameterNames(const AstDeclarator* declarator,
 		if (item.kind != DI_PARAMS || !item.params)
 			continue;
 		for (size_t p = 0; p < item.params->parameters.size(); p++)
-			CollectDeclaratorName(
-				item.params->parameters[p].declarator.get(), names,
-				false);
+		{
+			const AstParameter& param = item.params->parameters[p];
+			CollectDeclaratorName(param.declarator.get(), names, false);
+			if (!param.declarator ||
+			    !SpecifiersMentionParam(param.specifiers, names))
+				continue;
+			const AstName* id = param.declarator->IdName();
+			if (id && id->IsPlainIdentifier())
+				names.dependent.insert(id->parts[0].identifier);
+		}
 	}
 }
 
@@ -86,6 +157,19 @@ void WalkExpr(const AstExpr* expr, BodyNames& names,
 		    !expr->name.parts[0].tilde)
 			ids.push_back(expr);
 		return;
+	}
+	if (expr->kind == EK_MEMBER && !expr->operands.empty() &&
+	    expr->operands[0])
+	{
+		// 14.2p4: a member template-id of a dependent object
+		// expression requires the `template` keyword; without it the
+		// `<` is the less-than operator and this form cannot parse.
+		const AstNamePart& member = expr->name.parts.back();
+		if (expr->name.parts.size() == 1 &&
+		    member.kind == NP_TEMPLATE_ID && !member.template_keyword &&
+		    !member.tilde && ObjectIsDependent(*expr->operands[0], names))
+			throw runtime_error("dependent member template-id requires "
+			                    "the template keyword");
 	}
 	size_t skip_callee = 0;
 	if (expr->kind == EK_CALL && !expr->operands.empty() &&
@@ -135,10 +219,18 @@ void WalkLocalDecl(const AstDecl* decl, BodyNames& names,
 	}
 	if (decl->kind != DK_SIMPLE)
 		return;
+	bool dependent_type = SpecifiersMentionParam(decl->specifiers, names);
 	for (size_t i = 0; i < decl->declarators.size(); i++)
 	{
-		CollectDeclaratorName(decl->declarators[i].declarator.get(),
-		                      names, true);
+		const AstDeclarator* declarator =
+			decl->declarators[i].declarator.get();
+		CollectDeclaratorName(declarator, names, true);
+		if (dependent_type && declarator)
+		{
+			const AstName* id = declarator->IdName();
+			if (id && id->IsPlainIdentifier())
+				names.dependent.insert(id->parts[0].identifier);
+		}
 		const AstInitializer* init = decl->declarators[i].init.get();
 		if (!init)
 			continue;

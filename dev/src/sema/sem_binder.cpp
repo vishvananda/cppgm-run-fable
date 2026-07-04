@@ -657,8 +657,8 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	if (braced)
 	{
 		TypePtr completed = binding.type;
-		item.children.push_back(analyzer_.AnalyzeBracedInit(*braced,
-		                                                    completed));
+		item.children.push_back(analyzer_.AnalyzeBracedInit(
+			braced->arguments, completed));
 		binding.type = completed;
 		item.type = completed;
 		return;

@@ -615,7 +615,8 @@ AstExprPtr AstParser::ParsePostfixSuffixes(AstExprPtr expr)
 				Restore(state);
 				break;
 			}
-			(void)template_keyword;
+			if (template_keyword)
+				name.parts.front().template_keyword = true;
 			AstExprPtr node = MakeExpr(EK_MEMBER);
 			node->op = op;
 			node->op_spelling = spelling;

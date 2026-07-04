@@ -252,7 +252,8 @@ public:
 
 	// Braced initialization of the supported array forms; returns the
 	// braced-init-list node (completing unknown bounds via `dest`).
-	SemNodePtr AnalyzeBracedInit(const AstExpr& braced, TypePtr& dest);
+	SemNodePtr AnalyzeBracedInit(const vector<AstExprPtr>& items,
+	                             TypePtr& dest);
 	// One argument/initializer list with `pattern...` items expanded
 	// in place (PA19 14.5.3).
 	void AnalyzeArgumentList(const vector<AstExprPtr>& items,

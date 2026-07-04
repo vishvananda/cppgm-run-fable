@@ -1401,8 +1401,8 @@ void SemExprAnalyzer::AnalyzeArgumentList(const vector<AstExprPtr>& items,
 	}
 }
 
-SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(const AstExpr& braced,
-                                              TypePtr& dest)
+SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(
+	const vector<AstExprPtr>& items, TypePtr& dest)
 {
 	if (dest->kind != TK_ARRAY)
 		throw OutsideBoundary("braced initialization form");
@@ -1411,28 +1411,27 @@ SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(const AstExpr& braced,
 	if (RemoveTopCv(dest->target)->kind == TK_ARRAY)
 	{
 		if (!dest->bound_known)
-			dest = MakeArrayType(dest->target, true,
-			                     braced.arguments.size());
-		if (braced.arguments.size() > dest->bound)
+			dest = MakeArrayType(dest->target, true, items.size());
+		if (items.size() > dest->bound)
 			throw runtime_error("too many braced initializers");
 		SemNodePtr node = MakeSemNode(SN_BRACED_INIT_LIST);
 		node->type = dest;
 		node->category = VC_LVALUE;
-		for (size_t i = 0; i < braced.arguments.size(); i++)
+		for (size_t i = 0; i < items.size(); i++)
 		{
-			const AstExpr& element = *braced.arguments[i];
+			const AstExpr& element = *items[i];
 			if (element.kind != EK_BRACED)
 				throw OutsideBoundary("array-of-array element form");
 			TypePtr element_type = dest->target;
 			node->children.push_back(
-				AnalyzeBracedInit(element, element_type));
+				AnalyzeBracedInit(element.arguments, element_type));
 		}
 		return node;
 	}
 	// Pack expansions among the elements resolve before the bound
 	// completes (8.5.1p4 over the expanded list).
 	vector<SemValue> elements;
-	AnalyzeArgumentList(braced.arguments, elements);
+	AnalyzeArgumentList(items, elements);
 	if (dest->bound_known && elements.size() > dest->bound)
 		throw runtime_error("too many braced initializers");
 	if (!dest->bound_known)

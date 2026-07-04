@@ -229,6 +229,19 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	if (RemoveTopCv(dest)->kind == TK_CLASS)
 		// T(args) over a class: a constructed temporary object.
 		return MakeTemporaryObject(RemoveTopCv(dest), arguments, false);
+	if (RemoveTopCv(dest)->kind == TK_ARRAY)
+	{
+		// 5.2.3p3: `T{...}` over an array type direct-list-initializes
+		// a temporary array (the parser routes the braced form through
+		// the call shape).
+		TypePtr array = RemoveTopCv(dest);
+		SemValue result;
+		result.node = AnalyzeBracedInit(arguments, array);
+		result.node->category = VC_PRVALUE;
+		result.type = array;
+		result.category = VC_PRVALUE;
+		return result;
+	}
 	// PA19: pack expansions among the arguments resolve first; the
 	// expanded count selects the form.
 	bool has_pack = false;
