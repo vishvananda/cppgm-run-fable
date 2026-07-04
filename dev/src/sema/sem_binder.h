@@ -593,9 +593,12 @@ private:
 	void EnsureFunctionPattern(TemplateInfo& tmpl);
 	// Whether a new declaration re-declares `tmpl` (positional
 	// parameter identity over the composed pattern).
+	// `match_head_spelling=false` relaxes the 14.5.6.1p6 template-head
+	// comparison for out-of-class definition pairing.
 	bool SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	                                   const AstDecl& decl,
-	                                   const AstDecl& inner);
+	                                   const AstDecl& inner,
+	                                   bool match_head_spelling = true);
 	// 7.3.3p15 hiding between an own member template and an imported
 	// one: positional pattern identity over the composed patterns.
 	bool SameImportedTemplateSignature(TemplateInfo& own,

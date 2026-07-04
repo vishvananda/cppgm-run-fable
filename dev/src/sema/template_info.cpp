@@ -358,6 +358,62 @@ string PositionalizeTemplateNames(const string& text,
 	return out;
 }
 
+bool SameTemplateParameterKinds(const vector<TemplateParam>& a,
+                                const vector<TemplateParam>& b)
+{
+	if (a.size() != b.size())
+		return false;
+	for (size_t i = 0; i < a.size(); i++)
+	{
+		if (a[i].kind != b[i].kind || a[i].pack != b[i].pack)
+			return false;
+		if (a[i].kind == TPK_TEMPLATE &&
+		    !SameTemplateParameterKinds(a[i].tt_params, b[i].tt_params))
+			return false;
+	}
+	return true;
+}
+
+bool SameTemplateParameterLists(const vector<TemplateParam>& a,
+                                const vector<TemplateParam>& b)
+{
+	if (!SameTemplateParameterKinds(a, b))
+		return false;
+	for (size_t i = 0; i < a.size(); i++)
+	{
+		if (a[i].kind != TPK_VALUE)
+			continue;
+		// The declared type of a non-type parameter is part of the
+		// template's identity (14.5.6.1p6); spellings compare with the
+		// parameter names positionalized and the declarator-id
+		// stripped, mirroring CanonicalDeclaratorParams.
+		if (!a[i].source || !b[i].source)
+		{
+			if (bool(a[i].source) != bool(b[i].source))
+				return false;
+			continue;
+		}
+		string left = FlattenSpecifierSeq(a[i].source->specifiers);
+		string right = FlattenSpecifierSeq(b[i].source->specifiers);
+		if (a[i].source->declarator)
+		{
+			string shape = FlattenDeclarator(*a[i].source->declarator);
+			ReplaceWholeIdentifier(shape, a[i].name, "");
+			left += "|" + shape;
+		}
+		if (b[i].source->declarator)
+		{
+			string shape = FlattenDeclarator(*b[i].source->declarator);
+			ReplaceWholeIdentifier(shape, b[i].name, "");
+			right += "|" + shape;
+		}
+		if (PositionalizeTemplateNames(left, a) !=
+		    PositionalizeTemplateNames(right, b))
+			return false;
+	}
+	return true;
+}
+
 string CanonicalDeclaratorParams(const AstDeclarator& declarator,
                                  const vector<TemplateParam>& params)
 {

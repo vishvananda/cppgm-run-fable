@@ -271,6 +271,23 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 				break;
 			}
 		}
+		// An out-of-class definition may spell a template-head type
+		// through the class's own typedefs; pair it with the unique
+		// definition-less declaration that matches everywhere else.
+		if (!merged && definition)
+			for (size_t i = 0; i < binding->fn_templates.size(); i++)
+			{
+				TemplateInfo* other = binding->fn_templates[i];
+				if (other->params.size() != params.size() ||
+				    other->has_definition)
+					continue;
+				if (SameFunctionTemplateSignature(*other, decl, inner,
+				                                  false))
+				{
+					merged = other;
+					break;
+				}
+			}
 	}
 	if (merged)
 	{

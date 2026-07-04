@@ -323,3 +323,16 @@ string CanonicalDeclaratorParams(const AstDeclarator& declarator,
 // specialization entity names ("Box<int>"): the lowering's sanitized
 // symbol names and scope paths derive from it.
 string TemplateArgumentSpelling(const vector<TemplateArg>& args);
+
+// Whether two template parameter lists match positionally in kind
+// and pack-ness (template-template parameters recursively).
+bool SameTemplateParameterKinds(const vector<TemplateParam>& a,
+                                const vector<TemplateParam>& b);
+
+// 14.5.6.1p6: whether two template parameter lists declare the same
+// template head - positionally matching kinds and pack-ness, with
+// non-type parameter types compared by positionalized spelling
+// (enable_if-style defaulted parameters with different condition
+// spellings declare distinct overloads). Defaults are not identity.
+bool SameTemplateParameterLists(const vector<TemplateParam>& a,
+                                const vector<TemplateParam>& b);

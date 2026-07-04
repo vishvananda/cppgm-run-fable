@@ -349,11 +349,20 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 				dependent = true;
 		if (dependent)
 			continue;
-		const FunctionSpecialization* spec =
-			EnsureFunctionSpecialization(tmpl, args);
+		const FunctionSpecialization* spec;
+		try
+		{
+			spec = EnsureFunctionSpecialization(tmpl, args);
+		}
+		catch (const std::exception&)
+		{
+			// 14.8.2p8: substitution failure drops this template.
+			continue;
+		}
 		if (resolved && resolved != spec)
-			throw runtime_error("ambiguous template-id " +
-			                    part.identifier);
+			// 14.8.1: several templates accept the arguments; the use
+			// context (call ranking, 13.4 target selection) picks.
+			return &binding;
 		resolved = spec;
 	}
 	if (!resolved)

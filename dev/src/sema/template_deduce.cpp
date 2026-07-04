@@ -816,11 +816,23 @@ void SemBinder::EnsureFunctionPattern(TemplateInfo& tmpl)
 
 bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
                                               const AstDecl& decl,
-                                              const AstDecl& inner)
+                                              const AstDecl& inner,
+                                              bool match_head_spelling)
 {
 	EnsureFunctionPattern(tmpl);
 	vector<TemplateParam> params;
 	CollectTemplateParams(decl, params);
+	if (!SameTemplateParameterKinds(params, tmpl.params))
+		return false;
+	// 14.5.6.1p6: differing template heads (non-type parameter types
+	// included) declare distinct templates that overload. An
+	// out-of-class definition pairing skips the spelling comparison:
+	// its head may spell the same type through the class's own
+	// typedefs (`value_type` vs `T`), and pairing tolerance is safe
+	// because the declaration it completes already exists.
+	if (match_head_spelling &&
+	    !SameTemplateParameterLists(params, tmpl.params))
+		return false;
 	TypePtr full;
 	vector<TypePtr> param_patterns;
 	vector<bool> pattern_packs;
@@ -843,6 +855,18 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 		    !TypeEquals(param_patterns[i], tmpl.param_patterns[i]))
 			return false;
 	}
+	// The dependent parameter spelling distinguishes overloads whose
+	// non-composing patterns compare equal as nulls
+	// (`remove_reference<T>::type&` vs `...type&&`).
+	const AstDeclarator* decl_declarator = PatternDeclarator(inner);
+	const AstDeclarator* tmpl_declarator =
+		PatternDeclarator(*tmpl.pattern_decl);
+	if (bool(decl_declarator) != bool(tmpl_declarator))
+		return false;
+	if (decl_declarator &&
+	    CanonicalDeclaratorParams(*decl_declarator, params) !=
+	        CanonicalDeclaratorParams(*tmpl_declarator, tmpl.params))
+		return false;
 	// The dependent return spelling distinguishes overloads the
 	// abstract composition cannot see (`typename T::A f(T)` vs
 	// `typename T::B f(T)` are distinct templates).
@@ -1145,10 +1169,21 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		}
 		current_ = saved;
 	}
-	// Substitution failure is a hard error (SFINAE candidate dropping
-	// is out of scope); the body instantiates only on odr-use.
-	return EnsureFunctionSpecialization(
-		tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
+	// 14.8.2p8 (PA22): substitution failure while composing the
+	// concrete signature (parameter/return substitution, trailing
+	// decltype analysis, enable_if member lookup) is an immediate-
+	// context failure: the template contributes no candidate. The
+	// body instantiates only on odr-use, so body faults never route
+	// through here.
+	try
+	{
+		return EnsureFunctionSpecialization(
+			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
+	}
+	catch (const std::exception&)
+	{
+		return 0;
+	}
 }
 
 // --- specialization -----------------------------------------------------------
@@ -1288,6 +1323,14 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
 	for (size_t i = 0; i < bound.size(); i++)
 		if (!ArgBound(bound[i]))
 			return 0;
-	// Substitution failure is a hard error (no SFINAE dropping).
-	return EnsureFunctionSpecialization(tmpl, bound);
+	// 14.8.2.2: substitution failure drops the candidate from the
+	// overload-set deduction, like call deduction.
+	try
+	{
+		return EnsureFunctionSpecialization(tmpl, bound);
+	}
+	catch (const std::exception&)
+	{
+		return 0;
+	}
 }
