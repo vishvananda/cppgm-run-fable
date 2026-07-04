@@ -388,6 +388,11 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		return DeduceFromType(pattern->target, arg->target, bound);
 	case TK_TEMPLATE_SPEC:
 	{
+		// The deduced A must carry the pattern's exact qualification
+		// (a top-level cv wrapper pattern owns cv-qualified arguments).
+		if (exact_cv && (pattern->is_const != arg->is_const ||
+		                 pattern->is_volatile != arg->is_volatile))
+			return false;
 		// PA21: a pattern anchored on a template-template parameter
 		// placeholder binds the argument's template into its slot, then
 		// unifies the argument lists.
