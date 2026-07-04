@@ -183,11 +183,13 @@ void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 		    inner.class_name.parts.back().kind != NP_TEMPLATE_ID)
 			throw OutsideBoundary("explicit specialization name form");
 		// PA21: a qualified name explicitly specializes a member class
-		// template inside its owner's scope.
+		// template inside its owner's scope (or a namespace-qualified
+		// class template in its home namespace).
 		if (inner.class_name.parts.size() > 1)
 		{
 			Scope* declaring = ResolvePrefixScope(inner.class_name);
-			if (!declaring || declaring->kind != SCOPE_CLASS)
+			if (!declaring || (declaring->kind != SCOPE_CLASS &&
+			                   declaring->kind != SCOPE_NAMESPACE))
 				throw OutsideBoundary("explicit specialization name "
 				                      "form");
 			Scope* saved = current_;
@@ -632,7 +634,27 @@ void SemBinder::RegisterClassPartial(const AstDecl& decl,
 	PartialSpecialization partial;
 	CollectTemplateParams(decl, partial.params);
 	partial.pattern = ComposePartialPattern(tmpl, partial.params, part);
-	partial.decl = &inner;
+	partial.decl = inner.kind == DK_CLASS ? &inner : 0;
+	// A redeclaration merges onto the recorded pattern (a forward
+	// declaration gains its definition later).
+	string merge_key = TemplateArgumentKey(partial.pattern);
+	for (size_t p = 0; p < tmpl.partials.size(); p++)
+	{
+		PartialSpecialization& existing = tmpl.partials[p];
+		if (existing.params.size() != partial.params.size() ||
+		    TemplateArgumentKey(existing.pattern) != merge_key)
+			continue;
+		if (partial.decl)
+		{
+			if (existing.decl)
+				throw runtime_error("redefinition of a partial "
+				                    "specialization of " + tmpl.name);
+			existing.params = partial.params;
+			existing.pattern = partial.pattern;
+			existing.decl = partial.decl;
+		}
+		return;
+	}
 	tmpl.partials.push_back(partial);
 }
 

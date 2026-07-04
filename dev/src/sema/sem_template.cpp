@@ -247,6 +247,14 @@ void SemBinder::BindTemplateDeclaration(const AstDecl& decl)
 		RegisterClassPartial(decl, inner);
 		return;
 	case DK_CLASS_FORWARD:
+		// PA21: a template-id forward declaration declares a partial
+		// specialization (its definition completes the pattern).
+		if (inner.class_name.parts.size() == 1 &&
+		    inner.class_name.parts.back().kind == NP_TEMPLATE_ID)
+		{
+			RegisterClassPartial(decl, inner);
+			return;
+		}
 		if (!inner.class_name.IsPlainIdentifier())
 			throw OutsideBoundary("class template partial "
 			                      "specialization");
