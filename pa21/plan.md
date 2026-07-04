@@ -141,7 +141,7 @@ the existing PA14-PA20 lowering path.
 
 ## Status (2026-07-04)
 
-152/180 pa21 tests pass; through-pa20 fully green (1551/1551); file
+156/180 pa21 tests pass; through-pa20 fully green (1551/1551); file
 audit clean. Landed: the full member-template layer (member function /
 constructor / class / alias templates, out-of-class `template<..>
 template<..>` definitions, member-template calls and operators),
