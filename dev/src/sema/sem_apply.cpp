@@ -166,6 +166,7 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		out.node->children.push_back(std::move(callee));
 		out.node->children.push_back(
 			AddressOfObject(std::move(value.node)));
+		out.node->user_conversion = true;
 		bool null_literal = value.null_pointer_literal;
 		(void)null_literal;
 		value = std::move(out);

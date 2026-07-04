@@ -212,6 +212,10 @@ struct SemNode
 	// emitted only on demand like an instantiation, but with a strong
 	// binding (PA23; the reference omits an unused one).
 	bool demand_strong = false;
+	// SN_CALL_EXPRESSION: the call invokes a user conversion function
+	// (12.3.2); object initialization uses the fact to elide an
+	// effect-free conversion of an empty class (PA23).
+	bool user_conversion = false;
 	// SN_VARIABLE: the object's lifetime ends at scope exit; the
 	// attached SN_DESTRUCTOR_ACTION child holds the destruction call.
 	bool needs_dtor;

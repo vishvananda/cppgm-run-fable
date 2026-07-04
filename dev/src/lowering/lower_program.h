@@ -163,6 +163,9 @@ public:
 	// The "@name" spelling of a method / constructor / destructor
 	// callee node (PA15: demand-marks the weak definition).
 	string MemberFunctionRef(const SemNode& callee);
+	// The registered definition behind a method callee (null when
+	// none): the conversion-elision check reads its body shape.
+	const SemNode* MemberDefinitionFor(const SemNode& callee);
 	// The "@__strlit__N" object of a string-literal node.
 	string StringLiteralRef(const SemNode& node);
 	// Registers a namespace-scope object declaration (also used for

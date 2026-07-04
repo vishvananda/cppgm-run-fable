@@ -594,27 +594,109 @@ string FunctionLowerer::ClassArrayElement(const string& base,
 	return result;
 }
 
-// The checked references drop an overloaded-operator call that
-// initializes an empty class object (the callee stays odr-used and
-// prints on its ordinary terms; literal objects in the dropped
-// arguments still exist).
+// Whether a conversion body performs no observable work: exactly a
+// return of a constructed empty-class temporary taking no arguments
+// (the construction chain still prints on its ordinary demand).
+static bool ConversionBodyPerformsNoWork(const SemNode& fn)
+{
+	const SemNode* compound = 0;
+	for (size_t i = 0; i < fn.children.size(); i++)
+	{
+		if (fn.children[i]->kind == SN_PARAMETER)
+			continue;
+		if (compound)
+			return false;
+		compound = fn.children[i].get();
+	}
+	if (!compound || compound->kind != SN_COMPOUND_STATEMENT ||
+	    compound->children.size() != 1 ||
+	    compound->children[0]->kind != SN_RETURN_STATEMENT ||
+	    compound->children[0]->children.size() != 1)
+		return false;
+	const SemNode& returned = *compound->children[0]->children[0];
+	if (returned.kind != SN_CONSTRUCTOR_ACTION || !returned.type)
+		return false;
+	const NamedTypeInfo* named = RemoveTopCv(returned.type)->named;
+	if (!named || !named->class_record || !named->class_record->is_empty)
+		return false;
+	// The construction takes the callee and at most the object
+	// address - no value arguments.
+	return !returned.children.empty() &&
+		returned.children[0]->kind == SN_CALL_EXPRESSION &&
+		returned.children[0]->children.size() <= 2;
+}
+
+// The checked references drop an overloaded-operator (or user
+// conversion, PA23) call that initializes an empty class object (the
+// callee stays odr-used and prints on its ordinary terms; literal
+// objects in the dropped arguments still exist).
 bool FunctionLowerer::ElideEmptyOperatorInit(const SemNode& node,
                                              const SemNode& child)
 {
-	if (child.kind != SN_CALL_EXPRESSION || !child.from_operator ||
-	    child.children.empty() ||
-	    child.children[0]->kind != SN_CALLEE ||
+	// A trivial copy of an operator/conversion result reads through
+	// to the producing call (the copy itself moves no data).
+	const SemNode* producer = &child;
+	if (child.kind == SN_CONSTRUCTOR_ACTION && child.trivial_copy &&
+	    !child.children.empty())
+	{
+		const SemNode& call = *child.children[0];
+		size_t first_arg = child.ctor_addressed ? 2 : 1;
+		if (call.children.size() > first_arg)
+			producer = call.children[first_arg].get();
+	}
+	if (producer->kind != SN_CALL_EXPRESSION ||
+	    (!producer->from_operator && !producer->user_conversion) ||
+	    producer->children.empty() ||
+	    producer->children[0]->kind != SN_CALLEE ||
 	    RemoveTopCv(node.type)->kind != TK_CLASS ||
 	    !RemoveTopCv(node.type)->named->class_record ||
 	    !RemoveTopCv(node.type)->named->class_record->is_empty)
 		return false;
-	const SemNode& callee = *child.children[0];
+	const SemNode& callee = *producer->children[0];
+	if (!producer->from_operator)
+	{
+		// PA23: a conversion elides only when its body performs no
+		// observable work - a lone return of a constructed empty
+		// temporary (a conversion with real work keeps its calls).
+		const SemNode* body = program_.MemberDefinitionFor(callee);
+		if (!body || !ConversionBodyPerformsNoWork(*body))
+			return false;
+	}
 	if (callee.is_method || callee.special != SF_NONE)
 		program_.MemberFunctionRef(callee);
 	else
 		program_.FunctionRef(callee.entity_scope, callee.entity_name,
 		                     callee.type, callee.fn_spec);
 	RegisterDroppedLiterals(program_, child);
+	return true;
+}
+
+// The return-slot-reused local lives in the caller's result storage:
+// no slot, addresses through %ret, no scope cleanup. False when the
+// local is not the NRVO object.
+bool FunctionLowerer::LowerNrvoLocal(const SemNode& node)
+{
+	if (!nrvo_scope_ || node.entity_scope != nrvo_scope_ ||
+	    node.entity_name != nrvo_name_)
+		return false;
+	address_aliases_[std::make_pair(
+		(const void*)node.entity_scope, node.entity_name)] = "%ret";
+	nrvo_active_ = true;
+	for (size_t i = 0; i < node.children.size(); i++)
+	{
+		const SemNode& child = *node.children[i];
+		if (child.kind == SN_DESTRUCTOR_ACTION)
+			continue;  // ownership transfers with the result
+		if (child.kind == SN_CONSTRUCTOR_ACTION)
+		{
+			if (!child.trivial_init)
+				LowerClassInit(child, "%ret");
+		}
+		else if (child.kind == SN_EXPRESSION_STATEMENT)
+			LowerStatement(child);
+		else
+			LowerClassInit(child, "%ret");
+	}
 	return true;
 }
 
@@ -626,31 +708,8 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 	for (size_t i = 0; i < node.children.size(); i++)
 		if (node.children[i]->kind != SN_DESTRUCTOR_ACTION)
 			any_init = true;
-	// The return-slot-reused local lives in the caller's result
-	// storage: no slot, addresses through %ret, no scope cleanup.
-	if (nrvo_scope_ && node.entity_scope == nrvo_scope_ &&
-	    node.entity_name == nrvo_name_)
-	{
-		address_aliases_[std::make_pair(
-			(const void*)node.entity_scope, node.entity_name)] = "%ret";
-		nrvo_active_ = true;
-		for (size_t i = 0; i < node.children.size(); i++)
-		{
-			const SemNode& child = *node.children[i];
-			if (child.kind == SN_DESTRUCTOR_ACTION)
-				continue;  // ownership transfers with the result
-			if (child.kind == SN_CONSTRUCTOR_ACTION)
-			{
-				if (!child.trivial_init)
-					LowerClassInit(child, "%ret");
-			}
-			else if (child.kind == SN_EXPRESSION_STATEMENT)
-				LowerStatement(child);
-			else
-				LowerClassInit(child, "%ret");
-		}
+	if (LowerNrvoLocal(node))
 		return;
-	}
 	string slot = AddSlot(node.entity_scope, node.entity_name,
 	                      LowerSlotType(declared));
 	string decl_address;
@@ -677,6 +736,8 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 			}
 			if (child.trivial_copy)
 			{
+				if (ElideEmptyOperatorInit(node, child))
+					break;
 				LowerTrivialCopyAction(child, decl_address);
 				break;
 			}

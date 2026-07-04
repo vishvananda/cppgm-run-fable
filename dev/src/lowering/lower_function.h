@@ -213,6 +213,7 @@ private:
 	LowerValue LowerBitFieldAssignment(const SemNode& node);
 	LowerValue LowerMemberAssignment(const SemNode& node);
 	void LowerClassLocal(const SemNode& node);
+	bool LowerNrvoLocal(const SemNode& node);
 	// True when an empty-class local's operator-call initializer
 	// drops (the pinned reference shape); demands the callee.
 	bool ElideEmptyOperatorInit(const SemNode& node,

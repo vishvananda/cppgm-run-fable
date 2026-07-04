@@ -660,6 +660,14 @@ string LowerProgram::FunctionRef(const Scope* scope, const string& name,
 	return "@" + info.low_name;
 }
 
+const SemNode* LowerProgram::MemberDefinitionFor(const SemNode& callee)
+{
+	map<string, const SemNode*>::iterator def = member_defs_.find(
+		MemberDefinitionKey(callee.entity_scope, callee.entity_name,
+		                    callee.type, SF_NONE));
+	return def == member_defs_.end() ? 0 : def->second;
+}
+
 string LowerProgram::MemberFunctionRef(const SemNode& callee)
 {
 	const char* code = "";
