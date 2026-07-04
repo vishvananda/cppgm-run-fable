@@ -614,8 +614,27 @@ ClassSpecialization* SemBinder::EnsureClassSpecialization(
 void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
                                               ClassSpecialization& spec)
 {
+	// A completeness demand re-entering while this record's match
+	// probe is still deciding (`enable_if_t<is_streamable<S,
+	// T>::value>` on a candidate inside the probe FOR is_streamable<S,
+	// T>) is a recursive dependency: the class is incomplete in that
+	// context, so a SFINAE probe discards the candidate and a real
+	// use keeps the error.
+	if (spec.match_in_flight)
+		throw runtime_error("recursive instantiation of " + tmpl.name);
+	spec.match_in_flight = true;
 	vector<TemplateArg> bound;
-	int partial = MatchPartialSpecialization(tmpl, spec.args, bound);
+	int partial;
+	try
+	{
+		partial = MatchPartialSpecialization(tmpl, spec.args, bound);
+	}
+	catch (...)
+	{
+		spec.match_in_flight = false;
+		throw;
+	}
+	spec.match_in_flight = false;
 	if (partial >= 0)
 	{
 		InstantiateClassFromPartial(tmpl, spec, partial, bound);

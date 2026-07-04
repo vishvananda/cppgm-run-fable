@@ -85,6 +85,11 @@ struct ClassSpecialization
 	ScopeBinding self;
 	bool instantiated;   // pattern body bound (set before member binding
 	                     // so current-instantiation uses resolve here)
+	// PA22: the partial-specialization match probe for this record is
+	// still deciding; a completeness demand re-entering through it is
+	// a recursive dependency (the class is incomplete there, so a
+	// SFINAE probe discards and a real use errors).
+	bool match_in_flight = false;
 	// PA19 explicit/partial specialization: the body bound for this
 	// key came from an explicit specialization definition or a partial
 	// specialization pattern (the primary's registered member
