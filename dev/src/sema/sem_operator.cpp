@@ -210,6 +210,20 @@ void SemExprAnalyzer::AppendMemberTemplateCandidates(
 {
 	if (binding.fn_templates.empty() || operands.empty())
 		return;
+	// 12.8p19-adjacent (the checked shape): assigning a same-class
+	// value uses the copy/move assignment special member; an
+	// assignment operator template never declares one and does not
+	// compete for it.
+	if (binding.name == "operator =" && operands.size() == 2 &&
+	    operands[0].type && operands[1].type)
+	{
+		TypePtr rhs = RemoveTopCv(operands[1].type);
+		if (IsReferenceType(rhs))
+			rhs = RemoveTopCv(rhs->target);
+		if (rhs->kind == TK_CLASS &&
+		    rhs->named == RemoveTopCv(operands[0].type)->named)
+			return;
+	}
 	vector<SemValue> shells;
 	for (size_t i = 1; i < operands.size(); i++)
 	{

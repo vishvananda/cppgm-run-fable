@@ -301,6 +301,13 @@ void SemBinder::DeclareImplicitAssign(ClassInfo& cls, bool is_move,
 		binding = &AddBinding(*cls.members, fresh);
 		index = 0;
 	}
+	else if (!binding->type)
+	{
+		// PA21: a template-only operator= binding gains the implicit
+		// member as its first ordinary overload entry.
+		binding->type = fn;
+		index = 0;
+	}
 	else
 	{
 		binding->overloads.push_back(fn);
