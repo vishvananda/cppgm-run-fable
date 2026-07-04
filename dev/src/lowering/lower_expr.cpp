@@ -482,17 +482,31 @@ string FunctionLowerer::PointerStep(const string& base,
 	unsigned long long size = TypeSize(RemoveTopCv(element));
 	string counted = count.text;
 	// An 8-byte unsigned count re-reads as the signed index type
-	// (both spell i64; the reference pins the conversion copy).
+	// (both spell i64; the reference pins the conversion copy), and a
+	// narrower count widens to the index type first (5.7: the
+	// reference pins zext/sext by the count's own signedness).
 	if (!count.imm_int && count.type)
 	{
 		TypePtr bare = RemoveTopCv(StripRef(count.type));
+		if (bare->kind == TK_ENUM)
+			bare = MakeFundamentalType(bare->named->enum_underlying);
 		if (bare->kind == TK_FUNDAMENTAL &&
-		    IsIntegralFundamental(bare->fundamental) &&
-		    !IsSignedIntegralFundamental(bare->fundamental) &&
-		    TypeSize(bare) == 8)
+		    IsIntegralFundamental(bare->fundamental))
 		{
-			counted = NewTemp();
-			Emit(counted + " = copy i64 " + count.text);
+			bool is_signed =
+				IsSignedIntegralFundamental(bare->fundamental);
+			if (!is_signed && TypeSize(bare) == 8)
+			{
+				counted = NewTemp();
+				Emit(counted + " = copy i64 " + count.text);
+			}
+			else if (TypeSize(bare) < 8)
+			{
+				counted = NewTemp();
+				Emit(counted + " = convert " +
+				     (is_signed ? "sext" : "zext") + " i64 " +
+				     LowerValueType(bare) + " " + count.text);
+			}
 		}
 	}
 	string offset = counted;
