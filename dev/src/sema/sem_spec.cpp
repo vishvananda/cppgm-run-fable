@@ -299,6 +299,20 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 			merged->decl = &decl;
 			merged->pattern_decl = &inner;
 			merged->has_definition = true;
+			// 14.1p10: default template arguments accumulate across
+			// declarations; the definition keeps the declaration's.
+			for (size_t i = 0;
+			     i < params.size() && i < merged->params.size(); i++)
+			{
+				if (!params[i].default_type &&
+				    merged->params[i].default_type)
+					params[i].default_type =
+						merged->params[i].default_type;
+				if (!params[i].default_expr &&
+				    merged->params[i].default_expr)
+					params[i].default_expr =
+						merged->params[i].default_expr;
+			}
 			merged->params = params;
 			merged->pattern_ready = false;
 			InstantiatePendingFunctions(*merged);
