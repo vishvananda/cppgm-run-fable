@@ -247,6 +247,11 @@ string TypeKey(const TypePtr& type)
 // parameter index).
 string ArgKey(const TemplateArg& arg)
 {
+	if (arg.template_entity)
+		return "tt:" + LowerScopeKey(arg.template_entity->declaring) +
+			arg.template_entity->name;
+	if (arg.template_param >= 0)
+		return "ttp" + to_string(arg.template_param);
 	if (!arg.is_value)
 		return TypeKey(arg.type);
 	if (arg.value_param >= 0)
@@ -270,6 +275,9 @@ void ComponentKeys(const NameComponent& part, const string& prev,
 	}
 }
 
+string MangleComponentList(const vector<NameComponent>& parts,
+                           Substitutions& subs, string* key_out);
+
 // 5.1.6/5.1.7: one template argument. A concrete value spells the
 // literal form `L <type> <value> E` (negative values with `n`); a
 // pattern reference to the n-th template parameter spells T_/Tn_; a
@@ -278,6 +286,21 @@ void ComponentKeys(const NameComponent& part, const string& prev,
 // repeatable without encoding the full expression grammar).
 string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 {
+	if (arg.template_entity)
+	{
+		// 5.1.6: a template-template argument spells the template's
+		// (possibly nested) name like a class name.
+		vector<NameComponent> parts =
+			ScopeComponents(arg.template_entity->declaring);
+		NameComponent leaf;
+		leaf.name = arg.template_entity->name;
+		parts.push_back(leaf);
+		return MangleComponentList(parts, subs, 0);
+	}
+	if (arg.template_param >= 0)
+		return arg.template_param == 0
+			? string("T_")
+			: "T" + to_string(arg.template_param - 1) + "_";
 	if (!arg.is_value)
 		return MangleType(arg.type, subs);
 	if (arg.value_param >= 0)
@@ -733,6 +756,22 @@ static bool ArgSpellingIsGlobal(const TypePtr& type)
 // enum's own name to be global.
 static bool ArgSpellingIsGlobal(const TemplateArg& arg)
 {
+	if (arg.template_entity)
+	{
+		for (const Scope* up = arg.template_entity->declaring;
+		     up && up->parent; up = up->parent)
+		{
+			if (up->kind == SCOPE_TEMPLATE_PARAMS)
+				continue;
+			if (up->kind != SCOPE_NAMESPACE && up->kind != SCOPE_CLASS)
+				return false;
+			if (up->name.empty())
+				return false;
+		}
+		return true;
+	}
+	if (arg.template_param >= 0)
+		return false;
 	if (!arg.is_value)
 		return ArgSpellingIsGlobal(arg.type);
 	if (arg.value_param >= 0 || arg.dependent_value)
