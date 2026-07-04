@@ -94,6 +94,10 @@ public:
 	// forms kept as ASTs) spell parameter references T_/Tn_ through
 	// this list.
 	const vector<TemplateParam>* pattern_params = 0;
+	// PA23: the written function-parameter names while the signature
+	// mangles: decltype return expressions spell fp_/fp<n-1>_
+	// references through this list.
+	const vector<string>* fn_param_names = 0;
 };
 
 string SourceName(const string& name);

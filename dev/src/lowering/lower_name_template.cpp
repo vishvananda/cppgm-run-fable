@@ -98,6 +98,119 @@ string FundamentalKeywordCode(const string& keywords)
 string MangleWrittenTypeId(const AstTypeId& id, Substitutions& subs,
                            string* key_out);
 
+string MangleWrittenBase(const vector<const AstSpecifier*>& specifiers,
+                         bool keep_cv, Substitutions& subs, string& key);
+vector<const AstSpecifier*> TypeSpecifiers(const AstSpecifierSeq& seq);
+vector<string> WrittenOps(const AstDeclarator& declarator);
+void ApplyWrittenOps(const vector<string>& ops, Substitutions& subs,
+                     string& body, string& key);
+string MangleWrittenArg(const AstTemplateArgument& argument,
+                        Substitutions& subs, string* key_out);
+string MangleWrittenExprNode(const AstExpr& expr, Substitutions& subs);
+
+// The unresolved callee of a written call: `A<T>::b` spells
+// `sr <prefix-template-id> E <member source-name>`; an unqualified
+// (possibly template-id) callee spells the source-name with its
+// written arguments. Unresolved names are not substitution
+// candidates (the checked encodings).
+string MangleWrittenCallee(const AstName& name, Substitutions& subs)
+{
+	if (name.parts.empty() || name.global_scope)
+		throw OutsideBoundary("mangled dependent expression form");
+	string out;
+	for (size_t i = 0; i < name.parts.size(); i++)
+	{
+		const AstNamePart& part = name.parts[i];
+		bool terminal = i + 1 == name.parts.size();
+		if (part.kind != NP_IDENTIFIER && part.kind != NP_TEMPLATE_ID)
+			throw OutsideBoundary("mangled dependent expression form");
+		if (!terminal && i == 0)
+			out += "sr";
+		string spelled = SourceName(part.identifier);
+		if (part.kind == NP_TEMPLATE_ID)
+		{
+			spelled += "I";
+			for (size_t a = 0; a < part.arguments.size(); a++)
+				spelled += MangleWrittenArg(part.arguments[a], subs, 0);
+			spelled += "E";
+		}
+		if (!terminal)
+		{
+			if (part.kind != NP_TEMPLATE_ID)
+				throw OutsideBoundary(
+					"mangled dependent expression form");
+			spelled += "E";
+		}
+		out += spelled;
+	}
+	return out;
+}
+
+// A written expression inside a decltype return (the reference
+// conventions): calls spell `cl`, static_cast spells `sc` with the
+// target's base type (its reference wrap drops), function-parameter
+// references spell fp_/fp<n-1>_, and template parameters compress
+// like written types.
+string MangleWrittenExprNode(const AstExpr& expr, Substitutions& subs)
+{
+	switch (expr.kind)
+	{
+	case EK_PAREN:
+		return MangleWrittenExprNode(*expr.operands[0], subs);
+	case EK_ID:
+	{
+		if (expr.name.parts.size() == 1 &&
+		    expr.name.parts[0].kind == NP_IDENTIFIER)
+		{
+			const string& id = expr.name.parts[0].identifier;
+			if (subs.fn_param_names)
+				for (size_t i = 0; i < subs.fn_param_names->size(); i++)
+					if ((*subs.fn_param_names)[i] == id)
+						return i == 0
+							? string("fp_")
+							: "fp" + to_string(i - 1) + "_";
+			int index = TemplateParamIndex(subs, TPK_VALUE, id);
+			if (index >= 0)
+				return MangleSubstitutable("TP:" + to_string(index),
+				                           ParamSpelling(index), subs);
+		}
+		throw OutsideBoundary("mangled dependent expression form");
+	}
+	case EK_CALL:
+	{
+		const AstExpr* callee = expr.operands[0].get();
+		while (callee->kind == EK_PAREN)
+			callee = callee->operands[0].get();
+		if (callee->kind != EK_ID)
+			throw OutsideBoundary("mangled dependent expression form");
+		string out = "cl" + MangleWrittenCallee(callee->name, subs);
+		for (size_t i = 0; i < expr.arguments.size(); i++)
+			out += MangleWrittenExprNode(*expr.arguments[i], subs);
+		return out + "E";
+	}
+	case EK_KEYWORD_CAST:
+	{
+		if (expr.op != KW_STATIC_CAST || !expr.type)
+			throw OutsideBoundary("mangled dependent expression form");
+		string key;
+		string body = MangleWrittenBase(
+			TypeSpecifiers(expr.type->specifiers), true, subs, key);
+		if (expr.type->declarator)
+		{
+			vector<string> ops = WrittenOps(*expr.type->declarator);
+			while (!ops.empty() &&
+			       (ops.back() == "R" || ops.back() == "O"))
+				ops.pop_back();
+			ApplyWrittenOps(ops, subs, body, key);
+		}
+		return "sc" + body +
+			MangleWrittenExprNode(*expr.operands[0], subs);
+	}
+	default:
+		throw OutsideBoundary("mangled dependent expression form");
+	}
+}
+
 string MangleWrittenExpr(const AstExpr& expr, Substitutions& subs,
                          string* key_out)
 {
@@ -247,6 +360,18 @@ string MangleDependentName(const AstName& name, Substitutions& subs,
 string MangleWrittenBase(const vector<const AstSpecifier*>& specifiers,
                          bool keep_cv, Substitutions& subs, string& key)
 {
+	// decltype(expr) spells the expression (5.1.9 DT..E), a
+	// substitution candidate like any other type.
+	if (specifiers.size() == 1 &&
+	    specifiers[0]->kind == SPEC_DECLTYPE &&
+	    specifiers[0]->decltype_expr)
+	{
+		string body = "DT" +
+			MangleWrittenExprNode(*specifiers[0]->decltype_expr, subs) +
+			"E";
+		key = body;
+		return MangleSubstitutable(key, body, subs);
+	}
 	bool is_const = false;
 	bool is_volatile = false;
 	const AstName* name = 0;
@@ -352,7 +477,7 @@ void ApplyWrittenOps(const vector<string>& ops, Substitutions& subs,
 }
 
 string MangleWrittenParameter(const AstParameter& parameter, bool is_pack,
-                              Substitutions& subs);
+                              Substitutions& subs, string* key_out = 0);
 
 // Whether a written parameter spells its own `...` expansion.
 bool WrittenParameterIsPack(const AstParameter& parameter)
@@ -408,15 +533,29 @@ void ApplyWrittenDeclarator(const AstDeclarator& declarator,
 		return;
 	}
 	string params;
+	string params_key;
 	for (size_t p = 0; p < clause->parameters.size(); p++)
+	{
+		string one_key;
 		params += MangleWrittenParameter(
 			clause->parameters[p],
-			WrittenParameterIsPack(clause->parameters[p]), subs);
+			WrittenParameterIsPack(clause->parameters[p]), subs,
+			&one_key);
+		params_key += one_key + ",";
+	}
 	if (clause->parameters.empty())
+	{
 		params = "v";
+		params_key = "v";
+	}
 	if (clause->variadic)
+	{
 		params += "z";
-	key = "F(" + params + ")->" + key;
+		params_key += "z";
+	}
+	// The typed path keys function types the same way, so written and
+	// composed spellings compress against each other.
+	key = "F|" + key + "|" + params_key;
 	body = MangleSubstitutable(key, "F" + body + params + "E", subs);
 	ApplyWrittenOps(tail, subs, body, key);
 }
@@ -438,7 +577,7 @@ string MangleWrittenTypeId(const AstTypeId& id, Substitutions& subs,
 // ends up top-level (no enclosing pointer/reference) drops; a pack
 // parameter spells `Dp<element>`.
 string MangleWrittenParameter(const AstParameter& parameter, bool is_pack,
-                              Substitutions& subs)
+                              Substitutions& subs, string* key_out)
 {
 	vector<string> ops;
 	if (parameter.declarator)
@@ -454,7 +593,12 @@ string MangleWrittenParameter(const AstParameter& parameter, bool is_pack,
 	                                keep_cv, subs, key);
 	ApplyWrittenOps(ops, subs, body, key);
 	if (is_pack)
-		body = MangleSubstitutable("Dp|" + key, "Dp" + body, subs);
+	{
+		key = "Dp|" + key;
+		body = MangleSubstitutable(key, "Dp" + body, subs);
+	}
+	if (key_out)
+		*key_out = key;
 	return body;
 }
 
@@ -465,6 +609,13 @@ string MangleWrittenReturn(const AstDecl& inner, Substitutions& subs)
 	const AstDeclarator* declarator = WrittenDeclarator(inner);
 	if (!declarator)
 		throw OutsideBoundary("mangled dependent signature form");
+	// An auto placeholder resolves through the trailing return
+	// type-id (a written decltype spells DT..E).
+	for (size_t i = 0; i < declarator->items.size(); i++)
+		if (declarator->items[i].kind == DI_TRAILING_RETURN &&
+		    declarator->items[i].trailing_type)
+			return MangleWrittenTypeId(
+				*declarator->items[i].trailing_type, subs, 0);
 	string key;
 	string body = MangleWrittenBase(TypeSpecifiers(inner.specifiers), true,
 	                                subs, key);
@@ -493,6 +644,23 @@ string MangleSignatureReturn(const TemplateInfo& tmpl, Substitutions& subs)
 {
 	if (tmpl.conversion_pattern)
 		return MangleType(tmpl.conversion_pattern, subs);
+	// A trailing decltype return spells its written expression
+	// (DT..E); the composed pattern carries only the auto stand-in.
+	if (tmpl.pattern_decl)
+		if (const AstDeclarator* declarator =
+		        WrittenDeclarator(*tmpl.pattern_decl))
+			for (size_t i = 0; i < declarator->items.size(); i++)
+			{
+				const AstDeclaratorItem& item = declarator->items[i];
+				if (item.kind != DI_TRAILING_RETURN ||
+				    !item.trailing_type)
+					continue;
+				const AstTypeId& trailing = *item.trailing_type;
+				if (trailing.specifiers.size() == 1 &&
+				    trailing.specifiers[0].kind == SPEC_DECLTYPE)
+					return MangleWrittenTypeId(trailing, subs, 0);
+				break;
+			}
 	if (tmpl.pattern)
 		return MangleType(tmpl.pattern->target, subs);
 	if (tmpl.return_pattern)
@@ -549,6 +717,25 @@ string MangleFunctionTemplateSpelled(const FunctionSpecialization& spec,
 	const TemplateInfo& tmpl = *spec.owner;
 	Substitutions subs;
 	subs.pattern_params = &tmpl.params;
+	// The written parameter names: decltype-return expressions spell
+	// fp_/fp<n-1>_ references through them.
+	vector<string> written_param_names;
+	if (tmpl.pattern_decl)
+		if (const AstDeclarator* fn_declarator =
+		        WrittenDeclarator(*tmpl.pattern_decl))
+			if (const AstParameterClause* fn_clause =
+			        WrittenParameterClause(*fn_declarator))
+				for (size_t i = 0; i < fn_clause->parameters.size(); i++)
+				{
+					const AstParameter& parameter =
+						fn_clause->parameters[i];
+					const AstName* id = parameter.declarator
+						? parameter.declarator->IdName() : 0;
+					written_param_names.push_back(
+						id && id->IsPlainIdentifier()
+							? id->parts[0].identifier : string());
+				}
+	subs.fn_param_names = &written_param_names;
 	vector<NameComponent> parts = ScopeComponents(tmpl.declaring);
 	// PA21 member function templates: the encoding is the member form
 	// (method cv/ref-qualifiers before the class prefix).
