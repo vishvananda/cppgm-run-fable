@@ -336,12 +336,12 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		                                 item.entity_name, item.type,
 		                                 item.special);
 		member_defs_[key] = &item;
+		bool is_ctor = item.special == SF_CONSTRUCTOR ||
+			item.special == SF_CONSTRUCTOR_BASE;
 		if (!item.inline_def)
 		{
 			// An out-of-class constructor or destructor prints both
 			// ABI entries.
-			bool is_ctor = item.special == SF_CONSTRUCTOR ||
-				item.special == SF_CONSTRUCTOR_BASE;
 			MemberFunctionEntry(item.entity_scope, item.entity_name,
 			                    item.type,
 			                    is_ctor ? "C2" : "D2").used = true;
@@ -349,6 +349,13 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 			                    item.type,
 			                    is_ctor ? "C1" : "D1").used = true;
 		}
+		else if (item.inline_root)
+			// A spelled-inline out-of-class entry still prints, but
+			// weak and folded: the complete-object entry emits and the
+			// base entry rides the usual alias.
+			MemberFunctionEntry(item.entity_scope, item.entity_name,
+			                    item.type,
+			                    is_ctor ? "C1" : "D1").used = true;
 		return;
 	}
 	if (item.is_method)

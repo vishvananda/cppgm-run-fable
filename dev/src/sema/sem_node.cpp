@@ -216,6 +216,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.special = node.special;
 	out.vtable_slot = node.vtable_slot;
 	out.inline_def = node.inline_def;
+	out.inline_root = node.inline_root;
 	out.needs_dtor = node.needs_dtor;
 	out.trivial_init = node.trivial_init;
 	out.elided = node.elided;

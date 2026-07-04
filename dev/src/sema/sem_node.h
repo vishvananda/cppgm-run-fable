@@ -205,6 +205,9 @@ struct SemNode
 	int vtable_slot;
 	// SN_FUNCTION_DEFINITION: defined in-class (weak, demand-emitted).
 	bool inline_def;
+	// SN_FUNCTION_DEFINITION: an out-of-class member spelled `inline`
+	// emits weak but unconditionally (the reference prints it unused).
+	bool inline_root = false;
 	// SN_VARIABLE: the object's lifetime ends at scope exit; the
 	// attached SN_DESTRUCTOR_ACTION child holds the destruction call.
 	bool needs_dtor;

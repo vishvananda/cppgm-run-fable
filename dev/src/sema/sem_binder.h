@@ -832,6 +832,9 @@ private:
 		bool is_friend;
 		bool is_static;
 		bool out_of_class;  // qualified definition: strong emission
+		// The qualified definition spelled `inline`: it still prints,
+		// but weak (7.1.2p4 linkage with the reference's presentation).
+		bool spelled_inline = false;
 	};
 	// The current function context while a body is analyzed: the member
 	// class (methods), the lexical class (hidden friends), and the

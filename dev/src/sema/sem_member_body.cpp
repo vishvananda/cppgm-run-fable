@@ -283,8 +283,12 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	else
 	{
 		if (body.out_of_class && !instantiating_)
-			// A source-owned constructor prints unconditionally.
-			node->inline_def = false;
+		{
+			// A source-owned constructor prints unconditionally; a
+			// spelled-inline one prints weak but still prints.
+			node->inline_def = body.spelled_inline;
+			node->inline_root = body.spelled_inline;
+		}
 		else if (body.out_of_class)
 			// An instantiated out-of-class constructor/destructor
 			// emits weak and on demand, like an in-class one (14.7.1).

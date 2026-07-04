@@ -723,9 +723,10 @@ void SemBinder::BindQualifiedSpecialMemberInner(const AstDecl& decl,
 	body.fn_scope = MakeSpecialMemberScope(body.name, composed, *cls);
 	body.declaring = declaring;
 	body.cls = cls;
-	// Source-owned: both entries print - unless declared inline
-	// (weak, on demand).
-	body.out_of_class = !DeclSpellsInline(decl);
+	// Source-owned: both entries print; a spelled-inline definition
+	// prints weak but still prints.
+	body.out_of_class = true;
+	body.spelled_inline = DeclSpellsInline(decl);
 	AnalyzeDeferredBody(body);
 }
 
