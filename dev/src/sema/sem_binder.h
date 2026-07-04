@@ -97,6 +97,7 @@ protected:
 	virtual void BindSpecialMember(const AstDecl& decl);
 	virtual void BindBitFieldDeclaration(const AstDecl& decl);
 	virtual void BindFriendDeclaration(const AstDecl& decl);
+	virtual TypePtr BindNestedTypeSpecifier(const AstDecl& decl);
 	virtual void CheckQualifiedDefinitionScope(const Scope* declaring);
 	virtual void BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	                                     const AstInitDeclarator& declarator,

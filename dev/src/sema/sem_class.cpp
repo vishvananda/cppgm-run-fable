@@ -733,6 +733,25 @@ void SemBinder::BindQualifiedSpecialMemberInner(const AstDecl& decl,
 
 // --- friends ------------------------------------------------------------
 
+// An elaborated template-id specifier (`friend class BitRef<Bitset>;`,
+// `struct X<int>` as a type specifier) names the specialization
+// through the instantiation seam (3.4.4 with 14.2), filling defaulted
+// arguments; the record stays dormant (14.7.1p1).
+TypePtr SemBinder::BindNestedTypeSpecifier(const AstDecl& decl)
+{
+	if (decl.kind == DK_CLASS_FORWARD && decl.has_name &&
+	    !decl.class_name.parts.empty() &&
+	    decl.class_name.parts.back().kind == NP_TEMPLATE_ID)
+	{
+		const ScopeBinding* binding = ResolveTerminal(decl.class_name,
+		                                              SLF_ANY);
+		if (binding && binding->kind == SB_TYPE && binding->type &&
+		    RemoveTopCv(binding->type)->kind == TK_CLASS)
+			return binding->type;
+	}
+	return DeclBinder::BindNestedTypeSpecifier(decl);
+}
+
 void SemBinder::BindFriendDeclaration(const AstDecl& decl)
 {
 	ClassInfo* cls = OpenClass();
@@ -770,8 +789,21 @@ void SemBinder::BindFriendDeclaration(const AstDecl& decl)
 			}
 			return;  // friend of a non-class type declares nothing
 		}
+		// A plain `friend class X;` declares X in the enclosing
+		// namespace (3.4.4/7.3.1.2p3); a template-id friend only
+		// references an existing specialization, and its arguments
+		// (the injected-class-name included) resolve from here.
+		const AstDecl* nested = 0;
+		for (size_t i = 0; i < decl.specifiers.size(); i++)
+			if (decl.specifiers[i].kind == SPEC_NESTED_DECL)
+				nested = decl.specifiers[i].nested_decl.get();
+		bool reference_only = nested &&
+			nested->kind == DK_CLASS_FORWARD && nested->has_name &&
+			!nested->class_name.parts.empty() &&
+			nested->class_name.parts.back().kind == NP_TEMPLATE_ID;
 		Scope* saved = current_;
-		current_ = EnclosingNamespace();
+		if (!reference_only)
+			current_ = EnclosingNamespace();
 		DeclSpecifierInfo specs;
 		try
 		{
