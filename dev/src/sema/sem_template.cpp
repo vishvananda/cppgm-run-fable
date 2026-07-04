@@ -102,6 +102,37 @@ SemBinder::InstantiationContext::~InstantiationContext()
 
 // --- capture --------------------------------------------------------------
 
+// The declared parameter names of a function declarator (empty
+// entries for unnamed parameters).
+void SemBinder::CollectDeclaredParamNames(const AstDeclarator& declarator,
+                                          vector<string>& out)
+{
+	const AstParameterClause* clause = 0;
+	for (size_t i = 0; i < declarator.items.size() && !clause; i++)
+	{
+		const AstDeclaratorItem& item = declarator.items[i];
+		if (item.kind == DI_PARAMS)
+			clause = item.params.get();
+		else if (item.kind == DI_NESTED && item.nested)
+			for (size_t j = 0;
+			     j < item.nested->items.size() && !clause; j++)
+				if (item.nested->items[j].kind == DI_PARAMS)
+					clause = item.nested->items[j].params.get();
+	}
+	if (!clause)
+		return;
+	for (size_t i = 0; i < clause->parameters.size(); i++)
+	{
+		string name;
+		if (clause->parameters[i].declarator)
+			if (const AstName* id =
+			        clause->parameters[i].declarator->IdName())
+				if (id->IsPlainIdentifier())
+					name = id->parts[0].identifier;
+		out.push_back(name);
+	}
+}
+
 // Whether a declarator carries a parameter clause (declares a
 // function) at any nesting level.
 static bool DeclaratorHasParameterClause(const AstDeclarator& declarator)
@@ -637,6 +668,14 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	tmpl->decl = &decl;
 	tmpl->pattern_decl = &inner;
 	tmpl->has_definition = definition;
+	// Slot names follow the first declaration (unnamed definition
+	// parameters fall back to them).
+	if (const AstDeclarator* first_declarator =
+	        inner.kind == DK_FUNCTION
+	            ? inner.declarator.get()
+	            : inner.declarators[0].declarator.get())
+		CollectDeclaredParamNames(*first_declarator,
+		                          tmpl->declared_param_names);
 	// 14.3p1 shape checks apply to declarations too (a pack-expansion
 	// argument targeting a non-pack parameter is ill-formed without
 	// any instantiation).

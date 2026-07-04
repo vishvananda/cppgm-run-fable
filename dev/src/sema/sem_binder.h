@@ -589,6 +589,10 @@ private:
 	// trailing-return decltype (which composes before the clause,
 	// 8.3.5p2) can name them.
 	void PreBindDeclaredParameters(const AstDeclarator* declarator);
+	// PA21: the declared parameter names of a declarator (slot-name
+	// fallback recording).
+	void CollectDeclaredParamNames(const AstDeclarator& declarator,
+	                               vector<string>& out);
 	// A fully explicit function template-id (`f<int>`): resolves the
 	// specialization named by `part` over the templates of `binding`.
 	const ScopeBinding* ResolveFunctionTemplateId(

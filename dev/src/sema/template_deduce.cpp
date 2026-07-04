@@ -1301,7 +1301,14 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	// bindings onto the primary-named slots.
 	vector<string> slot_names(composed.parameters.size());
 	for (size_t i = 0; i < composed.parameters.size(); i++)
+	{
 		slot_names[i] = composed.parameters[i].name;
+		// Unnamed definition parameters fall back to the first
+		// declaration's names.
+		if (slot_names[i].empty() &&
+		    i < tmpl.declared_param_names.size())
+			slot_names[i] = tmpl.declared_param_names[i];
+	}
 	if (spec.explicit_def && tmpl.pattern_decl &&
 	    tmpl.pattern_decl->declarator)
 		RedirectExplicitSlotNames(*tmpl.pattern_decl->declarator,

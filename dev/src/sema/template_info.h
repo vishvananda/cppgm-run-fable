@@ -193,6 +193,9 @@ struct TemplateInfo
 	// PA19: which function parameters are pack-expanded (aligned with
 	// param_patterns; the pattern entry is the element pattern).
 	vector<bool> param_pattern_packs;
+	// PA21: the first declaration's parameter names (slot-name
+	// fallback for unnamed definition parameters).
+	vector<string> declared_param_names;
 
 	// --- class templates ---
 	// Out-of-class member definitions seen so far (DK_TEMPLATE nodes
