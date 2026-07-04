@@ -33,6 +33,14 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 		// lookup.
 		bool paren_callee = expr.operands[0]->kind == EK_PAREN;
 		bool plain = callee->name.IsPlainIdentifier();
+		// 3.4.2 with 14.8.1: an unqualified explicit template-id call
+		// (`get<0>(x)`) joins argument-dependent lookup under its base
+		// template name.
+		bool template_id = callee->name.parts.size() == 1 &&
+			!callee->name.global_scope &&
+			callee->name.parts[0].kind == NP_TEMPLATE_ID;
+		const AstNamePart* adl_explicit =
+			template_id ? &callee->name.parts[0] : 0;
 		if (TypePtr as_type = host_.TryResolveCalleeType(callee->name))
 			return AnalyzeFunctionalCast(as_type, expr.arguments);
 		const NamedTypeInfo* member_class = 0;
@@ -64,12 +72,12 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 			if (plain)
 				binding = host_.ResolveBuiltinFunction(
 					callee->name.parts[0].identifier);
-			if (!binding && plain && !paren_callee)
+			if (!binding && (plain || template_id) && !paren_callee)
 				// Only argument-dependent lookup can name the callee
 				// (hidden friends, associated namespaces).
 				return AnalyzeAdlCall(
 					expr, callee->name.parts[0].identifier,
-					vector<const ScopeBinding*>());
+					vector<const ScopeBinding*>(), adl_explicit);
 			if (!binding)
 				throw;
 		}

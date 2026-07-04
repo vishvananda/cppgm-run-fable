@@ -385,7 +385,8 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 // an imported binding are).
 void SemExprAnalyzer::AppendAdlCandidates(
 	const string& name, const vector<SemValue>& args,
-	vector<OperatorCandidate>& candidates, set<const void*>& seen)
+	vector<OperatorCandidate>& candidates, set<const void*>& seen,
+	const AstNamePart* explicit_part)
 {
 	vector<const Scope*> namespaces;
 	for (size_t i = 0; i < args.size(); i++)
@@ -414,11 +415,12 @@ void SemExprAnalyzer::AppendAdlCandidates(
 			{
 				AppendBindingOverloads(*found, false, true, candidates,
 				                       seen);
-				AppendTemplateCandidates(*found, args, candidates, seen);
+				AppendTemplateCandidates(*found, args, candidates, seen,
+				                         explicit_part);
 			}
 			else
 				AppendTemplateCandidates(*found, args, candidates, seen,
-				                         0, namespaces[i]);
+				                         explicit_part, namespaces[i]);
 		}
 	}
 }
@@ -428,7 +430,8 @@ void SemExprAnalyzer::AppendAdlCandidates(
 // imports into an associated namespace are not its own declarations).
 SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	const AstExpr& expr, const string& name,
-	const vector<const ScopeBinding*>& visible)
+	const vector<const ScopeBinding*>& visible,
+	const AstNamePart* explicit_part)
 {
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
@@ -441,9 +444,10 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	{
 		AppendBindingOverloads(*visible[i], false, false, candidates,
 		                       seen);
-		AppendTemplateCandidates(*visible[i], args, candidates, seen);
+		AppendTemplateCandidates(*visible[i], args, candidates, seen,
+		                         explicit_part);
 	}
-	AppendAdlCandidates(name, args, candidates, seen);
+	AppendAdlCandidates(name, args, candidates, seen, explicit_part);
 	if (candidates.empty())
 		throw runtime_error("undeclared name " + name);
 	vector<TypePtr> declared;

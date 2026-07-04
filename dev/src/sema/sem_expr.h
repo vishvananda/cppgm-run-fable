@@ -349,7 +349,8 @@ private:
 	// bindings (several when same-level using-directive imports merge
 	// into one overload set, 7.3.4p6).
 	SemValue AnalyzeAdlCall(const AstExpr& expr, const string& name,
-	                        const vector<const ScopeBinding*>& visible);
+	                        const vector<const ScopeBinding*>& visible,
+	                        const AstNamePart* explicit_part = 0);
 	SemValue AnalyzeBuiltinConstantP(const AstExpr& expr);
 	SemValue AnalyzeUnary(const AstExpr& expr);
 	SemValue AnalyzeAddressOf(const AstExpr& expr);
@@ -477,7 +478,8 @@ private:
 	void AppendAdlCandidates(const string& name,
 	                         const vector<SemValue>& args,
 	                         vector<OperatorCandidate>& candidates,
-	                         std::set<const void*>& seen);
+	                         std::set<const void*>& seen,
+	                         const AstNamePart* explicit_part = 0);
 	// PA21 9.4p2: whether every entry of a member function set is
 	// static (the set then decays like ordinary functions).
 	bool FunctionSetAllStatic(const ScopeBinding& binding);
