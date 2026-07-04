@@ -226,6 +226,19 @@ struct SemValue
 	SemNodePtr member_object;
 };
 
+// One composed member-call candidate set (sem_member.cpp): ordinary
+// overloads first, then deduced member-template specializations, with
+// the implicit-object-augmented signatures overload ranking uses.
+struct MemberCandidateSet
+{
+	vector<TypePtr> declared;
+	vector<const FunctionSpecialization*> specs;
+	vector<TypePtr> candidates;
+	vector<size_t> min_arity;
+	vector<bool> is_template;
+	size_t ordinary = 0;
+};
+
 // One user-declared operator candidate (sem_operator.cpp).
 struct OperatorCandidate
 {
@@ -385,6 +398,35 @@ private:
 	SemValue AnalyzeStaticMethodCall(const AstExpr& expr,
 	                                 const ScopeBinding& binding,
 	                                 const AstNamePart* explicit_part = 0);
+	// Composes a member call's candidate set (13.3.1p2-p4): ordinary
+	// overloads and deduced member-template specializations with
+	// their implicit object parameters.
+	void ComposeMethodCandidates(const SemValue& object,
+	                             const ScopeBinding& binding,
+	                             const vector<SemValue>& args,
+	                             const AstNamePart* explicit_part,
+	                             MemberCandidateSet& out);
+	// PA18 13.4: overloaded/template arguments deduce against every
+	// candidate's parameter types before ranking (`shift` aligns the
+	// implicit object parameter).
+	void AugmentOverloadSetArguments(const vector<TypePtr>& candidates,
+	                                 vector<SemValue>& args, size_t shift);
+	// The resolved member callee node (spec winners route like
+	// namespace-scope specializations; ordinary winners keep their
+	// declaring scope and per-overload unwind facts).
+	SemNodePtr MakeMemberCalleeNode(const ScopeBinding& binding,
+	                                const FunctionSpecialization* spec,
+	                                const Scope* owner_scope,
+	                                size_t winner, const TypePtr& type,
+	                                bool is_method,
+	                                const FunctionSpecialization* self_spec);
+	// The implicit object argument, projected to the winner's base
+	// subobject when the callee belongs to a base class.
+	void AttachMethodObjectArgument(SemValue& value, SemValue object,
+	                                const ScopeBinding& binding,
+	                                const Scope* owner_scope,
+	                                const FunctionSpecialization* spec,
+	                                const NamedTypeInfo* callee_class);
 	SemValue AnalyzeStaticMemberValue(const ScopeBinding& binding,
 	                                  const string& written);
 	// PA23 14.6.4.1: whether a static-member constant is visible to

@@ -628,40 +628,25 @@ const NamedTypeInfo* SemExprAnalyzer::ResolveMemberQualifier(
 	return entity;
 }
 
-// Overload resolution of a member function call with an implicit
-// object argument (13.3.1p2-p4): non-static overloads bind the object
-// to a reference to the method-cv-qualified class; static overloads
-// take a neutral identity binding.
-SemValue SemExprAnalyzer::AnalyzeMethodCall(
-	SemValue object, const ScopeBinding& binding,
-	const vector<AstExprPtr>& arguments, bool qualified,
-	const AstNamePart* explicit_part)
+// Composes the candidate set of a member-function call with an
+// implicit object argument (13.3.1p2-p4): non-static overloads bind
+// the object to a reference to the method-cv-qualified class; static
+// overloads take a neutral identity binding.
+void SemExprAnalyzer::ComposeMethodCandidates(
+	const SemValue& object, const ScopeBinding& binding,
+	const vector<SemValue>& args, const AstNamePart* explicit_part,
+	MemberCandidateSet& out)
 {
-	const NamedTypeInfo* object_entity = object.type->named;
-	vector<TypePtr> declared;
-	size_t ordinary = 0;
 	if (binding.type)
 	{
-		declared.push_back(binding.type);
+		out.declared.push_back(binding.type);
 		for (size_t i = 0; i < binding.overloads.size(); i++)
-			declared.push_back(binding.overloads[i]);
+			out.declared.push_back(binding.overloads[i]);
 	}
-	ordinary = declared.size();
-
-	vector<SemValue> args;
-	vector<ConversionSource> sources;
-	ConversionSource object_source;
-	object_source.type = object.type;
-	object_source.category = object.category == VC_PRVALUE
-		? VC_XVALUE : object.category;
-	sources.push_back(object_source);
-	AnalyzeArgumentList(arguments, args);
-	for (size_t i = 0; i < args.size(); i++)
-		sources.push_back(MakeConversionSource(args[i]));
+	out.ordinary = out.declared.size();
 	// PA21 member templates: deduced specializations join after the
 	// ordinary overloads.
-	vector<const FunctionSpecialization*> specs(ordinary,
-	                                            (const FunctionSpecialization*)0);
+	out.specs.assign(out.ordinary, (const FunctionSpecialization*)0);
 	if (!binding.fn_templates.empty())
 	{
 		std::set<const void*> seen;
@@ -670,23 +655,21 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		                         explicit_part);
 		for (size_t i = 0; i < deduced.size(); i++)
 		{
-			declared.push_back(deduced[i].declared);
-			specs.push_back(deduced[i].spec);
+			out.declared.push_back(deduced[i].declared);
+			out.specs.push_back(deduced[i].spec);
 		}
 	}
-	if (declared.empty())
+	if (out.declared.empty())
 		throw runtime_error("no viable member function " + binding.name);
-	vector<TypePtr> candidates;
-	vector<size_t> min_arity;
-	vector<bool> is_template;
+	const NamedTypeInfo* object_entity = object.type->named;
 	const NamedTypeInfo* owner_entity =
 		host_.Model().ScopeEntity(binding.owner);
-	for (size_t c = 0; c < declared.size(); c++)
+	for (size_t c = 0; c < out.declared.size(); c++)
 	{
-		const TypePtr& fn = declared[c];
-		bool is_static = c < ordinary
+		const TypePtr& fn = out.declared[c];
+		bool is_static = c < out.ordinary
 			? c < binding.fn_static.size() && binding.fn_static[c]
-			: specs[c]->owner && specs[c]->owner->member_static;
+			: out.specs[c]->owner && out.specs[c]->owner->member_static;
 		TypePtr object_param;
 		if (is_static)
 			// 13.3.1p4: the implicit object argument matches anything;
@@ -714,51 +697,138 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		parameters.push_back(object_param);
 		for (size_t i = 0; i < fn->parameters.size(); i++)
 			parameters.push_back(fn->parameters[i]);
-		candidates.push_back(MakeFunctionType(fn->target, parameters,
-		                                      fn->variadic));
+		out.candidates.push_back(MakeFunctionType(fn->target, parameters,
+		                                          fn->variadic));
 		size_t required = fn->parameters.size();
 		const vector<const AstExpr*>* defaults = 0;
-		if (c < ordinary)
+		if (c < out.ordinary)
 			defaults = c < binding.fn_defaults.size()
 				? &binding.fn_defaults[c] : 0;
 		else
-			defaults = &specs[c]->self.fn_defaults[0];
+			defaults = &out.specs[c]->self.fn_defaults[0];
 		while (defaults && required > 0 && required <= defaults->size()
 		       && (*defaults)[required - 1])
 			required--;
-		min_arity.push_back(required + 1);
-		is_template.push_back(c >= ordinary);
+		out.min_arity.push_back(required + 1);
+		out.is_template.push_back(c >= out.ordinary);
 	}
-	// PA18 13.4: overloaded/template arguments deduce against every
-	// candidate's parameter types before ranking (the implicit object
-	// parameter shifts the alignment by one).
+}
+
+// PA18 13.4: overloaded/template arguments deduce against every
+// candidate's parameter types before ranking (`shift` aligns the
+// implicit object parameter).
+void SemExprAnalyzer::AugmentOverloadSetArguments(
+	const vector<TypePtr>& candidates, vector<SemValue>& args,
+	size_t shift)
+{
+	for (size_t c = 0; c < candidates.size(); c++)
+		for (size_t i = 0;
+		     i < args.size() &&
+		     i + shift < candidates[c]->parameters.size(); i++)
+			if (args[i].function_set && !args[i].fn_templates.empty())
+				AddTargetDeducedOverloads(
+					args[i], candidates[c]->parameters[i + shift]);
+}
+
+// The resolved member callee: a member-template specialization routes
+// like a namespace-scope specialization (its own entry keyed on the
+// argument alias scope); an ordinary winner keeps its declaring scope
+// and per-overload unwind facts. `self_spec` carries a pre-resolved
+// template-id's single-overload specialization (`A::go<F>`).
+SemNodePtr SemExprAnalyzer::MakeMemberCalleeNode(
+	const ScopeBinding& binding, const FunctionSpecialization* spec,
+	const Scope* owner_scope, size_t winner, const TypePtr& type,
+	bool is_method, const FunctionSpecialization* self_spec)
+{
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->type = type;
+	if (spec)
 	{
-		bool augmented = false;
-		for (size_t c = 0; c < candidates.size(); c++)
-			for (size_t i = 0;
-			     i < args.size() &&
-			     i + 1 < candidates[c]->parameters.size(); i++)
-				if (args[i].function_set &&
-				    !args[i].fn_templates.empty())
-				{
-					AddTargetDeducedOverloads(
-						args[i], candidates[c]->parameters[i + 1]);
-					augmented = true;
-				}
-		if (augmented)
-		{
-			sources.clear();
-			sources.push_back(object_source);
-			for (size_t i = 0; i < args.size(); i++)
-				sources.push_back(MakeConversionSource(args[i]));
-		}
+		callee->name = CanonicalQualifiedName(spec->self.owner,
+		                                      spec->name);
+		callee->entity_scope = spec->self.owner;
+		callee->entity_name = spec->name;
+		callee->fn_spec = spec;
+		host_.OnSpecializationOdrUsed(spec);
+		if (spec->self.fn_unwind_no[0])
+			callee->unwind_no = true;
+		if (spec->self.fn_noexcept_decl[0])
+			callee->noexcept_decl = true;
+		return callee;
 	}
+	callee->name = CanonicalQualifiedName(owner_scope, binding.name);
+	callee->entity_scope = owner_scope;
+	callee->entity_name = binding.name;
+	callee->is_method = is_method;
+	callee->fn_spec = self_spec;
+	host_.OnSpecializationOdrUsed(self_spec);
+	if (winner < binding.fn_unwind_no.size() &&
+	    binding.fn_unwind_no[winner])
+		callee->unwind_no = true;
+	if (winner < binding.fn_noexcept_decl.size() &&
+	    binding.fn_noexcept_decl[winner])
+		callee->noexcept_decl = true;
+	return callee;
+}
+
+// The implicit object argument: an inherited method receives the base
+// subobject's address; a using-imported one belongs to the importing
+// class for addressing (its base sits at offset zero either way). A
+// PA21 extra (empty) base sits at offset zero but still takes one
+// base-subobject projection.
+void SemExprAnalyzer::AttachMethodObjectArgument(
+	SemValue& value, SemValue object, const ScopeBinding& binding,
+	const Scope* owner_scope, const FunctionSpecialization* spec,
+	const NamedTypeInfo* callee_class)
+{
+	const NamedTypeInfo* object_entity = object.type->named;
+	int hops = binding.home != owner_scope && !spec
+		? 0 : BaseClassDistance(object_entity, callee_class);
+	if (hops < 0)
+		hops = object_entity != callee_class &&
+			DerivedFromWithExtras(host_.Classes(), object_entity,
+			                      callee_class) ? 1 : 0;
+	if (hops > 0)
+	{
+		SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+		adjusted->type = MakeNamedType(TK_CLASS, callee_class);
+		adjusted->category = VC_LVALUE;
+		adjusted->base_hops = hops;
+		adjusted->children.push_back(std::move(object.node));
+		object.node = std::move(adjusted);
+	}
+	value.node->children.push_back(
+		AddressOfObject(std::move(object.node)));
+}
+
+// Overload resolution of a member function call with an implicit
+// object argument (13.3.1p2-p4).
+SemValue SemExprAnalyzer::AnalyzeMethodCall(
+	SemValue object, const ScopeBinding& binding,
+	const vector<AstExprPtr>& arguments, bool qualified,
+	const AstNamePart* explicit_part)
+{
+	const NamedTypeInfo* object_entity = object.type->named;
+	vector<SemValue> args;
+	AnalyzeArgumentList(arguments, args);
+	MemberCandidateSet set;
+	ComposeMethodCandidates(object, binding, args, explicit_part, set);
+	AugmentOverloadSetArguments(set.candidates, args, 1);
+	ConversionSource object_source;
+	object_source.type = object.type;
+	object_source.category = object.category == VC_PRVALUE
+		? VC_XVALUE : object.category;
+	vector<ConversionSource> sources;
+	sources.push_back(object_source);
+	for (size_t i = 0; i < args.size(); i++)
+		sources.push_back(MakeConversionSource(args[i]));
 	vector<ImplicitConversion> conversions;
-	SpecOverloadOrder order(host_, specs, args.size());
-	size_t winner = SelectBestOverload(candidates, sources, conversions,
-	                                   &min_arity, &is_template, &order);
+	SpecOverloadOrder order(host_, set.specs, args.size());
+	size_t winner = SelectBestOverload(set.candidates, sources,
+	                                   conversions, &set.min_arity,
+	                                   &set.is_template, &order);
 	const FunctionSpecialization* spec =
-		winner < ordinary ? 0 : specs[winner];
+		winner < set.ordinary ? 0 : set.specs[winner];
 	if (!spec && winner < binding.fn_deleted.size() &&
 	    binding.fn_deleted[winner])
 		throw runtime_error("use of deleted member function");
@@ -786,7 +856,7 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	bool is_static = spec
 		? spec->owner->member_static
 		: winner < binding.fn_static.size() && binding.fn_static[winner];
-	const TypePtr& fn = declared[winner];
+	const TypePtr& fn = set.declared[winner];
 	for (size_t i = 0; i < args.size(); i++)
 		if (i < fn->parameters.size())
 			ApplyConversion(args[i], conversions[i + 1],
@@ -803,41 +873,10 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		host_.Model().ScopeEntity(owner_scope);
 	const NamedTypeInfo* callee_class =
 		winner_entity ? winner_entity : object_entity;
-	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	if (spec)
-	{
-		// A member-template specialization routes like a namespace
-		// -scope specialization (its own entry keyed on the argument
-		// alias scope), with the object address as the leading
-		// argument.
-		callee->name = CanonicalQualifiedName(spec->self.owner,
-		                                      spec->name);
-		callee->type = is_static
-			? fn : ThisAdjustedType(callee_class, fn);
-		callee->entity_scope = spec->self.owner;
-		callee->entity_name = spec->name;
-		callee->fn_spec = spec;
-		host_.OnSpecializationOdrUsed(spec);
-		if (spec->self.fn_unwind_no[0])
-			callee->unwind_no = true;
-		if (spec->self.fn_noexcept_decl[0])
-			callee->noexcept_decl = true;
-	}
-	else
-	{
-		callee->name = CanonicalQualifiedName(owner_scope, binding.name);
-		callee->type = is_static ? fn
-		                         : ThisAdjustedType(callee_class, fn);
-		callee->entity_scope = owner_scope;
-		callee->entity_name = binding.name;
-		callee->is_method = !is_static;
-		if (winner < binding.fn_unwind_no.size() &&
-		    binding.fn_unwind_no[winner])
-			callee->unwind_no = true;
-		if (winner < binding.fn_noexcept_decl.size() &&
-		    binding.fn_noexcept_decl[winner])
-			callee->noexcept_decl = true;
-	}
+	SemNodePtr callee = MakeMemberCalleeNode(
+		binding, spec, owner_scope, winner,
+		is_static ? fn : ThisAdjustedType(callee_class, fn),
+		!is_static, 0);
 	// PA17 dynamic dispatch: an unqualified call to a virtual member
 	// dispatches through the static class's vtable slot (10.3p6); the
 	// dynamic callee may not be the statically selected one.
@@ -856,30 +895,8 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	}
 	value.node->children.push_back(std::move(callee));
 	if (!is_static)
-	{
-		// An inherited method receives the base subobject's address; a
-		// using-imported one belongs to the importing class for
-		// addressing (its base sits at offset zero either way). A
-		// PA21 extra (empty) base sits at offset zero but still takes
-		// one base-subobject projection.
-		int hops = binding.home != owner_scope && !spec
-			? 0 : BaseClassDistance(object_entity, callee_class);
-		if (hops < 0)
-			hops = object_entity != callee_class &&
-				DerivedFromWithExtras(host_.Classes(), object_entity,
-				                      callee_class) ? 1 : 0;
-		if (hops > 0)
-		{
-			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
-			adjusted->type = MakeNamedType(TK_CLASS, callee_class);
-			adjusted->category = VC_LVALUE;
-			adjusted->base_hops = hops;
-			adjusted->children.push_back(std::move(object.node));
-			object.node = std::move(adjusted);
-		}
-		value.node->children.push_back(
-			AddressOfObject(std::move(object.node)));
-	}
+		AttachMethodObjectArgument(value, std::move(object), binding,
+		                           owner_scope, spec, callee_class);
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));
 	return value;
@@ -976,41 +993,9 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 			chosen, spec ? 0 : winner, i, fn->parameters[i]));
 	}
 	SemValue value = CallResult(fn);
-	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	if (spec)
-	{
-		callee->name = CanonicalQualifiedName(spec->self.owner,
-		                                      spec->name);
-		callee->type = fn;
-		callee->entity_scope = spec->self.owner;
-		callee->entity_name = spec->name;
-		callee->fn_spec = spec;
-		host_.OnSpecializationOdrUsed(spec);
-		if (spec->self.fn_unwind_no[0])
-			callee->unwind_no = true;
-		if (spec->self.fn_noexcept_decl[0])
-			callee->noexcept_decl = true;
-	}
-	else
-	{
-		callee->name = CanonicalQualifiedName(binding.owner,
-		                                      binding.name);
-		callee->type = fn;
-		callee->entity_scope = binding.owner;
-		callee->entity_name = binding.name;
-		// A pre-resolved template-id (`A::go<F>`) carries its own
-		// single-overload binding; the call routes through the
-		// specialization's entry.
-		callee->fn_spec = binding.fn_self_spec;
-		host_.OnSpecializationOdrUsed(binding.fn_self_spec);
-		if (winner < binding.fn_unwind_no.size() &&
-		    binding.fn_unwind_no[winner])
-			callee->unwind_no = true;
-		if (winner < binding.fn_noexcept_decl.size() &&
-		    binding.fn_noexcept_decl[winner])
-			callee->noexcept_decl = true;
-	}
-	value.node->children.push_back(std::move(callee));
+	value.node->children.push_back(MakeMemberCalleeNode(
+		binding, spec, binding.owner, winner, fn, false,
+		binding.fn_self_spec));
 	for (size_t i = 0; i < args.size(); i++)
 		value.node->children.push_back(std::move(args[i].node));
 	return value;
