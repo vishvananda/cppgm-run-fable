@@ -190,31 +190,31 @@ void FunctionLowerer::EmitParamVBasePointers(size_t param_pos,
 	map.slots = !collapsed && IsReferenceType(child.type);
 	if (!map.slots)
 		return;
+	// Slots declare in table order; the stores run post-order (a
+	// shared base's own bases before it): carried entries store their
+	// hidden argument, the rest reconstruct from static
+	// complete-object offsets.
 	const string& base_name = params_[param_pos].low_name;
-	for (size_t h = 0; h < hidden_params_.size(); h++)
-	{
-		const HiddenParam& hp = hidden_params_[h];
-		if (hp.kind != HP_PVBPTR || hp.param_index != type_index)
-			continue;
-		string slot = AddSlot(child.entity_scope,
-		                      base_name + "__pvb" +
-		                          to_string(hp.vbase_index),
-		                      "ptr");
-		Emit("store ptr %" + hp.low_name + ", $" + slot);
-	}
+	vector<string> slots(cls->vbases.size());
+	for (size_t k = 0; k < cls->vbases.size(); k++)
+		slots[k] = AddSlot(child.entity_scope,
+		                   base_name + "__pvb" + to_string(k), "ptr");
 	vector<size_t> order;
 	PostOrderVBases(*cls, order);
 	for (size_t i = 0; i < order.size(); i++)
 	{
 		size_t k = order[i];
-		if (map.carried.count(k))
+		std::map<size_t, string>::const_iterator carried =
+			map.carried.find(k);
+		if (carried != map.carried.end())
+		{
+			Emit("store ptr " + carried->second + ", $" + slots[k]);
 			continue;
-		string slot = AddSlot(child.entity_scope,
-		                      base_name + "__pvb" + to_string(k), "ptr");
+		}
 		string address = NewTemp();
 		Emit(address + " = index i8 %" + base_name + ", " +
 		     to_string(cls->vbases[k].offset));
-		Emit("store ptr " + address + ", $" + slot);
+		Emit("store ptr " + address + ", $" + slots[k]);
 	}
 }
 
@@ -310,12 +310,16 @@ string FunctionLowerer::SupplyVBaseEntry(const ClassInfo& param_cls,
 		}
 		// A named complete object: the entry sits at its static
 		// complete-object offset (the declared class knows the layout
-		// even when the entry is deeper than the parameter's view).
+		// even when the entry is deeper than the parameter's view). A
+		// pointer variable anchors on its loaded value.
 		const ScopeBinding* binding = EntityBinding(*bottom);
 		if (binding && binding->kind == SB_VARIABLE &&
 		    !IsReferenceType(binding->type))
 		{
 			TypePtr declared = RemoveTopCv(binding->type);
+			bool through_pointer = declared->kind == TK_POINTER;
+			if (through_pointer)
+				declared = RemoveTopCv(declared->target);
 			const ClassInfo* record = declared->kind == TK_CLASS
 				? declared->named->class_record : 0;
 			unsigned long long offset = 0;
@@ -324,9 +328,27 @@ string FunctionLowerer::SupplyVBaseEntry(const ClassInfo& param_cls,
 			{
 				// The lowered argument doubles as the anchor when it
 				// went through unadjusted; otherwise re-address the
-				// named object.
-				string anchor = arg_node == bottom && record == &param_cls
-					? arg_text : LowerAddressExpr(*bottom);
+				// named object. One call's hidden row shares the
+				// anchor (and a pointer's single load).
+				string anchor;
+				map<const SemNode*, string>::const_iterator seen =
+					supply_anchors_.find(arg_node);
+				if (seen != supply_anchors_.end())
+					anchor = seen->second;
+				else
+				{
+					anchor =
+						arg_node == bottom &&
+						(through_pointer || record == &param_cls)
+							? arg_text : LowerAddressExpr(*bottom);
+					if (through_pointer)
+					{
+						string loaded = NewTemp();
+						Emit(loaded + " = load ptr " + anchor);
+						anchor = loaded;
+					}
+					supply_anchors_[arg_node] = anchor;
+				}
 				string address = NewTemp();
 				Emit(address + " = index i8 " + anchor + ", " +
 				     to_string(offset));
@@ -368,6 +390,7 @@ void FunctionLowerer::AppendHiddenArguments(
 	const vector<string>& arg_texts, const SemNode* object_node,
 	const string& object_text, string& arguments)
 {
+	supply_anchors_.clear();
 	for (size_t h = 0; h < hidden.size(); h++)
 	{
 		const HiddenParam& hp = hidden[h];
@@ -415,12 +438,23 @@ void FunctionLowerer::AppendHiddenArguments(
 string FunctionLowerer::VBaseCarrierAddress(const SemNode& node,
                                             bool with_projection)
 {
-	const SemNode& object = *node.children[0];
+	return VBaseSubobjectAddress(
+		*node.children[0], node.vbase_index, node.base_offset,
+		node.entity_scope ? node.entity_scope->entity : 0,
+		with_projection);
+}
+
+string FunctionLowerer::VBaseSubobjectAddress(const SemNode& object,
+                                              size_t vbase_index,
+                                              unsigned long long remainder,
+                                              const NamedTypeInfo* owner,
+                                              bool with_projection)
+{
 	TypePtr object_type = RemoveTopCv(object.type);
 	if (IsReferenceType(object_type))
 		object_type = RemoveTopCv(object_type->target);
 	const ClassInfo* record = object_type->named->class_record;
-	const ClassVBase& carrier = record->vbases[node.vbase_index];
+	const ClassVBase& carrier = record->vbases[vbase_index];
 	// A parameter (or `this`) with carried pointers supplies the
 	// carrier directly.
 	const SemNode* bottom = BottomIdExpression(object);
@@ -438,12 +472,12 @@ string FunctionLowerer::VBaseCarrierAddress(const SemNode& node,
 				Emit(address + " = load ptr $" +
 				     SlotRef(bottom->entity_scope,
 				             bottom->entity_name + "__pvb" +
-				                 to_string(node.vbase_index)));
+				                 to_string(vbase_index)));
 			}
 			else
 			{
 				std::map<size_t, string>::const_iterator carried =
-					param.carried.find(node.vbase_index);
+					param.carried.find(vbase_index);
 				if (carried == param.carried.end())
 					throw runtime_error(
 						"virtual-base carrier is not carried");
@@ -451,8 +485,8 @@ string FunctionLowerer::VBaseCarrierAddress(const SemNode& node,
 			}
 			return VBaseRemainderHops(
 				address, *carrier.cls,
-				node.entity_scope ? node.entity_scope->entity : 0,
-				node.base_offset, with_projection);
+				owner,
+				remainder, with_projection);
 		}
 	}
 	string base = LowerAddressExpr(object);
@@ -468,12 +502,12 @@ string FunctionLowerer::VBaseCarrierAddress(const SemNode& node,
 			     to_string(carrier.offset));
 			return VBaseRemainderHops(
 				located, *carrier.cls,
-				node.entity_scope ? node.entity_scope->entity : 0,
-				node.base_offset, with_projection);
+				owner,
+				remainder, with_projection);
 		}
 		// Static complete-object collapse: one projection covering the
 		// carrier and every hop inside it.
-		unsigned long long total = carrier.offset + node.base_offset;
+		unsigned long long total = carrier.offset + remainder;
 		if (!with_projection && total == 0)
 			return base;
 		string projected = NewTemp();
@@ -486,15 +520,14 @@ string FunctionLowerer::VBaseCarrierAddress(const SemNode& node,
 	Emit(vpointer + " = load ptr " + base);
 	string slot = NewTemp();
 	Emit(slot + " = index i8 " + vpointer + ", -" +
-	     to_string(24 + 8 * (unsigned long long)node.vbase_index));
+	     to_string(24 + 8 * (unsigned long long)vbase_index));
 	string offset = NewTemp();
 	Emit(offset + " = load i64 " + slot);
 	string at = NewTemp();
 	Emit(at + " = index i8 " + base + ", " + offset);
 	return VBaseRemainderHops(at, *carrier.cls,
-	                          node.entity_scope ? node.entity_scope->entity
-	                                            : 0,
-	                          node.base_offset, with_projection);
+	                          owner,
+	                          remainder, with_projection);
 }
 
 // The hops from a carrier virtual base down to the owner subobject:
@@ -1072,12 +1105,18 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 	}
 	else
 		LowerCall(call, address);
-	if (call.needs_dtor && dest.empty())
+	// PA27: a dispatched call's class result also re-arms the region
+	// (the reference tracks the temporary even when its destruction is
+	// trivial - the registered cleanup then emits nothing).
+	bool dispatched = !call.children.empty() &&
+		call.children[0]->kind == SN_CALLEE &&
+		call.children[0]->vtable_slot >= 0;
+	if ((call.needs_dtor || dispatched) && dest.empty())
 	{
 		// The materialized result is a destructible temporary of the
 		// enclosing full expression; the binder pinned its resolved
 		// destructor action on the node.
-		if (!call.result_dtor)
+		if (call.needs_dtor && !call.result_dtor)
 			throw runtime_error("class result temporary without a "
 			                    "resolved destructor");
 		// Registration invalidates the open dispatch; the region
@@ -1530,6 +1569,10 @@ string FunctionLowerer::CleanupSignature() const
 	char buffer[32];
 	for (size_t i = temp_cleanups_.size(); i-- > 0;)
 	{
+		// PA27: an armed-but-trivial temporary (a dispatched class
+		// result) emits no destruction and keeps the dispatch content.
+		if (!temp_cleanups_[i].action)
+			continue;
 		snprintf(buffer, sizeof(buffer), "%p",
 		         (const void*)temp_cleanups_[i].action);
 		signature += "t" + temp_cleanups_[i].address + ":" + buffer +
@@ -1766,6 +1809,8 @@ void FunctionLowerer::EmitTempCleanups(size_t from)
 	in_cleanup_emission_ = true;
 	for (size_t i = temp_cleanups_.size(); i-- > from;)
 	{
+		if (!temp_cleanups_[i].action)
+			continue;
 		const SemNode& call = *temp_cleanups_[i].action->children[0];
 		Emit("call void " +
 		     program_.MemberFunctionRef(*call.children[0]) + "(" +

@@ -1030,12 +1030,25 @@ bool CompleteObjectOffset(const ClassInfo& from, const NamedTypeInfo* to,
 	int hops = 0;
 	if (BaseSubobjectPath(from.entity, to, hops, offset) == BP_UNIQUE)
 		return true;
-	size_t index = 0;
-	unsigned long long remainder = 0;
-	if (!VirtualBasePath(from, to, index, remainder))
-		return false;
-	offset = from.vbases[index].offset + remainder;
-	return true;
+	// The table is transitive: every shared subobject appears with its
+	// own complete-object position (deeper carriers never compose).
+	for (size_t i = 0; i < from.vbases.size(); i++)
+		if (from.vbases[i].cls->entity == to)
+		{
+			offset = from.vbases[i].offset;
+			return true;
+		}
+	for (size_t i = 0; i < from.vbases.size(); i++)
+	{
+		unsigned long long inner = 0;
+		if (BaseSubobjectPath(from.vbases[i].cls->entity, to, hops,
+		                      inner) == BP_UNIQUE)
+		{
+			offset = from.vbases[i].offset + inner;
+			return true;
+		}
+	}
+	return false;
 }
 
 // --- queries ----------------------------------------------------------

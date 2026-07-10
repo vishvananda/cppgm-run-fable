@@ -209,12 +209,25 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		}
 		// 4.10p3: pointer to derived converts to pointer to a (no less
 		// qualified) base; nearer bases rank better (13.3.3.2p4).
+		// PA27: shared virtual bases participate (the lowering rides
+		// the carrier entry).
 		if (from->target->kind == TK_CLASS &&
 		    dest->target->kind == TK_CLASS &&
 		    CvSuperset(dest->target, from->target))
 		{
 			int distance = BaseClassDistance(from->target->named,
 			                                 dest->target->named);
+			if (distance <= 0 &&
+			    from->target->named != dest->target->named &&
+			    from->target->named->class_record)
+			{
+				size_t vbase_index = 0;
+				unsigned long long remainder = 0;
+				if (VirtualBasePath(*from->target->named->class_record,
+				                    dest->target->named, vbase_index,
+				                    remainder))
+					distance = 1;
+			}
 			if (distance > 0)
 			{
 				result.viable = true;

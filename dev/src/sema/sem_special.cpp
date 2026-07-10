@@ -559,11 +559,38 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
                                       vector<SemNodePtr>& out)
 {
 	EValueCategory category = is_move ? VC_XVALUE : VC_LVALUE;
-	// PA27: a synthesized complete-object constructor default-
-	// initializes the shared virtual bases first (base entries drop
-	// the marked actions; assignment leaves the shared region alone).
+	// PA27: a synthesized complete-object constructor transfers the
+	// shared virtual bases first (base entries drop the marked actions
+	// but keep the demanded definitions; trivially transferable shared
+	// subobjects ride the storage the reference leaves untouched).
 	if (!assign_form)
-		AppendVBaseInits(cls, 0, out, false);
+		for (size_t v = 0; v < cls.vbases.size(); v++)
+		{
+			const ClassInfo& base = *cls.vbases[v].cls;
+			if (TransferTrivial(base, is_move, false))
+				continue;
+			SemNodePtr base_source = MakeSemNode(SN_MEMBER_EXPRESSION);
+			base_source->type = MakeNamedType(TK_CLASS, base.entity);
+			base_source->category = category;
+			base_source->base_hops = 1;
+			base_source->base_offset = cls.vbases[v].offset;
+			base_source->children.push_back(CloneSemNode(source_proto));
+			SemValue source;
+			source.node = std::move(base_source);
+			source.type = MakeNamedType(TK_CLASS, base.entity);
+			source.category = category;
+			vector<SemValue> args;
+			args.push_back(std::move(source));
+			int index = ResolveClassConstructor(base, args, false,
+			                                    "base subobject");
+			vector<SemNodePtr> arg_nodes;
+			arg_nodes.push_back(std::move(args[0].node));
+			SemNodePtr action = MakeConstructorCall(
+				base, index, true, ThisVBaseAddress(cls, v),
+				std::move(arg_nodes));
+			action->vbase_action = true;
+			out.push_back(std::move(action));
+		}
 	unsigned long long alignment = 1;
 	size_t first_suffix = 0;
 	unsigned long long span = TrivialStoragePrefix(

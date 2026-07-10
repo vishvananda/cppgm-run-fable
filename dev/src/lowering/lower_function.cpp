@@ -454,11 +454,18 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 	case SN_CONSTRUCTOR_ACTION:
 		// PA27: shared virtual-base construction belongs to the
 		// complete-object entries; base entries and the deleting entry
-		// drop the marked actions.
+		// drop the marked actions but keep the callee demand (the
+		// reference emits the definitions beside the base entry).
 		if (node.vbase_action &&
 		    (info_.special_code == "C2" || info_.special_code == "D2" ||
 		     info_.special_code == "D0"))
+		{
+			if (!node.trivial_init && !node.children.empty() &&
+			    !node.children[0]->children.empty())
+				program_.MemberFunctionRef(
+					*node.children[0]->children[0]);
 			return;
+		}
 		LowerConstructorAction(node);
 		return;
 	case SN_STORAGE_COPY:

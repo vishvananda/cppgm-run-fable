@@ -258,6 +258,10 @@ private:
 	// PA27: the address behind a virtual-edge member path (carrier
 	// virtual base resolved per context, then the hops inside it).
 	string VBaseCarrierAddress(const SemNode& node, bool with_projection);
+	string VBaseSubobjectAddress(const SemNode& object, size_t vbase_index,
+	                             unsigned long long remainder,
+	                             const NamedTypeInfo* owner,
+	                             bool with_projection);
 	string VBaseRemainderHops(const string& base, const ClassInfo& carrier,
 	                          const NamedTypeInfo* owner,
 	                          unsigned long long remainder,
@@ -440,6 +444,9 @@ private:
 	map<string, VBaseParamMap> vbase_params_;
 	string vtt_param_;  // "%__vtt" when the entry carries one
 	size_t declared_param_count_ = 0;
+	// One call's hidden-argument supply shares each argument's anchor
+	// (a pointer variable loads once for its whole row).
+	map<const SemNode*, string> supply_anchors_;
 	// PA16: lvalues addressed through a parameter or the indirect
 	// result pointer instead of a local slot (by_address parameters and
 	// the return-slot-reused local), keyed like slot_map_.

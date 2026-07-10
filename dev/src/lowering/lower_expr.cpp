@@ -1243,11 +1243,17 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// calls the unwind analysis cannot prove non-throwing. The result
 	// preservation slot allocates at region entry and applies to
 	// every call of an armed full expression, dispatched or not.
+	// PA27: a dispatched call may land on any overrider; only a
+	// declared non-throwing specification (which binds every
+	// overrider, 15.4) keeps it unwrapped under cleanups.
+	bool dispatch_may_unwind =
+		direct && callee.vtable_slot >= 0 && !callee.noexcept_decl;
 	bool lazy_wrap = !in_cleanup_emission_ && !suppress_eh_regions_ &&
 		!in_lifetime_action_ &&
 		(!temp_cleanups_.empty() ||
 		 (HaveCleanups() &&
-		  (!direct || program_.CalleeMayUnwind(callee) ||
+		  (!direct || dispatch_may_unwind ||
+		   program_.CalleeMayUnwind(callee) ||
 		   program_.CalleeGuardedBody(callee))));
 	bool preserved = !in_cleanup_emission_ &&
 		(eh_armed_ || eh_open_ || lazy_wrap);
@@ -1266,9 +1272,11 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	if (pm_call)
 		object_text = LowerAddressExpr(*callee.children[0]);
 	// PA27: the argument nodes and lowered texts by callee parameter
-	// index anchor the hidden vbase-pointer supply.
-	vector<const SemNode*> arg_nodes(fn_type->parameters.size(), 0);
-	vector<string> arg_texts(fn_type->parameters.size());
+	// index anchor the hidden vbase-pointer supply (member-pointer
+	// calls count their prepended object parameter).
+	vector<const SemNode*> arg_nodes(
+		fn_type->parameters.size() + (pm_call ? 1 : 0), 0);
+	vector<string> arg_texts(arg_nodes.size());
 	if (pm_call && !arg_nodes.empty())
 	{
 		arg_nodes[0] = callee.children[0].get();
@@ -1352,7 +1360,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	    !in_lifetime_action_ &&
 	    (!temp_cleanups_.empty() ||
 	     (HaveCleanups() &&
-	      (!direct || program_.CalleeMayUnwind(callee) ||
+	      (!direct || dispatch_may_unwind ||
+	       program_.CalleeMayUnwind(callee) ||
 	       program_.CalleeGuardedBody(callee)))))
 		OpenEhRegion();
 	if (!direct || dispatch)

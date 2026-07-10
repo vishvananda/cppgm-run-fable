@@ -113,6 +113,32 @@ string FunctionLowerer::LowerValueAs(const SemNode& node,
 	if (target->kind == TK_POINTER &&
 	    (source->kind == TK_ARRAY || source->kind == TK_FUNCTION))
 		return LowerPointerOperand(node);
+	// PA27: a pointer conversion into a shared virtual base rides the
+	// carrier entry of the object the operand addresses.
+	if (target->kind == TK_POINTER && source->kind == TK_POINTER &&
+	    RemoveTopCv(source->target)->kind == TK_CLASS &&
+	    RemoveTopCv(target->target)->kind == TK_CLASS &&
+	    node.kind == SN_UNARY_EXPRESSION && node.op == OP_AMP &&
+	    !node.children.empty())
+	{
+		TypePtr from_class = RemoveTopCv(source->target);
+		TypePtr to_class = RemoveTopCv(target->target);
+		int hops = 0;
+		unsigned long long nv_offset = 0;
+		if (from_class->named != to_class->named &&
+		    from_class->named->class_record &&
+		    BaseSubobjectPath(from_class->named, to_class->named, hops,
+		                      nv_offset) == BP_NONE)
+		{
+			size_t vbase_index = 0;
+			unsigned long long remainder = 0;
+			if (VirtualBasePath(*from_class->named->class_record,
+			                    to_class->named, vbase_index, remainder))
+				return VBaseSubobjectAddress(
+					*node.children[0], vbase_index, remainder,
+					to_class->named, true);
+		}
+	}
 	LowerValue value = LowerValueExpr(node);
 	return ConvertValue(value, target, context).text;
 }
