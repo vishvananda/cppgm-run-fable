@@ -197,7 +197,13 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 			((to->fundamental == FT_BOOL) &&
 			 (IsPointerAfterDecay(value.type) ||
 			  IsNullPtrType(value.type) ||
-			  value.type->kind == TK_MEMBER_POINTER));
+			  value.type->kind == TK_MEMBER_POINTER)) ||
+			// 5.2.10p4: a pointer reinterpreted as an integer large
+			// enough to hold it (reinterpret_cast, or the c-style /
+			// functional spellings that resolve to it).
+			(IsIntegralType(to) && TypeSize(to) == 8 &&
+			 (op == KW_REINTERPET_CAST || op == OP_LPAREN) &&
+			 IsPointerAfterDecay(value.type));
 	else if (to->kind == TK_ENUM)
 		valid = IsArithmeticOrEnum(value.type);
 	else if (to->kind == TK_POINTER)

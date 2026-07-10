@@ -741,9 +741,9 @@ void FunctionLowerer::LowerStaticGuard(const SemNode& node)
 	OpenBlock(done_label);
 }
 
-void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
-                                          const string& slot,
-                                          const TypePtr& array)
+string FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
+                                            const string& slot,
+                                            const TypePtr& array)
 {
 	TypePtr element = RemoveTopCv(array->target);
 	unsigned long long size = TypeSize(element);
@@ -764,7 +764,7 @@ void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
 		     target);
 	}
 	if (array->bound <= node.children.size())
-		return;
+		return base;
 	if (LowerFloatType(element))
 	{
 		// No fixture pins a floating tail; zero-fill the span.
@@ -779,7 +779,7 @@ void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
 		Emit("zeroinit " +
 		     to_string((array->bound - node.children.size()) * size) +
 		     "x" + to_string(TypeAlignment(element)) + " " + target);
-		return;
+		return base;
 	}
 	// Each remaining element value-initializes individually (8.5.1p7),
 	// matching the reference's per-element zero stores.
@@ -795,6 +795,7 @@ void FunctionLowerer::LowerLocalArrayInit(const SemNode& node,
 		}
 		Emit("store " + LowerValueType(element) + " 0, " + target);
 	}
+	return base;
 }
 
 // The single source local of a class-valued return statement's

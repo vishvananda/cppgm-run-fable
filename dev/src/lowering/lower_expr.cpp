@@ -1047,6 +1047,13 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
                                                const TypePtr& referee)
 {
 	TypePtr bare = RemoveTopCv(referee);
+	if (node.kind == SN_BRACED_INIT_LIST && bare->kind == TK_ARRAY)
+	{
+		// PA24 8.5.4: a braced argument bound to a reference-to-array
+		// parameter materializes its temporary array.
+		string slot = AddMatSlot("argarr", LowerSlotType(bare));
+		return LowerLocalArrayInit(node, slot, bare);
+	}
 	if (node.kind == SN_CONSTRUCTOR_ACTION && bare->kind == TK_CLASS)
 	{
 		// A class temporary binding a reference parameter: an exact

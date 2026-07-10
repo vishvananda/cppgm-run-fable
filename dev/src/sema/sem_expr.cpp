@@ -77,6 +77,10 @@ ConversionSource MakeConversionSource(const SemValue& value)
 	source.null_pointer_literal = value.null_pointer_literal;
 	source.function_set = value.function_set;
 	source.overloads = value.overloads;
+	source.braced = value.braced_list;
+	for (size_t i = 0; i < value.list_values.size(); i++)
+		source.list_items.push_back(
+			MakeConversionSource(value.list_values[i]));
 	return source;
 }
 
@@ -1128,9 +1132,13 @@ SemValue SemExprAnalyzer::AnalyzeMember(const AstExpr& expr)
 // --- casts and sizeof -------------------------------------------------------
 
 // Analyzes one argument/initializer list, expanding `pattern...` pack
-// items in place (14.5.3).
+// items in place (14.5.3). `allow_braced` admits braced-init-list
+// arguments as deferred list-initialization values (8.5.4): their
+// elements analyze now, the target initialization builds when overload
+// resolution has selected a parameter.
 void SemExprAnalyzer::AnalyzeArgumentList(const vector<AstExprPtr>& items,
-                                          vector<SemValue>& out)
+                                          vector<SemValue>& out,
+                                          bool allow_braced)
 {
 	for (size_t i = 0; i < items.size(); i++)
 	{
@@ -1139,6 +1147,14 @@ void SemExprAnalyzer::AnalyzeArgumentList(const vector<AstExprPtr>& items,
 			if (!host_.ExpandPackExpression(*items[i]->operands[0], out))
 				throw runtime_error("pack expansion outside an "
 				                    "expandable context");
+			continue;
+		}
+		if (allow_braced && items[i]->kind == EK_BRACED)
+		{
+			SemValue value;
+			value.braced_list = true;
+			AnalyzeArgumentList(items[i]->arguments, value.list_values);
+			out.push_back(std::move(value));
 			continue;
 		}
 		out.push_back(Analyze(*items[i]));

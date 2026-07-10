@@ -39,7 +39,7 @@ struct ConversionSource
 {
 	ConversionSource()
 		: category(VC_PRVALUE), null_pointer_literal(false),
-		  function_set(false)
+		  function_set(false), braced(false)
 	{}
 
 	TypePtr type;           // reference-stripped expression type
@@ -50,6 +50,10 @@ struct ConversionSource
 	// the candidate function types (13.4 target-directed resolution).
 	bool function_set;
 	vector<TypePtr> overloads;
+	// A braced-init-list argument (13.3.3.1.5): `type` is null and
+	// `list_items` holds the analyzed element facts.
+	bool braced;
+	vector<ConversionSource> list_items;
 };
 
 // One classified implicit conversion sequence.

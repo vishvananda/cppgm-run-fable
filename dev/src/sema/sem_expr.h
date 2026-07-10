@@ -233,6 +233,12 @@ struct SemValue
 	// analyzed object expression (null for static/unbound uses).
 	const ScopeBinding* member_fn;
 	SemNodePtr member_object;
+	// PA24: a braced-init-list call argument awaiting its list
+	// -initialization target (13.3.3.1.5). `type` and `node` stay null
+	// until ApplyConversion builds the initialization for the selected
+	// parameter from the analyzed elements.
+	bool braced_list = false;
+	vector<SemValue> list_values;
 };
 
 // One composed member-call candidate set (sem_member.cpp): ordinary
@@ -300,9 +306,11 @@ public:
 	SemNodePtr AnalyzeBracedInit(const vector<AstExprPtr>& items,
 	                             TypePtr& dest);
 	// One argument/initializer list with `pattern...` items expanded
-	// in place (PA19 14.5.3).
+	// in place (PA19 14.5.3). `allow_braced` admits braced-init-list
+	// arguments as deferred list-initialization values (PA24 8.5.4).
 	void AnalyzeArgumentList(const vector<AstExprPtr>& items,
-	                         vector<SemValue>& out);
+	                         vector<SemValue>& out,
+	                         bool allow_braced = false);
 
 	// PA16: contextual bool conversion; a class operand materializes
 	// its conversion-function call into the value.
@@ -319,6 +327,10 @@ public:
 	// The converting-constructor arm of ApplyConversion (12.3.1).
 	void ApplyConstructorConversion(SemValue& value,
 	                                const ImplicitConversion& conv);
+	// The braced-argument arm of ApplyConversion (PA24 8.5.4).
+	void ApplyListInitConversion(SemValue& value,
+	                             const ImplicitConversion& conv,
+	                             const TypePtr& dest);
 
 	// PA16: 13.3.1.2 selection over the user-declared (and implicitly
 	// declared assignment) operator candidates; public so the binder's

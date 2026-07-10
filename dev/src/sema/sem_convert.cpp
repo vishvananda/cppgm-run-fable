@@ -102,6 +102,9 @@ ImplicitConversion ClassifySourceConversionFunction(
 ImplicitConversion ClassifyConversionImpl(const ConversionSource& source,
                                           const TypePtr& dest,
                                           bool contextual, bool allow_user);
+ImplicitConversion ClassifyListInitSequence(const ConversionSource& source,
+                                            const TypePtr& dest,
+                                            bool allow_user);
 
 // 4.5/4.6/4.7-4.12 over non-reference destinations. The destination is
 // taken as an object value: its own top-level cv is ignored.
@@ -711,10 +714,130 @@ void DemandClassCompleteness(const TypePtr& dest)
 		completion_hook(completion_context, bare->named);
 }
 
+// 13.3.3.1.5 list-initialization sequences over the PA24 subset: a
+// braced argument reaching a reference-to-array parameter builds a
+// temporary array; one reaching a class (or reference-to-class)
+// parameter list-initializes a temporary through the class's
+// non-explicit constructors; a scalar takes its single element.
+ImplicitConversion ClassifyListInitClass(const ConversionSource& source,
+                                         const TypePtr& dest,
+                                         bool allow_user)
+{
+	ImplicitConversion result;
+	if (!allow_user)
+		return result;
+	DemandClassCompleteness(dest);
+	if (ctor_template_hook)
+		ctor_template_hook(ctor_template_context, dest->named, source);
+	if (!dest->named->class_record)
+		return result;
+	const ClassInfo& cls = *dest->named->class_record;
+	for (size_t i = 0; i < cls.ctors.size(); i++)
+	{
+		const ClassCtor& ctor = cls.ctors[i];
+		if (ctor.is_explicit || ctor.deleted ||
+		    ctor.kind != CK_ORDINARY ||
+		    ctor.type->parameters.size() != source.list_items.size())
+			continue;
+		bool viable = true;
+		for (size_t j = 0; viable && j < source.list_items.size(); j++)
+		{
+			ImplicitConversion inner = ClassifyConversionImpl(
+				source.list_items[j], ctor.type->parameters[j],
+				false, false);
+			viable = inner.viable;
+		}
+		if (!viable)
+			continue;
+		result.viable = true;
+		result.rank = CR_USER;
+		result.user_class = dest->named;
+		result.user_ctor = (int)i;
+		return result;
+	}
+	return result;
+}
+
+ImplicitConversion ClassifyListInitSequence(const ConversionSource& source,
+                                            const TypePtr& dest,
+                                            bool allow_user)
+{
+	ImplicitConversion result;
+	if (IsReferenceType(dest))
+	{
+		const TypePtr& referee = dest->target;
+		bool rvalue_ref = dest->kind == TK_RVALUE_REFERENCE;
+		// The list always materializes a temporary: an lvalue
+		// reference binds it only when const (8.5.3p5).
+		if (!rvalue_ref)
+		{
+			TypePtr element = referee;
+			while (element->kind == TK_ARRAY)
+				element = element->target;
+			bool referee_const = false;
+			bool referee_volatile = false;
+			TopCv(element, referee_const, referee_volatile);
+			if (!referee_const || referee_volatile)
+				return result;
+		}
+		if (referee->kind == TK_ARRAY)
+		{
+			if (!referee->bound_known ||
+			    source.list_items.size() > referee->bound)
+				return result;
+			TypePtr element = RemoveTopCv(referee->target);
+			EConversionRank worst = CR_EXACT;
+			for (size_t i = 0; i < source.list_items.size(); i++)
+			{
+				ImplicitConversion inner = ClassifyConversionImpl(
+					source.list_items[i], element, false, false);
+				if (!inner.viable)
+					return result;
+				if (inner.rank > worst)
+					worst = inner.rank;
+			}
+			result.viable = true;
+			result.rank = worst;
+			result.reference_binding = true;
+			result.binds_rvalue_reference = rvalue_ref;
+			result.referee = referee;
+			return result;
+		}
+		result = RemoveTopCv(referee)->kind == TK_CLASS
+			? ClassifyListInitClass(source, RemoveTopCv(referee),
+			                        allow_user)
+			: ClassifyListInitSequence(source, RemoveTopCv(referee),
+			                           allow_user);
+		result.reference_binding = true;
+		result.binds_rvalue_reference = rvalue_ref;
+		result.referee = referee;
+		return result;
+	}
+	TypePtr bare = RemoveTopCv(dest);
+	if (bare->kind == TK_CLASS)
+		return ClassifyListInitClass(source, bare, allow_user);
+	if (bare->kind == TK_ARRAY)
+		return result;  // arrays are never parameter values
+	// 8.5.4p3: a scalar destination takes its single element (with the
+	// element's rank); an empty list value-initializes.
+	if (source.list_items.empty())
+	{
+		result.viable = true;
+		result.rank = CR_EXACT;
+		return result;
+	}
+	if (source.list_items.size() > 1)
+		return result;
+	return ClassifyConversionImpl(source.list_items[0], bare, false,
+	                              allow_user);
+}
+
 ImplicitConversion ClassifyConversionImpl(const ConversionSource& source,
                                           const TypePtr& dest,
                                           bool contextual, bool allow_user)
 {
+	if (source.braced)
+		return ClassifyListInitSequence(source, dest, allow_user);
 	if (allow_user)
 	{
 		DemandClassCompleteness(dest);

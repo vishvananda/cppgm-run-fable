@@ -95,10 +95,102 @@ void SemExprAnalyzer::ApplySelectedOverload(SemValue& value,
 	}
 }
 
+// PA24 8.5.4: builds the selected parameter's initialization from an
+// analyzed braced-init-list argument: a temporary array for (reference
+// -to-)array destinations, a list-constructed temporary for class
+// destinations, the single element for scalars.
+void SemExprAnalyzer::ApplyListInitConversion(SemValue& value,
+                                              const ImplicitConversion& conv,
+                                              const TypePtr& dest)
+{
+	vector<SemValue> items;
+	items.swap(value.list_values);
+	value.braced_list = false;
+	TypePtr bare = IsReferenceType(dest) ? dest->target : RemoveTopCv(dest);
+	if (bare->kind == TK_ARRAY)
+	{
+		TypePtr element = bare->target;
+		SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+		list->type = RemoveTopCv(bare);
+		list->category = VC_PRVALUE;
+		for (size_t i = 0; i < items.size(); i++)
+		{
+			CopyInitialize(items[i], RemoveTopCv(element),
+			               "array element");
+			list->children.push_back(std::move(items[i].node));
+		}
+		value.type = RemoveTopCv(bare);
+		value.category = VC_PRVALUE;
+		value.node = std::move(list);
+		return;
+	}
+	if (conv.user_ctor >= 0 && conv.user_class)
+	{
+		const ClassInfo* cls = host_.Classes().Find(conv.user_class);
+		if (!cls)
+			throw runtime_error("list constructor class record missing");
+		const TypePtr& fn = cls->ctors[conv.user_ctor].type;
+		vector<SemNodePtr> args;
+		for (size_t i = 0; i < items.size(); i++)
+		{
+			ImplicitConversion inner = ClassifyConversion(
+				MakeConversionSource(items[i]), fn->parameters[i]);
+			ApplyConversion(items[i], inner, fn->parameters[i]);
+			args.push_back(std::move(items[i].node));
+		}
+		SemNodePtr action = host_.MakeConstructorCall(
+			*cls, conv.user_ctor, false, SemNodePtr(), std::move(args));
+		action->category = VC_PRVALUE;
+		if (host_.Classes().NeedsDestruction(*cls))
+		{
+			action->needs_dtor = true;
+			action->children.push_back(host_.MakeTemporaryDtor(*cls));
+		}
+		TypePtr class_type = MakeNamedType(TK_CLASS, conv.user_class);
+		action->type = class_type;
+		value.node = std::move(action);
+		value.type = class_type;
+		value.category = VC_PRVALUE;
+		return;
+	}
+	// 8.5.4p3: the single element initializes a scalar; an empty list
+	// zero-initializes.
+	if (items.size() == 1)
+	{
+		value = std::move(items[0]);
+		CopyInitialize(value, RemoveTopCv(bare), "list element");
+		return;
+	}
+	if (!items.empty())
+		throw runtime_error("too many list-initializer elements");
+	value.type = RemoveTopCv(bare);
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_LITERAL);
+	value.node->token = "0";
+	value.node->type = value.type;
+	value.node->category = VC_PRVALUE;
+	if (value.type->kind == TK_POINTER || IsNullPtrType(value.type))
+		value.node->null_pointer = true;
+	else
+	{
+		value.node->has_value = true;
+		value.node->value = ConstValue(
+			value.type->kind == TK_ENUM
+				? value.type->named->enum_underlying
+				: value.type->fundamental,
+			0);
+	}
+}
+
 void SemExprAnalyzer::ApplyConversion(SemValue& value,
                                       const ImplicitConversion& conv,
                                       const TypePtr& dest)
 {
+	if (value.braced_list)
+	{
+		ApplyListInitConversion(value, conv, dest);
+		return;
+	}
 	if (conv.user_ctor >= 0 && conv.user_class)
 	{
 		ApplyConstructorConversion(value, conv);

@@ -418,7 +418,7 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 		throw runtime_error("temporary of an incomplete class");
 	host_.OnClassObjectMaterialized(class_type->named);
 	vector<SemValue> args;
-	AnalyzeArgumentList(arguments, args);
+	AnalyzeArgumentList(arguments, args, true);
 	if (cls->is_aggregate && !cls->has_user_ctor && !args.empty())
 	{
 		// 5.2.3p3/8.5.1: a braced temporary of an aggregate class

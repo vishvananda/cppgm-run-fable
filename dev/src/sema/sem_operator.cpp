@@ -435,7 +435,7 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 {
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
-	AnalyzeArgumentList(expr.arguments, args);
+	AnalyzeArgumentList(expr.arguments, args, true);
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
 	set<const void*> seen;

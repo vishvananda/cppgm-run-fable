@@ -200,6 +200,18 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 		value.type = target;
 		return value;
 	}
+	// 5.2.10p4: a pointer reinterpreted as a pointer-width integer
+	// copies the representation.
+	if (source->kind == TK_POINTER || source->kind == TK_FUNCTION)
+	{
+		string temp = NewTemp();
+		Emit(temp + " = copy " + LowerValueType(target) + " " +
+		     value.text);
+		value.text = temp;
+		value.imm_int = false;
+		value.type = target;
+		return value;
+	}
 	// Integral (and enumeration) conversions. An identity cast emits
 	// nothing (the canonical reference shape).
 	if (context == LCC_CAST && TypeEquals(source, target))

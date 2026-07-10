@@ -717,6 +717,42 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	}
 	if (braced)
 	{
+		// 8.5.2 via 8.5.1p14: a lone string literal inside the braces
+		// initializes a matching character array like the unbraced form.
+		if (binding.type->kind == TK_ARRAY &&
+		    braced->arguments.size() == 1 &&
+		    braced->arguments[0]->kind == EK_LITERAL &&
+		    braced->arguments[0]->literal_kind == PTK_LITERAL_ARRAY)
+		{
+			SemValue value = analyzer_.Analyze(*braced->arguments[0]);
+			item.children.push_back(StringLiteralArrayInit(
+				binding, *value.node, value.type));
+			item.type = binding.type;
+			return;
+		}
+		// 8.5.4p3: a braced scalar list of one element initializes like
+		// the equals form (with the narrowing check); an empty list
+		// zero-initializes.
+		if (binding.type->kind != TK_ARRAY &&
+		    !IsReferenceType(binding.type) &&
+		    RemoveTopCv(binding.type)->kind != TK_CLASS)
+		{
+			TypePtr bare = RemoveTopCv(binding.type);
+			if (braced->arguments.size() > 1)
+				throw runtime_error("too many initializers for " +
+				                    binding.name);
+			if (braced->arguments.empty())
+			{
+				item.children.push_back(ZeroValue(bare).node);
+				return;
+			}
+			SemValue value = analyzer_.Analyze(*braced->arguments[0]);
+			CheckListInitNarrowing(value, bare);
+			analyzer_.CopyInitialize(value, binding.type,
+			                         "initialization");
+			item.children.push_back(std::move(value.node));
+			return;
+		}
 		TypePtr completed = binding.type;
 		item.children.push_back(analyzer_.AnalyzeBracedInit(
 			braced->arguments, completed));

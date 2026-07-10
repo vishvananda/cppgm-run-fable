@@ -107,8 +107,10 @@ private:
 	// declaration-point initialization.
 	void LowerLocalStatic(const SemNode& node);
 	void LowerLocalStaticInit(const SemNode& node, const string& base);
-	void LowerLocalArrayInit(const SemNode& node, const string& slot,
-	                         const TypePtr& array);
+	// Emits the element stores of a braced local array into `slot`;
+	// returns the emitted base-address temp.
+	string LowerLocalArrayInit(const SemNode& node, const string& slot,
+	                           const TypePtr& array);
 	void LowerReturn(const SemNode& node);
 	void LowerIf(const SemNode& node);
 	void LowerWhile(const SemNode& node);

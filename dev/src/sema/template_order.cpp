@@ -342,11 +342,30 @@ void SemBinder::DeduceCtorTemplatesForConversion(
 	const NamedTypeInfo* entity, const ConversionSource& source)
 {
 	ClassInfo* cls = entity ? unit_.classes.Find(entity) : 0;
-	if (!cls || cls->ctor_templates.empty() || !source.type)
+	if (!cls || cls->ctor_templates.empty())
 		return;
-	vector<SemValue> shells(1);
-	shells[0].type = source.type;
-	shells[0].category = source.category;
+	vector<SemValue> shells;
+	if (source.braced)
+	{
+		// PA24 list-initialization: the braced elements deduce the
+		// class's constructor templates position-wise.
+		shells.resize(source.list_items.size());
+		for (size_t i = 0; i < source.list_items.size(); i++)
+		{
+			if (!source.list_items[i].type)
+				return;
+			shells[i].type = source.list_items[i].type;
+			shells[i].category = source.list_items[i].category;
+		}
+	}
+	else
+	{
+		if (!source.type)
+			return;
+		shells.resize(1);
+		shells[0].type = source.type;
+		shells[0].category = source.category;
+	}
 	vector<TypePtr> candidates;
 	vector<size_t> min_arity;
 	vector<size_t> positions;
