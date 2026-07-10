@@ -315,9 +315,11 @@ TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
 // expression).
 bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b);
 
-// PA25 18.9: whether `type` names a std::initializer_list
-// specialization (the class template declared directly in namespace
-// std); `element` receives the element type when given.
+// PA25 18.9: whether `tmpl` is the initializer_list class template
+// declared directly in namespace std, and whether `type` names a
+// std::initializer_list specialization of it (`element` receives the
+// element type when given).
+bool IsStdInitializerListTemplate(const struct TemplateInfo* tmpl);
 bool IsStdInitializerList(const TypePtr& type, TypePtr* element);
 bool TemplateArgIsDependent(const TemplateArg& arg);
 

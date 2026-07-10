@@ -132,3 +132,87 @@ calls `__cxa_bad_cast`. Static upcasts keep the existing base-subobject path.
   emission).
 - File audit: `perl scripts/cppgm_file_audit.pl --stage pa25 --paths dev/src`.
 - Manual sanity (optional): feed generated LowIR into pa28 lowir2native.
+
+## Architecture Review
+
+How the implementation actually landed, phase by phase:
+
+- **EH regions / source EH** — one region machine in `FunctionLowerer`
+  (`lower_member.cpp`): `OpenSegmentRegion`/`BeginFullExpression` decide
+  up-front from `ScanArmsCleanups`/`SegmentContainsCall` evaluation-order
+  scans; `OpenEhRegion` keys dispatch-block reuse on the rendered
+  cleanup-content signature (`CleanupSignature`), and a dispatch inside a
+  try re-arms the try's handler set and routes to its entry. Source-level
+  throw/try/catch statement lowering, catch-handler chains, and the
+  typeid/dynamic_cast expression forms live in `lower_eh.cpp` (a
+  responsibility split registered in `frontend_source_sets.mk` — the
+  conditional-value/branch forms moved with them because they open
+  per-arm segment regions). Sema owns the statement binding
+  (`BindThrowStatement`/`BindTryStatement`) and may-throw facts
+  (`NodeMayThrow`, `SemTreeMayThrow` know `SN_THROW`).
+- **typeid / RTTI** — sema recognizes `std::type_info` once
+  (`FindStdTypeInfo`/`StdTypeInfoEntity`), records the entity on the
+  `SemUnit`, and types the query nodes (`SemNode::typeid_operand`,
+  `typeid_dynamic`). `LowerProgram` renders records on first use, deduped
+  by Itanium encoding: class records via the PA17 chain, fundamentals /
+  pointers / never-completed specializations via `RttiTypeRef`;
+  `ThrowRttiRef` resolves fundamentals to the C++ runtime's strong
+  records. The operator==/!= fold checks the sema-recognized entity by
+  pointer identity (`IsStdTypeInfo`) and compares record addresses — no
+  runtime call.
+- **dynamic_cast** — sema gates on real polymorphism facts
+  (`is_polymorphic`, `BaseClassDistance`) and lowers to a pre-nulled
+  slot, null-check, one `__dynamic_cast` runtime call, and (reference
+  form) a `__cxa_bad_cast` fail block. No new IR operations.
+- **Capturing lambdas** — the PA24 hybrid model extended: sema lays out
+  by-copy value fields through the ordinary class-layout machinery
+  (offsets are `ClassField` facts; captured-this is the typed
+  `ClassField::captured_this`/`SemNode::captured_this` pair), enforces
+  5.1.2p16 constness for non-mutable by-copy reads, and numbers closures
+  per enclosing function body for the Itanium `<lambda-sig>`
+  discriminator. Lowering stores scalars / copy-constructs class captures
+  into the sema offsets. Closure manglings assemble from structured parts
+  (enclosing-function encoding + `Ul...E<disc>_` signature) through a
+  shared substitution table — no string surgery; `::main` prefixes spell
+  bare `4main` (g++ parity).
+- **initializer_list** — recognition is one structural predicate
+  (`IsStdInitializerListTemplate`/`IsStdInitializerList`: the template
+  named initializer_list declared directly in `::std`), used by overload
+  preference, auto deduction, braced deduction, range-for, and the
+  builtin-record build. A program that only declares the template gets a
+  real `ClassInfo` built through `BeginClassLayout`/`LayoutField`/
+  `FinishClassLayout` with implicit special members, so list values copy
+  like any trivial class. Lowering materializes the backing array with
+  per-element stores and fills `{begin, size}` from the record's own
+  field offsets.
+
+Ownership held: sema owns acceptance, layouts, may-throw and identity
+facts; lowering consumes typed facts and owns rendering. Runtime
+interfaces are declared externals only.
+
+## Final Architecture Review
+
+Post-audit state (see `audit.md` for the full findings):
+
+- The audit fixed eight issues: duplicate weak closure symbols from
+  block-scoped discriminators, the `_ZZ4mainv` prefix, two `"__this"`
+  name-string gates in lowering (one produced wrong code), missing
+  const on non-mutable by-copy captures, a hardcoded initializer_list
+  size-field offset, lowering-side re-recognition of `std::type_info`
+  by scope-name strings, and a scope-unchecked `initializer_list`
+  match in braced deduction; plus the builtin record now declares its
+  implicit special members.
+- Remaining known boundaries are contract-level, not defects:
+  class-element initializer_lists work for the trivially-destructible
+  subset the shipped tests pin (element destruction is PA26+ object-model
+  work; user-dtor elements are README-declared UB), `dynamic_cast<void*>`
+  and reference-form corner cases stay deferred to PA26 per the stage
+  handoff, and EH/RTTI LowIR is text-contract-only until the later
+  host-EH assignments (`pa28/README.md` defers the private
+  exception/runtime ABI path; the non-EH slice executes correctly through
+  the reference `lowir2native`).
+- No interpreter/VM/payload substitutes, no test-shaped gates, no
+  comparator or fixture edits, no file-audit bypasses (the four header
+  warnings are the `;`-count heuristic on declaration growth; all
+  PA25 header additions are declarations). fileAudit passes;
+  `make test-report-through-pa25` passes 2430/2430.

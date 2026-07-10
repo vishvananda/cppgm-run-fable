@@ -1324,7 +1324,6 @@ bool SemBinder::DerivedToBaseClass(const TypePtr& from, const TypePtr& to)
 	return false;
 }
 
-
 // An implicit/defaulted copy or move constructor: a trivial one
 // lowers as a raw object copy; otherwise the field-wise definition
 // synthesizes on first demand. The reference keeps the synthesized

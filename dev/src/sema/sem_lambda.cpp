@@ -104,6 +104,7 @@ void SemBinder::EnsureThisField(LambdaFrame& frame)
 	field.name = "__this";
 	field.type = frame.enclosing_this;
 	field.access = MA_PUBLIC;
+	field.captured_this = true;
 	ClassField& placed = LayoutField(*frame.cls, field);
 	frame.this_captured = true;
 	frame.this_offset = placed.offset;
@@ -162,6 +163,7 @@ SemNodePtr SemBinder::ThisValueNode()
 		}
 		SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
 		member->name = "__this";
+		member->captured_this = true;
 		member->type = frame->enclosing_this;
 		member->category = VC_PRVALUE;
 		member->member_offset = frame->this_offset;
@@ -214,12 +216,17 @@ bool SemBinder::TryCaptureUse(const ScopeBinding& binding, SemValue& out)
 		throw runtime_error(binding.name + " is not captured");
 	size_t index = EnsureCaptureField(*frame, binding, by_copy);
 	const LambdaCapture& capture = frame->captures[index];
+	// 5.1.2p16: without `mutable`, operator() is const, so by-copy
+	// members read as const lvalues.
+	TypePtr read = capture.referee;
+	if (capture.by_copy && !frame->is_mutable)
+		read = MakeCvQualifiedType(read, true, false);
 	out = SemValue();
-	out.type = capture.referee;
+	out.type = read;
 	out.category = VC_LVALUE;
 	out.node = MakeSemNode(SN_MEMBER_EXPRESSION);
 	out.node->name = capture.name;
-	out.node->type = capture.referee;
+	out.node->type = read;
 	out.node->member_ref = !capture.by_copy;
 	out.node->category = VC_LVALUE;
 	out.node->member_offset = capture.offset;
@@ -608,9 +615,24 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	entity->is_closure = true;
 	{
 		// 5.1.7: the <lambda-sig> discriminator counts earlier
-		// lambdas with the same signature in the same context.
+		// lambdas with the same signature in the same context: the
+		// enclosing function body (the mangled local-name prefix,
+		// lower_name.cpp LocalEntityFunctionScope), not the immediate
+		// block.
+		const Scope* context = fn_scope ? fn_scope->parent : 0;
+		for (const Scope* scope = context; scope && scope->parent;
+		     scope = scope->parent)
+		{
+			if (scope->kind == SCOPE_FUNCTION)
+			{
+				context = scope;
+				break;
+			}
+			if (scope->kind == SCOPE_NAMESPACE)
+				break;
+		}
 		std::vector<std::vector<TypePtr>>& seen =
-			closure_discriminators_[fn_scope ? fn_scope->parent : 0];
+			closure_discriminators_[context];
 		int matching = 0;
 		for (size_t i = 0; i < seen.size(); i++)
 		{
@@ -685,6 +707,7 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 		lambda.capture_default == OP_AMP;
 	frame.by_copy_default = lambda.has_capture_default &&
 		lambda.capture_default != OP_AMP;
+	frame.is_mutable = lambda.mutable_specifier;
 	frame.this_param_type = adjusted->parameters[0];
 	frame.enclosing_this = CurrentThisType();
 	for (size_t i = 0; i < lambda.captures.size(); i++)

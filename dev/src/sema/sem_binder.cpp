@@ -327,9 +327,10 @@ bool SemBinder::SwapUnevaluatedOperand(bool active)
 	return previous;
 }
 
-// PA25 5.2.8p1: typeid names the class std::type_info; the program
-// must have declared it in namespace std (18.7.1).
-const NamedTypeInfo* SemBinder::StdTypeInfoEntity()
+// The program's std::type_info class entity, or null when it is not
+// declared; the recognition result is recorded on the unit for the
+// lowering's operator==/!= fold.
+const NamedTypeInfo* SemBinder::FindStdTypeInfo()
 {
 	Scope* global = model_.global();
 	ScopeBinding* std_binding =
@@ -341,8 +342,17 @@ const NamedTypeInfo* SemBinder::StdTypeInfoEntity()
 			FindOwnBinding(*std_binding->target, "type_info");
 		if (info && info->kind == SB_TYPE && info->type &&
 		    RemoveTopCv(info->type)->kind == TK_CLASS)
-			return RemoveTopCv(info->type)->named;
+			unit_.std_type_info = RemoveTopCv(info->type)->named;
 	}
+	return unit_.std_type_info;
+}
+
+// PA25 5.2.8p1: typeid names the class std::type_info; the program
+// must have declared it in namespace std (18.7.1).
+const NamedTypeInfo* SemBinder::StdTypeInfoEntity()
+{
+	if (const NamedTypeInfo* entity = FindStdTypeInfo())
+		return entity;
 	throw std::runtime_error(
 		"typeid requires a declaration of std::type_info");
 }

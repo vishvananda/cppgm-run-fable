@@ -1020,8 +1020,8 @@ bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
 		// A dependent spec keeps its written arguments on the type
 		// node (targs); an instantiated one on the entity record.
 		const TemplateArg* first = 0;
-		if (bare->named && bare->named->spec_template &&
-		    bare->named->spec_template->name == "initializer_list")
+		if (bare->named &&
+		    IsStdInitializerListTemplate(bare->named->spec_template))
 		{
 			if (bare->kind == TK_TEMPLATE_SPEC && !bare->targs.empty())
 				first = &bare->targs[0];

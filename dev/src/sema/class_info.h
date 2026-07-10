@@ -48,6 +48,9 @@ struct ClassField
 	// storage row (variant members are not default-initialized or
 	// destroyed implicitly).
 	bool from_union = false;
+	// PA25 5.1.2: the closure field holding the captured `this`
+	// pointer (stored as a pointer value, not a capture reference).
+	bool captured_this = false;
 };
 
 // PA16: the special-member role of a constructor (12.8p2/p3).

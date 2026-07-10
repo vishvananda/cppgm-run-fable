@@ -425,6 +425,9 @@ void SemBinder::FinishTemplateChecks()
 void SemBinder::BindTranslationUnit(const AstDecl& unit)
 {
 	DeclBinder::BindTranslationUnit(unit);
+	// PA25 5.2.8: record the unit's std::type_info entity (when
+	// declared) for the lowering's comparison fold.
+	FindStdTypeInfo();
 	// PA25 14.6.4.1p3: specializations odr-used inside other
 	// instantiations bind after the forward pass, in odr-use order.
 	DrainPendingInstantiations();

@@ -223,6 +223,10 @@ struct SemNode
 	// stored pointer; on an SN_ASSIGNMENT_EXPRESSION the store binds
 	// the reference (constructor member initialization).
 	bool member_ref;
+	// PA25 5.1.2: SN_MEMBER_EXPRESSION reading a closure's captured
+	// `this` pointer field (sema-owned identification; the lowering
+	// keys its base-adjustment presentation on it).
+	bool captured_this = false;
 	// SN_FUNCTION_DEFINITION / SN_CALLEE: non-static member function
 	// with the hidden `this` first parameter / argument.
 	bool is_method;
@@ -392,6 +396,10 @@ struct SemUnit
 		string name;
 	};
 	vector<ExplicitMemberInstantiation> explicit_member_instantiations;
+	// PA25 5.2.8: the program's std::type_info class entity (null when
+	// undeclared). Sema owns the recognition; the lowering folds
+	// type_info operator==/!= calls through this identity.
+	const NamedTypeInfo* std_type_info = 0;
 };
 
 // Writes the `translation-unit` line and the tree below it.

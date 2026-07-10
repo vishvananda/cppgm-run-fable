@@ -275,8 +275,9 @@ private:
 	void EmitTempCleanups(size_t from);
 	void OpenEhRegion(const char* end_prefix = "call_unwind_end");
 	// PA25 5.2.8: a call node that is std::type_info::operator== or
-	// operator!= over typeid results (folds to RTTI address identity).
-	static bool IsTypeInfoComparison(const SemNode& node);
+	// operator!= over typeid results (folds to RTTI address identity;
+	// the class identity is the sema-recognized std::type_info).
+	bool IsTypeInfoComparison(const SemNode& node) const;
 	// --- PA25 source-level exception handling ---
 	// One active try or catch context. A try context carries its
 	// dispatch/entry/end labels and handler table; a catch context its

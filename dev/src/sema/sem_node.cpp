@@ -228,6 +228,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.elided = node.elided;
 	out.bf_plain_store = node.bf_plain_store;
 	out.member_ref = node.member_ref;
+	out.captured_this = node.captured_this;
 	out.synth_copy = node.synth_copy;
 	out.trivial_copy = node.trivial_copy;
 	out.ctor_addressed = node.ctor_addressed;

@@ -1412,4 +1412,7 @@ void SemBinder::BuildBuiltinInitializerList(NamedTypeInfo* info)
 	}
 	FinishClassLayout(cls, *model_.MutableInfo(info), 0);
 	model_.MutableInfo(info)->complete = true;
+	// The record copies and destroys like any trivial class (list
+	// values pass by value, 18.9p2).
+	DeclareImplicitSpecialMembers(cls);
 }

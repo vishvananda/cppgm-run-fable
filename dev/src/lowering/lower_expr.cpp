@@ -664,8 +664,6 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	return value;
 }
 
-
-
 // --- increments, assignments ----------------------------------------------
 
 // The directly addressable storage of an id-expression lvalue
@@ -817,10 +815,6 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 }
 
 // --- addresses and pointers -------------------------------------------------
-
-
-
-
 
 string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 {

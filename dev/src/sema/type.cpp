@@ -722,9 +722,17 @@ int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to)
 	return -1;
 }
 
-// PA25 18.9: a std::initializer_list specialization - the class
-// template named initializer_list declared directly inside the
-// top-level namespace std.
+// PA25 18.9: the class template named initializer_list declared
+// directly inside the top-level namespace std.
+bool IsStdInitializerListTemplate(const TemplateInfo* tmpl)
+{
+	return tmpl && tmpl->name == "initializer_list" &&
+		tmpl->declaring && tmpl->declaring->kind == SCOPE_NAMESPACE &&
+		tmpl->declaring->name == "std" && tmpl->declaring->parent &&
+		!tmpl->declaring->parent->parent;
+}
+
+// PA25 18.9: a std::initializer_list specialization.
 bool IsStdInitializerList(const TypePtr& type, TypePtr* element)
 {
 	if (!type)
@@ -732,13 +740,8 @@ bool IsStdInitializerList(const TypePtr& type, TypePtr* element)
 	TypePtr bare = RemoveTopCv(
 		IsReferenceType(type) ? type->target : type);
 	if ((bare->kind != TK_CLASS && bare->kind != TK_TEMPLATE_SPEC) ||
-	    !bare->named || !bare->named->spec_template)
-		return false;
-	const TemplateInfo* tmpl = bare->named->spec_template;
-	if (tmpl->name != "initializer_list" || !tmpl->declaring ||
-	    tmpl->declaring->kind != SCOPE_NAMESPACE ||
-	    tmpl->declaring->name != "std" || !tmpl->declaring->parent ||
-	    tmpl->declaring->parent->parent)
+	    !bare->named ||
+	    !IsStdInitializerListTemplate(bare->named->spec_template))
 		return false;
 	if (bare->named->spec_args.empty() ||
 	    !bare->named->spec_args[0].type)

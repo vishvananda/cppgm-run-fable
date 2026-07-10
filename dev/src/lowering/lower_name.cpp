@@ -600,6 +600,11 @@ string MangleEnclosingFunctionEncoding(const Scope* fn_scope,
 			fn_type = fn_binding->type;
 	if (!fn_type || !declaring)
 		throw OutsideBoundary("local entity mangling context");
+	// main is unmangled, so its local-name prefix is the bare source
+	// name with no signature (the g++/reference spelling).
+	if (fn_scope->name == "main" &&
+	    declaring->kind == SCOPE_NAMESPACE && !declaring->parent)
+		return "4main";
 	if (fn_scope->fn_spec)
 		return MangleFunctionTemplateEncoding(*fn_scope->fn_spec,
 		                                      subs);

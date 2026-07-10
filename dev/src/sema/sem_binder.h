@@ -963,6 +963,7 @@ private:
 		bool by_ref_default = false;   // [&] spelled
 		bool by_copy_default = false;  // PA25: [=] spelled
 		bool this_spelled = false;     // [this] spelled
+		bool is_mutable = false;       // `mutable` spelled
 		TypePtr this_param_type;       // the closure's own this
 		TypePtr enclosing_this;        // the captured-this type (or null)
 		vector<string> explicit_names; // [&name] / [name] spellings
@@ -1006,10 +1007,10 @@ private:
 	// instantiation, bound after the unit's forward pass.
 	vector<FunctionSpecialization*> pending_instantiations_;
 	void DrainPendingInstantiations();
-	// PA25: per-enclosing-scope lambda ordinals (the Itanium
-	// <lambda-sig> discriminator).
-	// Prior closure operator parameter lists per enclosing context:
-	// 5.1.7 numbers lambdas per signature, not per context.
+	// PA25 5.1.7: prior closure operator parameter lists per enclosing
+	// function body (the mangled local-name prefix context); the
+	// Itanium <lambda-sig> discriminator counts earlier same-signature
+	// lambdas there.
 	std::map<const Scope*, std::vector<std::vector<TypePtr>>>
 		closure_discriminators_;
 	vector<LambdaFrame> lambda_frames_;
@@ -1140,6 +1141,7 @@ public:
 	virtual const FunctionSpecialization* InstantiateCharPackLiteral(
 		const ScopeBinding& binding, const string& chars);
 	virtual bool SwapUnevaluatedOperand(bool active);
+	const NamedTypeInfo* FindStdTypeInfo();
 	virtual const NamedTypeInfo* StdTypeInfoEntity();
 	virtual void OnMemberSignatureBegin(Scope* class_scope);
 	virtual void OnMemberSignatureEnd();

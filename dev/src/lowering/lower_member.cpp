@@ -119,8 +119,7 @@ string FunctionLowerer::MemberAddress(const SemNode& node,
 	int hops = node.base_hops;
 	if (object.kind == SN_UNARY_EXPRESSION && object.op == OP_STAR &&
 	    object.has_op && !object.children.empty() &&
-	    object.children[0]->kind == SN_MEMBER_EXPRESSION &&
-	    object.children[0]->name == "__this" && hops == 0)
+	    object.children[0]->captured_this && hops == 0)
 		hops = 1;
 	string base = AdjustToBase(LowerAddressExpr(*node.children[0]),
 	                           hops);
@@ -414,7 +413,7 @@ void FunctionLowerer::LowerClosureInit(const SemNode& node,
 			Emit(target + " = index i8 " + dest + ", " +
 			     to_string(field.offset));
 		}
-		if (IsReferenceType(field.type) || field.name == "__this")
+		if (IsReferenceType(field.type) || field.captured_this)
 		{
 			string value = child.category == VC_LVALUE
 				? LowerAddressExpr(child)
@@ -441,7 +440,7 @@ void FunctionLowerer::LowerInitializerListInit(const SemNode& node,
                                                const string& dest)
 {
 	const ClassInfo* cls = program_.ProgramClass(node.type->named);
-	if (!cls || cls->fields.empty() ||
+	if (!cls || cls->fields.size() < 2 ||
 	    cls->fields[0].type->kind != TK_POINTER)
 		throw runtime_error("initializer_list record missing");
 	TypePtr element = RemoveTopCv(cls->fields[0].type->target);
@@ -455,7 +454,9 @@ void FunctionLowerer::LowerInitializerListInit(const SemNode& node,
 	{
 		if (element->kind == TK_CLASS)
 		{
-			// A class element constructs (or copies) in place.
+			// A class element constructs (or copies) in place; the
+			// shipped contract exercises the trivially-destructible
+			// subset (backing-array element destruction is PA26+).
 			string target = base;
 			if (i)
 			{
@@ -481,7 +482,8 @@ void FunctionLowerer::LowerInitializerListInit(const SemNode& node,
 	}
 	Emit("store ptr " + base + ", " + dest);
 	string size_address = NewTemp();
-	Emit(size_address + " = index i8 " + dest + ", 8");
+	Emit(size_address + " = index i8 " + dest + ", " +
+	     to_string(cls->fields[1].offset));
 	Emit("store i64 " + to_string(count) + ", " + size_address);
 }
 

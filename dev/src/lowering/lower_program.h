@@ -233,6 +233,13 @@ public:
 	// PA25 15.1: the weak zero-filled exception-object scaffolding
 	// global of a thrown type.
 	void EhObjGlobal(const TypePtr& type);
+	// PA25 5.2.8: whether `entity` is a unit's recognized
+	// std::type_info class (the sema-owned fact behind the
+	// operator==/!= address-identity fold).
+	bool IsStdTypeInfo(const NamedTypeInfo* entity) const
+	{
+		return entity && std_type_info_entities_.count(entity);
+	}
 	// PA18 reference-parity fold (lower_expr.cpp BranchOnValue): a
 	// branch on this namespace-scope pointer-to-function object may
 	// spell the object's address only when that is provably
@@ -345,6 +352,8 @@ private:
 	bool has_main_;
 	// The added units, for whole-program scans (branch-fold analysis).
 	vector<const SemUnit*> units_;
+	// PA25 5.2.8: each unit's sema-recognized std::type_info entity.
+	set<const NamedTypeInfo*> std_type_info_entities_;
 	map<string, bool> branch_folds_;  // qualified key -> cached verdict
 	// PA15: demand-emitted member/friend/special definitions, keyed by
 	// MemberDefinitionKey; lifetime helper state.

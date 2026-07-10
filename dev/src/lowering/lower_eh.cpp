@@ -41,7 +41,7 @@ TypePtr BoolType()
 
 }  // namespace
 
-bool FunctionLowerer::IsTypeInfoComparison(const SemNode& node)
+bool FunctionLowerer::IsTypeInfoComparison(const SemNode& node) const
 {
 	if (node.kind != SN_CALL_EXPRESSION || node.children.size() != 3 ||
 	    node.children[0]->kind != SN_CALLEE)
@@ -50,13 +50,8 @@ bool FunctionLowerer::IsTypeInfoComparison(const SemNode& node)
 	return callee.is_method &&
 		(callee.entity_name == "operator ==" ||
 		 callee.entity_name == "operator !=") &&
-		callee.entity_scope && callee.entity_scope->entity &&
-		callee.entity_scope->name == "type_info" &&
-		callee.entity_scope->parent &&
-		callee.entity_scope->parent->kind == SCOPE_NAMESPACE &&
-		callee.entity_scope->parent->name == "std" &&
-		callee.entity_scope->parent->parent &&
-		!callee.entity_scope->parent->parent->parent;
+		callee.entity_scope &&
+		program_.IsStdTypeInfo(callee.entity_scope->entity);
 }
 
 // PA25 5.2.7: a polymorphic downcast dynamic_cast. The result slot

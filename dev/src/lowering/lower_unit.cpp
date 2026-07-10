@@ -70,6 +70,8 @@ static TypePtr MemberSpecEntryType(const FunctionSpecialization& spec)
 void LowerProgram::AddUnit(const SemUnit& unit)
 {
 	units_.push_back(&unit);
+	if (unit.std_type_info)
+		std_type_info_entities_.insert(unit.std_type_info);
 	for (size_t i = 0; i < unit.items.size(); i++)
 		CollectItem(*unit.items[i]);
 	// unit.synthesized is the PA12 dump artifact; the real demand-driven
