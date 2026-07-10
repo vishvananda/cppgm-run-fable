@@ -218,6 +218,10 @@ struct Type
 	// parameter (`T[N]`); deduction binds the slot from the argument's
 	// concrete bound. -1 on concrete types.
 	int bound_param = -1;
+	// PA24 placeholder-only marker: the `auto` stand-in composed by the
+	// decl-specifier-seq. Deduction replaces the type before a binding
+	// or definition is created; never set on concrete types.
+	bool is_auto_placeholder = false;
 };
 
 // --- classification of fundamental types (3.9.1) ---
@@ -233,6 +237,9 @@ bool IsIntegralType(const TypePtr& type);
 bool IsReferenceType(const TypePtr& type);
 bool IsNullPtrType(const TypePtr& type);
 bool IsVoidType(const TypePtr& type);  // possibly cv-qualified void
+// PA24: the type spells the auto placeholder somewhere on its
+// pointer/reference target chain (a not-yet-deduced declared type).
+bool TypeContainsAutoPlaceholder(const TypePtr& type);
 
 // --- factories ---
 

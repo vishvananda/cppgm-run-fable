@@ -876,10 +876,13 @@ void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
 	BindVariable(name, type, declarator.init.get(), specs);
 }
 
-void DeclBinder::BindVariable(const string& name, const TypePtr& type,
+void DeclBinder::BindVariable(const string& name, const TypePtr& type_in,
                               const AstInitializer* init,
                               const DeclSpecifierInfo& specs)
 {
+	TypePtr type = type_in;
+	if (specs.is_auto)
+		type = DeduceAutoVariableType(type, init, name);
 	if (IsVoidType(type))
 		throw runtime_error("variable of void type");
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))

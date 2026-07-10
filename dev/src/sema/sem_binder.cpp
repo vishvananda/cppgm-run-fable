@@ -691,6 +691,93 @@ void SemBinder::FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 	}
 }
 
+namespace {
+
+// The declared-type pattern with the auto placeholder (the void stand
+// -in) at its base: matching against the initializer's type returns
+// the deduced spelling, or null on shape mismatch (7.1.6.4p6 via the
+// 14.8.2.1 deduction rules over the supported declarator forms).
+TypePtr MatchAutoPattern(const TypePtr& pattern, const TypePtr& arg)
+{
+	if (pattern->is_auto_placeholder)
+		return MakeCvQualifiedType(arg, pattern->is_const,
+		                           pattern->is_volatile);
+	if (pattern->kind == TK_POINTER)
+	{
+		TypePtr from = arg;
+		if (from->kind == TK_ARRAY)
+			from = MakePointerType(from->target, false, false);
+		if (from->kind == TK_FUNCTION)
+			from = MakePointerType(from, false, false);
+		if (from->kind != TK_POINTER)
+			return TypePtr();
+		TypePtr inner = MatchAutoPattern(pattern->target, from->target);
+		if (!inner)
+			return TypePtr();
+		return MakePointerType(inner,
+		                       pattern->is_const || from->is_const,
+		                       pattern->is_volatile || from->is_volatile);
+	}
+	return TypePtr();
+}
+
+}  // namespace
+
+// The shared deduction core over an analyzed initializer or return
+// value: the declared placeholder pattern deduces per 14.8.2.1.
+TypePtr SemBinder::DeduceAutoDeclared(const TypePtr& type,
+                                      const SemValue& value,
+                                      const char* what)
+{
+	if (!value.type)
+		throw runtime_error(string("auto ") + what + " has no type");
+	if (IsReferenceType(type))
+	{
+		// auto& / auto&& / const auto&: the referee pattern deduces
+		// against the initializer's type with its cv kept; auto&&
+		// forwards an lvalue as an lvalue reference (8.3.2p6 with
+		// 14.8.2.1p3).
+		TypePtr referee = MatchAutoPattern(type->target, value.type);
+		if (!referee)
+			throw runtime_error(string("auto deduction mismatch for ") +
+			                    what);
+		bool rvalue = type->kind == TK_RVALUE_REFERENCE &&
+			value.category != VC_LVALUE;
+		return MakeReferenceType(referee, rvalue, false);
+	}
+	// By value: the initializer decays and drops its top cv.
+	TypePtr from = value.type;
+	if (from->kind == TK_ARRAY)
+		from = MakePointerType(from->target, false, false);
+	else if (from->kind == TK_FUNCTION)
+		from = MakePointerType(from, false, false);
+	else
+		from = RemoveTopCv(from);
+	TypePtr deduced = MatchAutoPattern(type, from);
+	if (!deduced)
+		throw runtime_error(string("auto deduction mismatch for ") +
+		                    what);
+	return deduced;
+}
+
+TypePtr SemBinder::DeduceAutoVariableType(const TypePtr& type,
+                                          const AstInitializer* init,
+                                          const string& name)
+{
+	const AstExpr* expr = 0;
+	if (init && init->kind == INIT_EQ)
+		expr = init->expr.get();
+	else if (init && init->kind == INIT_PAREN && init->args.size() == 1)
+		expr = init->args[0].get();
+	if (!init || (!expr && init->kind != INIT_BRACED))
+		throw runtime_error("auto variable " + name +
+		                    " has no initializer");
+	if (!expr || expr->kind == EK_BRACED)
+		throw OutsideBoundary("braced auto initializer");
+	SemValue value = analyzer_.Analyze(*expr);
+	return DeduceAutoDeclared(type, value, name.c_str());
+}
+
 void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
                                     const AstInitializer* init)
 {
@@ -1016,6 +1103,7 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	method_.fn_name = name;
 	current_return_ = composed.type->target;
 	DeclBinder::BindFunctionBody(decl, composed, name);
+	TypePtr deduced_return = current_return_;
 	current_return_ = saved_return;
 	method_ = saved_method;
 	parents_.pop_back();
@@ -1023,6 +1111,30 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	published.name = name;
 	published.declaring = current_->parent;
 	published.composed = composed;
+	if (TypeContainsAutoPlaceholder(composed.type->target))
+	{
+		// 7.1.6.4p7/p10: the body's return statements deduced the
+		// placeholder (void when none did); the definition node, the
+		// function scope, and the declared overload entry take the
+		// deduced signature.
+		if (TypeContainsAutoPlaceholder(deduced_return))
+			deduced_return = MakeFundamentalType(FT_VOID);
+		TypePtr fixed = MakeFunctionType(deduced_return,
+		                                 composed.type->parameters,
+		                                 composed.type->variadic);
+		item->type = fixed;
+		current_->fn_type = fixed;
+		if (ScopeBinding* fn = FindOwnBinding(*current_->parent, name))
+		{
+			if (fn->type && TypeEquals(fn->type, composed.type))
+				fn->type = fixed;
+			else
+				for (size_t i = 0; i < fn->overloads.size(); i++)
+					if (TypeEquals(fn->overloads[i], composed.type))
+						fn->overloads[i] = fixed;
+		}
+		published.composed.type = fixed;
+	}
 	PublishBodyUnwindFact(published, SF_NONE, *item);
 }
 
@@ -1135,6 +1247,9 @@ void SemBinder::BindReturnStatement(const AstStmt& stmt)
 	SemNode* item = AppendItem(SN_RETURN_STATEMENT);
 	if (!stmt.expr)
 	{
+		// 7.1.6.4p10: a placeholder return with no operand is void.
+		if (TypeContainsAutoPlaceholder(current_return_))
+			current_return_ = MakeFundamentalType(FT_VOID);
 		if (!IsVoidType(current_return_))
 			throw runtime_error("non-void function returns no value");
 		return;
@@ -1149,6 +1264,15 @@ void SemBinder::BindReturnStatement(const AstStmt& stmt)
 		                                      false);
 	else
 		value = analyzer_.Analyze(*stmt.expr);
+	if (TypeContainsAutoPlaceholder(current_return_))
+	{
+		// 7.1.6.4p7: the first return statement deduces the placeholder
+		// return type; the enclosing definition publishes it after the
+		// body completes.
+		current_return_ = DeduceAutoDeclared(current_return_, value,
+		                                     "return value");
+		bare = RemoveTopCv(current_return_);
+	}
 	if (!IsReferenceType(current_return_) && bare->kind == TK_CLASS &&
 	    value.type && RemoveTopCv(value.type)->kind == TK_CLASS &&
 	    !value.function_set)

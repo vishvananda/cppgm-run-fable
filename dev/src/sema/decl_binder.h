@@ -85,6 +85,18 @@ protected:
 	void BindVariable(const string& name, const TypePtr& type,
 	                  const AstInitializer* init,
 	                  const DeclSpecifierInfo& specs);
+	// PA24 7.1.6.4: deduces a declared type whose base is the auto
+	// placeholder from the variable's initializer. The base binder has
+	// no expression analyzer; the composed placeholder type flows on
+	// unchanged (and the void-variable check reports it).
+	virtual TypePtr DeduceAutoVariableType(const TypePtr& type,
+	                                       const AstInitializer* init,
+	                                       const string& name)
+	{
+		(void)init;
+		(void)name;
+		return type;
+	}
 	void RecordConstantValue(ScopeBinding& binding,
 	                         const AstInitializer* init);
 	void BindFunctionDefinition(const AstDecl& decl);

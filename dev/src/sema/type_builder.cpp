@@ -161,8 +161,13 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 		if (named || AnySimpleTypeSpecifier(simple))
 			throw runtime_error("auto combined with a type specifier");
 		// The placeholder resolves from the trailing-return-type
-		// (8.3.5p2); the void stand-in is replaced at composition.
-		base = MakeFundamentalType(FT_VOID);
+		// (8.3.5p2) or PA24 initializer/return deduction; the marked
+		// void stand-in is replaced before any binding is created.
+		Type marked;
+		marked.kind = TK_FUNDAMENTAL;
+		marked.fundamental = FT_VOID;
+		marked.is_auto_placeholder = true;
+		base = std::make_shared<Type>(marked);
 	}
 	else
 		base = named ? named

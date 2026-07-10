@@ -83,6 +83,14 @@ bool IsVoidType(const TypePtr& type)
 	return type->kind == TK_FUNDAMENTAL && type->fundamental == FT_VOID;
 }
 
+bool TypeContainsAutoPlaceholder(const TypePtr& type)
+{
+	for (TypePtr at = type; at; at = at->target)
+		if (at->is_auto_placeholder)
+			return true;
+	return false;
+}
+
 TypePtr MakeFundamentalType(EFundamentalType fundamental)
 {
 	Type type;
@@ -117,7 +125,9 @@ TypePtr MakePointerType(const TypePtr& pointee, bool is_const,
 TypePtr MakeReferenceType(const TypePtr& target, bool is_rvalue,
                           bool allow_collapse)
 {
-	if (IsVoidType(target))
+	// The PA24 auto placeholder composes under reference declarators
+	// (`auto&`, `auto&&`); deduction replaces it before use.
+	if (IsVoidType(target) && !target->is_auto_placeholder)
 		throw runtime_error("reference to void is ill-formed");
 	Type type;
 	type.target = target;

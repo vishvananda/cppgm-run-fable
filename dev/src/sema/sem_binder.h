@@ -126,6 +126,16 @@ private:
 	void BindLabelStatement(const AstStmt& stmt);
 
 	// --- initialization and implicit constructors ---
+	// PA24 7.1.6.4p6: deduces the declared auto placeholder pattern
+	// from the analyzed initializer (template-argument-deduction
+	// rules; auto&& forwards by value category).
+	virtual TypePtr DeduceAutoVariableType(const TypePtr& type,
+	                                       const AstInitializer* init,
+	                                       const string& name);
+	// The shared placeholder-deduction core over an analyzed value
+	// (also used by return-type deduction, 7.1.6.4).
+	TypePtr DeduceAutoDeclared(const TypePtr& type, const SemValue& value,
+	                           const char* what);
 	void AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	                         const AstInitializer* init);
 	// PA20: evaluates a constexpr (or engine-foldable const) object's
