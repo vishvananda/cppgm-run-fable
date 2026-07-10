@@ -225,6 +225,13 @@ struct SemNode
 	unsigned long long member_offset;
 	int base_hops;
 	unsigned long long base_offset;
+	// PA27 SN_MEMBER_EXPRESSION: the base path crosses a virtual edge.
+	// `vbase_index` names the carrier entry of the object's static
+	// class's vbase table, and `base_offset` holds the remaining static
+	// offset inside the carrier's complete object. The lowering picks
+	// the carrier address per context (static complete-object offset,
+	// dynamic vpointer offset, or a carried hidden pointer).
+	int vbase_index = -1;
 	// PA26 5.2.9p11: the adjustment runs from a base view back to the
 	// derived object (a downcast) - the address shifts by -base_offset
 	// instead of projecting into a base subobject.
@@ -292,6 +299,11 @@ struct SemNode
 	// nothing: the callee is still demanded (emitted on use) but the
 	// call itself is not printed.
 	bool elided;
+	// PA27 constructor/destructor actions on a shared virtual-base
+	// subobject: only the complete-object variants (C1/D1) emit them;
+	// base-subobject entries (C2/D2) and the deleting entry (D0) skip
+	// the marked actions.
+	bool vbase_action = false;
 	// PA15 bit-field stores: the first write to a storage unit inside a
 	// constructor stores the masked value directly instead of
 	// read-modify-write.

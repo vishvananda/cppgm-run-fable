@@ -240,9 +240,10 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 	{
 		int hops = 0;
 		unsigned long long base_offset = 0;
-		EBasePath path = BaseSubobjectPath(
-			object_entity, host_.Model().ScopeEntity(member->owner),
-			hops, base_offset);
+		const NamedTypeInfo* owner_entity =
+			host_.Model().ScopeEntity(member->owner);
+		EBasePath path = BaseSubobjectPath(object_entity, owner_entity,
+		                                   hops, base_offset);
 		if (path == BP_AMBIGUOUS)
 			throw runtime_error("ambiguous base class subobject");
 		if (path == BP_UNIQUE)
@@ -260,6 +261,20 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 			}
 			value.node->base_hops = hops;
 			value.node->base_offset = base_offset;
+		}
+		else if (object_entity && object_entity->class_record)
+		{
+			// PA27: the owner subobject sits behind a virtual edge; the
+			// carrier entry and the remainder inside it ride the node.
+			size_t vbase_index = 0;
+			unsigned long long remainder = 0;
+			if (VirtualBasePath(*object_entity->class_record,
+			                    owner_entity, vbase_index, remainder))
+			{
+				value.node->base_hops = 1;
+				value.node->base_offset = remainder;
+				value.node->vbase_index = (int)vbase_index;
+			}
 		}
 	}
 	value.node->is_bit_field = field->is_bit_field;

@@ -266,6 +266,14 @@ private:
 	// One direct base's implicit default-initialization (PA26).
 	void AppendOneBaseDefaultInit(const ClassInfo& cls, size_t base_index,
 	                              vector<SemNodePtr>& out, bool syntactic);
+	// PA27: the shared virtual-base construction phase of a
+	// complete-object constructor (12.6.2p10: virtual bases first, in
+	// DFS appearance order). `plan` supplies mem-initializers matched
+	// to direct virtual rows (null for synthesized constructors); the
+	// appended actions carry vbase_action so base entries drop them.
+	void AppendVBaseInits(const ClassInfo& cls,
+	                      const MemberInitPlan* plan,
+	                      vector<SemNodePtr>& out, bool syntactic);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,
@@ -278,6 +286,9 @@ private:
 	// The direct base subobject's address at `base_index` (PA26).
 	SemNodePtr ThisBaseAddress(const ClassInfo& cls,
 	                           size_t base_index = 0);
+	// PA27: the shared virtual-base subobject's address at the given
+	// vbase-table index (a complete-object projection from `this`).
+	SemNodePtr ThisVBaseAddress(const ClassInfo& cls, size_t vbase_index);
 	SemNodePtr AddressOfNode(SemNodePtr operand);
 	SemNodePtr SubscriptNode(SemNodePtr array, unsigned long long index);
 	SemNodePtr MemberAssignAction(const ClassField& field,

@@ -4,30 +4,17 @@
 
 using std::runtime_error;
 
-// PA26 base-clause binding: resolves the direct-base list (packs
-// expanded, access recorded), populates the class's direct-base table
-// and the member-lookup base links, and re-seeds the layout with the
-// resolved base subobjects.
-
-namespace {
-
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA26 assignment boundary");
-}
-
-}  // namespace
+// PA27 base-clause binding: resolves the direct-base list (packs
+// expanded, access recorded, virtual bases accepted), populates the
+// class's direct-base table and the member-lookup base links, selects
+// the primary base (the first polymorphic non-virtual base carries the
+// vtable chain), and re-seeds the layout with the resolved subobjects.
 
 void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
                                Scope* scope)
 {
 	(void)info;
 	ClassInfo* cls = OpenClass();
-	// PA26: base-specifier packs expand per element; every resolved
-	// base joins the direct-base table in declaration order. The first
-	// base carries the primary chain (vtable slots, the polymorphic
-	// layer); extra bases must stay non-polymorphic.
 	std::vector<TypePtr> base_types;
 	std::vector<const AstBaseSpecifier*> base_specs;
 	bool saved_implicit = in_implicit_type_context_;
@@ -38,8 +25,6 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 		for (size_t b = 0; b < decl.bases.size(); b++)
 		{
 			const AstBaseSpecifier& spec = decl.bases[b];
-			if (spec.is_virtual)
-				throw OutsideBoundary("virtual inheritance");
 			if (BaseClauseIsDependent(spec.name))
 				any_dependent = true;
 			if (spec.pack)
@@ -77,11 +62,10 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 		for (size_t prior = 0; prior < b; prior++)
 			if (base_types[prior]->named == base_type->named)
 				throw runtime_error("duplicate direct base class");
-		if (b > 0 && base_cls->is_polymorphic)
-			throw OutsideBoundary("polymorphic multiple inheritance");
 		const AstBaseSpecifier& spec = *base_specs[b];
 		ClassDirectBase row;
 		row.cls = base_cls;
+		row.is_virtual = spec.is_virtual;
 		// 11.2p2: the default base access is private for `class` keys
 		// and public otherwise.
 		if (spec.has_access)
@@ -91,17 +75,39 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 			row.access =
 				decl.class_key == KW_CLASS ? MA_PRIVATE : MA_PUBLIC;
 		cls->direct_bases.push_back(row);
-		if (b == 0)
+	}
+	// PA27 primary selection: the first polymorphic non-virtual base
+	// (it shares the vpointer at offset 0), else the first non-virtual
+	// base. All other bases join the extra lookup links.
+	cls->primary_base = -1;
+	for (size_t b = 0; b < cls->direct_bases.size(); b++)
+		if (!cls->direct_bases[b].is_virtual &&
+		    cls->direct_bases[b].cls->is_polymorphic)
 		{
-			cls->base = base_cls;
+			cls->primary_base = (int)b;
+			break;
+		}
+	if (cls->primary_base < 0)
+		for (size_t b = 0; b < cls->direct_bases.size(); b++)
+			if (!cls->direct_bases[b].is_virtual)
+			{
+				cls->primary_base = (int)b;
+				break;
+			}
+	for (size_t b = 0; b < cls->direct_bases.size(); b++)
+	{
+		const ClassDirectBase& row = cls->direct_bases[b];
+		if ((int)b == cls->primary_base)
+		{
+			cls->base = row.cls;
 			cls->base_access = row.access;
-			model_.MutableInfo(info)->base_entity = base_cls->entity;
+			model_.MutableInfo(info)->base_entity = row.cls->entity;
 			// Base members become reachable through unqualified and
 			// qualified member lookup (10.2 over the base DAG).
-			scope->class_base = base_cls->members;
+			scope->class_base = row.cls->members;
 		}
 		else
-			scope->class_extra_bases.push_back(base_cls->members);
+			scope->class_extra_bases.push_back(row.cls->members);
 	}
 	// 8.5.1p1: a class with bases is not an aggregate.
 	cls->is_aggregate = false;
@@ -110,18 +116,14 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 	// lookup skips the base subtree.
 	if (instantiating_ && any_dependent)
 		scope->base_dependent = true;
-	// PA17: the derived class inherits the first base's vtable slots
+	// PA17: the derived class inherits the primary base's vtable slots
 	// (an overrider replaces in place) and the virtual-destructor
-	// facts. Introducing the first vpointer over a non-empty
-	// non-polymorphic base would need base-subobject pointer
-	// adjustment (out of scope).
-	cls->vslots = cls->base->vslots;
-	cls->dtor_slot = cls->base->dtor_slot;
-	if (cls->declares_virtual && !cls->base->is_polymorphic)
-		for (size_t b = 0; b < cls->direct_bases.size(); b++)
-			if (!cls->direct_bases[b].cls->is_empty)
-				throw OutsideBoundary(
-					"vpointer introduction over a non-empty "
-					"non-polymorphic base");
+	// facts. Other polymorphic bases keep their own slot lists and
+	// dispatch through their vtable views (PA27).
+	if (cls->base && cls->base->is_polymorphic)
+	{
+		cls->vslots = cls->base->vslots;
+		cls->dtor_slot = cls->base->dtor_slot;
+	}
 	BeginClassLayout(*cls);
 }

@@ -740,6 +740,40 @@ string LowerProgram::MemberFunctionRef(const SemNode& callee)
 	return "@" + info.low_name;
 }
 
+// PA27: whether the (already lowered) callee body carries a
+// null-guarded displaced-base adjustment; callers under cleanups wrap
+// such calls in a lazy dispatch region even when the sema unwind fact
+// stayed non-throwing.
+bool LowerProgram::CalleeGuardedBody(const SemNode& callee)
+{
+	if (callee.kind != SN_CALLEE || !callee.entity_scope)
+		return false;
+	return CalleeEntryInfo(callee).guarded_body;
+}
+
+// PA27: the registry entry a direct call resolves to (for the hidden
+// vbase-pointer signature), without demanding it.
+LowFunctionInfo& LowerProgram::CalleeEntryInfo(const SemNode& callee)
+{
+	if (callee.is_method || callee.special != SF_NONE)
+	{
+		const char* code = "";
+		switch (callee.special)
+		{
+		case SF_CONSTRUCTOR: code = "C1"; break;
+		case SF_CONSTRUCTOR_BASE: code = "C2"; break;
+		case SF_DESTRUCTOR: code = "D1"; break;
+		case SF_DESTRUCTOR_BASE: code = "D2"; break;
+		default:
+			break;
+		}
+		return MemberFunctionEntry(callee.entity_scope,
+		                           callee.entity_name, callee.type, code);
+	}
+	return FunctionEntry(callee.entity_scope, callee.entity_name,
+	                     callee.type, callee.fn_spec);
+}
+
 void LowerProgram::RequireEhRuntime()
 {
 	needs_eh_runtime_ = true;
@@ -1006,8 +1040,30 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 			!lowering_context_->fn_spec &&
 			lowering_context_->scope && lowering_context_->scope->entity &&
 			lowering_context_->scope->entity->spec_template;
+		// PA27: a constructor/destructor context whose class carries
+		// virtual bases pairs every user-provided subobject entry; a
+		// polymorphic context pairs the entries on its primary chain
+		// (reference-observed comdat behavior).
+		bool ctx_pair = false;
+		if (lowering_context_ && lowering_context_->is_method &&
+		    lowering_context_->weak &&
+		    !lowering_context_->special_code.empty())
+		{
+			const ClassInfo* ctx_cls =
+				MethodClass(lowering_context_->type);
+			if (ctx_cls && ClassHasVBases(*ctx_cls))
+				ctx_pair = true;
+			else if (ctx_cls && ctx_cls->is_polymorphic)
+				for (const ClassInfo* at = ctx_cls->base; at;
+				     at = at->base)
+					if (at == cls)
+					{
+						ctx_pair = true;
+						break;
+					}
+		}
 		bool comdat_pair = cls &&
-			((cls->is_polymorphic && cls->dtor_virtual) ||
+			((cls->is_polymorphic && cls->dtor_virtual) || ctx_pair ||
 			 (cls->entity && cls->entity->spec_template &&
 			  !cls->base && !from_spec_ctor));
 		// A constructor-template specialization's entries emit each
@@ -1390,6 +1446,9 @@ void LowerProgram::Write(ostream& out)
 			continue;
 		sections[3].push_back(info.body_text);
 	}
+	// PA27: vtable entry thunks print after the ordinary bodies.
+	for (size_t i = 0; i < thunk_texts_.size(); i++)
+		sections[3].push_back(thunk_texts_[i]);
 	if (needs_eh_runtime_)
 	{
 		vector<string> declares;

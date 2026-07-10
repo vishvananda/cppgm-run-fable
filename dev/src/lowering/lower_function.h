@@ -77,6 +77,45 @@ private:
 		string pass;
 	};
 
+	// --- PA27 hidden vbase-pointer state (lower_member.cpp helpers) ---
+	// One declared parameter (or `this`) whose class carries virtual
+	// bases: the carried hidden arguments by table index, and whether
+	// the entries live in $name__pvbN slots (reference-to-class
+	// parameters) or stay raw hidden registers.
+	struct VBaseParamMap
+	{
+		VBaseParamMap() : cls(0), slots(false) {}
+
+		const ClassInfo* cls;
+		bool slots;
+		map<size_t, string> carried;  // table index -> "%__pvbptrK"
+	};
+
+	// Emits the pvb slot stores / static reconstructions of one
+	// declared reference-to-class parameter and records its map.
+	void EmitParamVBasePointers(size_t param_pos, size_t type_index,
+	                            const SemNode& child);
+	// Appends the callee's hidden trailing arguments to `arguments`.
+	void AppendHiddenArguments(const vector<HiddenParam>& hidden,
+	                           const vector<const SemNode*>& arg_nodes,
+	                           const vector<string>& arg_texts,
+	                           const SemNode* object_node,
+	                           const string& object_text,
+	                           string& arguments);
+	// The address of `entry_cls`'s subobject for one hidden argument,
+	// anchored on the argument expression (parameter maps, complete
+	// locals, dynamic vpointer offsets, static fallback).
+	string SupplyVBaseEntry(const ClassInfo& param_cls,
+	                        const ClassInfo* entry_cls,
+	                        const SemNode* arg_node,
+	                        const string& arg_text);
+	// The current function's own address of `entry_cls` (base-entry
+	// forwarding or a static `this` projection).
+	string OwnVBaseEntryAddress(const ClassInfo* entry_cls);
+	// The current constructor/destructor's construction-table operand
+	// for a base entry's __vtt argument.
+	string SupplyVttArgument(const ClassInfo& callee_cls);
+
 	// --- shared state helpers (lower_function.cpp) ---
 	string Header() const;
 	void EmitParameterStores();
@@ -216,6 +255,13 @@ private:
 	                    const NamedTypeInfo* to);
 	string AdjustToBaseHops(const string& address, int hops,
 	                        unsigned long long offset);
+	// PA27: the address behind a virtual-edge member path (carrier
+	// virtual base resolved per context, then the hops inside it).
+	string VBaseCarrierAddress(const SemNode& node, bool with_projection);
+	string VBaseRemainderHops(const string& base, const ClassInfo& carrier,
+	                          const NamedTypeInfo* owner,
+	                          unsigned long long remainder,
+	                          bool with_projection);
 	// A runtime class-pointer adjustment across a displaced base:
 	// branches so null stays null (4.10p3 / 5.2.9p11); the PA27 shape
 	// stores 0 / the shifted address into one $basecast slot.
@@ -278,7 +324,10 @@ private:
 	void LowerDeletingDispatch(const SemNode& dtor_callee,
 	                           const string& pointer_text);
 	// The `as (...) -> ...` suffix of an indirect (or dispatched) call.
-	string IndirectCallSignature(const TypePtr& fn_type);
+	// `method_object` marks a leading this parameter (dispatch), which
+	// never carries its own hidden vbase pointers.
+	string IndirectCallSignature(const TypePtr& fn_type,
+	                             bool method_object = false);
 
 	// --- PA15 lifetime (lower_member.cpp) ---
 	// Full-expression temporaries (12.2): registered as each one is
@@ -385,6 +434,12 @@ private:
 	set<string> referenced_;
 	vector<ParamInfo> params_;
 	set<string> param_names_;
+	// PA27: the signature's hidden trailing pointers and the per-
+	// parameter carried-entry maps ("this" holds the __vbptr row).
+	vector<HiddenParam> hidden_params_;
+	map<string, VBaseParamMap> vbase_params_;
+	string vtt_param_;  // "%__vtt" when the entry carries one
+	size_t declared_param_count_ = 0;
 	// PA16: lvalues addressed through a parameter or the indirect
 	// result pointer instead of a local slot (by_address parameters and
 	// the return-slot-reused local), keyed like slot_map_.

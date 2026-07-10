@@ -405,6 +405,10 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 	// types can differ); every subobject transfers individually.
 	if (cls.is_polymorphic)
 		return 0;
+	// PA27: the shared virtual-base region is not part of the base
+	// subobject's own storage; no whole-storage shortcut.
+	if (ClassHasVBases(cls))
+		return 0;
 	// The prefix spans subobjects whose transfer of *this* form is
 	// trivial: constructor forms check copy/move constructors, assign
 	// forms check copy/move assignments (12.8p25/p28).
@@ -465,6 +469,10 @@ void SemBinder::AppendBaseTransfer(const ClassInfo& cls, bool is_move,
 	for (size_t b = 0; b < cls.direct_bases.size(); b++)
 	{
 		const ClassDirectBase& row = cls.direct_bases[b];
+		// PA27: virtual rows belong to the complete-object phase; the
+		// synthesized base entry transfers non-virtual subobjects only.
+		if (row.is_virtual)
+			continue;
 		SemNodePtr base_source = MakeSemNode(SN_MEMBER_EXPRESSION);
 		base_source->type = MakeNamedType(TK_CLASS, row.cls->entity);
 		base_source->category = category;
@@ -551,6 +559,11 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
                                       vector<SemNodePtr>& out)
 {
 	EValueCategory category = is_move ? VC_XVALUE : VC_LVALUE;
+	// PA27: a synthesized complete-object constructor default-
+	// initializes the shared virtual bases first (base entries drop
+	// the marked actions; assignment leaves the shared region alone).
+	if (!assign_form)
+		AppendVBaseInits(cls, 0, out, false);
 	unsigned long long alignment = 1;
 	size_t first_suffix = 0;
 	unsigned long long span = TrivialStoragePrefix(

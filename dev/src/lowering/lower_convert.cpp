@@ -200,6 +200,9 @@ LowerValue FunctionLowerer::ConvertPointerValue(LowerValue value,
 string FunctionLowerer::AdjustPointerGuarded(const string& value,
                                              long long delta)
 {
+	// The guard's branches count as unwind-relevant control flow for
+	// callers under cleanups (the reference wraps such calls lazily).
+	const_cast<LowFunctionInfo&>(info_).guarded_body = true;
 	string slot = AddMatSlot("basecast", "ptr");
 	string is_null = NewTemp();
 	Emit(is_null + " = cmp eq ptr " + value + ", 0");

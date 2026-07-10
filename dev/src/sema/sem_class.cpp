@@ -1226,6 +1226,19 @@ SemNodePtr SemBinder::ThisBaseAddress(const ClassInfo& cls,
 	return AddressOfNode(std::move(member));
 }
 
+SemNodePtr SemBinder::ThisVBaseAddress(const ClassInfo& cls,
+                                       size_t vbase_index)
+{
+	const ClassVBase& row = cls.vbases[vbase_index];
+	SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
+	member->type = MakeNamedType(TK_CLASS, row.cls->entity);
+	member->category = VC_LVALUE;
+	member->base_hops = 1;
+	member->base_offset = row.offset;
+	member->children.push_back(ThisObjectExpr());
+	return AddressOfNode(std::move(member));
+}
+
 SemNodePtr SemBinder::AddressOfNode(SemNodePtr operand)
 {
 	SemNodePtr address = MakeSemNode(SN_UNARY_EXPRESSION);

@@ -125,6 +125,395 @@ string FunctionLowerer::AdjustToBase(const string& address,
 	return AdjustToBaseHops(address, hops, offset);
 }
 
+// --- PA27 hidden vbase-pointer machinery -----------------------------------
+
+// The id-expression an object/argument expression bottoms out at,
+// peeling dereferences and projection wrappers ("this" included).
+static const SemNode* BottomIdExpression(const SemNode& node)
+{
+	const SemNode* at = &node;
+	while (at)
+	{
+		if (at->kind == SN_ID_EXPRESSION)
+			return at;
+		if (at->children.empty())
+			return 0;
+		at = at->children[0].get();
+	}
+	return 0;
+}
+
+// Emits the carried-pointer slots of one declared parameter: hidden
+// arguments store first, the remaining table entries reconstruct from
+// static complete-object offsets in post-order.
+void FunctionLowerer::EmitParamVBasePointers(size_t param_pos,
+                                             size_t type_index,
+                                             const SemNode& child)
+{
+	bool collapsed = false;
+	const ClassInfo* cls = ParamVBaseClass(child.type, collapsed);
+	if (!cls)
+		return;
+	VBaseParamMap& map = vbase_params_[params_[param_pos].low_name];
+	map.cls = cls;
+	for (size_t h = 0; h < hidden_params_.size(); h++)
+	{
+		const HiddenParam& hp = hidden_params_[h];
+		if (hp.kind == HP_PVBPTR && hp.param_index == type_index)
+			map.carried[hp.vbase_index] = "%" + hp.low_name;
+	}
+	map.slots = !collapsed && IsReferenceType(child.type);
+	if (!map.slots)
+		return;
+	const string& base_name = params_[param_pos].low_name;
+	for (size_t h = 0; h < hidden_params_.size(); h++)
+	{
+		const HiddenParam& hp = hidden_params_[h];
+		if (hp.kind != HP_PVBPTR || hp.param_index != type_index)
+			continue;
+		string slot = AddSlot(child.entity_scope,
+		                      base_name + "__pvb" +
+		                          to_string(hp.vbase_index),
+		                      "ptr");
+		Emit("store ptr %" + hp.low_name + ", $" + slot);
+	}
+	vector<size_t> order;
+	PostOrderVBases(*cls, order);
+	for (size_t i = 0; i < order.size(); i++)
+	{
+		size_t k = order[i];
+		if (map.carried.count(k))
+			continue;
+		string slot = AddSlot(child.entity_scope,
+		                      base_name + "__pvb" + to_string(k), "ptr");
+		string address = NewTemp();
+		Emit(address + " = index i8 %" + base_name + ", " +
+		     to_string(cls->vbases[k].offset));
+		Emit("store ptr " + address + ", $" + slot);
+	}
+}
+
+// The construction-table operand of a polymorphic base entry's __vtt
+// argument: a base entry slices its own table, a complete-object
+// entry addresses the class's VTT global at the base's sub-VTT.
+string FunctionLowerer::SupplyVttArgument(const ClassInfo& callee_cls)
+{
+	const ClassInfo* own = program_.MethodClass(def_.type);
+	if (!own)
+		throw runtime_error("construction-table argument outside a "
+		                    "constructor context");
+	size_t index = program_.SubVttIndex(*own, callee_cls);
+	if (!vtt_param_.empty())
+	{
+		string sliced = NewTemp();
+		Emit(sliced + " = index i8 " + vtt_param_ + ", " +
+		     to_string(8 * index));
+		return sliced;
+	}
+	string table = NewTemp();
+	Emit(table + " = addr " + program_.VttRef(own));
+	string sliced = NewTemp();
+	Emit(sliced + " = index i8 " + table + ", " + to_string(8 * index));
+	return sliced;
+}
+
+// The current function's own address of one shared virtual-base
+// subobject: base entries forward their hidden row; complete-object
+// entries project the static offset from `this`.
+string FunctionLowerer::OwnVBaseEntryAddress(const ClassInfo* entry_cls)
+{
+	map<string, VBaseParamMap>::const_iterator found =
+		vbase_params_.find("this");
+	if (found != vbase_params_.end())
+		for (size_t i = 0; i < found->second.cls->vbases.size(); i++)
+			if (found->second.cls->vbases[i].cls == entry_cls)
+			{
+				map<size_t, string>::const_iterator carried =
+					found->second.carried.find(i);
+				if (carried != found->second.carried.end())
+					return carried->second;
+				break;
+			}
+	const ClassInfo* own = program_.MethodClass(def_.type);
+	const ClassVBase* row = own ? FindClassVBase(*own, entry_cls) : 0;
+	if (!row)
+		throw std::runtime_error(
+			"hidden virtual-base pointer has no source subobject");
+	string self = NewTemp();
+	Emit(self + " = load ptr $this");
+	string address = NewTemp();
+	Emit(address + " = index i8 " + self + ", " +
+	     to_string(row->offset));
+	return address;
+}
+
+// The subobject address of `entry_cls` for one hidden call argument,
+// anchored on the (already lowered) argument expression.
+string FunctionLowerer::SupplyVBaseEntry(const ClassInfo& param_cls,
+                                         const ClassInfo* entry_cls,
+                                         const SemNode* arg_node,
+                                         const string& arg_text)
+{
+	const SemNode* bottom = arg_node ? BottomIdExpression(*arg_node) : 0;
+	if (bottom)
+	{
+		if (bottom->entity_name == "this")
+			return OwnVBaseEntryAddress(entry_cls);
+		map<string, VBaseParamMap>::const_iterator found =
+			vbase_params_.find(bottom->entity_name);
+		if (found != vbase_params_.end() && found->second.cls)
+		{
+			const VBaseParamMap& map = found->second;
+			const ClassVBase* row = FindClassVBase(*map.cls, entry_cls);
+			if (row)
+			{
+				size_t index = row - &map.cls->vbases[0];
+				if (map.slots)
+				{
+					string loaded = NewTemp();
+					Emit(loaded + " = load ptr $" +
+					     SlotRef(bottom->entity_scope,
+					             bottom->entity_name + "__pvb" +
+					                 to_string(index)));
+					return loaded;
+				}
+				std::map<size_t, string>::const_iterator carried =
+					map.carried.find(index);
+				if (carried != map.carried.end())
+					return carried->second;
+			}
+		}
+		// A named complete object: the entry sits at its static
+		// complete-object offset (the declared class knows the layout
+		// even when the entry is deeper than the parameter's view).
+		const ScopeBinding* binding = EntityBinding(*bottom);
+		if (binding && binding->kind == SB_VARIABLE &&
+		    !IsReferenceType(binding->type))
+		{
+			TypePtr declared = RemoveTopCv(binding->type);
+			const ClassInfo* record = declared->kind == TK_CLASS
+				? declared->named->class_record : 0;
+			unsigned long long offset = 0;
+			if (record &&
+			    CompleteObjectOffset(*record, entry_cls->entity, offset))
+			{
+				// The lowered argument doubles as the anchor when it
+				// went through unadjusted; otherwise re-address the
+				// named object.
+				string anchor = arg_node == bottom && record == &param_cls
+					? arg_text : LowerAddressExpr(*bottom);
+				string address = NewTemp();
+				Emit(address + " = index i8 " + anchor + ", " +
+				     to_string(offset));
+				return address;
+			}
+		}
+	}
+	// Fallback through the parameter's own class: a polymorphic view
+	// reads the offset from the vpointer header; otherwise the static
+	// complete-object layout stands in.
+	const ClassVBase* row = FindClassVBase(param_cls, entry_cls);
+	if (!row)
+		throw std::runtime_error(
+			"hidden virtual-base pointer has no argument subobject");
+	if (param_cls.is_polymorphic)
+	{
+		size_t index = row - &param_cls.vbases[0];
+		string vpointer = NewTemp();
+		Emit(vpointer + " = load ptr " + arg_text);
+		string slot = NewTemp();
+		Emit(slot + " = index i8 " + vpointer + ", -" +
+		     to_string(24 + 8 * index));
+		string offset = NewTemp();
+		Emit(offset + " = load i64 " + slot);
+		string address = NewTemp();
+		Emit(address + " = index i8 " + arg_text + ", " + offset);
+		return address;
+	}
+	string address = NewTemp();
+	Emit(address + " = index i8 " + arg_text + ", " +
+	     to_string(row->offset));
+	return address;
+}
+
+// Appends the callee's hidden trailing arguments (see pa27/plan.md).
+void FunctionLowerer::AppendHiddenArguments(
+	const vector<HiddenParam>& hidden,
+	const vector<const SemNode*>& arg_nodes,
+	const vector<string>& arg_texts, const SemNode* object_node,
+	const string& object_text, string& arguments)
+{
+	for (size_t h = 0; h < hidden.size(); h++)
+	{
+		const HiddenParam& hp = hidden[h];
+		string value;
+		switch (hp.kind)
+		{
+		case HP_VTT:
+			value = SupplyVttArgument(*hp.cls);
+			break;
+		case HP_VBPTR:
+		{
+			const ClassInfo* entry = hp.cls->vbases[hp.vbase_index].cls;
+			const SemNode* bottom =
+				object_node ? BottomIdExpression(*object_node) : 0;
+			if (!object_node || (bottom && bottom->entity_name == "this"))
+				value = OwnVBaseEntryAddress(entry);
+			else
+				value = SupplyVBaseEntry(*hp.cls, entry, object_node,
+				                         object_text);
+			break;
+		}
+		case HP_PVBPTR:
+		{
+			const ClassInfo* entry = hp.cls->vbases[hp.vbase_index].cls;
+			const SemNode* arg = hp.param_index < arg_nodes.size()
+				? arg_nodes[hp.param_index] : 0;
+			string text = hp.param_index < arg_texts.size()
+				? arg_texts[hp.param_index] : string();
+			value = SupplyVBaseEntry(*hp.cls, entry, arg, text);
+			break;
+		}
+		}
+		arguments += (arguments.empty() ? "" : ", ") + value;
+	}
+}
+
+// PA27: the subobject address behind a virtual-edge member path. The
+// carrier virtual base resolves per context: a non-polymorphic static
+// class projects the static complete-object offset in one collapsed
+// index; a polymorphic one loads the offset from the vpointer header
+// (entry k at addresspoint - 24 - 8k), then walks the remaining
+// virtual hops inside the carrier. `with_projection` appends the final
+// non-virtual remainder projection (member access always projects;
+// bare base adjustments only when the remainder is non-zero).
+string FunctionLowerer::VBaseCarrierAddress(const SemNode& node,
+                                            bool with_projection)
+{
+	const SemNode& object = *node.children[0];
+	TypePtr object_type = RemoveTopCv(object.type);
+	if (IsReferenceType(object_type))
+		object_type = RemoveTopCv(object_type->target);
+	const ClassInfo* record = object_type->named->class_record;
+	const ClassVBase& carrier = record->vbases[node.vbase_index];
+	// A parameter (or `this`) with carried pointers supplies the
+	// carrier directly.
+	const SemNode* bottom = BottomIdExpression(object);
+	if (bottom)
+	{
+		map<string, VBaseParamMap>::const_iterator found =
+			vbase_params_.find(bottom->entity_name);
+		if (found != vbase_params_.end() && found->second.cls)
+		{
+			const VBaseParamMap& param = found->second;
+			string address;
+			if (param.slots)
+			{
+				address = NewTemp();
+				Emit(address + " = load ptr $" +
+				     SlotRef(bottom->entity_scope,
+				             bottom->entity_name + "__pvb" +
+				                 to_string(node.vbase_index)));
+			}
+			else
+			{
+				std::map<size_t, string>::const_iterator carried =
+					param.carried.find(node.vbase_index);
+				if (carried == param.carried.end())
+					throw runtime_error(
+						"virtual-base carrier is not carried");
+				address = carried->second;
+			}
+			return VBaseRemainderHops(
+				address, *carrier.cls,
+				node.entity_scope ? node.entity_scope->entity : 0,
+				node.base_offset, with_projection);
+		}
+	}
+	string base = LowerAddressExpr(object);
+	if (!record->is_polymorphic)
+	{
+		// An unknown-provenance reference (a call result) reconstructs
+		// the carrier from the static complete layout, then hops like
+		// a carried pointer.
+		if (object.kind == SN_CALL_EXPRESSION)
+		{
+			string located = NewTemp();
+			Emit(located + " = index i8 " + base + ", " +
+			     to_string(carrier.offset));
+			return VBaseRemainderHops(
+				located, *carrier.cls,
+				node.entity_scope ? node.entity_scope->entity : 0,
+				node.base_offset, with_projection);
+		}
+		// Static complete-object collapse: one projection covering the
+		// carrier and every hop inside it.
+		unsigned long long total = carrier.offset + node.base_offset;
+		if (!with_projection && total == 0)
+			return base;
+		string projected = NewTemp();
+		Emit(projected + " = index i8 [projection=base_subobject] " +
+		     base + ", " + to_string(total));
+		return projected;
+	}
+	// Dynamic carrier: the vbase offset lives in the vtable header.
+	string vpointer = NewTemp();
+	Emit(vpointer + " = load ptr " + base);
+	string slot = NewTemp();
+	Emit(slot + " = index i8 " + vpointer + ", -" +
+	     to_string(24 + 8 * (unsigned long long)node.vbase_index));
+	string offset = NewTemp();
+	Emit(offset + " = load i64 " + slot);
+	string at = NewTemp();
+	Emit(at + " = index i8 " + base + ", " + offset);
+	return VBaseRemainderHops(at, *carrier.cls,
+	                          node.entity_scope ? node.entity_scope->entity
+	                                            : 0,
+	                          node.base_offset, with_projection);
+}
+
+// The hops from a carrier virtual base down to the owner subobject:
+// one projection per further virtual edge (each a static offset inside
+// the previous carrier's complete object), then the non-virtual
+// remainder projection.
+string FunctionLowerer::VBaseRemainderHops(const string& base_in,
+                                           const ClassInfo& carrier,
+                                           const NamedTypeInfo* owner,
+                                           unsigned long long remainder,
+                                           bool with_projection)
+{
+	string base = base_in;
+	const ClassInfo* at = &carrier;
+	unsigned long long nv_offset = remainder;
+	while (owner)
+	{
+		int hops = 0;
+		unsigned long long nv = 0;
+		if (at->entity == owner ||
+		    BaseSubobjectPath(at->entity, owner, hops, nv) == BP_UNIQUE)
+		{
+			nv_offset = nv;
+			break;
+		}
+		size_t index = 0;
+		unsigned long long inner = 0;
+		if (!VirtualBasePath(*at, owner, index, inner))
+			break;
+		string hopped = NewTemp();
+		Emit(hopped + " = index i8 [projection=base_subobject] " + base +
+		     ", " + to_string(at->vbases[index].offset));
+		base = hopped;
+		at = at->vbases[index].cls;
+		nv_offset = inner;
+	}
+	if (!with_projection && nv_offset == 0)
+		return base;
+	string projected = NewTemp();
+	Emit(projected + " = index i8 [projection=base_subobject] " + base +
+	     ", " + to_string(nv_offset));
+	return projected;
+}
+
 string FunctionLowerer::MemberAddress(const SemNode& node,
                                       bool skip_ref_load)
 {
@@ -141,6 +530,10 @@ string FunctionLowerer::MemberAddress(const SemNode& node,
 		Emit(shifted + " = index i8 " + base + ", -" +
 		     to_string(node.base_offset));
 		base = shifted;
+	}
+	else if (node.vbase_index >= 0)
+	{
+		base = VBaseCarrierAddress(node, !node.name.empty());
 	}
 	else
 	{
@@ -397,12 +790,29 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	bool saved = in_lifetime_action_;
 	in_lifetime_action_ = true;
 	string arguments = this_text;
+	vector<const SemNode*> arg_nodes(callee.type->parameters.size(), 0);
+	vector<string> arg_texts(callee.type->parameters.size());
 	for (size_t i = first_arg; i < call.children.size(); i++)
 	{
 		size_t param_at = i - first_arg + 1;
 		TypePtr param = param_at < callee.type->parameters.size()
 			? callee.type->parameters[param_at] : TypePtr();
-		arguments += ", " + LowerCallArgument(*call.children[i], param);
+		string text = LowerCallArgument(*call.children[i], param);
+		if (param_at < arg_nodes.size())
+		{
+			arg_nodes[param_at] = call.children[i].get();
+			arg_texts[param_at] = text;
+		}
+		arguments += ", " + text;
+	}
+	// PA27: hidden trailing vbase pointers (base entries take their
+	// subobject row from the enclosing complete object).
+	{
+		const vector<HiddenParam>& hidden =
+			HiddenSignatureParams(program_.CalleeEntryInfo(callee));
+		if (!hidden.empty())
+			AppendHiddenArguments(hidden, arg_nodes, arg_texts, 0,
+			                      this_text, arguments);
 	}
 	// A may-unwind construction runs under a dispatch region once
 	// destructible objects (argument temporaries, live locals) need
@@ -1339,15 +1749,70 @@ void FunctionLowerer::EmitTempCleanups(size_t from)
 // offset-to-top and RTTI entries) into the object's vpointer.
 void FunctionLowerer::LowerVPointerStore(const SemNode& node)
 {
-	string self = LowerValueExpr(*node.children[0]).text;
 	const ClassInfo* cls = RemoveTopCv(node.type)->named->class_record;
 	if (!cls)
 		throw runtime_error("vpointer store without a class record");
-	string table = NewTemp();
-	Emit(table + " = addr " + program_.VTableRef(cls));
-	string entry = NewTemp();
-	Emit(entry + " = index i8 " + table + ", 16");
-	Emit("store ptr " + entry + ", " + self);
+	// PA27: base entries of a polymorphic virtual-base class install
+	// their vpointers from the construction table.
+	bool from_vtt = !vtt_param_.empty();
+	string self = LowerValueExpr(*node.children[0]).text;
+	if (from_vtt)
+	{
+		string loaded = NewTemp();
+		Emit(loaded + " = load ptr " + vtt_param_);
+		Emit("store ptr " + loaded + ", " + self);
+	}
+	else
+	{
+		string table = NewTemp();
+		Emit(table + " = addr " + program_.VTableRef(cls));
+		string entry = NewTemp();
+		Emit(entry + " = index i8 " + table + ", " +
+		     to_string(LowerProgram::VTableAddressPoint(cls)));
+		Emit("store ptr " + entry + ", " + self);
+	}
+	if (cls->views.empty())
+		return;
+	// The non-primary vpointer locations (outermost views), each a
+	// fresh projection from the object address.
+	program_.VTableGroupRef(cls);
+	size_t ordinal = 0;
+	for (size_t v = 0; v < cls->views.size(); v++)
+	{
+		const ClassView& view = cls->views[v];
+		if (!view.outermost)
+			continue;
+		string base = LowerValueExpr(*node.children[0]).text;
+		string target = NewTemp();
+		Emit(target + " = index i8 [projection=base_subobject] " + base +
+		     ", " + to_string(view.offset));
+		if (from_vtt)
+		{
+			string slot = NewTemp();
+			Emit(slot + " = index i8 " + vtt_param_ + ", " +
+			     to_string(8 * LowerProgram::OwnViewVttIndex(*cls,
+			                                                 ordinal)));
+			string loaded = NewTemp();
+			Emit(loaded + " = load ptr " + slot);
+			Emit("store ptr " + loaded + ", " + target);
+		}
+		else
+		{
+			string table = NewTemp();
+			Emit(table + " = addr " + program_.ViewVTableRef(cls, v));
+			unsigned long long point =
+				LowerProgram::ViewAddressPoint(cls);
+			string value = table;
+			if (point)
+			{
+				value = NewTemp();
+				Emit(value + " = index i8 " + table + ", " +
+				     to_string(point));
+			}
+			Emit("store ptr " + value + ", " + target);
+		}
+		ordinal++;
+	}
 }
 
 // The deleting destructor entry (D0) shares the complete destructor's
@@ -1372,7 +1837,8 @@ void FunctionLowerer::EmitDeletingEpilogue()
 
 // The explicit `as (...) -> ...` signature of an indirect or
 // vtable-dispatched call, spelled from the lowered ABI boundary.
-string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type)
+string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type,
+                                              bool method_object)
 {
 	string return_text;
 	bool indirect_result = LowerAbiReturn(fn_type->target, return_text);
@@ -1392,6 +1858,14 @@ string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type)
 			" : " + param_text;
 		if (!pass.empty())
 			signature += " [pass=" + pass + "]";
+	}
+	// PA27: hidden trailing vbase pointers keep their names.
+	{
+		vector<HiddenParam> hidden;
+		HiddenParamsForType(fn_type, method_object, hidden);
+		for (size_t i = 0; i < hidden.size(); i++, at++)
+			signature += (at ? ", " : "") + string("%") +
+				hidden[i].low_name + " : ptr";
 	}
 	string text = " as (" + signature + ") -> " + return_text;
 	if (fn_type->variadic)

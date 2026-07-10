@@ -23,6 +23,26 @@ using std::vector;
 // top-level LowIR emission. Function bodies are lowered by
 // FunctionLowerer (lower_function.h) against this registry.
 
+// PA27: one hidden trailing pointer of a lowered signature (the
+// virtual-base ABI; computed in lower_vbase.cpp - see pa27/plan.md).
+enum EHiddenParamKind
+{
+	HP_VTT,    // construction-vtable table pointer (polymorphic C2/D2)
+	HP_VBPTR,  // own vbase-table entry address (base entries, methods)
+	HP_PVBPTR  // a declared parameter's carried vbase-table entry
+};
+
+struct HiddenParam
+{
+	HiddenParam() : kind(HP_VTT), param_index(0), vbase_index(0), cls(0) {}
+
+	EHiddenParamKind kind;
+	size_t param_index;  // HP_PVBPTR: the declared parameter it serves
+	size_t vbase_index;  // table index inside `cls`
+	const struct ClassInfo* cls;  // the class whose table entry rides
+	string low_name;     // "__vtt" / "__vbptrN" / "__pvbptrK"
+};
+
 struct LowFunctionInfo
 {
 	LowFunctionInfo()
@@ -75,7 +95,34 @@ struct LowFunctionInfo
 	const SemNode* definition;
 	size_t index;        // position in functions_ (demand rescan key)
 	string body_text;    // lowered definition text
+	// PA27: the hidden trailing pointers of the lowered signature
+	// (computed once on first use by HiddenSignatureParams).
+	vector<HiddenParam> hidden;
+	bool hidden_ready = false;
+	// PA27: the lowered body carries a null-guarded displaced-base
+	// adjustment; callers under cleanups guard the call lazily (the
+	// eager segment scan keeps the sema unwind fact).
+	bool guarded_body = false;
 };
+
+// PA27 hidden vbase-pointer ABI (lower_vbase.cpp). The class whose
+// vbase table a parameter type carries - reference-to-class carries
+// the full table, pointer-to-class (also behind a reference) the
+// collapsed table (entries inside a direct virtual base collapse into
+// it). Null when the type carries none.
+const ClassInfo* ParamVBaseClass(const TypePtr& param, bool& collapsed);
+
+// The carried table indices of one such parameter class.
+void ParamCarriedEntries(const ClassInfo& cls, bool collapsed,
+                         vector<size_t>& out);
+
+// The hidden trailing pointers of a function's signature (cached).
+const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info);
+
+// The type-only variant for indirect call signatures (function
+// pointers, member pointers, vtable dispatch).
+void HiddenParamsForType(const TypePtr& fn_type, bool is_method,
+                         vector<HiddenParam>& out);
 
 struct LowGlobalInfo
 {
@@ -139,6 +186,13 @@ struct LowVTableInfo
 	bool strong;    // key function defined in this program
 	bool rendered;
 	string text;    // rendered definition ("" for declare-only)
+	// PA27: the class's full vtable group rides the primary entry -
+	// secondary views, and (for polymorphic virtual-base classes) the
+	// construction vtables and the VTT. `group_used` re-renders the
+	// entry with the group when the demand arrives late.
+	bool group_used = false;
+	bool group_rendered = false;
+	string vtt_low_name;  // "" until named
 };
 
 class LowerProgram
@@ -163,6 +217,12 @@ public:
 	// The "@name" spelling of a method / constructor / destructor
 	// callee node (PA15: demand-marks the weak definition).
 	string MemberFunctionRef(const SemNode& callee);
+	// PA27: the registry entry a direct call resolves to (hidden
+	// vbase-pointer signatures), without demanding it.
+	LowFunctionInfo& CalleeEntryInfo(const SemNode& callee);
+	// PA27: the lowered callee body carries a null-guarded
+	// displaced-base adjustment (lazy dispatch-region wrapping).
+	bool CalleeGuardedBody(const SemNode& callee);
 	// The registered definition behind a method callee (null when
 	// none): the conversion-elision check reads its body shape.
 	const SemNode* MemberDefinitionFor(const SemNode& callee);
@@ -220,7 +280,8 @@ public:
 		RTTI_VT_CLASS,
 		RTTI_VT_SI_CLASS,
 		RTTI_VT_FUNDAMENTAL,
-		RTTI_VT_POINTER
+		RTTI_VT_POINTER,
+		RTTI_VT_VMI_CLASS
 	};
 	// PA25: the "@name" of an external runtime helper, declared on
 	// first use with the given signature/metadata suffix.
@@ -254,6 +315,27 @@ public:
 	// The class record of `entity` across the added units (PA24: the
 	// closure-construction lowering reads sema's field offsets).
 	const ClassInfo* ProgramClass(const NamedTypeInfo* entity) const;
+	// The class record behind a this-adjusted member function type.
+	const ClassInfo* MethodClass(const TypePtr& adjusted) const;
+	// --- PA27 multi-vtable references (lower_vtable.cpp) ---
+	// Demands the class's full vtable group (primary, views, and the
+	// VTT with its construction vtables when the class is a
+	// polymorphic virtual-base one).
+	void VTableGroupRef(const ClassInfo* cls);
+	// The "@name" of one secondary view's global; demands the group.
+	string ViewVTableRef(const ClassInfo* cls, size_t view_index);
+	// The address point (bytes) of a class's primary vtable / of a
+	// view inside `cls`'s group.
+	static unsigned long long VTableAddressPoint(const ClassInfo* cls);
+	static unsigned long long ViewAddressPoint(const ClassInfo* cls);
+	// The "@name" of the class's VTT; demands the group.
+	string VttRef(const ClassInfo* cls);
+	// The VTT-shape size of a class and the entry index of a direct
+	// base's construction sub-block / of an own view entry.
+	static size_t VttShapeSize(const ClassInfo& cls);
+	static size_t SubVttIndex(const ClassInfo& derived,
+	                          const ClassInfo& base);
+	static size_t OwnViewVttIndex(const ClassInfo& cls, size_t ordinal);
 
 private:
 	void CollectItem(const SemNode& item);
@@ -291,9 +373,33 @@ private:
 	                         vector<SemNodePtr>& actions);
 
 	// --- PA17 vtable/RTTI emission (lower_vtable.cpp) ---
-	// The class record behind a this-adjusted member function type.
-	const ClassInfo* MethodClass(const TypePtr& adjusted) const;
 	LowVTableInfo& VTableEntry(const ClassInfo* cls);
+	// A this-adjusting entry thunk toward `target` ("@name").
+	string VTableThunkRef(LowFunctionInfo& target, long long adjust,
+	                      const TypePtr& adjusted);
+	// One slot list rendered into vtable items (`view` null for the
+	// primary list; `level` resolves overriders for construction
+	// vtables).
+	string RenderVTableSlots(const ClassInfo& derived,
+	                         const ClassView* view,
+	                         const ClassInfo* level,
+	                         unsigned long long level_offset,
+	                         unsigned long long position);
+	string RenderVTableHeader(const ClassInfo& outer,
+	                          const ClassInfo& table_of,
+	                          unsigned long long position,
+	                          const string& rtti);
+	string RenderConstructionGroup(LowVTableInfo& entry);
+	void CollectConstructionBases(
+		const ClassInfo& cls, unsigned long long offset,
+		vector<std::pair<const ClassInfo*, unsigned long long>>& out);
+	void AppendVttEntries(
+		const ClassInfo& cls, unsigned long long offset,
+		const map<std::pair<const ClassInfo*, unsigned long long>,
+		          vector<string>>& names,
+		string& items);
+	static unsigned long long VBasePositionIn(const ClassInfo& outer,
+	                                          const ClassInfo* base);
 	// Renders every demanded-but-unrendered vtable (demanding its slot
 	// functions and RTTI chain); returns whether any rendered, so the
 	// caller can rerun the function-lowering sweep to a fixpoint.
@@ -377,6 +483,12 @@ private:
 	// --- PA17 polymorphic emission state (lower_vtable.cpp) ---
 	deque<LowVTableInfo> vtables_;
 	map<const ClassInfo*, size_t> vtable_index_;
+	// PA27: view-global names by (class, view index), thunk names by
+	// (target symbol, adjustment), and the rendered thunk bodies
+	// (appended after the ordinary function bodies).
+	map<std::pair<const ClassInfo*, size_t>, string> view_names_;
+	map<std::pair<string, long long>, string> thunk_names_;
+	vector<string> thunk_texts_;
 	map<const ClassInfo*, string> rtti_names_;   // rendered RTTI records
 	vector<string> poly_declare_globals_;  // external abi/vtable declares
 	vector<string> poly_globals_;          // RTTI + typeinfo-name texts
@@ -386,7 +498,7 @@ private:
 	// incomplete or non-simple template classes) and the external
 	// __cxxabiv1 vtable declares, by ERttiVtableKind.
 	map<string, string> rtti_type_names_;
-	string external_rtti_vtable_names_[4];
+	string external_rtti_vtable_names_[5];
 	// PA25: external runtime helper declares (__cxa_bad_typeid,
 	// __dynamic_cast, ...), keyed by their object name.
 	map<string, string> runtime_fn_names_;

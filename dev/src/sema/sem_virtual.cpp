@@ -91,6 +91,30 @@ int FindVirtualSlotIndex(const ClassInfo& info, const string& name,
 	return -1;
 }
 
+namespace {
+
+// PA27: the matching virtual slot of any base subobject off the
+// primary chain (their slots stay in the bases' own lists; the derived
+// class's overrider reaches them through the vtable views).
+const VirtualSlot* FindBaseVirtualSlot(const ClassInfo& cls,
+                                       const string& name,
+                                       const TypePtr& declared)
+{
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+	{
+		const ClassInfo* base = cls.direct_bases[b].cls;
+		int index = FindVirtualSlotIndex(*base, name, declared);
+		if (index >= 0)
+			return &base->vslots[index];
+		if (const VirtualSlot* deep =
+		        FindBaseVirtualSlot(*base, name, declared))
+			return deep;
+	}
+	return 0;
+}
+
+}  // namespace
+
 // The layout pre-scan: whether the class body textually declares a
 // virtual member (10.3p1 requires the keyword to introduce a new
 // virtual function; overriding without it needs a polymorphic base,
@@ -122,7 +146,12 @@ void SemBinder::RecordVirtualMember(ClassInfo& cls, const string& name,
 		return;
 	}
 	int slot = FindVirtualSlotIndex(cls, name, type);
-	bool is_virtual = declared_virtual || slot >= 0;
+	// PA27: an override of a non-primary (or virtual) base's virtual
+	// stays out of the primary slot list; the base's vtable view
+	// carries it.
+	const VirtualSlot* view_slot = slot < 0
+		? FindBaseVirtualSlot(cls, name, type) : 0;
+	bool is_virtual = declared_virtual || slot >= 0 || view_slot;
 	if (!is_virtual)
 	{
 		if (has_override)
@@ -153,6 +182,12 @@ void SemBinder::RecordVirtualMember(ClassInfo& cls, const string& name,
 		if (has_final)
 			overridden.is_final = true;
 	}
+	else if (view_slot)
+	{
+		if (view_slot->is_final)
+			throw runtime_error("overriding a final virtual function");
+		CheckCovariantReturn(view_slot->type->target, type->target);
+	}
 	else
 	{
 		if (has_override)
@@ -166,6 +201,18 @@ void SemBinder::RecordVirtualMember(ClassInfo& cls, const string& name,
 		added.pure = pure;
 		added.is_final = has_final;
 		cls.vslots.push_back(added);
+	}
+	// PA27: every virtual this class declares (overrides included)
+	// participates in view final-overrider resolution.
+	{
+		VirtualSlot mine;
+		mine.kind = VS_METHOD;
+		mine.name = name;
+		mine.type = MethodAdjustedType(cls, type);
+		mine.owner = cls.members;
+		mine.pure = pure;
+		mine.is_final = has_final;
+		cls.declared_virtuals.push_back(mine);
 	}
 	cls.is_aggregate = false;  // 8.5.1p1: no virtual functions
 	// Itanium-style key function: the first declared non-pure virtual
@@ -184,6 +231,10 @@ void SemBinder::RecordVirtualDtor(ClassInfo& cls, bool declared_virtual,
                                   bool deleted)
 {
 	bool inherited = cls.base && cls.base->dtor_virtual;
+	// PA27: a virtual destructor in any base subobject (non-primary or
+	// virtual bases included) makes this destructor an override.
+	for (size_t b = 0; !inherited && b < cls.direct_bases.size(); b++)
+		inherited = cls.direct_bases[b].cls->dtor_virtual;
 	if (composed.has_override && !inherited)
 		throw runtime_error("override specifier on a destructor "
 		                    "without a virtual base destructor");
@@ -224,24 +275,46 @@ void SemBinder::RecordVirtualDtor(ClassInfo& cls, bool declared_virtual,
 
 void SemBinder::FinishClassVirtualFacts(ClassInfo& cls)
 {
-	// 12.4p9: the (possibly implicit) destructor of a class whose base
-	// has a virtual destructor is virtual and overrides it.
+	// 12.4p9: the (possibly implicit) destructor of a class with any
+	// base subobject holding a virtual destructor is virtual and
+	// overrides it (PA27: non-primary and virtual bases included).
 	if (cls.base && cls.base->dtor_virtual)
 		cls.dtor_virtual = true;
-	if (!cls.dtor_virtual || cls.dtor_slot < 0)
-		return;
-	// The final overrider of the destructor slot pair is this class's
-	// own destructor, user-declared or implicit.
-	string name = "~" + cls.members->name;
-	TypePtr adjusted = MethodAdjustedType(
-		cls, MakeFunctionType(MakeFundamentalType(FT_VOID),
-		                      vector<TypePtr>(), false));
-	for (int at = cls.dtor_slot; at <= cls.dtor_slot + 1; at++)
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+		if (cls.direct_bases[b].cls->dtor_virtual)
+			cls.dtor_virtual = true;
+	// PA27: a destructor made virtual only by a non-primary or virtual
+	// base introduces its own slot pair in the primary vtable.
+	if (cls.dtor_virtual && cls.dtor_slot < 0 && cls.is_polymorphic)
 	{
-		cls.vslots[at].name = name;
-		cls.vslots[at].owner = cls.members;
-		cls.vslots[at].type = adjusted;
+		cls.dtor_slot = (int)cls.vslots.size();
+		VirtualSlot complete;
+		complete.kind = VS_DTOR_COMPLETE;
+		complete.name = "~" + cls.members->name;
+		complete.owner = cls.members;
+		cls.vslots.push_back(complete);
+		VirtualSlot deleting = complete;
+		deleting.kind = VS_DTOR_DELETING;
+		cls.vslots.push_back(deleting);
 	}
+	if (cls.dtor_virtual && cls.dtor_slot >= 0)
+	{
+		// The final overrider of the destructor slot pair is this
+		// class's own destructor, user-declared or implicit.
+		string name = "~" + cls.members->name;
+		TypePtr adjusted = MethodAdjustedType(
+			cls, MakeFunctionType(MakeFundamentalType(FT_VOID),
+			                      vector<TypePtr>(), false));
+		for (int at = cls.dtor_slot; at <= cls.dtor_slot + 1; at++)
+		{
+			cls.vslots[at].name = name;
+			cls.vslots[at].owner = cls.members;
+			cls.vslots[at].type = adjusted;
+		}
+	}
+	// PA27: the polymorphic base subobjects off the primary chain each
+	// carry a vtable view (layout offsets are final here).
+	ComputeClassViews(cls);
 }
 
 SemNodePtr SemBinder::MakeVPointerStore(const ClassInfo& cls)

@@ -77,6 +77,37 @@ string FunctionLowerer::Lower()
 		params_.push_back(param);
 		param_names_.insert(param.low_name);
 	}
+	// PA27: the hidden trailing vbase pointers of the signature.
+	declared_param_count_ = params_.size();
+	hidden_params_ =
+		HiddenSignatureParams(const_cast<LowFunctionInfo&>(info_));
+	for (size_t i = 0; i < hidden_params_.size(); i++)
+	{
+		const HiddenParam& hp = hidden_params_[i];
+		ParamInfo param;
+		param.low_name = hp.low_name;
+		param.type_text = "ptr";
+		params_.push_back(param);
+		param_names_.insert(param.low_name);
+		if (hp.kind == HP_VTT)
+			vtt_param_ = "%" + hp.low_name;
+		else if (hp.kind == HP_VBPTR)
+		{
+			VBaseParamMap& map = vbase_params_["this"];
+			map.cls = hp.cls;
+			map.carried[hp.vbase_index] = "%" + hp.low_name;
+		}
+	}
+	// PA27: any constructor/destructor entry of a polymorphic
+	// virtual-base class anchors the class's vtable group (the VTT its
+	// base entries slice must exist).
+	if (!info_.special_code.empty())
+	{
+		const ClassInfo* method_class = program_.MethodClass(def_.type);
+		if (method_class && method_class->is_polymorphic &&
+		    ClassHasVBases(*method_class))
+			program_.VTableGroupRef(method_class);
+	}
 	EmitParameterStores();
 	LowerStatementList(def_.children, first_statement);
 	// PA17: a deleting destructor entry frees the object after the
@@ -133,7 +164,7 @@ void FunctionLowerer::EmitParameterStores()
 {
 	OpenBlock("entry");
 	size_t lead = indirect_ret_ ? 1 : 0;
-	for (size_t i = lead; i < params_.size(); i++)
+	for (size_t i = lead; i < declared_param_count_; i++)
 	{
 		const SemNode& child = *def_.children[i - lead];
 		const Scope* scope = child.entity_scope;
@@ -165,6 +196,10 @@ void FunctionLowerer::EmitParameterStores()
 		                      params_[i].type_text);
 		Emit("store " + params_[i].type_text + " %" +
 		     params_[i].low_name + ", $" + slot);
+		// PA27: a parameter of a virtual-base class binds its carried
+		// subobject pointers (slots for references, raw registers
+		// otherwise) right after its own store.
+		EmitParamVBasePointers(i, i - lead, child);
 	}
 }
 
@@ -417,6 +452,13 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		EndFullExpression();
 		return;
 	case SN_CONSTRUCTOR_ACTION:
+		// PA27: shared virtual-base construction belongs to the
+		// complete-object entries; base entries and the deleting entry
+		// drop the marked actions.
+		if (node.vbase_action &&
+		    (info_.special_code == "C2" || info_.special_code == "D2" ||
+		     info_.special_code == "D0"))
+			return;
 		LowerConstructorAction(node);
 		return;
 	case SN_STORAGE_COPY:
@@ -431,6 +473,13 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 	}
 	case SN_DESTRUCTOR_ACTION:
 	{
+		// PA27: shared virtual-base destruction belongs to the
+		// complete-object destructor only (the deleting entry matches
+		// the reference in dropping it as well).
+		if (node.vbase_action &&
+		    (info_.special_code == "C2" || info_.special_code == "D2" ||
+		     info_.special_code == "D0"))
+			return;
 		bool saved = in_lifetime_action_;
 		in_lifetime_action_ = true;
 		LowerCall(*node.children[0]);
@@ -1291,6 +1340,17 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 			" : " + param_text;
 		if (!pass.empty())
 			params += " [pass=" + pass + "]";
+	}
+	// PA27: the hidden trailing vbase pointers keep their names.
+	{
+		const vector<HiddenParam>& hidden =
+			HiddenSignatureParams(const_cast<LowFunctionInfo&>(info));
+		for (size_t i = 0; i < hidden.size(); i++)
+		{
+			params += (at ? ", " : "") + string("%") +
+				hidden[i].low_name + " : ptr";
+			at++;
+		}
 	}
 	vector<string> meta;
 	if (info.type->variadic)

@@ -446,8 +446,11 @@ void SemBinder::AppendBaseDefaultInit(const ClassInfo& cls,
                                       bool syntactic)
 {
 	// PA26: every direct base default-initializes in declaration order.
+	// PA27: virtual rows belong to the complete-object phase
+	// (AppendVBaseInits).
 	for (size_t b = 0; b < cls.direct_bases.size(); b++)
-		AppendOneBaseDefaultInit(cls, b, out, syntactic);
+		if (!cls.direct_bases[b].is_virtual)
+			AppendOneBaseDefaultInit(cls, b, out, syntactic);
 }
 
 void SemBinder::AppendOneBaseDefaultInit(const ClassInfo& cls,
@@ -536,6 +539,75 @@ struct SemBinder::MemberInitPlan
 	vector<Scope*> base_init_scopes;  // pack-expansion elements
 	size_t base_init_count = 0;
 };
+
+// PA27 12.6.2p10: the shared virtual bases initialize first, in vbase
+// table order, only in the complete-object constructor. Direct virtual
+// rows may carry a written mem-initializer; every other entry
+// default-initializes with the usual whole-chain elision.
+void SemBinder::AppendVBaseInits(const ClassInfo& cls,
+                                 const MemberInitPlan* plan,
+                                 vector<SemNodePtr>& out, bool syntactic)
+{
+	for (size_t v = 0; v < cls.vbases.size(); v++)
+	{
+		const ClassInfo& base = *cls.vbases[v].cls;
+		const AstMemInitializer* init = 0;
+		if (plan)
+			for (size_t b = 0; b < cls.direct_bases.size(); b++)
+				if (cls.direct_bases[b].is_virtual &&
+				    cls.direct_bases[b].cls == &base)
+				{
+					init = plan->base_inits[b];
+					break;
+				}
+		size_t mark = out.size();
+		if (init)
+		{
+			vector<SemValue> values;
+			const AstInitializer& args = *init->init;
+			if (args.kind == INIT_PAREN)
+				analyzer_.AnalyzeArgumentList(args.args, values);
+			else if (args.kind == INIT_BRACED)
+				analyzer_.AnalyzeArgumentList(args.expr->arguments,
+				                              values);
+			int index = ResolveClassConstructor(base, values, false,
+			                                    "base initializer");
+			vector<SemNodePtr> arg_nodes;
+			for (size_t i = 0; i < values.size(); i++)
+				arg_nodes.push_back(std::move(values[i].node));
+			out.push_back(MakeConstructorCall(base, index, true,
+			                                  ThisVBaseAddress(cls, v),
+			                                  std::move(arg_nodes)));
+		}
+		else
+		{
+			if (!base.has_user_ctor &&
+			    !unit_.classes.NeedsConstruction(base))
+				continue;
+			if (syntactic
+			        ? !unit_.classes
+			               .DefaultConstructionHasSyntacticEffects(base)
+			        : !unit_.classes.DefaultConstructionHasEffects(base))
+			{
+				AppendElidedCtorDemand(base, true, out);
+			}
+			else
+			{
+				vector<SemValue> no_args;
+				int index = ResolveClassConstructor(base, no_args, false,
+				                                    "base subobject");
+				vector<SemNodePtr> arg_nodes;
+				for (size_t j = 0; j < no_args.size(); j++)
+					arg_nodes.push_back(std::move(no_args[j].node));
+				out.push_back(MakeConstructorCall(
+					base, index, true, ThisVBaseAddress(cls, v),
+					std::move(arg_nodes)));
+			}
+		}
+		for (size_t i = mark; i < out.size(); i++)
+			out[i]->vbase_action = true;
+	}
+}
 
 // Collects the written mem-initializers: field initializers by name,
 // base initializers by direct-base index (pack-expanded entries carry
@@ -648,10 +720,15 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 		return;
 	bf_units_written_.clear();
 	vector<SemNodePtr> actions;
+	// PA27 12.6.2p10: the shared virtual bases initialize ahead of the
+	// direct non-virtual bases (complete-object constructors only).
+	AppendVBaseInits(cls, &plan, actions, true);
 	// 12.6.2p10: direct bases initialize in declaration order, each
 	// through its mem-initializer or by default-initialization.
 	for (size_t b = 0; b < cls.direct_bases.size(); b++)
 	{
+		if (cls.direct_bases[b].is_virtual)
+			continue;
 		if (!plan.base_inits[b])
 		{
 			AppendOneBaseDefaultInit(cls, b, actions, true);
@@ -755,10 +832,24 @@ void SemBinder::AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item)
 	// 12.4p7: direct bases destroy in reverse declaration order.
 	for (size_t b = cls.direct_bases.size(); b-- > 0;)
 	{
+		if (cls.direct_bases[b].is_virtual)
+			continue;
 		const ClassInfo& base = *cls.direct_bases[b].cls;
 		if (unit_.classes.DestructionHasEffects(base))
 			actions.push_back(MakeDestructorCall(
 				base, true, ThisBaseAddress(cls, b)));
+	}
+	// PA27 12.4p7: the complete-object destructor destroys the shared
+	// virtual bases last, in reverse table order.
+	for (size_t v = cls.vbases.size(); v-- > 0;)
+	{
+		const ClassInfo& base = *cls.vbases[v].cls;
+		if (!unit_.classes.DestructionHasEffects(base))
+			continue;
+		SemNodePtr action =
+			MakeDestructorCall(base, true, ThisVBaseAddress(cls, v));
+		action->vbase_action = true;
+		actions.push_back(std::move(action));
 	}
 	for (size_t i = 0; i < actions.size(); i++)
 		item.children.push_back(std::move(actions[i]));
@@ -866,6 +957,7 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 	vector<SemNodePtr> actions;
 	try
 	{
+		AppendVBaseInits(cls, 0, actions, false);
 		if (cls.base)
 			AppendBaseDefaultInit(cls, actions, false);
 		if (cls.is_polymorphic)

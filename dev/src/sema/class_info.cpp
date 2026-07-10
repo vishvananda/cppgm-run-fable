@@ -79,6 +79,10 @@ namespace {
 
 // The visited sets keep shared subtrees (diamonds) linear; a visited
 // class's chain and extras were already searched without finding `to`.
+// PA27: the promoted primary base may sit at any direct-base row, so
+// the searches walk every row (the visited set absorbs the primary
+// also being reachable through the base_entity chain). Virtual rows
+// participate: derivation includes virtual bases.
 bool DerivedFromExtrasSearch(const ClassRegistry& classes,
                              const NamedTypeInfo* from,
                              const NamedTypeInfo* to,
@@ -91,7 +95,7 @@ bool DerivedFromExtrasSearch(const ClassRegistry& classes,
 		if (!visited.insert(at).second)
 			return false;
 		if (const ClassInfo* info = classes.Find(at))
-			for (size_t i = 1; i < info->direct_bases.size(); i++)
+			for (size_t i = 0; i < info->direct_bases.size(); i++)
 				if (DerivedFromExtrasSearch(
 				        classes, info->direct_bases[i].cls->entity, to,
 				        visited))
@@ -111,7 +115,7 @@ bool DerivedFromLinkedSearch(const NamedTypeInfo* from,
 		if (!visited.insert(at).second)
 			return false;
 		if (at->class_record)
-			for (size_t i = 1;
+			for (size_t i = 0;
 			     i < at->class_record->direct_bases.size(); i++)
 				if (DerivedFromLinkedSearch(
 				        at->class_record->direct_bases[i].cls->entity,
@@ -189,6 +193,10 @@ BasePathFact CountBasePaths(const NamedTypeInfo* from,
 		for (size_t i = 0; i < record->direct_bases.size(); i++)
 		{
 			const ClassDirectBase& row = record->direct_bases[i];
+			// PA27: virtual rows are not non-virtual subobject paths;
+			// virtual-base access resolves through the vbase table.
+			if (row.is_virtual)
+				continue;
 			BasePathFact sub = CountBasePaths(row.cls->entity, to, memo);
 			if (!sub.count)
 				continue;
@@ -298,6 +306,10 @@ bool ClassHasDisplacedBase(const ClassInfo* cls)
 		return ClassHasDisplacedBase(cls->base);
 	for (size_t i = 0; i < cls->direct_bases.size(); i++)
 	{
+		// PA27: virtual rows live in the shared region; member-pointer
+		// adjustments stay a non-virtual-path fact.
+		if (cls->direct_bases[i].is_virtual)
+			continue;
 		if (cls->direct_bases[i].offset != 0)
 			return true;
 		if (ClassHasDisplacedBase(cls->direct_bases[i].cls))
@@ -382,7 +394,10 @@ bool ClassRegistry::NeedsConstruction(const ClassInfo& info) const
 	if (FactCached(info, CF_NEEDS_CONSTRUCTION, value))
 		return value;
 	// PA17: constructing a polymorphic object must store the vpointer.
-	value = info.has_user_ctor || info.is_polymorphic;
+	// PA27 12.1p5: virtual bases make the default constructor
+	// non-trivial (the base entries carry hidden vbase pointers).
+	value = info.has_user_ctor || info.is_polymorphic ||
+		ClassHasVBases(info);
 	for (size_t i = 0; !value && i < DirectBaseCount(info); i++)
 		value = NeedsConstruction(*DirectBaseAt(info, i));
 	for (size_t i = 0; !value && i < info.fields.size(); i++)
@@ -466,7 +481,9 @@ bool ClassRegistry::ComputeDefaultConstructionEffects(
 	const ClassInfo& info, bool syntactic) const
 {
 	// PA17: the vpointer store is emitted construction work.
-	if (info.is_polymorphic)
+	// PA27: a class with virtual bases always runs its constructor
+	// chain (the base entries receive hidden vbase pointers).
+	if (info.is_polymorphic || ClassHasVBases(info))
 		return true;
 	if (info.has_user_ctor)
 	{
@@ -541,16 +558,45 @@ void BeginClassLayout(ClassInfo& info)
 	info.bit_cursor = 0;
 	info.alignment = 1;
 	info.is_empty = true;
-	info.is_polymorphic = info.declares_virtual ||
-		(info.base && info.base->is_polymorphic);
-	// PA26: direct bases lay out in declaration order. An empty base
-	// occupies no storage and stays at offset 0 (the empty-base
+	// PA27: any polymorphic base subobject (non-virtual or shared)
+	// makes the class polymorphic (10.3p1 inherited virtuals).
+	info.is_polymorphic = info.declares_virtual;
+	for (size_t i = 0; i < info.direct_bases.size(); i++)
+		if (info.direct_bases[i].cls->is_polymorphic)
+			info.is_polymorphic = true;
+	// PA27: a polymorphic class without a polymorphic non-virtual base
+	// introduces the vpointer at offset 0 ahead of every base span and
+	// field (non-empty bases displace behind it).
+	bool primary_poly = info.primary_base >= 0 &&
+		info.direct_bases[info.primary_base].cls->is_polymorphic;
+	if (info.is_polymorphic && !primary_poly)
+	{
+		info.bit_cursor = 64;
+		if (info.alignment < 8)
+			info.alignment = 8;
+		info.is_empty = false;
+	}
+	// The promoted primary base carries the vpointer at offset 0; every
+	// other non-virtual base lays out in declaration order. An empty
+	// base occupies no storage and stays at offset 0 (the empty-base
 	// optimization; distinct empty subobjects share the offset in this
-	// ABI), every other base reserves its span before the next base or
-	// the first member.
+	// ABI), every other base reserves its non-virtual span before the
+	// next base or the first member. Virtual rows are placed with the
+	// shared region at layout finish.
+	if (primary_poly)
+	{
+		ClassDirectBase& row = info.direct_bases[info.primary_base];
+		row.offset = 0;
+		info.bit_cursor = row.cls->nv_size * 8;
+		if (row.cls->alignment > info.alignment)
+			info.alignment = row.cls->alignment;
+		info.is_empty = false;
+	}
 	for (size_t i = 0; i < info.direct_bases.size(); i++)
 	{
 		ClassDirectBase& row = info.direct_bases[i];
+		if (row.is_virtual || (primary_poly && (int)i == info.primary_base))
+			continue;
 		if (row.cls->alignment > info.alignment)
 			info.alignment = row.cls->alignment;
 		if (row.cls->is_empty)
@@ -560,18 +606,7 @@ void BeginClassLayout(ClassInfo& info)
 		}
 		row.offset = RoundUpBits(info.bit_cursor,
 		                         row.cls->alignment * 8) / 8;
-		info.bit_cursor = (row.offset + row.cls->size) * 8;
-		info.is_empty = false;
-	}
-	// PA17: a class that introduces the polymorphic layer carries the
-	// vpointer at offset 0 ahead of every field. A polymorphic base
-	// already reserved it inside its own span.
-	if (info.is_polymorphic && (!info.base || !info.base->is_polymorphic))
-	{
-		if (info.bit_cursor < 64)
-			info.bit_cursor = 64;
-		if (info.alignment < 8)
-			info.alignment = 8;
+		info.bit_cursor = (row.offset + row.cls->nv_size) * 8;
 		info.is_empty = false;
 	}
 }
@@ -645,17 +680,362 @@ ClassField& LayoutBitField(ClassInfo& info, const ClassField& field)
 	return info.fields.back();
 }
 
+namespace {
+
+// PA27: DFS first-appearance collection of the shared virtual bases
+// (12.6.2 order: a virtual base joins the table when its first
+// base-specifier edge is traversed, then its own subtree follows).
+void CollectVBasesDfs(const ClassInfo* cls, vector<ClassVBase>& table,
+                      std::set<const ClassInfo*>& seen)
+{
+	for (size_t i = 0; i < cls->direct_bases.size(); i++)
+	{
+		const ClassDirectBase& row = cls->direct_bases[i];
+		if (row.is_virtual && seen.insert(row.cls).second)
+		{
+			ClassVBase entry;
+			entry.cls = row.cls;
+			table.push_back(entry);
+		}
+		CollectVBasesDfs(row.cls, table, seen);
+	}
+}
+
+}  // namespace
+
+void ComputeVirtualBaseTable(ClassInfo& info)
+{
+	info.vbases.clear();
+	std::set<const ClassInfo*> seen;
+	CollectVBasesDfs(&info, info.vbases, seen);
+}
+
+namespace {
+
+void PostOrderVBasesWalk(const ClassInfo& info, const ClassInfo* cls,
+                         std::set<const ClassInfo*>& seen,
+                         vector<size_t>& out)
+{
+	for (size_t b = 0; b < cls->direct_bases.size(); b++)
+	{
+		const ClassDirectBase& row = cls->direct_bases[b];
+		PostOrderVBasesWalk(info, row.cls, seen, out);
+		if (row.is_virtual && seen.insert(row.cls).second)
+			for (size_t i = 0; i < info.vbases.size(); i++)
+				if (info.vbases[i].cls == row.cls)
+				{
+					out.push_back(i);
+					break;
+				}
+	}
+}
+
+}  // namespace
+
+void PostOrderVBases(const ClassInfo& info, vector<size_t>& out)
+{
+	out.clear();
+	std::set<const ClassInfo*> seen;
+	PostOrderVBasesWalk(info, &info, seen, out);
+}
+
+const ClassVBase* FindClassVBase(const ClassInfo& info,
+                                 const ClassInfo* cls)
+{
+	for (size_t i = 0; i < info.vbases.size(); i++)
+		if (info.vbases[i].cls == cls)
+			return &info.vbases[i];
+	return 0;
+}
+
 void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity,
                        unsigned long long min_alignment)
 {
 	if (min_alignment > info.alignment)
 		info.alignment = min_alignment;
-	info.dsize = (info.bit_cursor + 7) / 8;
+	// PA27: freeze the non-virtual region, then append the shared
+	// virtual-base subobjects (each placed by its own non-virtual
+	// alignment, spanning its non-virtual bytes).
+	ComputeVirtualBaseTable(info);
+	info.nv_dsize = (info.bit_cursor + 7) / 8;
+	if (!info.vbases.empty() && info.nv_dsize == 0)
+		info.nv_dsize = 1;  // the identity byte ahead of the shared region
+	info.nv_alignment = info.alignment;
+	unsigned long long cursor = info.nv_dsize;
+	for (size_t i = 0; i < info.vbases.size(); i++)
+	{
+		ClassVBase& row = info.vbases[i];
+		cursor = RoundUpBits(cursor, row.cls->nv_alignment);
+		row.offset = cursor;
+		cursor += row.cls->nv_dsize ? row.cls->nv_dsize : 1;
+		if (row.cls->nv_alignment > info.alignment)
+			info.alignment = row.cls->nv_alignment;
+		info.is_empty = false;
+	}
+	// A virtual direct base's row carries its complete-object position
+	// (mem-initializer targets and RTTI read it).
+	for (size_t b = 0; b < info.direct_bases.size(); b++)
+		if (info.direct_bases[b].is_virtual)
+			if (const ClassVBase* entry =
+			        FindClassVBase(info, info.direct_bases[b].cls))
+				info.direct_bases[b].offset = entry->offset;
+	info.dsize = cursor;
 	unsigned long long size =
 		RoundUpBits(info.dsize, info.alignment);
 	info.size = size ? size : 1;
+	unsigned long long nv_span =
+		RoundUpBits(info.nv_dsize, info.alignment);
+	info.nv_size = nv_span ? nv_span : 1;
 	entity.size = info.size;
 	entity.alignment = info.alignment;
+}
+
+namespace {
+
+// The classes sharing the complete object's vpointer at offset 0: the
+// class itself and its promoted primary chain while it stays
+// polymorphic.
+void PrimaryChainSet(const ClassInfo* cls,
+                     std::set<const ClassInfo*>& chain)
+{
+	const ClassInfo* at = cls;
+	while (at && at->is_polymorphic)
+	{
+		chain.insert(at);
+		if (at->primary_base < 0)
+			break;
+		const ClassInfo* next = at->direct_bases[at->primary_base].cls;
+		if (!next->is_polymorphic)
+			break;
+		at = next;
+	}
+}
+
+// Pre-order walk over the non-virtual base subobjects of (cls @
+// offset): polymorphic subobjects off the primary chain become views.
+void CollectViewsDfs(const ClassInfo* cls, unsigned long long offset,
+                     const std::set<const ClassInfo*>& chain,
+                     std::set<unsigned long long>& vptr_locations,
+                     bool in_virtual_region, vector<ClassView>& out)
+{
+	for (size_t i = 0; i < cls->direct_bases.size(); i++)
+	{
+		const ClassDirectBase& row = cls->direct_bases[i];
+		if (row.is_virtual)
+			continue;
+		const ClassInfo* sub = row.cls;
+		unsigned long long at = offset + row.offset;
+		if (sub->is_polymorphic && !(at == 0 && chain.count(sub)))
+		{
+			ClassView view;
+			view.cls = sub;
+			view.offset = at;
+			view.is_virtual = in_virtual_region;
+			view.outermost = vptr_locations.insert(at).second;
+			out.push_back(view);
+		}
+		CollectViewsDfs(sub, at, chain, vptr_locations,
+		                in_virtual_region, out);
+	}
+}
+
+}  // namespace
+
+void ComputeClassViews(ClassInfo& info)
+{
+	info.views.clear();
+	if (!info.is_polymorphic)
+		return;
+	std::set<const ClassInfo*> chain;
+	PrimaryChainSet(&info, chain);
+	std::set<unsigned long long> vptr_locations;
+	vptr_locations.insert(0);  // the primary vpointer
+	CollectViewsDfs(&info, 0, chain, vptr_locations, false, info.views);
+	for (size_t i = 0; i < info.vbases.size(); i++)
+	{
+		const ClassVBase& row = info.vbases[i];
+		if (row.cls->is_polymorphic)
+		{
+			ClassView view;
+			view.cls = row.cls;
+			view.offset = row.offset;
+			view.is_virtual = true;
+			view.outermost = vptr_locations.insert(row.offset).second;
+			info.views.push_back(view);
+		}
+		CollectViewsDfs(row.cls, row.offset, chain, vptr_locations,
+		                true, info.views);
+	}
+}
+
+namespace {
+
+// 10.3p2 matching over two this-adjusted method types: same declared
+// parameters and same method cv-qualification.
+bool MatchAdjustedSignatures(const TypePtr& a, const TypePtr& b)
+{
+	if (a->parameters.size() != b->parameters.size())
+		return false;
+	for (size_t i = 1; i < a->parameters.size(); i++)
+		if (!TypeEquals(a->parameters[i], b->parameters[i]))
+			return false;
+	const TypePtr& a_class = a->parameters[0]->target;
+	const TypePtr& b_class = b->parameters[0]->target;
+	return a_class->is_const == b_class->is_const &&
+		a_class->is_volatile == b_class->is_volatile;
+}
+
+// The containment path from the complete object down to the view's
+// base subobject: (class, offset) pairs, most derived first.
+bool ViewPathSearch(const ClassInfo* cls, unsigned long long offset,
+                    const ClassView& view,
+                    vector<std::pair<const ClassInfo*,
+                                     unsigned long long>>& path)
+{
+	path.push_back(std::make_pair(cls, offset));
+	if (cls == view.cls && offset == view.offset)
+		return true;
+	for (size_t i = 0; i < cls->direct_bases.size(); i++)
+	{
+		const ClassDirectBase& row = cls->direct_bases[i];
+		if (row.is_virtual)
+			continue;
+		if (ViewPathSearch(row.cls, offset + row.offset, view, path))
+			return true;
+	}
+	path.pop_back();
+	return false;
+}
+
+}  // namespace
+
+bool ResolveViewOverrider(const ClassInfo& derived, const ClassView& view,
+                          const VirtualSlot& slot, ViewOverrider& out)
+{
+	// Destructor slots resolve to the most derived class's destructor
+	// (the entry identity re-adjusts the hidden this parameter).
+	if (slot.kind != VS_METHOD)
+	{
+		out.owner = derived.members;
+		TypePtr self = MakeNamedType(TK_CLASS, derived.entity);
+		vector<TypePtr> parameters;
+		parameters.push_back(MakePointerType(self, false, false));
+		out.type = MakeFunctionType(MakeFundamentalType(FT_VOID),
+		                            parameters, false);
+		out.offset = 0;
+		out.pure = false;
+		return true;
+	}
+	vector<std::pair<const ClassInfo*, unsigned long long>> path;
+	if (view.is_virtual)
+	{
+		// The shared subobject hangs off the complete object; the
+		// overrider search covers the complete class, then descends
+		// from the containing virtual base.
+		path.push_back(std::make_pair(&derived, 0ull));
+		bool found = false;
+		for (size_t v = 0; !found && v < derived.vbases.size(); v++)
+			found = ViewPathSearch(derived.vbases[v].cls,
+			                       derived.vbases[v].offset, view, path);
+		if (!found)
+			return false;
+	}
+	else if (!ViewPathSearch(&derived, 0, view, path))
+		return false;
+	for (size_t i = 0; i < path.size(); i++)
+	{
+		const ClassInfo* cls = path[i].first;
+		if (cls == view.cls)
+			break;
+		for (size_t d = 0; d < cls->declared_virtuals.size(); d++)
+		{
+			const VirtualSlot& declared = cls->declared_virtuals[d];
+			if (declared.name != slot.name ||
+			    !MatchAdjustedSignatures(declared.type, slot.type))
+				continue;
+			out.owner = cls->members;
+			out.type = declared.type;
+			out.offset = path[i].second;
+			out.pure = declared.pure;
+			return true;
+		}
+	}
+	// No override above the view base: the base-level final overrider
+	// (always on the view base's own primary chain, so it shares the
+	// view's position).
+	out.owner = slot.owner;
+	out.type = slot.type;
+	out.offset = view.offset;
+	out.pure = slot.pure;
+	out.at_view_base = true;
+	return true;
+}
+
+namespace {
+
+// The first virtual edge on any inheritance path from `cls` to `to`:
+// walks the non-virtual DAG and returns the virtual base behind the
+// first crossing edge. Deterministic: declaration order, depth-first.
+const ClassInfo* FirstVirtualEdge(const ClassInfo& cls,
+                                  const NamedTypeInfo* to)
+{
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+	{
+		const ClassDirectBase& row = cls.direct_bases[b];
+		if (row.is_virtual)
+		{
+			int hops = 0;
+			unsigned long long nv_offset = 0;
+			if (row.cls->entity == to ||
+			    BaseSubobjectPath(row.cls->entity, to, hops,
+			                      nv_offset) == BP_UNIQUE)
+				return row.cls;
+			size_t inner_index = 0;
+			unsigned long long inner_rem = 0;
+			if (VirtualBasePath(*row.cls, to, inner_index, inner_rem))
+				return row.cls;
+			continue;
+		}
+		if (const ClassInfo* carrier = FirstVirtualEdge(*row.cls, to))
+			return carrier;
+	}
+	return 0;
+}
+
+}  // namespace
+
+bool VirtualBasePath(const ClassInfo& from, const NamedTypeInfo* to,
+                     size_t& vbase_index, unsigned long long& remainder)
+{
+	const ClassInfo* carrier = FirstVirtualEdge(from, to);
+	if (!carrier)
+		return false;
+	for (size_t i = 0; i < from.vbases.size(); i++)
+		if (from.vbases[i].cls == carrier)
+		{
+			vbase_index = i;
+			return CompleteObjectOffset(*carrier, to, remainder);
+		}
+	return false;
+}
+
+bool CompleteObjectOffset(const ClassInfo& from, const NamedTypeInfo* to,
+                          unsigned long long& offset)
+{
+	if (from.entity == to)
+	{
+		offset = 0;
+		return true;
+	}
+	int hops = 0;
+	if (BaseSubobjectPath(from.entity, to, hops, offset) == BP_UNIQUE)
+		return true;
+	size_t index = 0;
+	unsigned long long remainder = 0;
+	if (!VirtualBasePath(from, to, index, remainder))
+		return false;
+	offset = from.vbases[index].offset + remainder;
+	return true;
 }
 
 // --- queries ----------------------------------------------------------
@@ -761,8 +1141,10 @@ bool ClassHasTrivialCopyCtor(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_COPY_CTOR, value))
 		return value;
-	// 12.8p12: virtual functions make the copy constructor non-trivial.
+	// 12.8p12: virtual functions and virtual bases make the copy
+	// constructor non-trivial.
 	value = !UserProvidedCtor(info, CK_COPY) && !info.is_polymorphic &&
+		!ClassHasVBases(info) &&
 		SubobjectsSatisfy<ClassHasTrivialCopyCtor>(info);
 	return FactStore(info, CF_TRIVIAL_COPY_CTOR, value);
 }
@@ -773,6 +1155,7 @@ bool ClassHasTrivialMoveCtor(const ClassInfo& info)
 	if (FactCached(info, CF_TRIVIAL_MOVE_CTOR, value))
 		return value;
 	value = !UserProvidedCtor(info, CK_MOVE) && !info.is_polymorphic &&
+		!ClassHasVBases(info) &&
 		SubobjectsSatisfy<ClassHasTrivialMoveCtor>(info);
 	return FactStore(info, CF_TRIVIAL_MOVE_CTOR, value);
 }
@@ -782,8 +1165,10 @@ bool ClassHasTrivialCopyAssign(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_COPY_ASSIGN, value))
 		return value;
-	// 12.8p25: virtual functions make copy assignment non-trivial.
+	// 12.8p25: virtual functions and virtual bases make copy assignment
+	// non-trivial.
 	value = !info.has_user_copy_assign && !info.is_polymorphic &&
+		!ClassHasVBases(info) &&
 		SubobjectsSatisfy<ClassHasTrivialCopyAssign>(info);
 	return FactStore(info, CF_TRIVIAL_COPY_ASSIGN, value);
 }
@@ -794,6 +1179,7 @@ bool ClassHasTrivialMoveAssign(const ClassInfo& info)
 	if (FactCached(info, CF_TRIVIAL_MOVE_ASSIGN, value))
 		return value;
 	value = !info.has_user_move_assign && !info.is_polymorphic &&
+		!ClassHasVBases(info) &&
 		SubobjectsSatisfy<ClassHasTrivialMoveAssign>(info);
 	return FactStore(info, CF_TRIVIAL_MOVE_ASSIGN, value);
 }

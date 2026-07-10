@@ -438,6 +438,9 @@ LowerValue FunctionLowerer::LowerUnary(const SemNode& node)
 			return value;
 		}
 		value.text = LowerAddressExpr(operand);
+		// PA27: an object's address is never null, so displaced-base
+		// adjustments of the value skip their null guard.
+		value.known_nonnull = true;
 		return value;
 	case OP_INC:
 	case OP_DEC:
@@ -1244,7 +1247,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		!in_lifetime_action_ &&
 		(!temp_cleanups_.empty() ||
 		 (HaveCleanups() &&
-		  (!direct || program_.CalleeMayUnwind(callee))));
+		  (!direct || program_.CalleeMayUnwind(callee) ||
+		   program_.CalleeGuardedBody(callee))));
 	bool preserved = !in_cleanup_emission_ &&
 		(eh_armed_ || eh_open_ || lazy_wrap);
 	string preserve_slot;
@@ -1261,6 +1265,15 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	bool pm_call = !direct && callee.kind == SN_MEMBER_POINTER_ACCESS;
 	if (pm_call)
 		object_text = LowerAddressExpr(*callee.children[0]);
+	// PA27: the argument nodes and lowered texts by callee parameter
+	// index anchor the hidden vbase-pointer supply.
+	vector<const SemNode*> arg_nodes(fn_type->parameters.size(), 0);
+	vector<string> arg_texts(fn_type->parameters.size());
+	if (pm_call && !arg_nodes.empty())
+	{
+		arg_nodes[0] = callee.children[0].get();
+		arg_texts[0] = object_text;
+	}
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
 		TypePtr param = i - 1 < fn_type->parameters.size()
@@ -1268,7 +1281,36 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		string text = LowerCallArgument(*node.children[i], param);
 		if (i == 1 && !pm_call)
 			object_text = text;
+		size_t param_at = i - 1 + (pm_call ? 1 : 0);
+		if (param_at < arg_nodes.size())
+		{
+			arg_nodes[param_at] = node.children[i].get();
+			arg_texts[param_at] = text;
+		}
 		arguments += (i > 1 || pm_call ? ", " : "") + text;
+	}
+	// PA27: hidden trailing vbase pointers per the callee's signature.
+	{
+		vector<HiddenParam> type_hidden;
+		const vector<HiddenParam>* hidden = 0;
+		if (direct)
+			hidden = &HiddenSignatureParams(
+				program_.CalleeEntryInfo(callee));
+		else
+		{
+			HiddenParamsForType(
+				pm_call ? MemberPointerCallSignature(fn_type) : fn_type,
+				pm_call, type_hidden);
+			hidden = &type_hidden;
+		}
+		if (!hidden->empty())
+			AppendHiddenArguments(
+				*hidden, arg_nodes, arg_texts,
+				node.children.size() > 1 && (callee.is_method || pm_call)
+					? (pm_call ? callee.children[0].get()
+					           : node.children[1].get())
+					: 0,
+				object_text, arguments);
 	}
 	// The callee value of an indirect call lowers after the arguments
 	// (the oracle's evaluation order). A member-pointer callee over a
@@ -1310,11 +1352,13 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	    !in_lifetime_action_ &&
 	    (!temp_cleanups_.empty() ||
 	     (HaveCleanups() &&
-	      (!direct || program_.CalleeMayUnwind(callee)))))
+	      (!direct || program_.CalleeMayUnwind(callee) ||
+	       program_.CalleeGuardedBody(callee)))))
 		OpenEhRegion();
 	if (!direct || dispatch)
 		line += IndirectCallSignature(
-			pm_call ? MemberPointerCallSignature(fn_type) : fn_type);
+			pm_call ? MemberPointerCallSignature(fn_type) : fn_type,
+			dispatch);
 	Emit(line);
 	bool class_result =
 		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&

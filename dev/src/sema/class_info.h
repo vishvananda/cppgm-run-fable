@@ -168,7 +168,10 @@ struct VirtualSlot
 // its byte offset inside the derived object, and the declared access.
 // Bases lay out in declaration order; empty bases occupy no storage and
 // sit at offset 0 (the empty-base optimization), every other base
-// reserves its span before the first field.
+// reserves its span before the first field. PA27: a polymorphic direct
+// base promotes to offset 0 (the primary vtable carrier); virtual rows
+// live in the shared virtual-base region after the fields (their
+// offset is the complete-object position filled at layout finish).
 struct ClassDirectBase
 {
 	ClassDirectBase() : cls(0), offset(0), access(MA_PUBLIC) {}
@@ -176,6 +179,33 @@ struct ClassDirectBase
 	const ClassInfo* cls;
 	unsigned long long offset;
 	EMemberAccess access;
+	bool is_virtual = false;
+};
+
+// PA27: one shared virtual-base subobject of the complete object, in
+// depth-first first-appearance order over the inheritance DAG (12.6.2
+// initialization order; the layout appends them after the non-virtual
+// region in the same order).
+struct ClassVBase
+{
+	ClassVBase() : cls(0), offset(0) {}
+
+	const ClassInfo* cls;
+	unsigned long long offset;  // complete-object byte offset
+};
+
+// PA27: one polymorphic base subobject off the primary chain. Each
+// carries its own vtable view; `outermost` marks the single view whose
+// vpointer store wins at a shared location (a base and its own primary
+// chain share one vpointer).
+struct ClassView
+{
+	ClassView() : cls(0), offset(0), outermost(true), is_virtual(false) {}
+
+	const ClassInfo* cls;
+	unsigned long long offset;
+	bool outermost;
+	bool is_virtual;  // reached as a shared virtual-base subobject
 };
 
 struct ClassInfo
@@ -203,23 +233,37 @@ struct ClassInfo
 
 	const NamedTypeInfo* entity;
 	Scope* members;
-	// The first direct base (the primary chain: vtable inheritance and
-	// the polymorphic layer flow through it; it always sits at offset 0).
+	// The primary direct base (the primary chain: vtable inheritance
+	// and the polymorphic layer flow through it at offset 0). PA27: the
+	// first polymorphic non-virtual direct base when one exists, else
+	// the first non-virtual direct base; null for a class whose bases
+	// are all virtual.
 	const ClassInfo* base;
 	EMemberAccess base_access;
 	// PA26: every direct base in declaration order with its resolved
-	// subobject offset (direct_bases[0].cls == base when a base exists).
-	// Extra bases must stay non-polymorphic (polymorphic multiple
-	// inheritance is PA27 territory).
+	// subobject offset. PA27: rows flagged is_virtual live in the
+	// shared virtual-base region; `primary_base` indexes the promoted
+	// primary row (-1 when none).
 	vector<ClassDirectBase> direct_bases;
+	int primary_base = -1;
+	// PA27: the complete virtual-base table (DFS first-appearance
+	// order) and the non-primary polymorphic base views.
+	vector<ClassVBase> vbases;
+	vector<ClassView> views;
 	vector<ClassField> fields;  // declaration order
 	bool is_union;
-	bool is_empty;  // no fields and no non-empty base
+	bool is_empty;  // no fields, no non-empty base, no virtual base
 	// Occupied bytes (0 for an empty class); sizeof rounds dsize up to
-	// the alignment, with a 1-byte minimum (9p4).
+	// the alignment, with a 1-byte minimum (9p4). PA27: dsize/size span
+	// the complete object including the virtual-base region; the nv_*
+	// facts describe the non-virtual region only (the span a base
+	// subobject occupies inside a derived object).
 	unsigned long long dsize;
 	unsigned long long size;
 	unsigned long long alignment;
+	unsigned long long nv_dsize = 0;
+	unsigned long long nv_size = 1;
+	unsigned long long nv_alignment = 1;
 	bool is_aggregate;  // 8.5.1p1 (C++11: default member inits disqualify)
 	bool has_user_ctor;
 	bool has_user_dtor;
@@ -283,7 +327,13 @@ struct ClassInfo
 	bool declares_virtual;  // own members spell the `virtual` keyword
 	// Vtable slot order: inherited base slots first (overriders replace
 	// in place), then newly introduced slots in declaration order.
+	// PA27: the primary list inherits along the promoted primary chain
+	// only; overrides of other bases' virtuals live in those bases'
+	// views and do not append here.
 	vector<VirtualSlot> vslots;
+	// PA27: the virtual members this class itself declares (overrides
+	// included), for resolving view final overriders.
+	vector<VirtualSlot> declared_virtuals;
 	bool dtor_virtual;  // declared virtual or inherits a virtual dtor
 	int dtor_slot;      // VS_DTOR_COMPLETE position (-1 when none)
 	// Itanium-style key function: the first declared non-pure virtual
@@ -423,8 +473,69 @@ ClassField& LayoutBitField(ClassInfo& info, const ClassField& field);
 
 // Finishes the layout: applies any class-head alignas request,
 // rounds the size, and stamps the entity's size/alignment facts.
+// PA27: freezes the non-virtual facts, then appends the virtual-base
+// region (each vbase placed by its own nv alignment and nv span).
 void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity,
                        unsigned long long min_alignment);
+
+// PA27: fills info.vbases with the shared virtual-base table in DFS
+// first-appearance order (offsets assigned by FinishClassLayout).
+void ComputeVirtualBaseTable(ClassInfo& info);
+
+// PA27: the table indices in post-order (a virtual base's own shared
+// bases before it); synthesized bodies reconstruct fallback pointers
+// in this order.
+void PostOrderVBases(const ClassInfo& info, vector<size_t>& out);
+
+// PA27: fills info.views with the polymorphic base subobjects off the
+// primary chain (pre-order over the non-virtual DAG, then the virtual
+// bases); runs after layout and the polymorphic facts.
+void ComputeClassViews(ClassInfo& info);
+
+// The vbase-table row of `cls` inside `info`'s complete object (null
+// when `cls` is not a virtual base of `info`).
+const ClassVBase* FindClassVBase(const ClassInfo& info,
+                                 const ClassInfo* cls);
+
+// PA27: the static offset of the `to` subobject inside a COMPLETE
+// `from` object - a non-virtual path, or a virtual-base-table entry
+// plus the non-virtual remainder inside it.
+bool CompleteObjectOffset(const ClassInfo& from, const NamedTypeInfo* to,
+                          unsigned long long& offset);
+
+// PA27: the canonical virtual path from `from` to its virtual base (or
+// a subobject inside one): the carrier is the class behind the FIRST
+// virtual edge (always an entry of `from`'s vbase table); `remainder`
+// is the static offset of `to` inside the carrier's complete object.
+bool VirtualBasePath(const ClassInfo& from, const NamedTypeInfo* to,
+                     size_t& vbase_index, unsigned long long& remainder);
+
+// PA27: whether the class or any base subobject carries a virtual base
+// (drives the hidden vbase-pointer ABI).
+inline bool ClassHasVBases(const ClassInfo& info)
+{
+	return !info.vbases.empty();
+}
+
+// PA27: the resolved final overrider of one slot of a view's base
+// class: the overriding class's member scope, its this-adjusted type,
+// and its subobject offset inside the complete object.
+struct ViewOverrider
+{
+	ViewOverrider() : owner(0), offset(0), pure(false), at_view_base(false)
+	{}
+
+	const Scope* owner;
+	TypePtr type;
+	unsigned long long offset;
+	bool pure;
+	// The slot keeps the view base's own final overrider (no override
+	// above it), so its position is the view's own position.
+	bool at_view_base;
+};
+
+bool ResolveViewOverrider(const ClassInfo& derived, const ClassView& view,
+                          const VirtualSlot& slot, ViewOverrider& out);
 
 // --- queries ----------------------------------------------------------
 
