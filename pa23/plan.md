@@ -196,6 +196,19 @@ injected-class-name form; relevant only if a later execution stage
 links against reference-mangled object symbols.
 
 Handoff state for PA24: template semantic layer complete and composed
-(2293/2293 through-pa23), instantiated declarations lower through the
-ordinary LowIR path, no template-subset special-casing in lowering,
-file audit clean.
+(2279/2279 through-pa23, 23/23 stages), instantiated declarations
+lower through the ordinary LowIR path, no template-subset
+special-casing in lowering, file audit clean.
+
+A second audit pass (loop 53) independently re-verified the first
+pass's conclusions against the full PA23 range (`4defba26e..HEAD`):
+no earlier-PA test, ref, script, Makefile, or grammar file changed;
+no timeout manipulation; every added catch block rejects a candidate
+or rethrows (`InstantiationBodyFault` is re-raised, so real
+instantiation errors are not swallowed as deduction failures); the
+new string keys are all mangler substitution-table state; the demand
+loops stay bounded by the owning template's member list; and the two
+unit splits register in `frontend_source_sets.mk` with post-split
+sizes (1193/1346 lines) well under the cap. The only defect found was
+a stale test-count figure in these documents, corrected to the
+harness's actual 2279/2279 output.

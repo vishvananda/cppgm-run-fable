@@ -4,7 +4,13 @@
 
 Scope: the PA23 commits `4defba26e..82ebb8fcb` (~2,270 insertions across 38
 files under `dev/`), reviewed against `pa23/plan.md`, `pa23/README.md`, and
-the through-pa23 gate (2293/2293 green at audit start, 23/23 stages).
+the through-pa23 gate (2279/2279 green at audit start, 23/23 stages).
+
+A second pass (loop 53) re-audited the full range `4defba26e..HEAD`
+(2,313 insertions, 40 files) including the first pass's own fixes,
+with fresh greps for test-keyed gates, env hooks, timeout
+manipulation, swallowed exceptions, stringly facts, and unbounded
+scans, plus a check that nothing outside `dev/` changed.
 
 ### Files to inspect
 
@@ -156,6 +162,40 @@ Reviewed and judged sound (no change needed):
   `dev/src`; no unconditional-success paths; grammar/timeouts
   untouched.
 
+Second-pass findings (loop 53), re-verifying the above independently:
+
+- The first pass's four fixes are real in the code: `conversion_no_work`
+  is computed in `sem_member_body.cpp` from the just-bound body plus
+  `DefaultConstructionHasSyntacticEffects` (memoized, recursive over
+  bases and members) and `lower_member.cpp` only reads the flag;
+  `ResolveClassVariableTemplate` completes its binding locally and
+  registers after the re-entrant initializer analysis;
+  `InstantiateReadyMembers` carries the constexpr carve-out;
+  `SignatureReturnSpelling` filters `KW_FRIEND`/`KW_INLINE` specifiers
+  before flattening.
+- Nothing outside `dev/` changed in the whole PA23 range except the
+  plan/audit docs and the `frontend_source_sets.mk` registration of
+  the two new units — no earlier-PA refs, tests, scripts, Makefiles,
+  or `pa23.gram` edits, and no timeout/sleep/alarm additions.
+- Every catch block added by PA23 either rejects a candidate
+  (SFINAE-correct `return false`/`continue`), falls back to a second
+  evaluator then rethrows, or explicitly re-raises
+  `InstantiationBodyFault` so genuine instantiation errors stay hard.
+- New string-typed state is confined to mangler substitution tables
+  in `lower_name.cpp`/`lower_name_template.cpp` (Itanium substitution
+  keys are encoding-keyed by design) — no semantic facts became
+  stringly.
+- `InstantiateStaticMembers`/`DemandSpecializationStatics`/
+  `OnStaticMemberReferenced` are bounded by the owning template's
+  `member_defs`, the base chain, and the declaring scope chain
+  respectively, all with done-guards — no whole-registry walks.
+- The split units are registered in the build fragment and the parent
+  files sit at 1193 (`sem_expr.cpp`) and 1346 (`lower_unit.cpp`)
+  lines — real ownership splits, not cap dodges.
+- **Doc defect (fixed)**: `plan.md` and this file mixed a stale
+  `2293/2293` figure with the harness's actual `2279/2279` output;
+  both normalized to the observed count.
+
 ## Changes Made
 
 - `dev/src/sema/sem_member_body.cpp`: `ConversionBodyPerformsNoWork`
@@ -178,6 +218,11 @@ Reviewed and judged sound (no change needed):
   anonymous namespace and declared in the header.
 - `pa23/plan.md`: Architecture Review and Final Architecture Review
   sections.
+- Second pass: test-count figures in `pa23/plan.md` and this file
+  normalized to the harness's actual `2279/2279` output; second-pass
+  verification notes added to both documents. No code changes were
+  needed — every code-level claim of the first pass held up under
+  independent re-inspection.
 
 ## Validation
 
@@ -191,6 +236,10 @@ Reviewed and judged sound (no change needed):
   pass; the 3 `bad-division` warnings (`parser.h`, `sem_binder.h`,
   `sem_expr.h`) predate PA23 - the PA23 delta added only declarations
   and no-op virtual defaults to those headers.
+- Second pass (loop 53): both gates re-run fresh —
+  `make test-report-through-pa23` 2279/2279 (exit 0, 23/23 stages)
+  and the file audit passing with only the 3 pre-existing
+  `bad-division` warnings.
 - Fixture-vs-g++ cross-check for the spelled-prefix dialect: g++ 15
   compiles the fixture but returns 1 (deduces the defaulted tail),
   confirming the checked-in ref pins a deliberate reference dialect
