@@ -216,6 +216,11 @@ struct SemNode
 	// (12.3.2); object initialization uses the fact to elide an
 	// effect-free conversion of an empty class (PA23).
 	bool user_conversion = false;
+	// SN_FUNCTION_DEFINITION of a conversion function: the bound body
+	// performs no observable work (a lone return of an effect-free
+	// empty-class temporary), so an empty-object copy-initialization
+	// through it lowers to no runtime action (PA23).
+	bool conversion_no_work = false;
 	// SN_VARIABLE: the object's lifetime ends at scope exit; the
 	// attached SN_DESTRUCTOR_ACTION child holds the destruction call.
 	bool needs_dtor;

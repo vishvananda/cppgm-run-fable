@@ -947,8 +947,13 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 				spec.members_done[i] = true;
 				continue;
 			}
+			// An object demand covers non-constexpr statics only;
+			// constexpr members wait for odr-use even when their
+			// definition registers after the demand (the same policy
+			// InstantiateStaticMembers applies at demand time).
 			if (MemberDefIsStaticData(*tmpl.member_defs[i]) &&
-			    !spec.statics_demanded)
+			    (!spec.statics_demanded ||
+			     DeclHasConstexpr(*tmpl.member_defs[i]->inner)))
 				continue;
 			spec.members_done[i] = true;
 			InstantiateMemberDefinition(tmpl, spec, i);

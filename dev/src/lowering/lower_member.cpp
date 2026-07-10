@@ -594,38 +594,6 @@ string FunctionLowerer::ClassArrayElement(const string& base,
 	return result;
 }
 
-// Whether a conversion body performs no observable work: exactly a
-// return of a constructed empty-class temporary taking no arguments
-// (the construction chain still prints on its ordinary demand).
-static bool ConversionBodyPerformsNoWork(const SemNode& fn)
-{
-	const SemNode* compound = 0;
-	for (size_t i = 0; i < fn.children.size(); i++)
-	{
-		if (fn.children[i]->kind == SN_PARAMETER)
-			continue;
-		if (compound)
-			return false;
-		compound = fn.children[i].get();
-	}
-	if (!compound || compound->kind != SN_COMPOUND_STATEMENT ||
-	    compound->children.size() != 1 ||
-	    compound->children[0]->kind != SN_RETURN_STATEMENT ||
-	    compound->children[0]->children.size() != 1)
-		return false;
-	const SemNode& returned = *compound->children[0]->children[0];
-	if (returned.kind != SN_CONSTRUCTOR_ACTION || !returned.type)
-		return false;
-	const NamedTypeInfo* named = RemoveTopCv(returned.type)->named;
-	if (!named || !named->class_record || !named->class_record->is_empty)
-		return false;
-	// The construction takes the callee and at most the object
-	// address - no value arguments.
-	return !returned.children.empty() &&
-		returned.children[0]->kind == SN_CALL_EXPRESSION &&
-		returned.children[0]->children.size() <= 2;
-}
-
 // The checked references drop an overloaded-operator (or user
 // conversion, PA23) call that initializes an empty class object (the
 // callee stays odr-used and prints on its ordinary terms; literal
@@ -655,11 +623,11 @@ bool FunctionLowerer::ElideEmptyOperatorInit(const SemNode& node,
 	const SemNode& callee = *producer->children[0];
 	if (!producer->from_operator)
 	{
-		// PA23: a conversion elides only when its body performs no
-		// observable work - a lone return of a constructed empty
-		// temporary (a conversion with real work keeps its calls).
+		// PA23: a conversion elides only when its bound body published
+		// the no-observable-work fact (sema owns the body analysis; a
+		// conversion with real work keeps its calls).
 		const SemNode* body = program_.MemberDefinitionFor(callee);
-		if (!body || !ConversionBodyPerformsNoWork(*body))
+		if (!body || !body->conversion_no_work)
 			return false;
 	}
 	if (callee.is_method || callee.special != SF_NONE)

@@ -214,6 +214,44 @@ void SemBinder::AttachParameterDtor(SemNode& parameter)
 		                   AddressOfNode(std::move(object))));
 }
 
+// PA23 12.3.2: whether a just-bound conversion body performs no
+// observable work - exactly a return of a default-constructed
+// empty-class temporary whose construction chain is effect-free. The
+// lowering reads the published fact to elide an empty-object
+// copy-initialization through the conversion (the callee stays
+// odr-used and prints on its ordinary demand).
+static bool ConversionBodyPerformsNoWork(const SemNode& fn,
+                                         const ClassRegistry& classes)
+{
+	const SemNode* compound = 0;
+	for (size_t i = 0; i < fn.children.size(); i++)
+	{
+		if (fn.children[i]->kind == SN_PARAMETER)
+			continue;
+		if (compound)
+			return false;
+		compound = fn.children[i].get();
+	}
+	if (!compound || compound->kind != SN_COMPOUND_STATEMENT ||
+	    compound->children.size() != 1 ||
+	    compound->children[0]->kind != SN_RETURN_STATEMENT ||
+	    compound->children[0]->children.size() != 1)
+		return false;
+	const SemNode& returned = *compound->children[0]->children[0];
+	if (returned.kind != SN_CONSTRUCTOR_ACTION || !returned.type)
+		return false;
+	const NamedTypeInfo* named = RemoveTopCv(returned.type)->named;
+	if (!named || !named->class_record || !named->class_record->is_empty)
+		return false;
+	// The construction takes the callee and at most the object
+	// address - no value arguments - and its chain does nothing.
+	return !returned.children.empty() &&
+		returned.children[0]->kind == SN_CALL_EXPRESSION &&
+		returned.children[0]->children.size() <= 2 &&
+		!classes.DefaultConstructionHasSyntacticEffects(
+			*named->class_record);
+}
+
 void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 {
 	ESpecialFunction special = SF_NONE;
@@ -281,6 +319,14 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	current_return_ = saved_return;
 
 	PublishBodyUnwindFact(body, special, *node);
+	// PA23: a conversion function (DK_SPECIAL_MEMBER_DEFINITION whose
+	// name keeps the "operator " spelling) publishes whether its body
+	// performs observable work; the lowering elides an empty-object
+	// copy-initialization through a workless one.
+	if (special == SF_NONE &&
+	    body.decl->kind == DK_SPECIAL_MEMBER_DEFINITION)
+		node->conversion_no_work =
+			ConversionBodyPerformsNoWork(*node, unit_.classes);
 	// PA18: an instantiated out-of-class member definition emits weak
 	// and on demand, like an in-class one (14.7.1). PA23: a
 	// source-owned spelled-inline one does too (7.1.2 with 3.2; the

@@ -90,30 +90,6 @@ string FlattenNameBody(const AstName& name)
 	return text;
 }
 
-string FlattenSpecifier(const AstSpecifier& specifier)
-{
-	switch (specifier.kind)
-	{
-	case SPEC_KEYWORD:
-		return specifier.spelling;
-	case SPEC_TYPE_NAME:
-		return FlattenName(specifier.name);
-	case SPEC_DECLTYPE:
-		return "decltype(" + FlattenExpr(*specifier.decltype_expr) + ")";
-	case SPEC_NESTED_DECL:
-	{
-		const AstDecl& decl = *specifier.nested_decl;
-		string text = decl.kind == DK_ENUM ? "enum" : decl.class_key_spelling;
-		if (decl.has_name)
-			text += " " + FlattenName(decl.class_name);
-		else if (!decl.name.empty())
-			text += " " + decl.name;
-		return text;
-	}
-	}
-	return string();
-}
-
 string FlattenFunctionQualifier(const AstFunctionQualifier& qual)
 {
 	switch (qual.kind)
@@ -232,6 +208,30 @@ string FlattenLambdaIntroducer(const AstLambda& lambda)
 			text += "...";
 	}
 	return text + "]";
+}
+
+string FlattenSpecifier(const AstSpecifier& specifier)
+{
+	switch (specifier.kind)
+	{
+	case SPEC_KEYWORD:
+		return specifier.spelling;
+	case SPEC_TYPE_NAME:
+		return FlattenName(specifier.name);
+	case SPEC_DECLTYPE:
+		return "decltype(" + FlattenExpr(*specifier.decltype_expr) + ")";
+	case SPEC_NESTED_DECL:
+	{
+		const AstDecl& decl = *specifier.nested_decl;
+		string text = decl.kind == DK_ENUM ? "enum" : decl.class_key_spelling;
+		if (decl.has_name)
+			text += " " + FlattenName(decl.class_name);
+		else if (!decl.name.empty())
+			text += " " + decl.name;
+		return text;
+	}
+	}
+	return string();
 }
 
 string FlattenSpecifierSeq(const AstSpecifierSeq& specifiers)

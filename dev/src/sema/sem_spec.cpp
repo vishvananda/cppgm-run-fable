@@ -1166,24 +1166,28 @@ const ScopeBinding* SemBinder::ResolveClassVariableTemplate(
 	fresh.home = tmpl.declaring;
 	fresh.var_spec_template = &tmpl;
 	fresh.var_spec_args = args;
-	// The scope registration makes the entity resolvable by
-	// (scope, name) like an ordinary object (the lowering identity).
-	ScopeBinding& binding = AddBinding(*tmpl.declaring, fresh);
 	// The definition is a unit-level object regardless of where the
 	// first use sits (a body-analysis use must not make it a local).
 	unit_.items.push_back(MakeSemNode(SN_VARIABLE));
 	SemNode* item = unit_.items.back().get();
-	item->name = QualifiedScopePath(tmpl.declaring) + binding.name;
-	item->type = binding.type;
+	item->name = QualifiedScopePath(tmpl.declaring) + fresh.name;
+	item->type = fresh.type;
 	item->entity_scope = tmpl.declaring;
-	item->entity_name = binding.name;
+	item->entity_name = fresh.name;
 	item->has_explicit_init = true;
 	item->weak_def = true;
+	// The binding completes locally before the scope registration:
+	// the initializer analysis below may add bindings to the declaring
+	// scope itself (another class-typed variable template), so no
+	// reference into its binding vector survives the analysis.
 	SemValue value = analyzer_.Analyze(init);
-	analyzer_.CopyInitialize(value, binding.type, "initialization");
+	analyzer_.CopyInitialize(value, fresh.type, "initialization");
 	item->children.push_back(std::move(value.node));
-	FinishConstexprObject(*item, binding, is_constexpr);
-	*slot = binding;
+	FinishConstexprObject(*item, fresh, is_constexpr);
+	// The scope registration makes the entity resolvable by
+	// (scope, name) like an ordinary object (the lowering identity).
+	AddBinding(*tmpl.declaring, fresh);
+	*slot = fresh;
 	return slot.get();
 }
 

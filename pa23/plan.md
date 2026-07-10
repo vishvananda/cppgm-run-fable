@@ -129,3 +129,73 @@ scheme.
   continuing.
 - `perl scripts/cppgm_file_audit.pl --stage pa23 --paths dev/src` stays
   clean.
+
+## Architecture Review
+
+What PA23 actually is in the tree: no new subsystem, ~2,270 lines of
+integration fixes threaded through the PA18-PA22 template layers, plus
+three real unit splits (`sem_apply.cpp` conversion application out of
+`sem_expr.cpp`, `lower_fold.cpp` branch-fold analysis out of
+`lower_unit.cpp`, member-call candidate composition phases in
+`sem_member.cpp` with the shared `MemberCandidateSet`).
+
+State ownership held up: every new fact landed typed on its owning
+record rather than in side tables - `ClassSpecialization.
+lazily_instantiated` and `statics_demanded` (demand rules),
+`ScopeBinding.value_from_def` (14.6.4.1 fold visibility),
+`ScopeBinding.var_spec_template/var_spec_args` (variable-template
+identity the lowering mangles from), `TemplateArg.entity_fn_spec`
+(function-pointer NTTPs), `NamedTypeInfo.spec_spelled` (spelled-prefix
+deduction), `SemNode.demand_strong` / `user_conversion` /
+`conversion_no_work` (emission and elision facts). Lowering consumes
+these; it does not re-derive sema facts (the one violation found - the
+conversion-elision body walk - was moved into sema during audit).
+
+Deduction changes are structural rules, not fixture gates:
+pack-run separation keys on `CollectPatternPackSlots`, non-deduced
+alias contexts on the anchor record's `TMPL_ALIAS` kind, explicit
+specialization selection on composed-signature `TypeEquals`,
+derived-to-base deduction restricted to call contexts per 14.8.2.1p4
+vs 14.5.5.1.
+
+Reference-dialect divergences from vanilla C++11 are deliberate,
+pinned by checked-in refs, and implemented generally:
+- Spelled-prefix pack deduction (`spec_spelled`): `tuple<T0, Ts...>`
+  against a defaulted ten-parameter `tuple<int,int,int>` deduces
+  Ts={int,int} (ref object= mangling `_Z4takeIiJiiEE...`); g++ 15
+  deduces the defaulted tail into the pack (sizeof...=9). Keyed on
+  typed structure (trailing pack pattern, spelled-arg count), not on
+  test shapes.
+- Empty-object operator/conversion call-site elision and the C1/C2
+  comdat pairing rules mirror the reference's emission conventions;
+  the elision is gated on sema-proven effect-freedom.
+
+## Final Architecture Review
+
+Audit-driven changes (see `pa23/audit.md`): the conversion-elision
+fact moved from a lowering-side body re-walk into sema
+(`ConversionBodyPerformsNoWork` in `sem_member_body.cpp`, published as
+`SemNode.conversion_no_work`), and now also requires the returned
+temporary's construction chain to be syntactically effect-free -
+closing the hole where an empty class with an effectful user default
+constructor could have its conversion call dropped. Signature-identity
+keyword stripping (`friend`/`inline`) moved from post-flatten string
+erasure to AST-level specifier filtering. A dangling-reference hazard
+in `ResolveClassVariableTemplate` (binding reference held across
+re-entrant initializer analysis) was restructured to complete the
+binding locally before scope registration, which also removed the
+window where the cached copy and the live binding could diverge. The
+constexpr-static demand policy is now enforced identically at demand
+time and at late-definition registration (`InstantiateReadyMembers`
+skips constexpr statics exactly like `InstantiateStaticMembers`).
+
+Remaining known-convention gap (unchanged, documented above): our
+variable-template-id object name spells the class-spec argument by
+full-prefix substitution (g++ form) where the reference uses the
+injected-class-name form; relevant only if a later execution stage
+links against reference-mangled object symbols.
+
+Handoff state for PA24: template semantic layer complete and composed
+(2293/2293 through-pa23), instantiated declarations lower through the
+ordinary LowIR path, no template-subset special-casing in lowering,
+file audit clean.

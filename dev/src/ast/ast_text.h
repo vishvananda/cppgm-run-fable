@@ -21,6 +21,7 @@ std::string FlattenNameTopLevel(const AstName& name);
 std::string FlattenLambdaIntroducer(const AstLambda& lambda);
 
 std::string FlattenTypeId(const AstTypeId& type);
+std::string FlattenSpecifier(const AstSpecifier& specifier);
 std::string FlattenSpecifierSeq(const AstSpecifierSeq& specifiers);
 std::string FlattenDeclarator(const AstDeclarator& declarator);
 std::string FlattenExpr(const AstExpr& expr);
