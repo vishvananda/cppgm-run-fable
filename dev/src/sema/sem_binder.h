@@ -800,9 +800,10 @@ private:
 	                         const vector<AstExprPtr>& items,
 	                         size_t at, bool top_braced,
 	                         vector<SemNodePtr>& out);
-	// The synthesized field-wise constructor used by aggregate array
-	// elements; returns its this-adjusted type.
-	TypePtr EnsureAggregateCtor(const ClassInfo& cls);
+	// The synthesized field-wise constructor used by aggregate
+	// temporaries and array elements; returns its this-adjusted type.
+	// `provided` extends the parameter cover (see the definition).
+	TypePtr EnsureAggregateCtor(const ClassInfo& cls, size_t provided);
 	void AppendAggregateArrayInit(SemNode& item, ScopeBinding& binding,
 	                              const ClassInfo& cls,
 	                              const AstExpr& braced);

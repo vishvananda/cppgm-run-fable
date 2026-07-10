@@ -289,10 +289,13 @@ public:
 	SemValue Analyze(const AstExpr& expr);
 	// A constructed (or aggregate-initialized) temporary of a class
 	// type from an argument/braced-init list (5.2.3, 8.5.4); the
-	// binder's braced-return path builds through it too.
+	// binder's braced-return path builds through it too. `braced_list`
+	// marks a spelled braced form: an empty list over an aggregate
+	// with class-typed members takes the field-wise shape.
 	SemValue MakeTemporaryObject(const TypePtr& class_type,
 	                             const vector<AstExprPtr>& arguments,
-	                             bool braced_assign);
+	                             bool braced_assign,
+	                             bool braced_list = false);
 
 	// 8.5 copy-initialization of a `dest`-typed object, parameter, or
 	// return value (references bind): validates the conversion, retypes

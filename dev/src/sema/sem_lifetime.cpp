@@ -367,26 +367,45 @@ size_t SemBinder::ConsumeArrayItems(const ClassField& field,
 	return inner_at;
 }
 
-// The synthesized field-wise constructor that aggregate array elements
-// call: one parameter per named field, stored in order.
-TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in)
+// The synthesized field-wise constructor that aggregate temporaries
+// and array elements call: one parameter per covered named field,
+// stored in order; named fields beyond the cover (an omitted scalar
+// tail) zero-initialize inside the body. The cover spans the provided
+// initializers extended through the last non-scalar field (class and
+// array members always take a parameter the call site materializes),
+// so each distinct use arity gets its own signature.
+TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
+                                       size_t provided)
 {
 	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
-	vector<TypePtr> params;
-	vector<string> names;
+	vector<const ClassField*> named;
+	size_t non_scalar = 0;  // one past the last non-scalar named field
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		if (cls.fields[i].name.empty())
 			continue;
-		params.push_back(AdjustParameterType(cls.fields[i].type));
-		names.push_back(cls.fields[i].name);
+		named.push_back(&cls.fields[i]);
+		TypePtr bare = RemoveTopCv(cls.fields[i].type);
+		if (bare->kind == TK_CLASS || bare->kind == TK_ARRAY ||
+		    IsReferenceType(cls.fields[i].type))
+			non_scalar = named.size();
+	}
+	size_t cover = provided > non_scalar ? provided : non_scalar;
+	if (cover > named.size())
+		cover = named.size();
+	vector<TypePtr> params;
+	vector<string> names;
+	for (size_t i = 0; i < cover; i++)
+	{
+		params.push_back(AdjustParameterType(named[i]->type));
+		names.push_back(named[i]->name);
 	}
 	TypePtr ctor_type = MakeFunctionType(MakeFundamentalType(FT_VOID),
 	                                     params, false);
 	TypePtr adjusted = MethodAdjustedType(cls, ctor_type);
-	if (cls.aggregate_ctor_built)
+	if (cls.aggregate_ctor_covers[cover])
 		return adjusted;
-	cls.aggregate_ctor_built = true;
+	cls.aggregate_ctor_covers[cover] = true;
 	const string& base_name = cls.members->name;
 	Scope* fn_scope =
 		model_.CreateScope(SCOPE_FUNCTION, base_name, cls.members);
@@ -421,26 +440,28 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in)
 	method_.fn_name = base_name;
 	method_.this_type = node->type->parameters[0];
 	bf_units_written_.clear();
-	size_t param_at = 0;
 	vector<SemNodePtr> actions;
-	for (size_t i = 0; i < cls.fields.size(); i++)
+	for (size_t i = 0; i < named.size(); i++)
 	{
-		const ClassField& field = cls.fields[i];
-		if (field.name.empty())
-			continue;
+		const ClassField& field = *named[i];
 		SemValue value;
-		value.node = MakeSemNode(SN_ID_EXPRESSION);
-		value.node->name = names[param_at];
-		value.node->type = params[param_at];
-		value.node->category = VC_LVALUE;
-		value.node->entity_scope = fn_scope;
-		value.node->entity_name = names[param_at];
-		value.type = IsReferenceType(params[param_at])
-			? params[param_at]->target : params[param_at];
-		value.category = VC_LVALUE;
+		if (i < cover)
+		{
+			value.node = MakeSemNode(SN_ID_EXPRESSION);
+			value.node->name = names[i];
+			value.node->type = params[i];
+			value.node->category = VC_LVALUE;
+			value.node->entity_scope = fn_scope;
+			value.node->entity_name = names[i];
+			value.type = IsReferenceType(params[i])
+				? params[i]->target : params[i];
+			value.category = VC_LVALUE;
+		}
+		else
+			// 8.5.1p7: the omitted scalar tail value-initializes.
+			value = ZeroValue(RemoveTopCv(field.type));
 		actions.push_back(MemberAssignAction(field, ThisFieldExpr(field),
 		                                     std::move(value)));
-		param_at++;
 	}
 	for (size_t i = 0; i < actions.size(); i++)
 		node->children.push_back(std::move(actions[i]));
@@ -461,7 +482,7 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in)
 SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
                                              vector<SemValue> args)
 {
-	TypePtr adjusted = EnsureAggregateCtor(cls_in);
+	TypePtr adjusted = EnsureAggregateCtor(cls_in, args.size());
 	const ClassInfo& cls = *unit_.classes.Find(cls_in.entity);
 	const string& base_name = cls.members->name;
 	string qualified = QualifiedScopePath(cls.members->parent) +
@@ -496,6 +517,16 @@ SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
 		TypePtr param = adjusted->parameters[i];
 		if (IsReferenceType(param))
 			throw runtime_error("reference member is not initialized");
+		if (RemoveTopCv(param)->kind == TK_CLASS)
+		{
+			// 8.5.1p7: an omitted class member value-initializes; the
+			// call site materializes the temporary it passes by value.
+			vector<AstExprPtr> no_args;
+			SemValue filled = analyzer_.MakeTemporaryObject(
+				RemoveTopCv(param), no_args, false);
+			call->children.push_back(std::move(filled.node));
+			continue;
+		}
 		SemValue zero = ZeroValue(RemoveTopCv(param));
 		call->children.push_back(std::move(zero.node));
 	}
@@ -663,7 +694,9 @@ void SemBinder::AppendAggregateArrayInit(SemNode& item,
 	}
 	if (braced.arguments.size() > array->bound)
 		throw runtime_error("too many initializers for " + binding.name);
-	TypePtr adjusted = EnsureAggregateCtor(cls);
+	// Array elements share one full-cover signature; omitted element
+	// members pad with zero arguments at the call sites.
+	TypePtr adjusted = EnsureAggregateCtor(cls, (size_t)-1);
 	unsigned long long size = cls.size;
 	const string& base_name = cls.members->name;
 	string qualified = QualifiedScopePath(cls.members->parent) +

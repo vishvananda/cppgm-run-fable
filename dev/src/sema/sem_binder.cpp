@@ -1261,7 +1261,7 @@ void SemBinder::BindReturnStatement(const AstStmt& stmt)
 		// 6.6.3p3: a braced-init-list return copy-list-initializes
 		// the result object.
 		value = analyzer_.MakeTemporaryObject(bare, stmt.expr->arguments,
-		                                      false);
+		                                      false, true);
 	else
 		value = analyzer_.Analyze(*stmt.expr);
 	if (TypeContainsAutoPlaceholder(current_return_))

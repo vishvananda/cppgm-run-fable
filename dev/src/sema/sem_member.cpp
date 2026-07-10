@@ -409,7 +409,7 @@ SemValue SemExprAnalyzer::AnalyzeImplicitMember(const ScopeBinding& binding,
 // reference output elides.
 SemValue SemExprAnalyzer::MakeTemporaryObject(
 	const TypePtr& class_type, const vector<AstExprPtr>& arguments,
-	bool braced_assign)
+	bool braced_assign, bool braced_list)
 {
 	if (class_type->kind == TK_CLASS)
 		host_.RequireCompleteType(class_type->named);
@@ -419,7 +419,16 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 	host_.OnClassObjectMaterialized(class_type->named);
 	vector<SemValue> args;
 	AnalyzeArgumentList(arguments, args, true);
-	if (cls->is_aggregate && !cls->has_user_ctor && !args.empty())
+	// An empty spelled list over an aggregate whose members include a
+	// class type still takes the field-wise shape (8.5.1p7: each
+	// member value-initializes; the reference pins this form).
+	bool class_field = false;
+	for (size_t i = 0; cls->is_aggregate && i < cls->fields.size(); i++)
+		if (!cls->fields[i].name.empty() &&
+		    RemoveTopCv(cls->fields[i].type)->kind == TK_CLASS)
+			class_field = true;
+	if (cls->is_aggregate && !cls->has_user_ctor &&
+	    (!args.empty() || (braced_list && class_field)))
 	{
 		// 5.2.3p3/8.5.1: a braced temporary of an aggregate class
 		// initializes field-wise.

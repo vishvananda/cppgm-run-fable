@@ -168,7 +168,7 @@ struct ClassInfo
 		  is_union(false), is_empty(true), dsize(0), size(1), alignment(1),
 		  is_aggregate(true), has_user_ctor(false), has_user_dtor(false),
 		  dtor_deleted(false), dtor_access(MA_PUBLIC), dtor_definition(0),
-		  dtor_unwind_no(false), bit_cursor(0), aggregate_ctor_built(false),
+		  dtor_unwind_no(false), bit_cursor(0),
 		  implicit_ctor_built(false),
 		  implicit_dtor_built(false), implicit_ctor_unwind_no(false),
 		  implicit_dtor_unwind_no(false), dtor_user_declared(false),
@@ -226,7 +226,10 @@ struct ClassInfo
 	unsigned long long bit_cursor;  // next free bit from the object start
 
 	// Synthesized implicit special members (built on first demand).
-	bool aggregate_ctor_built;
+	// PA24: the field-wise aggregate constructor synthesizes one
+	// signature per distinct parameter cover (provided initializers
+	// extended through the last non-scalar field).
+	std::map<unsigned long long, bool> aggregate_ctor_covers;
 	bool implicit_ctor_built;
 	bool implicit_dtor_built;
 	bool implicit_ctor_unwind_no;
