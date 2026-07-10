@@ -354,9 +354,28 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 			return "XadL_Z" + spelled + params + "EE";
 		}
 		// PA26: a member pointer argument spells the address
-		// expression over the member entity.
+		// expression over the member entity; a member function
+		// carries its cv-qualifiers and bare signature (5.1.6, the
+		// g++ spelling), a data member only its name.
 		if (arg.type && arg.type->kind == TK_MEMBER_POINTER)
-			return "XadL_Z" + spelled + "EE";
+		{
+			const TypePtr& member = arg.type->target;
+			if (member->kind != TK_FUNCTION)
+				return "XadL_Z" + spelled + "EE";
+			string qualified;
+			for (size_t i = 0; i < parts.size(); i++)
+				qualified += SourceName(parts[i].name);
+			qualified += SourceName(arg.entity_name);
+			string cv = string(member->is_volatile ? "V" : "") +
+				(member->is_const ? "K" : "");
+			qualified = "N" + cv + qualified + "E";
+			string params;
+			for (size_t i = 0; i < member->parameters.size(); i++)
+				params += MangleType(member->parameters[i], subs);
+			if (member->parameters.empty())
+				params = "v";
+			return "XadL_Z" + qualified + params + "EE";
+		}
 		return "L_Z" + spelled + "E";
 	}
 	string code = MangleType(arg.type, subs);

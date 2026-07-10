@@ -195,16 +195,13 @@ void SemBinder::ResolveMemberPointerArgument(const AstExpr* expr,
 	if (!found || !found->home || found->home->kind != SCOPE_CLASS)
 		throw runtime_error("member pointer argument does not name a "
 		                    "class member");
-	// 4.11p2: a base member's pointer converts to the parameter's
-	// derived class; the unique path's offset displaces a data member
-	// inside the derived object.
+	// 14.3.2p5: no conversions apply to a member pointer argument, so
+	// the named member's class must be the parameter's class itself
+	// (base-to-derived conversion stays expression-level; g++ rejects
+	// it here too, keeping SFINAE choices aligned).
 	const NamedTypeInfo* owner_entity =
 		found->owner ? found->owner->entity : 0;
-	int path_hops = 0;
-	unsigned long long path_offset = 0;
-	if (!owner_entity ||
-	    BaseSubobjectPath(param_type->named, owner_entity, path_hops,
-	                      path_offset) != BP_UNIQUE)
+	if (!owner_entity || owner_entity != param_type->named)
 		throw runtime_error("member pointer argument class mismatch");
 	if (found->kind == SB_FUNCTION)
 	{
@@ -248,5 +245,5 @@ void SemBinder::ResolveMemberPointerArgument(const AstExpr* expr,
 	arg.entity_scope = found->owner;
 	arg.entity_name = found->name;
 	arg.value_type = FT_LONG_LONG_INT;
-	arg.value_bits = field->offset + path_offset + 1;
+	arg.value_bits = field->offset + 1;
 }
