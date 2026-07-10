@@ -689,6 +689,9 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	if (LowerFloatType(operand.type))
 		Emit(truth + " = cmp ne " + LowerValueType(operand.type) +
 		     " " + operand.text + ", " + LowerFloatZero(operand.type));
+	else if (operand.type && operand.type->kind == TK_POINTER)
+		// A pointer operand compares in its own value space.
+		Emit(truth + " = cmp ne ptr " + operand.text + ", 0");
 	else
 		Emit(truth + " = cmp ne i64 " + operand.text + ", 0");
 	Emit("store i64 " + truth + ", $" + slot);

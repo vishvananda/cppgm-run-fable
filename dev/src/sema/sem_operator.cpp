@@ -87,9 +87,12 @@ const Scope* InnermostNamespace(const Scope* scope)
 
 // 3.4.2p2 associated namespaces of one argument type (the PA15
 // subset: classes with their base chains, enumerations, and the
-// pointee chain).
-void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
-                                 vector<const Scope*>& out)
+// pointee chain). `seen` breaks CRTP cycles (a class whose base names
+// the class itself as a template argument, PA26).
+void CollectAssociatedNamespacesInner(TypesModel& model,
+                                      const TypePtr& type,
+                                      vector<const Scope*>& out,
+                                      set<const NamedTypeInfo*>& seen)
 {
 	if (!type)
 		return;  // a template-only overload set has no operand type
@@ -99,6 +102,8 @@ void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
 		for (const NamedTypeInfo* entity = type->named; entity;
 		     entity = entity->base_entity)
 		{
+			if (!seen.insert(entity).second)
+				return;
 			const Scope* ns = InnermostNamespace(entity->scope);
 			if (ns)
 				out.push_back(ns);
@@ -117,7 +122,8 @@ void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
 						out.push_back(tns);
 				}
 				else if (!arg.is_value)
-					CollectAssociatedNamespaces(model, arg.type, out);
+					CollectAssociatedNamespacesInner(model, arg.type,
+					                                 out, seen);
 			}
 		}
 		return;
@@ -132,11 +138,18 @@ void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
 	case TK_LVALUE_REFERENCE:
 	case TK_RVALUE_REFERENCE:
 	case TK_ARRAY:
-		CollectAssociatedNamespaces(model, type->target, out);
+		CollectAssociatedNamespacesInner(model, type->target, out, seen);
 		return;
 	default:
 		return;
 	}
+}
+
+void CollectAssociatedNamespaces(TypesModel& model, const TypePtr& type,
+                                 vector<const Scope*>& out)
+{
+	set<const NamedTypeInfo*> seen;
+	CollectAssociatedNamespacesInner(model, type, out, seen);
 }
 
 void AppendBindingOverloads(const ScopeBinding& binding, bool is_member,
