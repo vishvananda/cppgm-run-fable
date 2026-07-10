@@ -290,6 +290,9 @@ LowerValue FunctionLowerer::LowerIdValue(const SemNode& node)
 	value.text = NewTemp();
 	Emit(value.text + " = load " + LowerValueType(value.type) + " " +
 	     storage);
+	// PA27: `this` is never null, so displaced-base adjustments of the
+	// value skip their null guard.
+	value.known_nonnull = node.entity_name == "this";
 	return value;
 }
 

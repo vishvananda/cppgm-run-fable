@@ -162,13 +162,32 @@ LowerValue FunctionLowerer::ConvertPointerValue(LowerValue value,
 		int hops = 0;
 		unsigned long long offset = 0;
 		if (BaseSubobjectPath(from, to, hops, offset) == BP_UNIQUE)
-			value.text = offset
-				? AdjustPointerGuarded(value.text, (long long)offset)
-				: AdjustToBaseHops(value.text, hops, 0);
+		{
+			if (!offset)
+				value.text = AdjustToBaseHops(value.text, hops, 0);
+			else if (value.known_nonnull)
+				value.text = AdjustToBaseHops(value.text, hops, offset);
+			else
+				value.text =
+					AdjustPointerGuarded(value.text, (long long)offset);
+		}
 		else if (BaseSubobjectPath(to, from, hops, offset) ==
 		             BP_UNIQUE && offset)
-			value.text = AdjustPointerGuarded(value.text,
-			                                  -(long long)offset);
+		{
+			// 5.2.9p11: a downcast view shifts back toward the derived
+			// object; `this` (never null) keeps the direct projection.
+			if (value.known_nonnull)
+			{
+				string shifted = NewTemp();
+				Emit(shifted +
+				     " = index i8 [projection=base_subobject] " +
+				     value.text + ", -" + to_string(offset));
+				value.text = shifted;
+			}
+			else
+				value.text = AdjustPointerGuarded(value.text,
+				                                  -(long long)offset);
+		}
 	}
 	value.type = target;
 	return value;
@@ -176,23 +195,29 @@ LowerValue FunctionLowerer::ConvertPointerValue(LowerValue value,
 
 // A runtime class-pointer adjustment across a displaced base: null
 // stays null (4.10p3 / 5.2.9p11), so the displacement applies on the
-// non-null path only.
+// non-null path only (the PA27 basecast shape: each arm stores the
+// result slot).
 string FunctionLowerer::AdjustPointerGuarded(const string& value,
                                              long long delta)
 {
-	string slot = AddMatSlot("ptradj", "ptr");
-	Emit("store ptr " + value + ", $" + slot);
+	string slot = AddMatSlot("basecast", "ptr");
 	string is_null = NewTemp();
 	Emit(is_null + " = cmp eq ptr " + value + ", 0");
-	string shift_label = NewLabel("ptradj_shift");
-	string end_label = NewLabel("ptradj_end");
+	string null_label = NewLabel("basecast_null");
+	string adjust_label = NewLabel("basecast_adjust");
+	string end_label = NewLabel("basecast_end");
+	ReferenceLabel(null_label);
+	ReferenceLabel(adjust_label);
+	Terminate("branch " + is_null + ", ^" + null_label + ", ^" +
+	          adjust_label);
+	OpenBlock(null_label);
+	Emit("store ptr 0, $" + slot);
 	ReferenceLabel(end_label);
-	ReferenceLabel(shift_label);
-	Terminate("branch " + is_null + ", ^" + end_label + ", ^" +
-	          shift_label);
-	OpenBlock(shift_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(adjust_label);
 	string adjusted = NewTemp();
-	Emit(adjusted + " = index i8 " + value + ", " + to_string(delta));
+	Emit(adjusted + " = index i8 [projection=base_subobject] " + value +
+	     ", " + to_string(delta));
 	Emit("store ptr " + adjusted + ", $" + slot);
 	ReferenceLabel(end_label);
 	Terminate("jump ^" + end_label);
