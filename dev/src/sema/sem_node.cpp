@@ -97,6 +97,9 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_STATIC_GUARD: return "static-guard";
 	case SN_TYPEID: return "typeid-expression";
 	case SN_DYNAMIC_CAST: return "dynamic-cast-expression";
+	case SN_THROW: return "throw-expression";
+	case SN_TRY: return "try-statement";
+	case SN_CATCH_HANDLER: return "catch-handler";
 	}
 	throw runtime_error("unknown semantic node kind");
 }

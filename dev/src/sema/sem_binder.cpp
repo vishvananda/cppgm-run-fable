@@ -1138,6 +1138,12 @@ void SemBinder::BindStatement(const AstStmt& stmt)
 	case SK_DEFAULT:
 		BindLabelStatement(stmt);
 		return;
+	case SK_THROW:
+		BindThrowStatement(stmt);
+		return;
+	case SK_TRY:
+		BindTryStatement(stmt);
+		return;
 	case SK_BREAK:
 		AppendItem(SN_BREAK_STATEMENT);
 		return;
@@ -1203,6 +1209,71 @@ void SemBinder::BindExpressionStatement(const AstStmt& stmt)
 	SemNode* item = AppendItem(SN_EXPRESSION_STATEMENT);
 	SemValue value = analyzer_.Analyze(*stmt.expr);
 	item->children.push_back(std::move(value.node));
+}
+
+// PA25 15.1: a throw statement is an expression statement over the
+// throw-expression.
+void SemBinder::BindThrowStatement(const AstStmt& stmt)
+{
+	SemNode* item = AppendItem(SN_EXPRESSION_STATEMENT);
+	SemValue value = analyzer_.AnalyzeThrow(stmt.expr.get());
+	item->children.push_back(std::move(value.node));
+}
+
+// PA25 15: a try block with its handlers. Each handler binds its
+// exception declaration in a fresh block scope around the handler
+// body.
+void SemBinder::BindTryStatement(const AstStmt& stmt)
+{
+	SemNode* item = AppendItem(SN_TRY);
+	parents_.push_back(item);
+	BindStatement(*stmt.body);
+	for (size_t i = 0; i < stmt.handlers.size(); i++)
+	{
+		const AstHandler& handler = stmt.handlers[i];
+		SemNode* handler_item = AppendItem(SN_CATCH_HANDLER);
+		parents_.push_back(handler_item);
+		Scope* saved = current_;
+		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+		if (!handler.ellipsis)
+		{
+			DeclSpecifierInfo specs =
+				builder_.ProcessSpecifiers(handler.specifiers, true);
+			TypePtr type = specs.type;
+			string var_name;
+			if (handler.declarator)
+			{
+				DeclaratorInfo composed = builder_.ComposeDeclarator(
+					handler.declarator.get(), specs.type);
+				type = composed.type;
+				if (composed.id && composed.id->IsPlainIdentifier())
+					var_name = composed.id->parts[0].identifier;
+			}
+			handler_item->type = type;
+			TypePtr bare = RemoveTopCv(
+				IsReferenceType(type) ? type->target : type);
+			if (bare->kind == TK_CLASS)
+				RequireCompleteType(bare->named);
+			else if (bare->kind != TK_FUNDAMENTAL)
+				throw OutsideBoundary("handler type form");
+			if (!var_name.empty())
+			{
+				ScopeBinding binding;
+				binding.kind = SB_VARIABLE;
+				binding.name = var_name;
+				binding.type = type;
+				binding.home = current_;
+				AddBinding(*current_, binding);
+				handler_item->name = var_name;
+				handler_item->entity_scope = current_;
+				handler_item->entity_name = var_name;
+			}
+		}
+		BindStatement(*handler.body);
+		current_ = saved;
+		parents_.pop_back();
+	}
+	parents_.pop_back();
 }
 
 void SemBinder::BindConditionDeclaration(const AstCondition& condition,

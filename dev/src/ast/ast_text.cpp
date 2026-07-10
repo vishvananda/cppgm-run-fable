@@ -323,6 +323,10 @@ string FlattenExpr(const AstExpr& expr)
 		return FlattenName(expr.name);
 	case EK_PAREN:
 		return "(" + FlattenExpr(*expr.operands[0]) + ")";
+	case EK_THROW:
+		return expr.operands.empty()
+			? string("throw")
+			: "throw " + FlattenExpr(*expr.operands[0]);
 	case EK_BINARY:
 	case EK_ASSIGNMENT:
 		return FlattenExpr(*expr.operands[0]) + expr.op_spelling +

@@ -58,6 +58,19 @@ AstExprPtr AstParser::ParseExpression()
 // by an assignment-operator and a right-recursive tail.
 AstExprPtr AstParser::ParseAssignmentExpression()
 {
+	// 5.17p1: assignment-expression: throw-expression.
+	if (AtSimple(KW_THROW))
+	{
+		Advance();
+		AstExprPtr node = MakeExpr(EK_THROW);
+		State state = Save();
+		AstExprPtr operand = ParseAssignmentExpression();
+		if (operand)
+			node->operands.push_back(move(operand));
+		else
+			Restore(state);
+		return node;
+	}
 	AstExprPtr left = ParseConditionalExpression();
 	if (!left)
 		return AstExprPtr();

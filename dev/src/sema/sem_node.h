@@ -132,7 +132,20 @@ enum ESemNodeKind
 	// form, a glvalue for the reference form - the node's category
 	// tells them apart); `typeid_operand` is the operand's static
 	// class type, the node's type the target.
-	SN_DYNAMIC_CAST
+	SN_DYNAMIC_CAST,
+	// PA25 throw: children[0] is the thrown payload (a converted
+	// scalar value or a constructor action into the exception
+	// storage), children[1] (class payloads with destructors) the
+	// exception object's destructor action; `typeid_operand` is the
+	// thrown type. No children: a rethrow.
+	SN_THROW,
+	// PA25 try: children[0] is the guarded compound, the rest are
+	// SN_CATCH_HANDLER items.
+	SN_TRY,
+	// PA25 catch handler: `type` is the handler's declared type (null
+	// for ...); a named binding records (entity_scope, entity_name);
+	// children[0] is the handler body.
+	SN_CATCH_HANDLER
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete

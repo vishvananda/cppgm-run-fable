@@ -311,6 +311,9 @@ public:
 	explicit SemExprAnalyzer(ISemExprHost& host);
 
 	SemValue Analyze(const AstExpr& expr);
+	// PA25 15.1: a throw-expression (null operand: rethrow); the
+	// binder's throw-statement path enters here too.
+	SemValue AnalyzeThrow(const AstExpr* operand);
 	// A constructed (or aggregate-initialized) temporary of a class
 	// type from an argument/braced-init list (5.2.3, 8.5.4); the
 	// binder's braced-return path builds through it too. `braced_list`

@@ -123,6 +123,8 @@ private:
 	void BindReturnStatement(const AstStmt& stmt);
 	SemNodePtr WrapReturnValue(SemValue value, const TypePtr& bare);
 	void BindCondition(const AstCondition& condition, bool for_switch);
+	void BindThrowStatement(const AstStmt& stmt);
+	void BindTryStatement(const AstStmt& stmt);
 	void BindConditionDeclaration(const AstCondition& condition,
 	                              bool for_switch);
 	void BindIfStatement(const AstStmt& stmt);

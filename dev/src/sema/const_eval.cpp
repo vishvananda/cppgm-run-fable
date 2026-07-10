@@ -584,6 +584,8 @@ string RenderFloatConstant(long double value, EFundamentalType type)
 
 bool SemTreeMayThrow(const SemNode& node)
 {
+	if (node.kind == SN_THROW)
+		return true;
 	if (node.kind == SN_CALL_EXPRESSION && !node.children.empty())
 	{
 		// An indirect call has no known specification; a direct call

@@ -25,6 +25,20 @@ const ClassInfo* LowerProgram::MethodClass(const TypePtr& adjusted) const
 
 namespace {
 
+// The readable name tail of a fundamental type ("long int" ->
+// "long_int"); RTTI and exception-object scaffolding names use it.
+string FundamentalNameTail(const TypePtr& type)
+{
+	string display = DescribeType(type);
+	string tail;
+	for (size_t i = 0; i < display.size(); i++)
+	{
+		char c = display[i];
+		tail += (c == ' ') ? '_' : c;
+	}
+	return tail;
+}
+
 // A specialization whose arguments all sanitize (type arguments that
 // are fundamentals, enumerations, or such classes; value arguments)
 // keeps the readable class-keyed RTTI naming; any other argument
@@ -193,7 +207,7 @@ string LowerProgram::RttiTypeRef(const TypePtr& type_in)
 	{
 	case TK_FUNDAMENTAL:
 	{
-		string tail = LowerSanitizeName(DescribeType(type));
+		string tail = FundamentalNameTail(type);
 		low = UniqueSymbol("__rtti_" + tail);
 		name_low = UniqueSymbol("__typeinfo_name__" + tail);
 		head = ExternalRttiVtableRef(RTTI_VT_FUNDAMENTAL);
@@ -326,4 +340,50 @@ bool LowerProgram::RenderPendingVTables()
 			entry.text = RenderVTableDefinition(entry);
 	}
 	return any;
+}
+
+// PA25 15.1/15.3: the record a thrown or caught type matches by. The
+// runtime compares record addresses, so fundamentals resolve to the
+// C++ library's strong records (with the weak scaffolding rendered
+// beside them); program classes match their own weak records.
+string LowerProgram::ThrowRttiRef(const TypePtr& type_in)
+{
+	TypePtr type = RemoveTopCv(type_in);
+	if (type->kind != TK_FUNDAMENTAL)
+		return RttiTypeRef(type);
+	RttiTypeRef(type);
+	string encoding = MangleTypeEncoding(type);
+	map<string, string>::iterator found =
+		external_rtti_names_.find(encoding);
+	if (found != external_rtti_names_.end())
+		return "@" + found->second;
+	string name = UniqueSymbol("__external_rtti__" +
+	                           FundamentalNameTail(type));
+	external_rtti_names_[encoding] = name;
+	poly_declare_globals_.push_back(
+		"declare global @" + name + " [binding=strong, object=_ZTI" +
+		encoding + "]");
+	return "@" + name;
+}
+
+// The weak zero-filled exception-object scaffolding global beside a
+// throw of `type` (the reference presentation).
+void LowerProgram::EhObjGlobal(const TypePtr& type_in)
+{
+	TypePtr type = RemoveTopCv(type_in);
+	string tail;
+	if (type->kind == TK_CLASS)
+		tail = type->named->class_key + "_" +
+			LowerScopePath(type->named->class_record
+			                   ? type->named->class_record->members->parent
+			                   : 0) +
+			LowerSanitizeName(type->named->name);
+	else
+		tail = FundamentalNameTail(type);
+	if (!ehobj_rendered_.insert(tail).second)
+		return;
+	string name = UniqueSymbol("__ehobj_" + tail);
+	poly_globals_.push_back(
+		"global @" + name + " [binding=weak, object=@" + name +
+		"] = {\n  zero " + to_string(TypeSize(type)) + "\n}");
 }

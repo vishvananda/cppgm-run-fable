@@ -379,14 +379,35 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 {
 	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
 	vector<const ClassField*> named;
-	size_t non_scalar = 0;  // one past the last non-scalar named field
+	size_t non_scalar = 0;  // one past the last named field the ctor
+	                        // cannot value-initialize internally
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		if (cls.fields[i].name.empty())
 			continue;
 		named.push_back(&cls.fields[i]);
 		TypePtr bare = RemoveTopCv(cls.fields[i].type);
-		if (bare->kind == TK_CLASS || bare->kind == TK_ARRAY ||
+		// A copyable omitted class member arrives as a materialized
+		// by-value argument (the pinned PA24 shape); PA25: one whose
+		// copy is unusable value-initializes inside the synthesized
+		// body instead.
+		bool internal_class_init = false;
+		if (bare->kind == TK_CLASS)
+		{
+			const ClassInfo* member = unit_.classes.Find(bare->named);
+			if (member)
+			{
+				DeclareImplicitSpecialMembers(
+					unit_.classes.Create(bare->named));
+				internal_class_init = true;
+				for (size_t c = 0; c < member->ctors.size(); c++)
+					if (member->ctors[c].kind == CK_COPY &&
+					    !member->ctors[c].deleted)
+						internal_class_init = false;
+			}
+		}
+		if ((bare->kind == TK_CLASS && !internal_class_init) ||
+		    bare->kind == TK_ARRAY ||
 		    IsReferenceType(cls.fields[i].type))
 			non_scalar = named.size();
 	}
@@ -458,8 +479,22 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 			value.category = VC_LVALUE;
 		}
 		else
+		{
+			TypePtr bare = RemoveTopCv(field.type);
+			const ClassInfo* member_cls = bare->kind == TK_CLASS
+				? unit_.classes.Find(bare->named) : 0;
+			if (member_cls)
+			{
+				// 8.5.1p7: an omitted class member value-initializes
+				// in place (8.5p10).
+				AppendClassMemberInit(field, *member_cls, 0,
+				                      vector<const AstExpr*>(),
+				                      actions);
+				continue;
+			}
 			// 8.5.1p7: the omitted scalar tail value-initializes.
 			value = ZeroValue(RemoveTopCv(field.type));
+		}
 		actions.push_back(MemberAssignAction(field, ThisFieldExpr(field),
 		                                     std::move(value)));
 	}

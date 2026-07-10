@@ -117,6 +117,9 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeSubscript(expr);
 	case EK_MEMBER:
 		return AnalyzeMember(expr);
+	case EK_THROW:
+		return AnalyzeThrow(expr.operands.empty()
+		                        ? 0 : expr.operands[0].get());
 	case EK_CSTYLE_CAST:
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
 		                     *expr.operands[0], true, OP_LPAREN, "");

@@ -269,10 +269,44 @@ private:
 	void EndFullExpression();
 	bool ScanArmsCleanups(const SemNode& node, bool& live) const;
 	void EmitTempCleanups(size_t from);
-	void OpenEhRegion();
+	void OpenEhRegion(const char* end_prefix = "call_unwind_end");
 	// PA25 5.2.8: a call node that is std::type_info::operator== or
 	// operator!= over typeid results (folds to RTTI address identity).
 	static bool IsTypeInfoComparison(const SemNode& node);
+	// --- PA25 source-level exception handling ---
+	// One active try or catch context. A try context carries its
+	// dispatch/entry/end labels and handler table; a catch context its
+	// cleanup label (normal exits run __cxa_end_catch).
+	struct EhHandler
+	{
+		EhHandler() : catch_all(false), selector(0), node(0) {}
+
+		string rtti;    // "@..." record of the handler type ("" for ...)
+		bool catch_all;
+		int selector;   // function-global 1-based id (0: unassigned)
+		const SemNode* node;
+		string body_label;
+	};
+	struct EhContext
+	{
+		EhContext() : is_catch(false), cleanup_depth(0) {}
+
+		bool is_catch;
+		string dispatch_label;
+		string entry_label;
+		string end_label;
+		string cleanup_label;  // catch contexts: the unwind path
+		vector<EhHandler> handlers;
+		size_t cleanup_depth;  // cleanup_scopes_.size() at the try
+	};
+	// Emits the try's handler markers (eh_catch/eh_catch_all lines),
+	// assigning function-global selectors on first emission.
+	void EmitTryMarkers(EhContext& context);
+	// The eh_end / __cxa_end_catch pops a return crossing the active
+	// contexts must run, interleaved with the scope cleanups.
+	void EmitEhReturnUnwind();
+	void LowerTry(const SemNode& node);
+	void LowerThrow(const SemNode& node);
 	// PA25 5.2.7 dynamic_cast: null-checks the operand, calls the
 	// __dynamic_cast runtime, and (reference form) raises
 	// __cxa_bad_cast on failure; returns the result pointer text.
@@ -361,6 +395,10 @@ private:
 	// cleanups (the reference leaves conditional-arm temporaries
 	// undestroyed rather than tracking them across the join).
 	int cond_arm_depth_;
+	// PA25: the active try/catch contexts and the function-global
+	// catch-handler selector counter.
+	vector<EhContext> eh_contexts_;
+	int catch_selector_counter_;
 	// Class return-value construction into the result object never
 	// opens unwind regions (the reference's final-action form).
 	bool suppress_eh_regions_;

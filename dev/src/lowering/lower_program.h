@@ -223,6 +223,13 @@ public:
 	// first use with the given signature/metadata suffix.
 	string ExternalRuntimeFnRef(const string& object_name,
 	                            const string& declare_suffix);
+	// PA25 15.1: the RTTI record a throw/catch type matches by - the
+	// strong external record for fundamentals (with the weak record
+	// rendered beside it), the program's own record otherwise.
+	string ThrowRttiRef(const TypePtr& type);
+	// PA25 15.1: the weak zero-filled exception-object scaffolding
+	// global of a thrown type.
+	void EhObjGlobal(const TypePtr& type);
 	// PA18 reference-parity fold (lower_expr.cpp BranchOnValue): a
 	// branch on this namespace-scope pointer-to-function object may
 	// spell the object's address only when that is provably
@@ -367,4 +374,8 @@ private:
 	// __dynamic_cast, ...), keyed by their object name.
 	map<string, string> runtime_fn_names_;
 	vector<string> runtime_declares_;
+	// PA25: strong external RTTI declares (throw/catch fundamentals)
+	// and the rendered exception-object scaffolding globals.
+	map<string, string> external_rtti_names_;
+	set<string> ehobj_rendered_;
 };

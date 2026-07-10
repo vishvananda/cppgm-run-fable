@@ -478,6 +478,54 @@ SemValue SemExprAnalyzer::AnalyzeTypeid(const AstExpr& expr)
 	return value;
 }
 
+// PA25 15.1: throw builds the exception payload - a converted scalar
+// value or a copy-construction into the exception storage (with the
+// exception object's destructor pinned for __cxa_throw).
+SemValue SemExprAnalyzer::AnalyzeThrow(const AstExpr* operand)
+{
+	SemValue value;
+	value.type = MakeFundamentalType(FT_VOID);
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_THROW);
+	value.node->type = value.type;
+	if (!operand)
+		return value;
+	SemValue thrown = Analyze(*operand);
+	TypePtr type = thrown.type;
+	if (IsReferenceType(type))
+		type = type->target;
+	TypePtr bare = RemoveTopCv(type);
+	if (bare->kind == TK_ARRAY || bare->kind == TK_FUNCTION)
+		throw OutsideBoundary("thrown operand form");
+	if (bare->kind == TK_CLASS)
+	{
+		host_.RequireCompleteType(bare->named);
+		const ClassInfo* cls = host_.Classes().Find(bare->named);
+		if (!cls)
+			throw runtime_error("thrown class record missing");
+		vector<SemValue> args;
+		args.push_back(std::move(thrown));
+		int index = host_.ResolveClassCtorHost(*cls, args, true,
+		                                       "throw");
+		vector<SemNodePtr> arg_nodes;
+		for (size_t i = 0; i < args.size(); i++)
+			arg_nodes.push_back(std::move(args[i].node));
+		SemNodePtr action = host_.MakeConstructorCall(
+			*cls, index, false, SemNodePtr(), std::move(arg_nodes));
+		action->type = bare;
+		action->category = VC_PRVALUE;
+		if (host_.Classes().NeedsDestruction(*cls))
+			action->needs_dtor = true;
+		value.node->children.push_back(std::move(action));
+		if (host_.Classes().NeedsDestruction(*cls))
+			value.node->children.push_back(host_.MakeTemporaryDtor(*cls));
+	}
+	else
+		value.node->children.push_back(std::move(thrown.node));
+	value.node->typeid_operand = bare;
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 {
 	bool alignment = expr.kind == EK_TYPE_TRAIT;

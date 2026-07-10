@@ -1101,6 +1101,18 @@ void FunctionLowerer::EmitZeroValueReturn()
 		Terminate("return void");
 		return;
 	}
+	TypePtr ret_bare = RemoveTopCv(return_type_);
+	if (!IsReferenceType(return_type_) && ret_bare->kind == TK_CLASS)
+	{
+		if (retobj_slot_.empty())
+			retobj_slot_ = AddMatSlot("retobj",
+			                          LowerSlotType(ret_bare));
+		Emit("zeroinit " + LowerObjSpan(ret_bare) + " $" +
+		     retobj_slot_);
+		Terminate("return " + LowerSlotType(ret_bare) + " $" +
+		          retobj_slot_);
+		return;
+	}
 	string type_text = LowerValueType(return_type_);
 	if (LowerFloatType(return_type_))
 		Terminate("return " + type_text + " " +
@@ -1630,6 +1642,9 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 	case SN_DYNAMIC_CAST:
 		// A discarded cast still runs its runtime query.
 		LowerDynamicCast(node);
+		return;
+	case SN_THROW:
+		LowerThrow(node);
 		return;
 	case SN_CALL_EXPRESSION:
 		if (!IsReferenceType(node.type) &&

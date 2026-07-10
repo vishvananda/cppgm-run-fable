@@ -931,9 +931,30 @@ void FunctionLowerer::CloseEhRegion()
 	ReferenceLabel(eh_end_);
 	Terminate("jump ^" + eh_end_);
 	OpenBlock(eh_dispatch_);
-	EmitTempCleanups(0);
-	EmitCleanupsFrom(0);
-	Terminate("resume");
+	// Inside a try, the dispatch re-arms the try's handler set, runs
+	// the pending cleanups, and routes to the handler entry; outside,
+	// it resumes the unwind.
+	size_t enclosing = eh_contexts_.size();
+	while (enclosing > 0 && eh_contexts_[enclosing - 1].is_catch)
+		enclosing--;
+	if (enclosing > 0)
+	{
+		EhContext& outer = eh_contexts_[enclosing - 1];
+		EmitTryMarkers(outer);
+		Emit("eh_cleanup");
+		EmitTempCleanups(0);
+		EmitCleanupsFrom(outer.cleanup_depth);
+		Emit("eh_end");
+		Emit("eh_end");
+		ReferenceLabel(outer.entry_label);
+		Terminate("jump ^" + outer.entry_label);
+	}
+	else
+	{
+		EmitTempCleanups(0);
+		EmitCleanupsFrom(0);
+		Terminate("resume");
+	}
 	OpenBlock(eh_end_);
 }
 
@@ -943,6 +964,14 @@ void FunctionLowerer::CloseEhRegion()
 string FunctionLowerer::CleanupSignature() const
 {
 	string signature;
+	// A dispatch inside a try routes to that try's handler entry, so
+	// its content keys on the try context too.
+	for (size_t i = eh_contexts_.size(); i-- > 0;)
+		if (!eh_contexts_[i].is_catch)
+		{
+			signature += "try:" + eh_contexts_[i].dispatch_label + ";";
+			break;
+		}
 	char buffer[32];
 	for (size_t i = temp_cleanups_.size(); i-- > 0;)
 	{
@@ -966,7 +995,7 @@ string FunctionLowerer::CleanupSignature() const
 	return signature;
 }
 
-void FunctionLowerer::OpenEhRegion()
+void FunctionLowerer::OpenEhRegion(const char* end_prefix)
 {
 	string signature = CleanupSignature();
 	map<string, string>::const_iterator found =
@@ -979,7 +1008,7 @@ void FunctionLowerer::OpenEhRegion()
 	else
 	{
 		eh_dispatch_ = NewLabel("call_unwind_dispatch");
-		eh_end_ = NewLabel("call_unwind_end");
+		eh_end_ = NewLabel(end_prefix);
 		eh_reused_ = false;
 		eh_pending_signature_ = signature;
 	}
@@ -1018,6 +1047,9 @@ bool FunctionLowerer::SegmentContainsCall(const SemNode& node,
 	switch (node.kind)
 	{
 	case SN_DESTRUCTOR_ACTION:
+		return false;
+	case SN_THROW:
+		// The throw lowering manages its own dispatch regions.
 		return false;
 	case SN_CALL_EXPRESSION:
 		// A std::type_info comparison folds to a pointer compare.
@@ -1134,7 +1166,7 @@ bool FunctionLowerer::ScanArmsCleanups(const SemNode& node,
 	}
 	bool call_event = node.kind == SN_NEW_INIT ||
 		node.kind == SN_NEW_ARRAY || node.kind == SN_DELETE_EXPRESSION ||
-		node.kind == SN_DELETE_ARRAY;
+		node.kind == SN_DELETE_ARRAY || node.kind == SN_THROW;
 	for (size_t i = 0; i < node.children.size(); i++)
 		if (ScanArmsCleanups(*node.children[i], live))
 			return true;

@@ -711,6 +711,8 @@ void SemBinder::DowngradePackDeducedTemporaries(const ClassCtor& ctor,
 
 bool SemBinder::NodeMayThrow(const SemNode& node) const
 {
+	if (node.kind == SN_THROW)
+		return true;
 	if (node.kind == SN_CALL_EXPRESSION && !node.children.empty() &&
 	    node.children[0]->kind == SN_CALLEE &&
 	    !node.children[0]->unwind_no)
@@ -954,8 +956,13 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		                            (int)winner);
 	const ClassCtor& ctor = cls.ctors[winner];
 	if (ctor.deleted)
+	{
+		fprintf(stderr, "DBG deleted ctor cls=%s what=%s winner=%zu kind=%d nctors=%zu\n",
+		        cls.entity->display.c_str(), what, winner,
+		        (int)ctor.kind, cls.ctors.size());
 		throw runtime_error(string("use of deleted constructor for ") +
 		                    what);
+	}
 	if (copy_init && ctor.is_explicit)
 	{
 		// 13.3.1.4: an explicit constructor is not a candidate here;

@@ -29,7 +29,8 @@ enum EExprKind
 	EK_DELETE,           // delete-expression
 	EK_LAMBDA,           // lambda-expression
 	EK_PACK_EXPANSION,   // initializer-clause ...
-	EK_BRACED            // braced-init-list
+	EK_BRACED,           // braced-init-list
+	EK_THROW             // throw-expression (15.1)
 };
 
 struct AstExpr
