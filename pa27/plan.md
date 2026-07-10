@@ -166,3 +166,67 @@ body is demanded).
   byte-identically to PA26).
 - `perl scripts/cppgm_file_audit.pl --stage pa27 --paths dev/src` for
   size/architecture gates before committing.
+
+## Architecture Review
+
+The implementation matches the ownership split above. Sema facts are
+typed end to end: `ClassInfo` gains the vbase table (`vbases`), the
+nv/full layout split (`nv_dsize`/`nv_size`/`nv_alignment`), primary
+promotion (`primary_base`), per-class views (`views`), and
+`declared_virtuals` for view final-overrider resolution
+(`ResolveViewOverrider`). Virtual-edge member paths ride SemNodes as
+`vbase_index` + `base_offset` (carrier table entry plus static
+remainder), and the complete-object-only construction/destruction
+phases are marked with `vbase_action` and gated by entry kind
+(C1/D1 emit, C2/D2/D0 drop but keep the callee demand) - no strings,
+no test-shaped gates.
+
+Lowering owns the hidden-argument ABI in `lower_vbase.cpp`: signature
+computation (`HiddenSignatureParams`, cached per registry entry),
+template demand analysis over instantiated bodies, per-parameter
+carried maps and `$name__pvbN` slots, call-site supply
+(`SupplyVBaseEntry` with anchor sharing), VTT slicing, and vpointer
+installs from static groups or the construction table. Vtable
+rendering (`lower_vtable.cpp`) derives views, construction vtables,
+VTT shapes, and vmi RTTI records from the sema tables; thunks are
+generated per (target, adjust) pair. `basecast` shapes and
+`known_nonnull` guard elision live in `lower_convert.cpp` beside the
+older adjustment forms.
+
+Audit-driven corrections (see `pa27/audit.md`): the virtual-edge
+member path now remaps the carrier into the parameter's own vbase
+table before touching carried pointers (the node's index counts the
+object's static class's table, which can order entries differently
+across a base view); parameter-map lookups match the declaring scope
+so shadowing locals never ride a parameter's hidden pointers; the
+`dynamic_cast` src2dst hint demands public access on every edge of
+the unique path; and class completion rejects polymorphic hierarchies
+whose subobject vbase-table orders disagree - the decoded dialect
+writes every header of a class's vtable group in the complete class's
+table order while readers index it with their static class's table,
+and the refs only define the agreeing shapes.
+
+## Final Architecture Review
+
+Regression surface: PA14-PA26 outputs are byte-stable - classes
+without virtual bases take the `vbases.empty()` fast paths everywhere
+(no hidden params, headerless PA26 vtables, PA26 address points), and
+the full through-pa27 suite passes. The primary-promotion and
+empty-base rules generalize the PA26 layout instead of forking it.
+
+Performance: all new queries are bounded by class-graph size and
+memoized where hot - `CountBasePaths` memoizes per query,
+`HiddenSignatureParams` caches per function entry (`hidden_ready`),
+demand analysis walks each instantiated definition once, and vtable
+groups render once per demand level (`rendered`/`group_rendered`).
+No quadratic full-registry scans were added; `RenderPendingVTables`
+rescans only on new demand rounds, matching the PA17 fixpoint.
+
+Boundaries: no compiler phase is skipped, there are no fallback
+success paths, no interpreter/VM/trampoline or embedded-payload
+substitutes, and no fixture-specific acceptance. The one deliberate
+boundary narrowing (disagreeing vbase-table orders under a
+polymorphic class) is a typed completion-time rejection of shapes
+whose ABI the reference outputs leave undefined, following the
+established assignment-boundary convention rather than guessing an
+encoding the harness could never check.

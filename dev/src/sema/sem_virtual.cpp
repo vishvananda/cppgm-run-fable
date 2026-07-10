@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include <set>
 #include <stdexcept>
 
 using std::runtime_error;
@@ -111,6 +112,33 @@ const VirtualSlot* FindBaseVirtualSlot(const ClassInfo& cls,
 			return deep;
 	}
 	return 0;
+}
+
+// PA27 boundary: every vtable header in a class's group is written in
+// the complete class's vbase-table order, while its readers - the
+// dynamic vbase-offset loads (`vptr - 24 - 8k`) and the RTTI
+// virtual-base offset-flags rows - index it with their own static
+// class's table. The reference outputs only define hierarchies where
+// the orders agree, so a polymorphic class whose subobject tables
+// disagree has no defined ABI here; it is rejected instead of
+// miscompiled.
+void CheckVBaseTableAgreement(const ClassInfo& cls, const ClassInfo* sub,
+                              std::set<const ClassInfo*>& seen)
+{
+	if (!seen.insert(sub).second)
+		return;
+	if (sub != &cls)
+		for (size_t i = 0; i < sub->vbases.size(); i++)
+		{
+			const ClassVBase* row =
+				FindClassVBase(cls, sub->vbases[i].cls);
+			if (!row || (size_t)(row - &cls.vbases[0]) != i)
+				throw runtime_error(
+					"virtual-base table order across subobjects is "
+					"outside the PA27 assignment boundary");
+		}
+	for (size_t b = 0; b < sub->direct_bases.size(); b++)
+		CheckVBaseTableAgreement(cls, sub->direct_bases[b].cls, seen);
 }
 
 }  // namespace
@@ -315,6 +343,11 @@ void SemBinder::FinishClassVirtualFacts(ClassInfo& cls)
 	// PA27: the polymorphic base subobjects off the primary chain each
 	// carry a vtable view (layout offsets are final here).
 	ComputeClassViews(cls);
+	if (cls.is_polymorphic && !cls.vbases.empty())
+	{
+		std::set<const ClassInfo*> seen;
+		CheckVBaseTableAgreement(cls, &cls, seen);
+	}
 }
 
 SemNodePtr SemBinder::MakeVPointerStore(const ClassInfo& cls)

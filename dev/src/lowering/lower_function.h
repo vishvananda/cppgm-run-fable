@@ -84,9 +84,13 @@ private:
 	// parameters) or stay raw hidden registers.
 	struct VBaseParamMap
 	{
-		VBaseParamMap() : cls(0), slots(false) {}
+		VBaseParamMap() : cls(0), scope(0), slots(false) {}
 
 		const ClassInfo* cls;
+		// The parameter's declaring scope: lookups match it so a
+		// shadowing local never rides the parameter's pointers (null
+		// for `this`, which cannot be shadowed).
+		const Scope* scope;
 		bool slots;
 		map<size_t, string> carried;  // table index -> "%__pvbptrK"
 	};

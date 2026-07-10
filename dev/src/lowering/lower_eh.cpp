@@ -87,7 +87,9 @@ LowerValue FunctionLowerer::LowerTypeInfoComparison(const SemNode& node,
 // The Itanium src2dst hint of a dynamic_cast: the static offset when
 // the source is a unique public base of the target, -3 when it
 // appears more than once, -1 across a virtual base, -2 when the
-// classes are unrelated (the sibling scan).
+// classes are unrelated (the sibling scan) or the unique path is not
+// public - the runtime shortcuts on a non-negative hint, so every
+// edge must grant public access.
 static long long DynamicCastHint(const NamedTypeInfo* target,
                                  const NamedTypeInfo* source)
 {
@@ -95,7 +97,14 @@ static long long DynamicCastHint(const NamedTypeInfo* target,
 	unsigned long long offset = 0;
 	EBasePath path = BaseSubobjectPath(target, source, hops, offset);
 	if (path == BP_UNIQUE)
-		return (long long)offset;
+	{
+		vector<ClassBaseEdge> edges;
+		bool is_public = BaseAccessPath(target, source, edges);
+		for (size_t i = 0; is_public && i < edges.size(); i++)
+			is_public = edges[i].derived
+				->direct_bases[edges[i].base_index].access == MA_PUBLIC;
+		return is_public ? (long long)offset : -2;
+	}
 	if (path == BP_AMBIGUOUS)
 		return -3;
 	if (target->class_record &&

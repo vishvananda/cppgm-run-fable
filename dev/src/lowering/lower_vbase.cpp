@@ -88,20 +88,30 @@ struct VBaseDemands
 	std::set<size_t> full;                        // parameter index
 };
 
+// One declared parameter's identity: the name and the declaring scope
+// (a same-named local in another scope is a different entity).
+typedef std::pair<string, const Scope*> ParamKey;
+
+bool MatchesParamKey(const SemNode& node, const ParamKey& key)
+{
+	if (key.first.empty() || node.entity_name != key.first)
+		return false;
+	if (key.second)
+		return node.entity_scope == key.second;
+	return !node.entity_scope || node.entity_scope->kind != SCOPE_CLASS;
+}
+
 // The declared parameter (by index into `names`) an object expression
 // bottoms out at, or -1: derefs and projection wrappers peel away.
-int BottomParamIndex(const SemNode& node, const vector<string>& names)
+int BottomParamIndex(const SemNode& node, const vector<ParamKey>& names)
 {
 	const SemNode* at = &node;
 	while (at)
 	{
 		if (at->kind == SN_ID_EXPRESSION)
 		{
-			if (at->entity_scope &&
-			    at->entity_scope->kind == SCOPE_CLASS)
-				return -1;
 			for (size_t i = 0; i < names.size(); i++)
-				if (!names[i].empty() && at->entity_name == names[i])
+				if (MatchesParamKey(*at, names[i]))
 					return (int)i;
 			return -1;
 		}
@@ -114,18 +124,17 @@ int BottomParamIndex(const SemNode& node, const vector<string>& names)
 
 // Whether the subtree mentions the parameter at all (argument
 // positions demand the full set).
-bool MentionsParam(const SemNode& node, const string& name)
+bool MentionsParam(const SemNode& node, const ParamKey& key)
 {
-	if (node.kind == SN_ID_EXPRESSION && node.entity_name == name &&
-	    (!node.entity_scope || node.entity_scope->kind != SCOPE_CLASS))
+	if (node.kind == SN_ID_EXPRESSION && MatchesParamKey(node, key))
 		return true;
 	for (size_t i = 0; i < node.children.size(); i++)
-		if (node.children[i] && MentionsParam(*node.children[i], name))
+		if (node.children[i] && MentionsParam(*node.children[i], key))
 			return true;
 	return false;
 }
 
-void CollectVBaseDemands(const SemNode& node, const vector<string>& names,
+void CollectVBaseDemands(const SemNode& node, const vector<ParamKey>& names,
                          VBaseDemands& out)
 {
 	if (node.kind == SN_MEMBER_EXPRESSION && node.vbase_index >= 0 &&
@@ -143,7 +152,7 @@ void CollectVBaseDemands(const SemNode& node, const vector<string>& names,
 			if (!node.children[a])
 				continue;
 			for (size_t p = 0; p < names.size(); p++)
-				if (!names[p].empty() &&
+				if (!names[p].first.empty() &&
 				    MentionsParam(*node.children[a], names[p]))
 					out.full.insert(p);
 		}
@@ -282,7 +291,9 @@ const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info)
 		 ScopeInInstantiation(info.scope));
 	if (instantiated && info.definition)
 	{
-		vector<string> names(info.type->parameters.size());
+		vector<ParamKey> names(
+			info.type->parameters.size(),
+			ParamKey(string(), (const Scope*)0));
 		size_t first = info.is_method ? 1 : 0;
 		size_t at = first;
 		for (size_t c = 0; c < info.definition->children.size(); c++)
@@ -293,7 +304,11 @@ const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info)
 			if (child.name == "this")
 				continue;
 			if (at < names.size())
-				names[at++] = child.name;
+			{
+				names[at].first = child.name;
+				names[at].second = child.entity_scope;
+				at++;
+			}
 		}
 		for (size_t c = 0; c < info.definition->children.size(); c++)
 			CollectVBaseDemands(*info.definition->children[c], names,
@@ -353,6 +368,7 @@ void FunctionLowerer::EmitParamVBasePointers(size_t param_pos,
 		return;
 	VBaseParamMap& map = vbase_params_[params_[param_pos].low_name];
 	map.cls = cls;
+	map.scope = child.entity_scope;
 	for (size_t h = 0; h < hidden_params_.size(); h++)
 	{
 		const HiddenParam& hp = hidden_params_[h];
@@ -458,7 +474,9 @@ string FunctionLowerer::SupplyVBaseEntry(const ClassInfo& param_cls,
 			return OwnVBaseEntryAddress(entry_cls);
 		map<string, VBaseParamMap>::const_iterator found =
 			vbase_params_.find(bottom->entity_name);
-		if (found != vbase_params_.end() && found->second.cls)
+		if (found != vbase_params_.end() && found->second.cls &&
+		    (!found->second.scope ||
+		     found->second.scope == bottom->entity_scope))
 		{
 			const VBaseParamMap& map = found->second;
 			const ClassVBase* row = FindClassVBase(*map.cls, entry_cls);
@@ -628,15 +646,24 @@ string FunctionLowerer::VBaseSubobjectAddress(const SemNode& object,
 	const ClassInfo* record = object_type->named->class_record;
 	const ClassVBase& carrier = record->vbases[vbase_index];
 	// A parameter (or `this`) with carried pointers supplies the
-	// carrier directly.
+	// carrier directly. The node's index counts the object's static
+	// class's table; the carried row lives in the parameter's own
+	// table (the orders can differ across a base view), so the carrier
+	// class remaps before any slot or register is touched.
 	const SemNode* bottom = BottomIdExpression(object);
 	if (bottom)
 	{
 		map<string, VBaseParamMap>::const_iterator found =
 			vbase_params_.find(bottom->entity_name);
-		if (found != vbase_params_.end() && found->second.cls)
+		const ClassVBase* prow =
+			found != vbase_params_.end() && found->second.cls &&
+			(!found->second.scope ||
+			 found->second.scope == bottom->entity_scope)
+				? FindClassVBase(*found->second.cls, carrier.cls) : 0;
+		if (prow)
 		{
 			const VBaseParamMap& param = found->second;
+			size_t pindex = (size_t)(prow - &param.cls->vbases[0]);
 			string address;
 			if (param.slots)
 			{
@@ -644,12 +671,12 @@ string FunctionLowerer::VBaseSubobjectAddress(const SemNode& object,
 				Emit(address + " = load ptr $" +
 				     SlotRef(bottom->entity_scope,
 				             bottom->entity_name + "__pvb" +
-				                 to_string(vbase_index)));
+				                 to_string(pindex)));
 			}
 			else
 			{
 				std::map<size_t, string>::const_iterator carried =
-					param.carried.find(vbase_index);
+					param.carried.find(pindex);
 				if (carried == param.carried.end())
 					throw runtime_error(
 						"virtual-base carrier is not carried");
