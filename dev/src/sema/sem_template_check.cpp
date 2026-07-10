@@ -272,6 +272,11 @@ void WalkStmt(const AstStmt* stmt, BodyNames& names,
 	WalkStmt(stmt->body.get(), names, ids);
 	WalkStmt(stmt->for_init.get(), names, ids);
 	WalkExpr(stmt->iteration.get(), names, ids);
+	// PA24 range form: the for-range-declaration declares its loop
+	// name for the body; the initializer is an ordinary expression.
+	if (stmt->for_range_decl)
+		WalkLocalDecl(stmt->for_range_decl.get(), names, ids);
+	WalkExpr(stmt->for_range_init.get(), names, ids);
 	for (size_t i = 0; i < stmt->handlers.size(); i++)
 	{
 		CollectDeclaratorName(stmt->handlers[i].declarator.get(), names,

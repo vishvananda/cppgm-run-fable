@@ -122,6 +122,13 @@ private:
 	void BindWhileStatement(const AstStmt& stmt);
 	void BindDoStatement(const AstStmt& stmt);
 	void BindForStatement(const AstStmt& stmt);
+	// PA24 6.5.4: desugars the range form into hidden range/index or
+	// begin/end declarations plus an ordinary loop node.
+	void BindRangeForStatement(const AstStmt& stmt);
+	string NextRangeForName(const char* stem);
+	void BindSynthesizedVariable(const string& name, const TypePtr& type,
+	                             AstExprPtr init_expr,
+	                             const DeclSpecifierInfo& specs);
 	void BindSwitchStatement(const AstStmt& stmt);
 	void BindLabelStatement(const AstStmt& stmt);
 
@@ -815,6 +822,11 @@ private:
 	// Call expressions synthesized by the statement disambiguation
 	// recovery (owned here; analyzed nodes reference them).
 	vector<AstExprPtr> recovered_exprs_;
+	// PA24 range-for desugaring: synthesized expression/initializer
+	// fragments (owned here) and the per-body hidden-name counter.
+	vector<AstExprPtr> synth_exprs_;
+	vector<std::unique_ptr<AstInitializer>> synth_inits_;
+	int range_hidden_counter_ = 0;
 
 	SemUnit& unit_;
 	SemExprAnalyzer analyzer_;

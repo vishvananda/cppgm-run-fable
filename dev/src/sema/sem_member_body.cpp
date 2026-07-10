@@ -272,6 +272,8 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	EMemberAccess saved_access = current_access_;
 	MethodContext saved_method = method_;
 	TypePtr saved_return = current_return_;
+	int saved_hidden = range_hidden_counter_;
+	range_hidden_counter_ = 0;
 	vector<SemNode*> saved_parents;
 	saved_parents.swap(parents_);
 	current_ = body.fn_scope;
@@ -310,6 +312,7 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 		current_access_ = saved_access;
 		method_ = saved_method;
 		current_return_ = saved_return;
+		range_hidden_counter_ = saved_hidden;
 		throw;
 	}
 	TypePtr deduced_return = current_return_;
@@ -318,6 +321,7 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	current_access_ = saved_access;
 	method_ = saved_method;
 	current_return_ = saved_return;
+	range_hidden_counter_ = saved_hidden;
 
 	DeferredBody published = body;
 	if (special == SF_NONE &&

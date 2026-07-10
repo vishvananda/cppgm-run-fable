@@ -166,5 +166,9 @@ struct AstStmt
 	AstStmtPtr body;                // loop/switch/labeled/case bodies, try compound
 	AstStmtPtr for_init;            // SK_FOR (declaration or expression stmt)
 	AstExprPtr iteration;           // SK_FOR third clause
+	// SK_FOR range form (6.5.4): the for-range-declaration (one
+	// uninitialized declarator) and the for-range-initializer.
+	AstDeclPtr for_range_decl;
+	AstExprPtr for_range_init;
 	std::vector<AstHandler> handlers;  // SK_TRY
 };

@@ -10,6 +10,11 @@ AstStmtPtr MakeStmt(EStmtKind kind)
 	return AstStmtPtr(new AstStmt(kind));
 }
 
+AstDeclPtr MakeDecl(EDeclKind kind)
+{
+	return AstDeclPtr(new AstDecl(kind));
+}
+
 }  // namespace
 
 // block-item: declaration before statement (6.8: anything that can be
@@ -258,8 +263,53 @@ AstStmtPtr AstParser::ParseIterationStatement()
 		return AstStmtPtr();
 	Advance();
 	PushTransientScope();
+	if (!MatchSimple(OP_LPAREN))
+	{
+		PopScope();
+		Restore(state);
+		return AstStmtPtr();
+	}
+	// 6.5.4: for ( for-range-declaration : for-range-initializer )
+	// statement. The range declaration is a specifier-seq plus one
+	// uninitialized declarator followed by a colon.
+	{
+		State range_state = Save();
+		AstDeclPtr range_decl = MakeDecl(DK_SIMPLE);
+		AstInitDeclarator range_declarator;
+		range_declarator.begin_token = pos_;
+		if (ParseSpecifierSeq(range_decl->specifiers,
+		                      kDeclSpecifierSeq) &&
+		    ParseDeclarator(range_declarator.declarator, true) &&
+		    AtSimple(OP_COLON))
+		{
+			Advance();
+			const AstName* id =
+				range_declarator.declarator->IdName();
+			if (id && id->IsPlainIdentifier())
+				Register(id->parts[0].identifier, NF_VALUE);
+			range_decl->declarators.push_back(
+				move(range_declarator));
+			AstExprPtr range_init = AtSimple(OP_LBRACE)
+				? ParseBracedInitList() : ParseExpression();
+			AstStmtPtr range_body;
+			if (range_init && MatchSimple(OP_RPAREN) &&
+			    (range_body = ParseStatement()))
+			{
+				PopScope();
+				AstStmtPtr range_stmt = MakeStmt(SK_FOR);
+				range_stmt->for_range_decl = move(range_decl);
+				range_stmt->for_range_init = move(range_init);
+				range_stmt->body = move(range_body);
+				return range_stmt;
+			}
+			PopScope();
+			Restore(state);
+			return AstStmtPtr();
+		}
+		Restore(range_state);
+	}
 	AstStmtPtr init;
-	if (!MatchSimple(OP_LPAREN) || !(init = ParseForInitStatement()))
+	if (!(init = ParseForInitStatement()))
 	{
 		PopScope();
 		Restore(state);
