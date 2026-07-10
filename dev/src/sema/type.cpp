@@ -370,6 +370,10 @@ bool TypeIsDependent(const TypePtr& type)
 		return true;
 	if (type->bound_param >= 0)
 		return true;
+	// PA26: a member pointer whose class part names a parameter.
+	if (type->kind == TK_MEMBER_POINTER && type->named &&
+	    type->named->param_index >= 0)
+		return true;
 	for (size_t i = 0; i < type->parameters.size(); i++)
 		if (TypeIsDependent(type->parameters[i]))
 			return true;

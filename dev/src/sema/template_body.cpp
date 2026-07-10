@@ -396,6 +396,10 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 	// not an error here: a partial-explicit template-id falls back to
 	// the overload set so the call context deduces the rest (14.8.1).
 	const FunctionSpecialization* resolved = 0;
+	// PA26 14.8.1: a sibling template the explicit list binds only
+	// partially stays a candidate for context deduction (13.4 target
+	// selection); the set then resolves at the use.
+	bool partial = false;
 	for (size_t t = 0; t < binding.fn_templates.size(); t++)
 	{
 		TemplateInfo& tmpl = *binding.fn_templates[t];
@@ -411,6 +415,8 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 		}
 		catch (const std::exception&)
 		{
+			if (part.arguments.size() < tmpl.params.size())
+				partial = true;
 			continue;
 		}
 		bool dependent = false;
@@ -419,7 +425,11 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 			    TemplateArgIsDependent(args[i]))
 				dependent = true;
 		if (dependent)
+		{
+			if (part.arguments.size() < tmpl.params.size())
+				partial = true;
 			continue;
+		}
 		const FunctionSpecialization* spec;
 		try
 		{
@@ -440,7 +450,7 @@ const ScopeBinding* SemBinder::ResolveFunctionTemplateId(
 			return &binding;
 		resolved = spec;
 	}
-	if (!resolved)
+	if (!resolved || partial)
 		// A call context can still deduce the remaining parameters
 		// from the arguments (14.8.1); hand back the overload set.
 		return &binding;

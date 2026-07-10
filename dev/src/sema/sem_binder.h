@@ -483,6 +483,10 @@ private:
 	// parameter's declared type.
 	TemplateArg ResolveValueArgument(const AstTemplateArgument& argument,
 	                                 const TypePtr& param_type);
+	// PA26 14.3.2p6: `&C::member` (or null) member pointer arguments.
+	void ResolveMemberPointerArgument(const AstExpr* expr,
+	                                  const TypePtr& param_type,
+	                                  TemplateArg& arg);
 	TemplateArg ResolveDefaultValueExpr(const AstExpr& expr,
 	                                    const TypePtr& param_type);
 	// PA20: the engine evaluates a converted constant expression

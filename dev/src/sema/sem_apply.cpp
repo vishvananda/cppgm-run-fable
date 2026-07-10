@@ -46,7 +46,8 @@ void SemExprAnalyzer::ApplyConstructorConversion(
 // now shows the selected function's type, and a deduced specialization
 // re-targets the node's identity.
 void SemExprAnalyzer::ApplySelectedOverload(SemValue& value,
-                                            const ImplicitConversion& conv)
+                                            const ImplicitConversion& conv,
+                                            const TypePtr& dest)
 {
 	value.type = value.overloads[conv.selected_overload];
 	if (!value.node)
@@ -80,9 +81,29 @@ void SemExprAnalyzer::ApplySelectedOverload(SemValue& value,
 	if (value.fn_set_addressed)
 	{
 		// The set was spelled under & (5.3.1p6): the selected function
-		// forms the pointer directly, with no decay step.
+		// forms the pointer directly, with no decay step. A member
+		// pointer destination forms the member pointer (5.3.1p4).
+		TypePtr bare_dest = dest;
+		if (bare_dest && IsReferenceType(bare_dest))
+			bare_dest = bare_dest->target;
+		if (bare_dest)
+			bare_dest = RemoveTopCv(bare_dest);
 		SemNodePtr address = MakeSemNode(SN_UNARY_EXPRESSION);
-		address->type = MakePointerType(value.type, false, false);
+		if (bare_dest && bare_dest->kind == TK_MEMBER_POINTER)
+		{
+			address->type = MakeMemberPointerType(
+				bare_dest->named, value.type, false, false);
+			// The member-function entry keys on the this-adjusted
+			// member identity.
+			value.node->type = ThisAdjustedType(
+				value.node->entity_scope
+					? host_.Model().ScopeEntity(
+					      value.node->entity_scope)
+					: bare_dest->named,
+				value.type);
+		}
+		else
+			address->type = MakePointerType(value.type, false, false);
 		address->category = VC_PRVALUE;
 		address->has_op = true;
 		address->op = OP_AMP;
@@ -316,7 +337,7 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		return;
 	}
 	if (conv.selected_overload >= 0)
-		ApplySelectedOverload(value, conv);
+		ApplySelectedOverload(value, conv, dest);
 	if (conv.null_to_pointer)
 	{
 		// The dump retypes a converted null pointer literal in place.

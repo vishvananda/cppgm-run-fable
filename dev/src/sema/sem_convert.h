@@ -50,6 +50,9 @@ struct ConversionSource
 	// the candidate function types (13.4 target-directed resolution).
 	bool function_set;
 	vector<TypePtr> overloads;
+	// PA26: the class of a member-function set (`&C::f`); a member
+	// pointer destination selects against it (13.4 with 5.3.1p4).
+	const NamedTypeInfo* member_class = 0;
 	// A braced-init-list argument (13.3.3.1.5): `type` is null and
 	// `list_items` holds the analyzed element facts.
 	bool braced;

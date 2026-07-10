@@ -96,6 +96,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_VPOINTER_STORE: return "vpointer-store";
 	case SN_STATIC_GUARD: return "static-guard";
 	case SN_TYPEID: return "typeid-expression";
+	case SN_MEMBER_POINTER_ACCESS: return "member-pointer-access";
 	case SN_DYNAMIC_CAST: return "dynamic-cast-expression";
 	case SN_THROW: return "throw-expression";
 	case SN_TRY: return "try-statement";

@@ -188,6 +188,15 @@ LowerValue FunctionLowerer::LowerLiteralValue(const SemNode& node)
 		return value;
 	}
 	value.type = NodeType(node);
+	if (node.null_pointer && value.type->kind == TK_MEMBER_POINTER)
+	{
+		// PA26: a retyped integer zero keeps the immediate 0 in the
+		// member pointer's own value space; the nullptr keyword
+		// materializes its immediate.
+		value.imm_null = true;
+		value.text = node.has_value ? "0" : "nullptr";
+		return value;
+	}
 	if (node.null_pointer && value.type->kind == TK_POINTER)
 	{
 		// A null pointer constant the semantics retyped keeps the
@@ -335,6 +344,23 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 	}
 	case SN_MEMBER_EXPRESSION:
 		return LowerMemberValue(node);
+	case SN_MEMBER_POINTER_ACCESS:
+	{
+		// PA26 5.5: a data member access loads through the computed
+		// field address.
+		string address = MemberPointerAccessAddress(node);
+		LowerValue value;
+		value.type = RemoveTopCv(StripRef(node.type));
+		if (value.type->kind == TK_ARRAY)
+		{
+			value.text = address;
+			return value;
+		}
+		value.text = NewTemp();
+		Emit(value.text + " = load " + LowerValueType(value.type) +
+		     " " + address);
+		return value;
+	}
 	case SN_DYNAMIC_CAST:
 	{
 		LowerValue value;
@@ -408,6 +434,9 @@ LowerValue FunctionLowerer::LowerUnary(const SemNode& node)
 		return value;
 	}
 	case OP_AMP:
+		// PA26 5.3.1p3-p4: &C::member renders the member pointer value.
+		if (value.type && value.type->kind == TK_MEMBER_POINTER)
+			return LowerMemberPointerConstant(node);
 		value.text = LowerAddressExpr(operand);
 		return value;
 	case OP_INC:
@@ -592,6 +621,26 @@ LowerValue FunctionLowerer::LowerComparison(const SemNode& node)
 	const SemNode& rhs = *node.children[1];
 	LowerValue value;
 	value.type = BoolType();
+	// PA26: member pointers compare in their own value space (i64 for
+	// data members, i128 for functions); a null side renders 0.
+	TypePtr pm_type;
+	if (RemoveTopCv(NodeType(lhs))->kind == TK_MEMBER_POINTER)
+		pm_type = RemoveTopCv(NodeType(lhs));
+	else if (RemoveTopCv(NodeType(rhs))->kind == TK_MEMBER_POINTER)
+		pm_type = RemoveTopCv(NodeType(rhs));
+	if (pm_type)
+	{
+		string a = RemoveTopCv(NodeType(lhs))->kind == TK_MEMBER_POINTER
+			? LowerValueExpr(lhs).text
+			: IsNullPtrType(NodeType(lhs)) ? "nullptr" : "0";
+		string b = RemoveTopCv(NodeType(rhs))->kind == TK_MEMBER_POINTER
+			? LowerValueExpr(rhs).text
+			: IsNullPtrType(NodeType(rhs)) ? "nullptr" : "0";
+		value.text = NewTemp();
+		Emit(value.text + " = cmp " + ComparePredicate(node.op, pm_type) +
+		     " " + LowerValueType(pm_type) + " " + a + ", " + b);
+		return value;
+	}
 	if (IsPointerish(NodeType(lhs)) || IsPointerish(NodeType(rhs)))
 	{
 		string a = LowerPointerCmpOperand(lhs);
@@ -882,6 +931,8 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	}
 	case SN_MEMBER_EXPRESSION:
 		return MemberAddress(node);
+	case SN_MEMBER_POINTER_ACCESS:
+		return MemberPointerAccessAddress(node);
 	case SN_TYPEID:
 		return LowerTypeidAddress(node);
 	case SN_DYNAMIC_CAST:
@@ -1196,14 +1247,22 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		                           LowerValueType(fn_type->target));
 	string arguments;
 	string object_text;  // the implicit object argument (dispatch)
+	// PA26 5.5: a bound member-pointer call takes the (already
+	// adjusted) object address as its leading argument.
+	bool pm_call = !direct && callee.kind == SN_MEMBER_POINTER_ACCESS;
+	if (pm_call)
+	{
+		object_text = LowerAddressExpr(*callee.children[0]);
+		arguments = object_text;
+	}
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
 		TypePtr param = i - 1 < fn_type->parameters.size()
 			? fn_type->parameters[i - 1] : TypePtr();
 		string text = LowerCallArgument(*node.children[i], param);
-		if (i == 1)
+		if (i == 1 && !pm_call)
 			object_text = text;
-		arguments += (i > 1 ? ", " : "") + text;
+		arguments += (i > 1 || pm_call ? ", " : "") + text;
 	}
 	// The callee value of an indirect call lowers after the arguments
 	// (the oracle's evaluation order).
@@ -1244,7 +1303,20 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	      (!direct || program_.CalleeMayUnwind(callee)))))
 		OpenEhRegion();
 	if (!direct || dispatch)
-		line += IndirectCallSignature(fn_type);
+	{
+		TypePtr signature_type = fn_type;
+		if (pm_call)
+		{
+			vector<TypePtr> parameters;
+			parameters.push_back(MakePointerType(
+				MakeFundamentalType(FT_VOID), false, false));
+			for (size_t i = 0; i < fn_type->parameters.size(); i++)
+				parameters.push_back(fn_type->parameters[i]);
+			signature_type = MakeFunctionType(
+				fn_type->target, parameters, fn_type->variadic);
+		}
+		line += IndirectCallSignature(signature_type);
+	}
 	Emit(line);
 	bool class_result =
 		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&
@@ -1292,6 +1364,28 @@ string FunctionLowerer::LowerCalleeText(const SemNode& callee,
 		return program_.FunctionRef(callee.entity_scope,
 		                            callee.entity_name, fn_type,
 		                            callee.fn_spec);
+	if (callee.kind == SN_MEMBER_POINTER_ACCESS)
+	{
+		// PA26: a constant member pointer (`&C::f`, incl. a folded
+		// non-type parameter) calls through its address directly.
+		const SemNode& pm_value = *callee.children[1];
+		if (pm_value.kind == SN_UNARY_EXPRESSION && pm_value.has_op &&
+		    pm_value.op == OP_AMP && !pm_value.children.empty() &&
+		    RemoveTopCv(pm_value.type)->kind == TK_MEMBER_POINTER)
+		{
+			string address = NewTemp();
+			Emit(address + " = addr " +
+			     program_.MemberFunctionRef(*pm_value.children[0]));
+			return address;
+		}
+		// Otherwise the value's low 64 bits carry the code address.
+		LowerValue pm = LowerValueExpr(pm_value);
+		string bits = NewTemp();
+		Emit(bits + " = convert trunc i64 i128 " + pm.text);
+		string fn = NewTemp();
+		Emit(fn + " = copy ptr " + bits);
+		return fn;
+	}
 	if (NodeType(callee)->kind == TK_POINTER)
 		return LowerValueExpr(callee).text;
 	return LowerPointerOperand(callee);

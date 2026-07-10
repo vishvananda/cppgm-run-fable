@@ -90,6 +90,12 @@ ImplicitConversion ClassifyFunctionSet(const ConversionSource& source,
 	ImplicitConversion result;
 	if (dest->kind == TK_POINTER && dest->target->kind == TK_FUNCTION)
 		SelectFunctionFromSet(source.overloads, dest->target, result);
+	// PA26 13.4: a member-function set resolves against a member
+	// pointer destination when the classes agree.
+	if (dest->kind == TK_MEMBER_POINTER &&
+	    dest->target->kind == TK_FUNCTION && source.member_class &&
+	    BaseClassDistance(dest->named, source.member_class) >= 0)
+		SelectFunctionFromSet(source.overloads, dest->target, result);
 	return result;
 }
 
@@ -229,11 +235,45 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		}
 		return result;
 	}
-	if (dest->kind == TK_MEMBER_POINTER && source.null_pointer_literal)
+	if (dest->kind == TK_MEMBER_POINTER &&
+	    (source.null_pointer_literal || IsNullPtrType(from)))
 	{
 		result.viable = true;
 		result.rank = CR_CONVERSION;
-		result.null_to_pointer = true;
+		result.null_to_pointer = source.null_pointer_literal;
+		return result;
+	}
+	if (dest->kind == TK_MEMBER_POINTER &&
+	    from->kind == TK_MEMBER_POINTER)
+	{
+		// 4.4p2: a qualification conversion applies over the member
+		// type (member pointers act as one more pointer level).
+		bool qualification = false;
+		if (!TypeEquals(from->target, dest->target))
+		{
+			if (!QualificationConvertible(
+			        MakePointerType(from->target, false, false),
+			        MakePointerType(dest->target, false, false)))
+				return result;
+			qualification = true;
+		}
+		if (from->named == dest->named)
+		{
+			result.viable = true;
+			result.rank = CR_EXACT;
+			result.qualification = qualification;
+			if (qualification)
+				result.qual_dest = dest;
+			return result;
+		}
+		// 4.11p2: pm of base converts to pm of (unambiguous) derived.
+		int distance = BaseClassDistance(dest->named, from->named);
+		if (distance > 0)
+		{
+			result.viable = true;
+			result.rank = CR_CONVERSION;
+			result.base_distance = distance;
+		}
 		return result;
 	}
 	// 13.3.3.1: a derived-class value copy-initializes a base-class

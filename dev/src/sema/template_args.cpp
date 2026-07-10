@@ -253,6 +253,10 @@ TypePtr SemBinder::ValueParamType(const TemplateParam& param,
 	// (14.3.2).
 	if (IsReferenceType(type) || type->kind == TK_POINTER)
 		return type;
+	// PA26 14.3.2: member pointer parameters take `&C::member` (or a
+	// null pointer constant).
+	if (type->kind == TK_MEMBER_POINTER)
+		return type;
 	// 14.1p8: a function-typed parameter adjusts to pointer to
 	// function.
 	if (type->kind == TK_FUNCTION)
@@ -312,7 +316,10 @@ void SemBinder::ResolveEntityArgument(const AstName* name,
 	    param_type->kind == TK_POINTER &&
 	    param_type->target->kind == TK_FUNCTION)
 	{
-		if (!found->owner || found->owner->kind != SCOPE_NAMESPACE)
+		// PA26: a static member function also has linkage; its owner
+		// is a class scope.
+		if (!found->owner || (found->owner->kind != SCOPE_NAMESPACE &&
+		                      found->owner->kind != SCOPE_CLASS))
 			throw runtime_error("template argument does not name an "
 			                    "entity with linkage");
 		bool matched = found->type &&
@@ -337,6 +344,127 @@ void SemBinder::ResolveEntityArgument(const AstName* name,
 		throw runtime_error("template argument entity type mismatch");
 	arg.entity_scope = found->owner;
 	arg.entity_name = found->name;
+}
+
+// PA26 14.3.2p6: a member pointer argument spells `&C::member` (the
+// declared member's type must match the parameter's member type) or a
+// null pointer constant. A data member carries its typed value (the
+// field offset + 1; 0 is null); the named entity carries the mangling
+// and instantiation identity.
+void SemBinder::ResolveMemberPointerArgument(const AstExpr* expr,
+                                             const TypePtr& param_type,
+                                             TemplateArg& arg)
+{
+	// A plain name forwarding another member pointer parameter reuses
+	// the bound argument's value and entity.
+	if (expr && expr->kind == EK_ID)
+	{
+		const ScopeBinding* alias = ResolveTerminal(expr->name, SLF_ANY);
+		if (alias && alias->kind == SB_VARIABLE && alias->no_object)
+		{
+			if (alias->param_index >= 0)
+			{
+				arg.value_param = alias->param_index;
+				return;
+			}
+			if (alias->has_value)
+			{
+				arg.value_type = alias->value.type;
+				arg.value_bits = alias->value.bits;
+				if (alias->owner &&
+				    alias->owner->kind == SCOPE_CLASS)
+				{
+					arg.entity_scope = alias->owner;
+					arg.entity_name = alias->pack_element_name;
+				}
+				return;
+			}
+		}
+		if (alias && alias->kind == SB_VARIABLE && !alias->has_value &&
+		    alias->owner && alias->owner->kind == SCOPE_CLASS &&
+		    !alias->pack_element_name.empty())
+		{
+			arg.entity_scope = alias->owner;
+			arg.entity_name = alias->pack_element_name;
+			return;
+		}
+	}
+	if (expr)
+	{
+		// A null pointer constant forms the null member pointer.
+		try
+		{
+			ConstValue value = EvaluateConstExpr(*expr, *this);
+			if (value.bits == 0)
+			{
+				arg.value_type = FT_LONG_LONG_INT;
+				arg.value_bits = 0;
+				return;
+			}
+		}
+		catch (const std::exception&)
+		{
+		}
+	}
+	const AstName* entity = 0;
+	if (expr && expr->kind == EK_UNARY && expr->op_spelling == "&" &&
+	    !expr->operands.empty() && expr->operands[0]->kind == EK_ID)
+		entity = &expr->operands[0]->name;
+	if (!entity)
+		throw runtime_error("member pointer argument does not name a "
+		                    "member");
+	const ScopeBinding* found = ResolveTerminal(*entity, SLF_ANY);
+	if (!found || !found->home || found->home->kind != SCOPE_CLASS)
+		throw runtime_error("member pointer argument does not name a "
+		                    "class member");
+	const NamedTypeInfo* owner_entity =
+		found->owner ? found->owner->entity : 0;
+	if (!owner_entity ||
+	    BaseClassDistance(param_type->named, owner_entity) < 0)
+		throw runtime_error("member pointer argument class mismatch");
+	if (found->kind == SB_FUNCTION)
+	{
+		bool matched = found->type &&
+			TypeEquals(found->type, param_type->target);
+		for (size_t i = 0; !matched && i < found->overloads.size(); i++)
+			matched = TypeEquals(found->overloads[i],
+			                     param_type->target);
+		// 14.8.2.2: a member function template deduces against the
+		// parameter's member type.
+		if (!matched)
+			for (size_t t = 0; t < found->fn_templates.size(); t++)
+				if (const FunctionSpecialization* spec =
+				        DeduceFunctionTemplateFromTarget(
+				            *found->fn_templates[t],
+				            param_type->target))
+				{
+					OnSpecializationOdrUsed(spec);
+					arg.entity_scope = spec->self.owner;
+					arg.entity_name = spec->name;
+					arg.entity_fn_spec = spec;
+					return;
+				}
+		if (!matched)
+			throw runtime_error("member pointer argument type mismatch");
+		arg.entity_scope = found->owner;
+		arg.entity_name = found->name;
+		return;
+	}
+	if (found->kind != SB_VARIABLE)
+		throw runtime_error("member pointer argument does not name a "
+		                    "member");
+	const ClassInfo* record = owner_entity->class_record;
+	const ClassField* field =
+		record ? FindClassField(*record, found->name) : 0;
+	if (!field)
+		throw runtime_error("member pointer argument names no field");
+	if (!TypeEquals(RemoveTopCv(field->type),
+	                RemoveTopCv(param_type->target)))
+		throw runtime_error("member pointer argument type mismatch");
+	arg.entity_scope = found->owner;
+	arg.entity_name = found->name;
+	arg.value_type = FT_LONG_LONG_INT;
+	arg.value_bits = field->offset + 1;
 }
 
 // Resolves one value argument (an expression, or a type-form argument
@@ -386,6 +514,14 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 	    (IsReferenceType(param_type) || param_type->kind == TK_POINTER))
 	{
 		ResolveEntityArgument(name, expr, param_type, arg);
+		return arg;
+	}
+	// PA26 14.3.2p6: a member pointer parameter takes `&C::member`, a
+	// forwarded member pointer parameter, or a null pointer constant.
+	if (param_type && param_type->kind == TK_MEMBER_POINTER &&
+	    !TypeIsDependent(param_type))
+	{
+		ResolveMemberPointerArgument(expr, param_type, arg);
 		return arg;
 	}
 	if (!TypeIsDependent(param_type))
@@ -550,6 +686,33 @@ void SemBinder::BindParamAlias(Scope& scope, const TemplateParam& param,
 	{
 		alias.kind = SB_TYPE_ALIAS;
 		alias.type = arg.type;
+	}
+	else if (arg.type && arg.type->kind == TK_MEMBER_POINTER)
+	{
+		// PA26: a data member pointer folds by value (the field offset
+		// + 1); a member function pointer resolves back to its member
+		// entity, so uses re-form the `&C::f` constant.
+		alias.kind = SB_VARIABLE;
+		alias.no_object = true;
+		alias.type = MakeCvQualifiedType(arg.type, true, false);
+		if (arg.type->target->kind == TK_FUNCTION && arg.entity_scope)
+		{
+			alias.owner = arg.entity_scope;
+			alias.pack_element_name = arg.entity_name;
+		}
+		else if (arg.is_value && arg.value_param < 0 &&
+		         !arg.dependent_value)
+		{
+			alias.has_value = true;
+			alias.value = ConstValue(arg.value_type, arg.value_bits);
+			if (arg.entity_scope)
+			{
+				alias.owner = arg.entity_scope;
+				alias.pack_element_name = arg.entity_name;
+			}
+		}
+		else
+			alias.param_index = arg.value_param;
 	}
 	else if (arg.entity_scope)
 	{

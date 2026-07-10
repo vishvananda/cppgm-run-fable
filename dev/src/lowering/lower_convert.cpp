@@ -167,6 +167,32 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 	TypePtr source = RemoveTopCv(StripRef(value.type));
 	if (target->kind == TK_POINTER || IsNullPtrType(target))
 		return ConvertPointerValue(std::move(value), source, target);
+	// PA26: member pointer conversions (null, qualification, 4.11p2
+	// base-to-derived) keep the value; a data member pointer converted
+	// to a derived class at a non-zero base offset adds the offset.
+	if (target->kind == TK_MEMBER_POINTER)
+	{
+		if (value.imm_null && value.text.empty())
+			value.text = "nullptr";
+		if (source->kind == TK_MEMBER_POINTER &&
+		    target->target->kind != TK_FUNCTION &&
+		    target->named != source->named && !value.imm_null)
+		{
+			int hops = 0;
+			unsigned long long offset = 0;
+			if (BaseSubobjectPath(target->named, source->named, hops,
+			                      offset) == BP_UNIQUE && offset)
+			{
+				string temp = NewTemp();
+				Emit(temp + " = binary add i64 " + value.text + ", " +
+				     to_string(offset));
+				value.text = temp;
+				value.imm_int = false;
+			}
+		}
+		value.type = target;
+		return value;
+	}
 	bool to_bool = target->kind == TK_FUNDAMENTAL &&
 		target->fundamental == FT_BOOL;
 	bool from_bool = source->kind == TK_FUNDAMENTAL &&

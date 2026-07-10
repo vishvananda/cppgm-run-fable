@@ -449,8 +449,20 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 		return DeduceFromType(pattern->target, arg->target, bound);
 	}
 	case TK_MEMBER_POINTER:
-		if (pattern->named != arg->named)
+		if (pattern->is_const != arg->is_const ||
+		    pattern->is_volatile != arg->is_volatile)
 			return false;
+		// PA26: a dependent class part (`T::*`) deduces like the type
+		// parameter it names against the argument's class.
+		if (pattern->named != arg->named)
+		{
+			if (pattern->named->param_index < 0)
+				return false;
+			if (!DeduceFromType(
+			        MakeNamedType(TK_TYPE_PARAM, pattern->named),
+			        MakeNamedType(TK_CLASS, arg->named), bound))
+				return false;
+		}
 		return DeduceFromType(pattern->target, arg->target, bound);
 	case TK_TEMPLATE_SPEC:
 	{
@@ -1052,7 +1064,13 @@ bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
 		for (size_t i = 0; i < arg.overloads.size(); i++)
 		{
 			SemValue shell;
-			shell.type = arg.overloads[i];
+			// PA26: an addressed member set deduces as the member
+			// pointer over each declared overload (14.8.2.1p6 with
+			// 5.3.1p4).
+			shell.type = arg.fn_set_addressed && arg.member_class
+				? MakeMemberPointerType(arg.member_class,
+				                        arg.overloads[i], false, false)
+				: arg.overloads[i];
 			shell.category = VC_LVALUE;
 			vector<TemplateArg> probe = bound;
 			if (DeduceFixedParameter(pattern, shell, probe))

@@ -140,6 +140,12 @@ enum ESemNodeKind
 	// thrown type. No children: a rethrow.
 	SN_THROW,
 	// PA25 try: children[0] is the guarded compound, the rest are
+	// PA26 5.5: `object .* pm` / `pointer ->* pm`. children[0] is the
+	// (already base-adjusted) object expression, children[1] the member
+	// pointer value. A data access carries the member lvalue type; a
+	// function access carries the pointed-to function type and is legal
+	// only as an SN_CALL_EXPRESSION callee.
+	SN_MEMBER_POINTER_ACCESS,
 	// SN_CATCH_HANDLER items.
 	SN_TRY,
 	// PA25 catch handler: `type` is the handler's declared type (null

@@ -353,6 +353,10 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 				params = "v";
 			return "XadL_Z" + spelled + params + "EE";
 		}
+		// PA26: a member pointer argument spells the address
+		// expression over the member entity.
+		if (arg.type && arg.type->kind == TK_MEMBER_POINTER)
+			return "XadL_Z" + spelled + "EE";
 		return "L_Z" + spelled + "E";
 	}
 	string code = MangleType(arg.type, subs);
@@ -778,6 +782,44 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 		vector<NameComponent> parts = EntityComponents(*type->named);
 		parts.back().args = &type->targs;
 		return MangleComponentList(parts, subs, key_out);
+	}
+	case TK_MEMBER_POINTER:
+	{
+		// PA26 5.1.5: `M <class> <member type>`; a cv-qualified member
+		// function spells its qualifiers ahead of the F encoding, and
+		// both the qualified function and the M form substitute.
+		TypePtr cls = MakeNamedType(TK_CLASS, type->named);
+		string class_key;
+		string class_part = MangleType(cls, subs, &class_key);
+		string member_key;
+		string member_part;
+		if (type->target->kind == TK_FUNCTION &&
+		    (type->target->is_const || type->target->is_volatile))
+		{
+			string fn_key;
+			string fn_part = MangleType(type->target, subs, &fn_key);
+			string cv = string(type->target->is_volatile ? "V" : "") +
+				(type->target->is_const ? "K" : "");
+			member_key = cv + "|" + fn_key;
+			string found = subs.Find(member_key);
+			if (!found.empty())
+				member_part = found;
+			else
+			{
+				subs.Add(member_key);
+				member_part = cv + fn_part;
+			}
+		}
+		else
+			member_part = MangleType(type->target, subs, &member_key);
+		string key = "M|" + class_key + "|" + member_key;
+		if (key_out)
+			*key_out = key;
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return "M" + class_part + member_part;
 	}
 	case TK_TYPE_PARAM:
 	{

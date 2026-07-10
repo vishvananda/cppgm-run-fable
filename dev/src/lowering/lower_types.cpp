@@ -93,6 +93,11 @@ string LowerValueType(const TypePtr& type)
 		return "ptr";
 	case TK_ENUM:
 		return SignedSpelling(TypeSize(type));
+	case TK_MEMBER_POINTER:
+		// PA26 Itanium-style values with 0 as null: a data member
+		// pointer is the field offset + 1; a member function pointer
+		// packs {address, this-adjustment} into an i128.
+		return type->target->kind == TK_FUNCTION ? "i128" : "i64";
 	default:
 		throw OutsideBoundary("value type");
 	}

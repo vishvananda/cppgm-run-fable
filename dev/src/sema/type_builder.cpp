@@ -453,7 +453,11 @@ void TypeBuilder::ComposeItemPtrs(
 		if (item.kind == DI_MEMBER_PTR)
 		{
 			TypePtr cls = host_.ResolveTypeName(item.name);
-			if (cls->kind != TK_CLASS)
+			// PA26: a dependent qualifier (`T::*` in a pattern) keeps
+			// the parameter/specialization entity; deduction and
+			// substitution resolve it per instantiation.
+			if (cls->kind != TK_CLASS && cls->kind != TK_TYPE_PARAM &&
+			    cls->kind != TK_TEMPLATE_SPEC)
 				throw runtime_error("member-pointer qualifier does not "
 				                    "name a class");
 			out.type = MakeMemberPointerType(cls->named, out.type,

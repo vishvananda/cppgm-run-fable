@@ -396,12 +396,18 @@ private:
 	SemValue AnalyzeBuiltinConstantP(const AstExpr& expr);
 	SemValue AnalyzeUnary(const AstExpr& expr);
 	SemValue AnalyzeAddressOf(const AstExpr& expr);
+	// PA26: a member-function pointer template parameter use.
+	SemValue MemberPointerParamConstant(const ScopeBinding& binding,
+	                                    const TypePtr& pm);
 	SemValue AnalyzeIncDec(const AstExpr& expr, bool prefix);
 	SemValue AnalyzeBinary(const AstExpr& expr);
 	SemValue AnalyzeAdditive(const AstExpr& expr, SemValue& lhs,
 	                         SemValue& rhs);
 	SemValue AnalyzeComparison(const AstExpr& expr, SemValue& lhs,
 	                           SemValue& rhs);
+	// PA26 5.5: `.*` / `->*` application over non-virtual layouts.
+	SemValue AnalyzeMemberPointerBinary(const AstExpr& expr, SemValue& lhs,
+	                                    SemValue& rhs);
 	SemValue AnalyzeAssignment(const AstExpr& expr);
 	SemValue AnalyzeConditional(const AstExpr& expr);
 	TypePtr ConditionalResultType(const SemValue& a, const SemValue& b,
@@ -556,9 +562,11 @@ private:
 	                                   size_t slot, size_t index,
 	                                   const TypePtr& param);
 	// 13.4: applies a target-selected overload to the value's node
-	// (deduced specializations re-target its identity).
+	// (deduced specializations re-target its identity). `dest` shapes
+	// an addressed set's pointer (member pointer targets, PA26).
 	void ApplySelectedOverload(SemValue& value,
-	                           const ImplicitConversion& conv);
+	                           const ImplicitConversion& conv,
+	                           const TypePtr& dest);
 	static bool OperatorOperand(const SemValue& value);
 	bool TryBinaryOperator(const string& spelling, SemValue& lhs,
 	                       SemValue& rhs, SemValue& result);

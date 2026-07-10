@@ -212,6 +212,10 @@ private:
 	                    const NamedTypeInfo* to);
 	string AdjustToBaseHops(const string& address, int hops,
 	                        unsigned long long offset);
+	// PA26 member pointers: `&C::member` constants and `.*` / `->*`
+	// data-member addressing.
+	LowerValue LowerMemberPointerConstant(const SemNode& node);
+	string MemberPointerAccessAddress(const SemNode& node);
 	// Registers a by-value class parameter's attached destructor
 	// actions as function-scope cleanups (the callee owns them).
 	void RegisterParameterCleanup(const SemNode& parameter);

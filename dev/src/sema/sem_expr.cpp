@@ -77,6 +77,7 @@ ConversionSource MakeConversionSource(const SemValue& value)
 	source.null_pointer_literal = value.null_pointer_literal;
 	source.function_set = value.function_set;
 	source.overloads = value.overloads;
+	source.member_class = value.member_class;
 	source.braced = value.braced_list;
 	for (size_t i = 0; i < value.list_values.size(); i++)
 		source.list_items.push_back(
@@ -289,6 +290,36 @@ TypePtr SemExprAnalyzer::ThisAdjustedType(const NamedTypeInfo* cls,
 
 // PA19 14.1p4: the constant prvalue behind an objectless binding (a
 // non-type template parameter or variable-template specialization).
+// PA26 14.1p4: a member-function pointer template parameter's use
+// re-forms the `&C::f` constant over the argument's member entity (the
+// lowering renders the member's address pair from the id node).
+SemValue SemExprAnalyzer::MemberPointerParamConstant(
+	const ScopeBinding& binding, const TypePtr& pm)
+{
+	const Scope* members = binding.owner;
+	const ScopeBinding* entity =
+		FindOwnBinding(*members, binding.pack_element_name);
+	if (!entity || entity->kind != SB_FUNCTION)
+		throw runtime_error("member pointer parameter entity missing");
+	SemNodePtr member = MakeSemNode(SN_ID_EXPRESSION);
+	member->name = binding.pack_element_name;
+	member->type = ThisAdjustedType(members->entity, pm->target);
+	member->category = VC_LVALUE;
+	member->entity_scope = members;
+	member->entity_name = binding.pack_element_name;
+	SemValue value;
+	value.type = pm;
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_UNARY_EXPRESSION);
+	value.node->type = pm;
+	value.node->category = VC_PRVALUE;
+	value.node->has_op = true;
+	value.node->op = OP_AMP;
+	value.node->op_spelling = "&";
+	value.node->children.push_back(std::move(member));
+	return value;
+}
+
 SemValue SemExprAnalyzer::FoldObjectlessConstant(const ScopeBinding& binding)
 {
 	if (!binding.has_value)
@@ -347,7 +378,18 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		// PA19: a non-type template parameter has no object behind it;
 		// every use folds to its converted constant value (14.1p4).
 		if (binding->no_object)
+		{
+			// PA26: a member-function pointer parameter re-forms the
+			// `&C::f` constant over its member entity.
+			TypePtr declared_pm = RemoveTopCv(binding->type);
+			if (!binding->has_value && binding->param_index < 0 &&
+			    declared_pm->kind == TK_MEMBER_POINTER &&
+			    declared_pm->target->kind == TK_FUNCTION &&
+			    binding->owner &&
+			    binding->owner->kind == SCOPE_CLASS)
+				return MemberPointerParamConstant(*binding, declared_pm);
 			return FoldObjectlessConstant(*binding);
+		}
 		// PA24: an enclosing function-local used inside an open lambda
 		// body reads through the closure's capture field.
 		if (host_.TryCaptureUse(*binding, value))
@@ -574,6 +616,16 @@ SemValue SemExprAnalyzer::AnalyzeAddressOf(const AstExpr& expr)
 	SemValue value;
 	if (operand.member_class)
 	{
+		// PA26 13.4: an overloaded (or template) member set under &
+		// stays unresolved; the member pointer target type selects the
+		// overload (5.3.1p4 with 14.8.2.2).
+		if (operand.function_set &&
+		    (operand.overloads.size() > 1 ||
+		     !operand.fn_templates.empty()))
+		{
+			operand.fn_set_addressed = true;
+			return operand;
+		}
 		// 5.3.1p3-p4: &C::member forms a member pointer over the
 		// declared (cv-qualified) member type.
 		value.type = MakeMemberPointerType(operand.member_class,
@@ -769,10 +821,113 @@ SemValue SemExprAnalyzer::AnalyzeAdditive(const AstExpr& expr, SemValue& lhs,
 	                      UsualArithmeticConversions(lhs.type, rhs.type));
 }
 
+// 5.5: `object .* pm` / `pointer ->* pm` over the non-virtual object
+// model. The object adjusts to the member pointer's class subobject; a
+// data access yields the member lvalue, a function access a call-only
+// bound value carrying the pointed-to function type.
+SemValue SemExprAnalyzer::AnalyzeMemberPointerBinary(const AstExpr& expr,
+                                                     SemValue& lhs,
+                                                     SemValue& rhs)
+{
+	TypePtr pm = RemoveTopCv(rhs.type);
+	if (pm->kind != TK_MEMBER_POINTER)
+		throw runtime_error("right operand is not a member pointer");
+	SemValue object = std::move(lhs);
+	if (expr.op == OP_ARROWSTAR)
+	{
+		TypePtr pointer = object.type;
+		if (pointer->kind != TK_POINTER ||
+		    RemoveTopCv(pointer->target)->kind != TK_CLASS)
+			throw runtime_error("->* left operand is not a pointer to "
+			                    "class");
+		SemNodePtr deref = MakeSemNode(SN_UNARY_EXPRESSION);
+		deref->type = pointer->target;
+		deref->category = VC_LVALUE;
+		deref->has_op = true;
+		deref->op = OP_STAR;
+		deref->op_spelling = "*";
+		deref->children.push_back(std::move(object.node));
+		object.node = std::move(deref);
+		object.type = pointer->target;
+		object.category = VC_LVALUE;
+	}
+	TypePtr object_class = RemoveTopCv(object.type);
+	if (object_class->kind != TK_CLASS)
+		throw runtime_error(".* left operand is not a class object");
+	int hops = 0;
+	unsigned long long base_offset = 0;
+	EBasePath path = BaseSubobjectPath(object_class->named, pm->named,
+	                                   hops, base_offset);
+	if (path == BP_AMBIGUOUS)
+		throw runtime_error("ambiguous base class subobject");
+	if (path != BP_UNIQUE)
+		throw runtime_error("object class is unrelated to the member "
+		                    "pointer class");
+	if (hops > 0)
+	{
+		SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+		adjusted->type = MakeNamedType(TK_CLASS, pm->named);
+		adjusted->category = object.category == VC_PRVALUE
+			? VC_XVALUE : object.category;
+		adjusted->base_hops = hops;
+		adjusted->base_offset = base_offset;
+		adjusted->children.push_back(std::move(object.node));
+		object.node = std::move(adjusted);
+	}
+	SemValue value;
+	if (pm->target->kind == TK_FUNCTION)
+	{
+		// The bound value is legal only as a call target; the call
+		// lowers through the pointed-to function type.
+		value.type = pm->target;
+		value.category = VC_PRVALUE;
+		value.node = MakeSemNode(SN_MEMBER_POINTER_ACCESS);
+		value.node->type = pm->target;
+		value.node->category = VC_PRVALUE;
+		value.node->children.push_back(std::move(object.node));
+		value.node->children.push_back(std::move(rhs.node));
+		return value;
+	}
+	// 5.5p5-p6: the data member lvalue carries the union of the
+	// object's and the member's cv-qualification.
+	bool object_const = false;
+	bool object_volatile = false;
+	TopCv(object.type, object_const, object_volatile);
+	value.type = MakeCvQualifiedType(pm->target, object_const,
+	                                 object_volatile);
+	value.category = object.category == VC_PRVALUE ? VC_XVALUE
+	                                               : object.category;
+	value.node = MakeSemNode(SN_MEMBER_POINTER_ACCESS);
+	value.node->type = value.type;
+	value.node->category = value.category;
+	value.node->children.push_back(std::move(object.node));
+	value.node->children.push_back(std::move(rhs.node));
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeComparison(const AstExpr& expr, SemValue& lhs,
                                             SemValue& rhs)
 {
 	bool equality = expr.op == OP_EQ || expr.op == OP_NE;
+	// PA26 5.10p2: member pointers compare for (in)equality with each
+	// other and with null pointer constants.
+	bool left_pm = RemoveTopCv(lhs.type)->kind == TK_MEMBER_POINTER;
+	bool right_pm = RemoveTopCv(rhs.type)->kind == TK_MEMBER_POINTER;
+	if (left_pm || right_pm)
+	{
+		if (!equality)
+			throw runtime_error("relational member pointer comparison");
+		bool left_ok = left_pm || lhs.null_pointer_literal ||
+			IsNullPtrType(lhs.type);
+		bool right_ok = right_pm || rhs.null_pointer_literal ||
+			IsNullPtrType(rhs.type);
+		if (!left_ok || !right_ok ||
+		    (left_pm && right_pm &&
+		     !TypeEquals(RemoveTopCv(lhs.type), RemoveTopCv(rhs.type))))
+			throw runtime_error("member pointer comparison mismatch");
+		return MakeBinaryNode(expr, lhs, rhs, VC_PRVALUE,
+		                      MakeFundamentalType(FT_BOOL));
+	}
 	bool left_pointer = IsPointerAfterDecay(lhs.type) ||
 		IsNullPtrType(lhs.type);
 	bool right_pointer = IsPointerAfterDecay(rhs.type) ||
@@ -867,6 +1022,9 @@ SemValue SemExprAnalyzer::AnalyzeBinary(const AstExpr& expr)
 		                      MakeFundamentalType(FT_BOOL));
 	case OP_COMMA:
 		return MakeBinaryNode(expr, lhs, rhs, rhs.category, rhs.type);
+	case OP_DOTSTAR:
+	case OP_ARROWSTAR:
+		return AnalyzeMemberPointerBinary(expr, lhs, rhs);
 	default:
 		throw OutsideBoundary("binary operator");
 	}
@@ -1044,6 +1202,23 @@ TypePtr SemExprAnalyzer::ConditionalResultType(const SemValue& a,
 			return a.type;
 		}
 	}
+	// PA26 5.16p6: a member pointer arm composes with the other arm's
+	// member pointer of the same type or a null pointer constant.
+	bool a_pm = RemoveTopCv(a.type)->kind == TK_MEMBER_POINTER;
+	bool b_pm = RemoveTopCv(b.type)->kind == TK_MEMBER_POINTER;
+	if (a_pm || b_pm)
+	{
+		bool a_null = a.null_pointer_literal || IsNullPtrType(a.type);
+		bool b_null = b.null_pointer_literal || IsNullPtrType(b.type);
+		if (a_pm && (b_pm ? TypeEquals(RemoveTopCv(a.type),
+		                               RemoveTopCv(b.type))
+		                  : b_null))
+			return RemoveTopCv(a.type);
+		if (b_pm && a_null)
+			return RemoveTopCv(b.type);
+		throw runtime_error("incompatible conditional member pointer "
+		                    "operands");
+	}
 	bool a_pointer = IsPointerAfterDecay(a.type) || IsNullPtrType(a.type) ||
 		a.null_pointer_literal;
 	bool b_pointer = IsPointerAfterDecay(b.type) || IsNullPtrType(b.type) ||
@@ -1093,8 +1268,24 @@ SemValue SemExprAnalyzer::AnalyzeConditional(const AstExpr& expr)
 	{
 		SemValue& pick = known ? a : b;
 		SemValue& drop = known ? b : a;
-		if (pick.node && pick.node->has_value && drop.node &&
-		    drop.node->has_value)
+		// PA26: member pointer constants (`&C::m`) fold like literal
+		// arms - the non-selected branch materializes nothing.
+		struct Foldable
+		{
+			static bool Arm(const SemValue& value)
+			{
+				if (!value.node)
+					return false;
+				if (value.node->has_value)
+					return true;
+				return value.node->kind == SN_UNARY_EXPRESSION &&
+					value.node->has_op && value.node->op == OP_AMP &&
+					value.type &&
+					RemoveTopCv(value.type)->kind ==
+						TK_MEMBER_POINTER;
+			}
+		};
+		if (Foldable::Arm(pick) && Foldable::Arm(drop))
 			return std::move(pick);
 	}
 	// 5.16p3: with one class-typed operand, the other operand converts
