@@ -126,6 +126,25 @@ static const AstTypeId* PatternConversionTypeId(const AstDecl& inner)
 	return id->parts.back().conversion_type.get();
 }
 
+// The instantiated body's definition node: identity, linkage, and
+// emission facts (an explicit specialization is strong-on-demand;
+// instantiated bodies stay weak).
+SemNodePtr SemBinder::MakeInstantiatedBodyNode(
+	TemplateInfo& tmpl, FunctionSpecialization& spec,
+	const DeclaratorInfo& composed)
+{
+	SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
+	item->name = CanonicalQualifiedName(tmpl.declaring, spec.name);
+	item->type = composed.type;
+	item->entity_scope = spec.param_scope;
+	item->entity_name = spec.name;
+	item->unwind_no = composed.noexcept_simple;
+	item->inline_def = true;
+	item->demand_strong = spec.explicit_def && !spec.explicit_inline;
+	item->fn_spec = &spec;
+	return item;
+}
+
 void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
                                         FunctionSpecialization& spec)
 {
@@ -173,21 +192,12 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
 		inner.declarator.get(), specs.type);
 	BindCapturedPackParameter(fn_scope);
+	// The capture scope served the signature only; a nested pattern
+	// composition during the body must not leak parameter names here.
+	param_capture_scope_ = 0;
 
-	SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
+	SemNodePtr item = MakeInstantiatedBodyNode(tmpl, spec, composed);
 	SemNode* node = item.get();
-	item->name = CanonicalQualifiedName(tmpl.declaring, spec.name);
-	item->type = composed.type;
-	item->entity_scope = spec.param_scope;
-	item->entity_name = spec.name;
-	item->unwind_no = composed.noexcept_simple;
-	// An explicit specialization is an ordinary definition: strong
-	// unless declared inline (7.1.2), but emitted only on demand like
-	// an instantiation (the reference omits an unused one).
-	// Instantiated bodies stay weak.
-	item->inline_def = true;
-	item->demand_strong = spec.explicit_def && !spec.explicit_inline;
-	item->fn_spec = &spec;
 	// 7.1.5: constexpr on the pattern (or explicit-specialization)
 	// declaration makes the instantiated body engine-evaluable and
 	// implicitly inline.
@@ -217,6 +227,10 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 			method_.this_type = item->type->parameters[0];
 	}
 	current_return_ = composed.type->target;
+	// PA24: deferred placeholder returns in template bodies stay out
+	// of scope; the consistency pattern resets for this body.
+	auto_return_pattern_ = TypeContainsAutoPlaceholder(current_return_)
+		? current_return_ : TypePtr();
 	parents_.push_back(node);
 	try
 	{

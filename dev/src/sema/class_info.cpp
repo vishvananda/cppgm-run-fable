@@ -577,11 +577,22 @@ static bool ClassPassesDirect(const ClassInfo& info)
 	return SubobjectsSatisfy<ClassPassesDirect>(info);
 }
 
+// Itanium call convention: a deleted copy constructor (a move-only
+// class) makes the object non-trivial for calls; it passes and
+// returns indirectly.
+static bool ClassCopyCtorDeleted(const ClassInfo& info)
+{
+	for (size_t i = 0; i < info.ctors.size(); i++)
+		if (info.ctors[i].kind == CK_COPY && info.ctors[i].deleted)
+			return true;
+	return false;
+}
+
 bool ClassParamDirect(const ClassInfo& info)
 {
 	return info.size <= 16 && !info.is_union &&
 		ClassHasTrivialMoveCtor(info) && ClassHasTrivialDtor(info) &&
-		ClassPassesDirect(info);
+		!ClassCopyCtorDeleted(info) && ClassPassesDirect(info);
 }
 
 bool ClassReturnDirect(const ClassInfo& info)

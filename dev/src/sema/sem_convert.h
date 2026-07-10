@@ -101,6 +101,9 @@ struct ImplicitConversion
 	const NamedTypeInfo* conv_class;
 	int conv_index;
 	EConversionRank second_rank;
+	// PA24 5.1.2p6: a captureless closure converting to its function
+	// pointer (applied as the function's address, no call emitted).
+	bool closure_to_pointer = false;
 };
 
 // Classifies the conversion of `source` to the destination type (a
@@ -182,3 +185,11 @@ void SetCtorTemplateHook(void (*hook)(void* context,
                                       const NamedTypeInfo* dest,
                                       const ConversionSource& source),
                          void* context);
+
+// PA24 captureless closures: the classification asks the binder for a
+// closure class's function type (null for ordinary classes); a match
+// against a pointer-to-function destination converts like the
+// function-to-pointer standard conversion.
+void SetClosureFunctionHook(TypePtr (*hook)(void* context,
+                                            const NamedTypeInfo* cls),
+                            void* context);

@@ -173,6 +173,12 @@ struct ISemExprHost
 	// The `this` value expression: the parameter-backed id, or the
 	// captured-this field inside an open lambda body.
 	virtual SemNodePtr ThisValueNode() = 0;
+	// PA24: the synthesized function behind a captureless closure
+	// class (false for ordinary classes).
+	virtual bool CapturelessClosureFunction(const NamedTypeInfo* cls,
+	                                        const Scope*& owner,
+	                                        string& name,
+	                                        TypePtr& type) = 0;
 	virtual ~ISemExprHost() {}
 };
 

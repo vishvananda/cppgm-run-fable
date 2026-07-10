@@ -58,6 +58,8 @@ SemBinder::InstantiationContext::InstantiationContext(SemBinder& binder,
 	saved_c_linkage_ = binder.in_c_linkage_;
 	saved_method_ = binder.method_;
 	saved_return_ = binder.current_return_;
+	saved_return_pattern_ = binder.auto_return_pattern_;
+	saved_hidden_names_ = binder.range_hidden_counter_;
 	saved_bit_field_ = binder.in_bit_field_;
 	saved_instantiating_ = binder.instantiating_;
 	saved_unevaluated_ = binder.in_unevaluated_operand_;
@@ -72,6 +74,8 @@ SemBinder::InstantiationContext::InstantiationContext(SemBinder& binder,
 	binder.in_c_linkage_ = false;
 	binder.method_ = MethodContext();
 	binder.current_return_ = TypePtr();
+	binder.auto_return_pattern_ = TypePtr();
+	binder.range_hidden_counter_ = 0;
 	binder.in_bit_field_ = false;
 	if (instantiating)
 		binder.instantiating_ = true;
@@ -92,6 +96,8 @@ SemBinder::InstantiationContext::~InstantiationContext()
 	binder_.in_c_linkage_ = saved_c_linkage_;
 	binder_.method_ = saved_method_;
 	binder_.current_return_ = saved_return_;
+	binder_.auto_return_pattern_ = saved_return_pattern_;
+	binder_.range_hidden_counter_ = saved_hidden_names_;
 	binder_.in_bit_field_ = saved_bit_field_;
 	binder_.instantiating_ = saved_instantiating_;
 	binder_.in_unevaluated_operand_ = saved_unevaluated_;

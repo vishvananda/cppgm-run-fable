@@ -13,6 +13,10 @@ namespace {
 thread_local void (*ctor_template_hook)(void*, const NamedTypeInfo*,
                                         const ConversionSource&) = 0;
 thread_local void* ctor_template_context = 0;
+// PA24: the binder's captureless-closure function-type query.
+thread_local TypePtr (*closure_function_hook)(void*,
+                                              const NamedTypeInfo*) = 0;
+thread_local void* closure_function_context = 0;
 
 bool IsBoolType(const TypePtr& type)
 {
@@ -120,6 +124,22 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 		return ClassifyFunctionSet(source, dest);
 
 	TypePtr from = DecayedValueType(source.type);
+	// PA24 5.1.2p6: a captureless closure converts to the pointer to
+	// its function like the function-to-pointer conversion (Exact
+	// rank, no conversion-function call).
+	if (dest->kind == TK_POINTER && dest->target->kind == TK_FUNCTION &&
+	    from->kind == TK_CLASS && closure_function_hook)
+	{
+		TypePtr fn = closure_function_hook(closure_function_context,
+		                                   from->named);
+		if (fn && TypeEquals(RemoveTopCv(fn), RemoveTopCv(dest->target)))
+		{
+			result.viable = true;
+			result.rank = CR_EXACT;
+			result.closure_to_pointer = true;
+			return result;
+		}
+	}
 	if (TypeEquals(from, dest))
 	{
 		result.viable = true;
@@ -282,7 +302,30 @@ ImplicitConversion ClassifyReferenceBinding(const ConversionSource& source,
 	if (source.function_set)
 	{
 		if (referee->kind == TK_FUNCTION)
+		{
 			SelectFunctionFromSet(source.overloads, referee, result);
+			return result;
+		}
+		// 8.5.3p5: the function-to-pointer converted temporary binds a
+		// const lvalue (or rvalue) reference to pointer-to-function.
+		bool set_referee_const = false;
+		bool set_referee_volatile = false;
+		TopCv(referee, set_referee_const, set_referee_volatile);
+		bool set_const_ref = !rvalue_ref && set_referee_const &&
+			!set_referee_volatile;
+		if ((rvalue_ref || set_const_ref) &&
+		    RemoveTopCv(referee)->kind == TK_POINTER &&
+		    RemoveTopCv(referee)->target->kind == TK_FUNCTION)
+		{
+			ImplicitConversion value = ClassifyValueConversion(
+				source, RemoveTopCv(referee), allow_user);
+			if (value.viable)
+			{
+				result.viable = true;
+				result.rank = value.rank;
+				result.selected_overload = value.selected_overload;
+			}
+		}
 		return result;
 	}
 
@@ -874,6 +917,14 @@ void SetConversionTemplateHook(void (*hook)(void* context,
 {
 	conversion_template_hook = hook;
 	conversion_template_context = context;
+}
+
+void SetClosureFunctionHook(TypePtr (*hook)(void* context,
+                                            const NamedTypeInfo* cls),
+                            void* context)
+{
+	closure_function_hook = hook;
+	closure_function_context = context;
 }
 
 void SetCtorTemplateHook(void (*hook)(void* context,

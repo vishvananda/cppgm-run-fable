@@ -35,7 +35,8 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
 	  indirect_ret_(false), nrvo_scope_(0), nrvo_active_(false),
 	  temp_counter_(0), label_counter_(0), mat_counter_(0),
 	  eh_open_(false), in_lifetime_action_(false), eh_armed_(false),
-	  in_cleanup_emission_(false), ctor_depth_(0)
+	  in_cleanup_emission_(false), ctor_depth_(0),
+	  param_cleanup_count_(0)
 {
 }
 
@@ -107,9 +108,9 @@ string FunctionLowerer::Header() const
 		meta.push_back("unwind=no");
 	if (info_.c_linkage)
 		meta.push_back("linkage=c");
-	meta.push_back(info_.weak && !info_.demand_strong ? "binding=weak"
-	               : info_.internal ? "binding=internal"
-	                                : "binding=strong");
+	meta.push_back(info_.internal ? "binding=internal"
+	               : info_.weak && !info_.demand_strong ? "binding=weak"
+	                                                    : "binding=strong");
 	if (!info_.object_name.empty())
 		meta.push_back("object=" + info_.object_name);
 	if (info_.object_root)
@@ -174,7 +175,10 @@ void FunctionLowerer::RegisterParameterCleanup(const SemNode& parameter)
 		if (parameter.children[i]->kind == SN_DESTRUCTOR_ACTION)
 			actions.push_back(parameter.children[i].get());
 	if (!actions.empty())
+	{
 		RegisterCleanup(actions);
+		param_cleanup_count_++;
+	}
 }
 
 // --- block / slot / temp state -----------------------------------------
@@ -912,7 +916,12 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 			Terminate("return void");
 			return;
 		}
-		string slot = AddMatSlot("retobj", LowerSlotType(ret_bare));
+		// Every return statement shares one materialized result slot
+		// (the reference numbers a single retobj per function).
+		if (retobj_slot_.empty())
+			retobj_slot_ = AddMatSlot("retobj",
+			                          LowerSlotType(ret_bare));
+		string slot = retobj_slot_;
 		string address = NewTemp();
 		Emit(address + " = addr $" + slot);
 		LowerClassInit(value, address);

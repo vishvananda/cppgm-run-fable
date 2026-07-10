@@ -157,7 +157,8 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 				object.type = MakeNamedType(TK_CLASS, target);
 			}
 			return AnalyzeMethodCall(std::move(object), binding,
-			                         expr.arguments, qualified);
+			                         expr.arguments, qualified,
+			                         explicit_part);
 		}
 		return AnalyzeStaticMethodCall(expr, binding, explicit_part);
 	}

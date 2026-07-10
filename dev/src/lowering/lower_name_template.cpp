@@ -810,16 +810,29 @@ using namespace lower_mangle;
 
 string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 {
+	string mangled;
 	try
 	{
-		return MangleFunctionTemplateSpelled(spec, true);
+		mangled = MangleFunctionTemplateSpelled(spec, true);
 	}
 	catch (const std::exception&)
 	{
 		// Forms outside the written-signature subset keep the total
 		// concrete spelling (`object=` stays a pairing hint).
-		return MangleFunctionTemplateSpelled(spec, false);
+		mangled = MangleFunctionTemplateSpelled(spec, false);
 	}
+	// PA24: concrete spellings that embed a lambda-owning local scope
+	// can carry punctuation the LowIR metadata grammar rejects; the
+	// pairing hint sanitizes to identifier characters.
+	for (size_t i = 0; i < mangled.size(); i++)
+	{
+		char c = mangled[i];
+		bool word = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '$' || c == '.';
+		if (!word)
+			mangled[i] = '_';
+	}
+	return mangled;
 }
 
 // PA21 constructor-template specializations: C1/C2 followed by the

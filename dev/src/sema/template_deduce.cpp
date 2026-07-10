@@ -696,6 +696,10 @@ bool SemBinder::ComposeFunctionPattern(
 	const AstDeclarator* declarator = PatternDeclarator(inner);
 	Scope* saved = current_;
 	current_ = scope;
+	// An abstract pattern composition never captures parameter names
+	// into an enclosing body's scope.
+	Scope* saved_capture = param_capture_scope_;
+	param_capture_scope_ = 0;
 	bool composed_full = false;
 	full = TypePtr();
 	param_patterns.clear();
@@ -766,6 +770,7 @@ bool SemBinder::ComposeFunctionPattern(
 			}
 	}
 	current_ = saved;
+	param_capture_scope_ = saved_capture;
 	return composed_full;
 }
 

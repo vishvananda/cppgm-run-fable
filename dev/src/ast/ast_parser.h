@@ -192,6 +192,8 @@ private:
 	AstStmtPtr ParseExpressionStatement();
 	AstConditionPtr ParseCondition();
 	AstStmtPtr ParseForInitStatement();
+	// PA24 6.5.4: the range form (after `for (`).
+	AstStmtPtr ParseRangeForForm(bool& matched);
 
 	// --- specifiers and declarators (ast_parse_declarator.cpp) -------
 	enum ESeqKind

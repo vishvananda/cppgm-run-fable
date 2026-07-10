@@ -313,6 +313,10 @@ private:
 	// Cleanup scopes parallel the lowered compound statements; each
 	// scope holds per-object action groups in declaration order.
 	vector<vector<vector<const SemNode*>>> cleanup_scopes_;
+	// Parameter cleanup groups registered at entry (non-arming).
+	size_t param_cleanup_count_;
+	// The shared materialized return-object slot (one per function).
+	string retobj_slot_;
 	vector<size_t> break_cleanup_;
 	vector<size_t> continue_cleanup_;
 	// Destructor actions of the local just lowered, registered only

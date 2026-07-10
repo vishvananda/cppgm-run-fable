@@ -240,9 +240,9 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		if (item.internal_fn)
 		{
 			// PA24: a captureless lambda's function has internal
-			// linkage and no external object identity.
+			// linkage and no external object identity; it still emits
+			// only on demand (the weak flag drives the sweep).
 			info.internal = true;
-			info.weak = false;
 			info.object_name.clear();
 		}
 	}

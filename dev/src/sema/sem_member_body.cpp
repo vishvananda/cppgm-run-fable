@@ -331,35 +331,8 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	DeferredBody published = body;
 	if (special == SF_NONE &&
 	    TypeContainsAutoPlaceholder(body.composed.type->target))
-	{
-		// 7.1.6.4p7/p10: the member's placeholder return deduced from
-		// its body (void when no return statement ran); the definition
-		// node and the class-scope overload entry take the deduced
-		// signature.
-		if (TypeContainsAutoPlaceholder(deduced_return))
-			deduced_return = MakeFundamentalType(FT_VOID);
-		const TypePtr& spelled = body.composed.type;
-		TypePtr fixed = MakeFunctionType(deduced_return,
-		                                 spelled->parameters,
-		                                 spelled->variadic);
-		fixed = MakeFunctionCvQualifiedType(fixed, spelled->is_const,
-		                                    spelled->is_volatile);
-		if (spelled->ref_qual)
-			fixed = MakeRefQualifiedType(fixed, spelled->ref_qual);
-		node->type = body.is_friend || body.is_static
-			? fixed : MethodAdjustedType(*body.cls, fixed);
-		if (ScopeBinding* fn = FindOwnBinding(*body.declaring,
-		                                      body.name))
-		{
-			if (fn->type && TypeEquals(fn->type, spelled))
-				fn->type = fixed;
-			else
-				for (size_t i = 0; i < fn->overloads.size(); i++)
-					if (TypeEquals(fn->overloads[i], spelled))
-						fn->overloads[i] = fixed;
-		}
-		published.composed.type = fixed;
-	}
+		published.composed.type = PublishDeducedMemberReturn(
+			body, deduced_return, *node);
 	PublishBodyUnwindFact(published, special, *node);
 	// PA23: a conversion function (DK_SPECIAL_MEMBER_DEFINITION whose
 	// name keeps the "operator " spelling) publishes whether its body
@@ -393,6 +366,38 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 			node->inline_def = true;
 		unit_.deferred.push_back(std::move(item));
 	}
+}
+
+// 7.1.6.4p7/p10: the member's placeholder return deduced from its
+// body (void when no return statement ran); the definition node and
+// the class-scope overload entry take the deduced signature, which is
+// returned for the unwind-fact publication.
+TypePtr SemBinder::PublishDeducedMemberReturn(const DeferredBody& body,
+                                              TypePtr deduced_return,
+                                              SemNode& node)
+{
+	if (TypeContainsAutoPlaceholder(deduced_return))
+		deduced_return = MakeFundamentalType(FT_VOID);
+	const TypePtr& spelled = body.composed.type;
+	TypePtr fixed = MakeFunctionType(deduced_return,
+	                                 spelled->parameters,
+	                                 spelled->variadic);
+	fixed = MakeFunctionCvQualifiedType(fixed, spelled->is_const,
+	                                    spelled->is_volatile);
+	if (spelled->ref_qual)
+		fixed = MakeRefQualifiedType(fixed, spelled->ref_qual);
+	node.type = body.is_friend || body.is_static
+		? fixed : MethodAdjustedType(*body.cls, fixed);
+	if (ScopeBinding* fn = FindOwnBinding(*body.declaring, body.name))
+	{
+		if (fn->type && TypeEquals(fn->type, spelled))
+			fn->type = fixed;
+		else
+			for (size_t i = 0; i < fn->overloads.size(); i++)
+				if (TypeEquals(fn->overloads[i], spelled))
+					fn->overloads[i] = fixed;
+	}
+	return fixed;
 }
 
 void SemBinder::PublishBodyUnwindFact(const DeferredBody& body,

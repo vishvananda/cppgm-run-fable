@@ -219,6 +219,43 @@ AstStmtPtr AstParser::ParseForInitStatement()
 	return stmt;
 }
 
+// The range form of a for statement, after `for (` has been consumed:
+// a specifier-seq plus one uninitialized declarator followed by a
+// colon. `matched` reports that the introducer matched (so the caller
+// must not retry the classic form).
+AstStmtPtr AstParser::ParseRangeForForm(bool& matched)
+{
+	State range_state = Save();
+	AstDeclPtr range_decl = MakeDecl(DK_SIMPLE);
+	AstInitDeclarator range_declarator;
+	range_declarator.begin_token = pos_;
+	if (!ParseSpecifierSeq(range_decl->specifiers, kDeclSpecifierSeq) ||
+	    !ParseDeclarator(range_declarator.declarator, true) ||
+	    !AtSimple(OP_COLON))
+	{
+		Restore(range_state);
+		return AstStmtPtr();
+	}
+	matched = true;
+	Advance();
+	const AstName* id = range_declarator.declarator->IdName();
+	if (id && id->IsPlainIdentifier())
+		Register(id->parts[0].identifier, NF_VALUE);
+	range_decl->declarators.push_back(move(range_declarator));
+	AstExprPtr range_init = AtSimple(OP_LBRACE) ? ParseBracedInitList()
+	                                            : ParseExpression();
+	AstStmtPtr range_body;
+	if (!range_init || !MatchSimple(OP_RPAREN) ||
+	    !(range_body = ParseStatement()))
+		return AstStmtPtr();
+	PopScope();
+	AstStmtPtr range_stmt = MakeStmt(SK_FOR);
+	range_stmt->for_range_decl = move(range_decl);
+	range_stmt->for_range_init = move(range_init);
+	range_stmt->body = move(range_body);
+	return range_stmt;
+}
+
 AstStmtPtr AstParser::ParseIterationStatement()
 {
 	State state = Save();
@@ -270,43 +307,19 @@ AstStmtPtr AstParser::ParseIterationStatement()
 		return AstStmtPtr();
 	}
 	// 6.5.4: for ( for-range-declaration : for-range-initializer )
-	// statement. The range declaration is a specifier-seq plus one
-	// uninitialized declarator followed by a colon.
+	// statement (a failed range parse falls through to the classic
+	// three-clause form; a matched one that then fails is an error).
 	{
-		State range_state = Save();
-		AstDeclPtr range_decl = MakeDecl(DK_SIMPLE);
-		AstInitDeclarator range_declarator;
-		range_declarator.begin_token = pos_;
-		if (ParseSpecifierSeq(range_decl->specifiers,
-		                      kDeclSpecifierSeq) &&
-		    ParseDeclarator(range_declarator.declarator, true) &&
-		    AtSimple(OP_COLON))
+		bool range_matched = false;
+		AstStmtPtr range_stmt = ParseRangeForForm(range_matched);
+		if (range_stmt)
+			return range_stmt;
+		if (range_matched)
 		{
-			Advance();
-			const AstName* id =
-				range_declarator.declarator->IdName();
-			if (id && id->IsPlainIdentifier())
-				Register(id->parts[0].identifier, NF_VALUE);
-			range_decl->declarators.push_back(
-				move(range_declarator));
-			AstExprPtr range_init = AtSimple(OP_LBRACE)
-				? ParseBracedInitList() : ParseExpression();
-			AstStmtPtr range_body;
-			if (range_init && MatchSimple(OP_RPAREN) &&
-			    (range_body = ParseStatement()))
-			{
-				PopScope();
-				AstStmtPtr range_stmt = MakeStmt(SK_FOR);
-				range_stmt->for_range_decl = move(range_decl);
-				range_stmt->for_range_init = move(range_init);
-				range_stmt->body = move(range_body);
-				return range_stmt;
-			}
 			PopScope();
 			Restore(state);
 			return AstStmtPtr();
 		}
-		Restore(range_state);
 	}
 	AstStmtPtr init;
 	if (!(init = ParseForInitStatement()))

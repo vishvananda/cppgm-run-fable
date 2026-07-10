@@ -789,6 +789,35 @@ bool SemExprAnalyzer::TryUnaryOperator(const string& spelling,
 SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
                                              const AstExpr& expr)
 {
+	// PA24: a directly-called captureless lambda expression calls its
+	// synthesized function through the pointer conversion (the
+	// reference shape); closure objects keep the operator() path.
+	if (object.node && object.node->kind == SN_CLOSURE_INIT &&
+	    object.node->children.empty())
+	{
+		const Scope* owner = 0;
+		string name;
+		TypePtr fn_type;
+		if (host_.CapturelessClosureFunction(
+		        RemoveTopCv(object.type)->named, owner, name, fn_type))
+		{
+			SemNodePtr fn = MakeSemNode(SN_ID_EXPRESSION);
+			fn->name = name;
+			fn->type = fn_type;
+			fn->category = VC_LVALUE;
+			fn->entity_scope = owner;
+			fn->entity_name = name;
+			vector<SemValue> args;
+			AnalyzeArgumentList(expr.arguments, args);
+			CheckCallArguments(fn_type, args);
+			SemValue value = CallResult(fn_type);
+			value.node->children.push_back(std::move(fn));
+			for (size_t a = 0; a < args.size(); a++)
+				value.node->children.push_back(
+					std::move(args[a].node));
+			return value;
+		}
+	}
 	const ScopeBinding* member = 0;
 	Scope* members = host_.Model().MemberScope(object.type->named);
 	for (const Scope* link = members; link; link = link->class_base)

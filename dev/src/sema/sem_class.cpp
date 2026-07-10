@@ -1376,10 +1376,16 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 		{
 			// An implicit/defaulted copy or move constructor: a trivial
 			// one lowers as a raw object copy; otherwise the field-wise
-			// definition synthesizes on first demand.
+			// definition synthesizes on first demand. The reference
+			// keeps the synthesized call for a move over enumeration
+			// members (its pinned shape).
+			bool enum_member = false;
+			for (size_t f = 0; f < cls.fields.size(); f++)
+				if (RemoveTopCv(cls.fields[f].type)->kind == TK_ENUM)
+					enum_member = true;
 			trivial_transfer = selected.kind == CK_COPY
 				? ClassHasTrivialCopyCtor(cls)
-				: ClassHasTrivialMoveCtor(cls);
+				: ClassHasTrivialMoveCtor(cls) && !enum_member;
 			if (trivial_transfer)
 			{
 				callee_unwind_no = true;

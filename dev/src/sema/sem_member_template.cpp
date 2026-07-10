@@ -784,6 +784,9 @@ void SemBinder::InstantiateCtorTemplateBody(ClassInfo& cls, int index)
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
 		inner.declarator.get(), MakeFundamentalType(FT_VOID));
 	BindCapturedPackParameter(fn_scope);
+	// The capture scope served the signature only; the body bind must
+	// not leak nested pattern-composition names here.
+	param_capture_scope_ = 0;
 	DeferredBody body;
 	body.decl = &inner;
 	body.composed = composed;

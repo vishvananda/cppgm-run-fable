@@ -32,6 +32,35 @@ TypePtr LambdaAutoPlaceholder()
 	return std::make_shared<Type>(marked);
 }
 
+// Whether a statement subtree declares a class (a lambda whose body
+// does keeps the closure view under auto deduction - the reference
+// shape for local-type-owning lambdas).
+bool StmtDeclaresClass(const AstStmt* stmt)
+{
+	if (!stmt)
+		return false;
+	if (stmt->decl && (stmt->decl->kind == DK_CLASS ||
+	                   stmt->decl->kind == DK_SIMPLE))
+	{
+		if (stmt->decl->kind == DK_CLASS)
+			return true;
+		for (size_t i = 0; i < stmt->decl->specifiers.size(); i++)
+			if (stmt->decl->specifiers[i].kind == SPEC_NESTED_DECL &&
+			    stmt->decl->specifiers[i].nested_decl &&
+			    stmt->decl->specifiers[i].nested_decl->kind == DK_CLASS)
+				return true;
+	}
+	for (size_t i = 0; i < stmt->items.size(); i++)
+		if (StmtDeclaresClass(stmt->items[i].get()))
+			return true;
+	if (StmtDeclaresClass(stmt->then_branch.get()) ||
+	    StmtDeclaresClass(stmt->else_branch.get()) ||
+	    StmtDeclaresClass(stmt->body.get()) ||
+	    StmtDeclaresClass(stmt->for_init.get()))
+		return true;
+	return false;
+}
+
 }  // namespace
 
 // The innermost lambda frame whose body is the one currently being
@@ -65,6 +94,49 @@ SemNodePtr SemBinder::ClosureThisId(const LambdaFrame& frame)
 	return deref;
 }
 
+// The captured-this pointer field (created on the spelled capture or
+// the first use).
+void SemBinder::EnsureThisField(LambdaFrame& frame)
+{
+	if (frame.this_captured)
+		return;
+	ClassField field;
+	field.name = "__this";
+	field.type = frame.enclosing_this;
+	field.access = MA_PUBLIC;
+	ClassField& placed = LayoutField(*frame.cls, field);
+	frame.this_captured = true;
+	frame.this_offset = placed.offset;
+	LambdaCapture capture;
+	capture.is_this = true;
+	frame.captures.push_back(capture);
+}
+
+// The by-reference capture field of one enclosing entity (created on
+// the spelled capture or the first use); returns its capture index.
+size_t SemBinder::EnsureCaptureField(LambdaFrame& frame,
+                                     const ScopeBinding& binding)
+{
+	for (size_t i = 0; i < frame.captures.size(); i++)
+		if (frame.captures[i].binding == &binding)
+			return i;
+	TypePtr referee = binding.type;
+	if (IsReferenceType(referee))
+		referee = referee->target;
+	ClassField field;
+	field.name = binding.name;
+	field.type = MakeReferenceType(referee, false, false);
+	field.access = MA_PUBLIC;
+	ClassField& placed = LayoutField(*frame.cls, field);
+	LambdaCapture capture;
+	capture.binding = &binding;
+	capture.name = binding.name;
+	capture.offset = placed.offset;
+	capture.referee = referee;
+	frame.captures.push_back(capture);
+	return frame.captures.size() - 1;
+}
+
 SemNodePtr SemBinder::ThisValueNode()
 {
 	LambdaFrame* frame = ActiveLambdaFrame();
@@ -76,16 +148,7 @@ SemNodePtr SemBinder::ThisValueNode()
 		{
 			if (!frame->by_ref_default && !frame->this_spelled)
 				throw runtime_error("this is not captured");
-			ClassField field;
-			field.name = "__this";
-			field.type = frame->enclosing_this;
-			field.access = MA_PUBLIC;
-			ClassField& placed = LayoutField(*frame->cls, field);
-			frame->this_captured = true;
-			frame->this_offset = placed.offset;
-			LambdaCapture capture;
-			capture.is_this = true;
-			frame->captures.push_back(capture);
+			EnsureThisField(*frame);
 		}
 		SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
 		member->name = "__this";
@@ -135,29 +198,7 @@ bool SemBinder::TryCaptureUse(const ScopeBinding& binding, SemValue& out)
 			spelled = true;
 	if (!frame->by_ref_default && !spelled)
 		throw runtime_error(binding.name + " is not captured");
-	size_t index = frame->captures.size();
-	for (size_t i = 0; i < frame->captures.size(); i++)
-		if (frame->captures[i].binding == &binding)
-			index = i;
-	if (index == frame->captures.size())
-	{
-		// First use: a by-reference capture appends a reference field
-		// (the closure stores the entity's address).
-		TypePtr referee = binding.type;
-		if (IsReferenceType(referee))
-			referee = referee->target;
-		ClassField field;
-		field.name = binding.name;
-		field.type = MakeReferenceType(referee, false, false);
-		field.access = MA_PUBLIC;
-		ClassField& placed = LayoutField(*frame->cls, field);
-		LambdaCapture capture;
-		capture.binding = &binding;
-		capture.name = binding.name;
-		capture.offset = placed.offset;
-		capture.referee = referee;
-		frame->captures.push_back(capture);
-	}
+	size_t index = EnsureCaptureField(*frame, binding);
 	const LambdaCapture& capture = frame->captures[index];
 	out = SemValue();
 	out.type = capture.referee;
@@ -172,34 +213,26 @@ bool SemBinder::TryCaptureUse(const ScopeBinding& binding, SemValue& out)
 	return true;
 }
 
+bool SemBinder::CapturelessClosureFunction(const NamedTypeInfo* cls,
+                                           const Scope*& owner,
+                                           string& name, TypePtr& type)
+{
+	std::map<const NamedTypeInfo*, ClosureFunction>::const_iterator
+		found = closure_functions_.find(cls);
+	if (found == closure_functions_.end())
+		return false;
+	owner = found->second.owner;
+	name = found->second.name;
+	type = found->second.type;
+	return true;
+}
+
 // Rebuilds the expression value of an already-synthesized lambda: the
 // function name for a captureless one, a closure-construction value
 // (capture sources re-analyzed in the current context) otherwise.
 SemValue SemBinder::MakeLambdaValue(const LambdaInfo& info)
 {
 	SemValue value;
-	if (info.captureless)
-	{
-		const ScopeBinding* binding =
-			FindOwnBinding(*model_.global(), info.fn_name);
-		if (!binding)
-			throw runtime_error("lambda function binding missing");
-		value.function_set = true;
-		value.overloads.push_back(info.fn_type);
-		value.overload_specs.resize(1, 0);
-		value.fn_owner = binding->owner;
-		value.fn_name = info.fn_name;
-		value.category = VC_LVALUE;
-		value.type = info.fn_type;
-		value.member_type = info.fn_type;
-		value.node = MakeSemNode(SN_ID_EXPRESSION);
-		value.node->name = info.fn_name;
-		value.node->type = info.fn_type;
-		value.node->category = VC_LVALUE;
-		value.node->entity_scope = binding->owner;
-		value.node->entity_name = info.fn_name;
-		return value;
-	}
 	TypePtr class_type = MakeNamedType(TK_CLASS, info.cls->entity);
 	value.type = class_type;
 	value.category = VC_PRVALUE;
@@ -275,12 +308,31 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, name, current_);
 	vector<ParameterInfo> parameters;
 	vector<TypePtr> param_types;
-	if (lambda.has_declarator && lambda.parameters)
-		builder_.BuildParameters(*lambda.parameters, parameters,
-		                         param_types, 0);
+	// Parameters (and an expanded pack's body-visible binding) publish
+	// into the lambda's own scope while they compose.
+	Scope* saved_capture = param_capture_scope_;
+	param_capture_scope_ = fn_scope;
+	PackParamRecord saved_record = last_pack_param_;
+	last_pack_param_ = PackParamRecord();
+	try
+	{
+		if (lambda.has_declarator && lambda.parameters)
+			builder_.BuildParameters(*lambda.parameters, parameters,
+			                         param_types, 0);
+		BindCapturedPackParameter(fn_scope);
+	}
+	catch (...)
+	{
+		param_capture_scope_ = saved_capture;
+		last_pack_param_ = saved_record;
+		throw;
+	}
+	param_capture_scope_ = saved_capture;
+	last_pack_param_ = saved_record;
 	for (size_t i = 0; i < parameters.size(); i++)
 	{
-		if (parameters[i].name.empty())
+		if (parameters[i].name.empty() ||
+		    FindOwnBinding(*fn_scope, parameters[i].name))
 			continue;
 		ScopeBinding param_binding;
 		param_binding.kind = SB_PARAMETER;
@@ -379,6 +431,11 @@ void SemBinder::BindCapturelessLambda(const AstLambda& lambda,
                                       const vector<TypePtr>& param_types,
                                       const TypePtr& ret, LambdaInfo& info)
 {
+	// The captureless closure is an empty class whose operator ()
+	// carries the body; the same body also synthesizes as an internal
+	// free function - the target of the closure's function-pointer
+	// conversion, of auto deduction, and of direct expression calls.
+	// Each form emits only on demand.
 	TypePtr fn_type = MakeFunctionType(ret, param_types, false);
 	fn_scope->fn_type = fn_type;
 	SemNodePtr item = MakeSemNode(SN_FUNCTION_DEFINITION);
@@ -437,6 +494,51 @@ void SemBinder::BindCapturelessLambda(const AstLambda& lambda,
 	unit_.deferred.push_back(std::move(item));
 	info.fn_name = name;
 	info.fn_type = fn_type;
+	// The closure class and its operator () (a second synthesis of the
+	// same body in its own scope).
+	Scope* op_scope = model_.CreateScope(SCOPE_FUNCTION, name, current_);
+	{
+		Scope* saved_capture = param_capture_scope_;
+		param_capture_scope_ = op_scope;
+		PackParamRecord saved_record = last_pack_param_;
+		last_pack_param_ = PackParamRecord();
+		vector<ParameterInfo> op_parameters;
+		vector<TypePtr> op_param_types;
+		try
+		{
+			if (lambda.has_declarator && lambda.parameters)
+				builder_.BuildParameters(*lambda.parameters,
+				                         op_parameters,
+				                         op_param_types, 0);
+			BindCapturedPackParameter(op_scope);
+		}
+		catch (...)
+		{
+			param_capture_scope_ = saved_capture;
+			last_pack_param_ = saved_record;
+			throw;
+		}
+		param_capture_scope_ = saved_capture;
+		last_pack_param_ = saved_record;
+		for (size_t i = 0; i < op_parameters.size(); i++)
+		{
+			if (op_parameters[i].name.empty() ||
+			    FindOwnBinding(*op_scope, op_parameters[i].name))
+				continue;
+			ScopeBinding param_binding;
+			param_binding.kind = SB_PARAMETER;
+			param_binding.name = op_parameters[i].name;
+			param_binding.type = op_parameters[i].type;
+			AddBinding(*op_scope, param_binding);
+		}
+		BindClosureLambda(lambda, name, op_scope, op_parameters,
+		                  op_param_types, ret, info);
+	}
+	closure_functions_[info.cls->entity].owner = model_.global();
+	closure_functions_[info.cls->entity].name = name;
+	closure_functions_[info.cls->entity].type = fn_type;
+	if (StmtDeclaresClass(lambda.body.get()))
+		closure_object_view_.insert(info.cls->entity);
 }
 
 void SemBinder::BindClosureLambda(const AstLambda& lambda,
@@ -516,6 +618,22 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 				lambda.captures[i].identifier);
 	}
 	lambda_frames_.push_back(frame);
+	// 5.1.2p14: spelled captures are members regardless of use.
+	for (size_t i = 0; i < lambda.captures.size(); i++)
+	{
+		LambdaFrame& open = lambda_frames_.back();
+		if (lambda.captures[i].kind == LC_THIS)
+		{
+			if (open.enclosing_this)
+				EnsureThisField(open);
+			continue;
+		}
+		const ScopeBinding* named = UnqualifiedLookup(
+			current_, lambda.captures[i].identifier, SLF_ANY);
+		if (named && (named->kind == SB_VARIABLE ||
+		              named->kind == SB_PARAMETER))
+			EnsureCaptureField(open, *named);
+	}
 	TypePtr deduced;
 	try
 	{

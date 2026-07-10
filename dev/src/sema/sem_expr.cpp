@@ -610,6 +610,11 @@ SemValue SemExprAnalyzer::AnalyzeIncDec(const AstExpr& expr, bool prefix)
 		                     overloaded))
 			return overloaded;
 	}
+	// 13.3.1.2p3 with 13.6: no member operator - a class operand may
+	// still reach the built-in form through a conversion function
+	// yielding a reference to arithmetic.
+	if (RemoveTopCv(operand.type)->kind == TK_CLASS)
+		ConvertClassOperand(operand);
 	RequireModifiableLvalue(operand, "increment or decrement");
 	bool arithmetic = IsArithmeticType(operand.type) &&
 		!(operand.type->kind == TK_FUNDAMENTAL &&
@@ -1040,6 +1045,23 @@ SemValue SemExprAnalyzer::AnalyzeConditional(const AstExpr& expr)
 		if (pick.node && pick.node->has_value && drop.node &&
 		    drop.node->has_value)
 			return std::move(pick);
+	}
+	// 5.16p3: with one class-typed operand, the other operand converts
+	// to the class type when an implicit conversion sequence exists
+	// (the converted arm constructs the materialized result).
+	{
+		TypePtr a_bare = RemoveTopCv(a.type);
+		TypePtr b_bare = RemoveTopCv(b.type);
+		if ((a_bare->kind == TK_CLASS) != (b_bare->kind == TK_CLASS) &&
+		    !a.function_set && !b.function_set)
+		{
+			SemValue& other = a_bare->kind == TK_CLASS ? b : a;
+			TypePtr target = a_bare->kind == TK_CLASS ? a_bare : b_bare;
+			ImplicitConversion conv = ClassifyConversion(
+				MakeConversionSource(other), target);
+			if (conv.viable)
+				ApplyConversion(other, conv, target);
+		}
 	}
 	EValueCategory category = VC_PRVALUE;
 	TypePtr type = ConditionalResultType(a, b, category);

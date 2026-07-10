@@ -191,6 +191,30 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		ApplyListInitConversion(value, conv, dest);
 		return;
 	}
+	if (conv.closure_to_pointer)
+	{
+		// PA24 5.1.2p6: the captureless closure's value becomes its
+		// function (the lowering spells the address and decay).
+		const Scope* owner = 0;
+		string name;
+		TypePtr fn_type;
+		TypePtr closure = value.type;
+		if (IsReferenceType(closure))
+			closure = closure->target;
+		if (!host_.CapturelessClosureFunction(
+		        RemoveTopCv(closure)->named, owner, name, fn_type))
+			throw runtime_error("closure function record missing");
+		value = SemValue();
+		value.type = fn_type;
+		value.category = VC_LVALUE;
+		value.node = MakeSemNode(SN_ID_EXPRESSION);
+		value.node->name = name;
+		value.node->type = fn_type;
+		value.node->category = VC_LVALUE;
+		value.node->entity_scope = owner;
+		value.node->entity_name = name;
+		return;
+	}
 	if (conv.user_ctor >= 0 && conv.user_class)
 	{
 		ApplyConstructorConversion(value, conv);

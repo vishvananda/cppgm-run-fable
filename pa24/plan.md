@@ -6,7 +6,8 @@ braced initialization, captureless-plus-by-ref lambdas, and range-for. No new
 output format; the checked-in `.ref` files under the relaxed LowIR comparator
 are the contract.
 
-Current state: 30/94 pa24 tests pass. All earlier stages are green.
+Status: complete — 94/94 pa24 tests and the full through-pa24 suite
+(2373/2373) pass; the pa24 file audit is clean.
 
 ## Ownership boundaries
 
@@ -53,11 +54,18 @@ Current state: 30/94 pa24 tests pass. All earlier stages are green.
 6. **Range-for**: AST fields + parse; sema desugars per 6.5.4 into
    `{ range/begin/end bindings; ordinary for }` for arrays, braced-init lists
    (materialized as a hidden bounded array), and member/ADL `begin`/`end`.
-7. **Lambdas**: closure class synthesis in sema (unique local class per
-   lambda), `operator()` as an ordinary member function body, captureless
-   conversion operator to function pointer, by-reference local captures and
-   `this` capture as reference members initialized at closure construction.
-   Template-context lambdas instantiate with their enclosing body.
+7. **Lambdas** (as landed, the hybrid reference model): every lambda
+   synthesizes a closure class whose fields are the by-reference captures
+   (reference fields) and the captured `this` (a pointer field), created on
+   first use — spelled captures materialize unconditionally. `operator()`
+   binds through the shared statement path. A captureless lambda
+   additionally synthesizes an internal free function holding the same
+   body: the target of the closure's function-pointer conversion (a
+   standard-rank conversion, no call emitted), of plain-`auto` deduction
+   (pointer at block scope, function type at namespace scope, closure kept
+   for cv-`auto` and local-type-owning bodies), and of direct
+   lambda-expression calls. Capture rewriting hooks: TryCaptureUse /
+   ThisValueNode gate on the innermost frame whose scope is the open body.
 8. **Misc cluster**: by-value indirect param copy shape, conversion-operator
    inc/dec + using-alias cases, conditional ctor conversion, dependent
    validation tests — diagnose after the main features land (several are

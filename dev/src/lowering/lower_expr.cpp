@@ -800,6 +800,11 @@ LowerValue FunctionLowerer::LowerIncDec(const SemNode& node, bool prefix)
 		Emit(new_value + " = binary " + BinaryOpName(node.op, type) +
 		     " " + type_text + " " + old_value + ", " + one);
 	}
+	// A postfix form over a reference-returning call lvalue recomputes
+	// its store address after the value (the canonical reference
+	// order); the prefix form stores through the read address.
+	if (!prefix && operand.kind == SN_CALL_EXPRESSION)
+		storage = LowerAddressExpr(operand);
 	Emit("store " + type_text + " " + new_value + ", " + storage);
 	LowerValue value;
 	value.type = type;
@@ -1026,10 +1031,12 @@ string FunctionLowerer::LowerPointerOperand(const SemNode& node)
 	{
 		const ScopeBinding* binding = node.kind == SN_ID_EXPRESSION
 			? EntityBinding(node) : 0;
-		// PA24: a function-typed variable (a namespace-scope auto
-		// deduced from a lambda) is its storage address, undecayed
-		// (the reference call shape).
-		if (binding && binding->kind == SB_VARIABLE)
+		// PA24: a variable DECLARED with a plain function type (a
+		// namespace-scope auto deduced from a lambda) is its storage
+		// address, undecayed (the reference call shape). A function
+		// reference keeps its load-and-decay form.
+		if (binding && binding->kind == SB_VARIABLE &&
+		    binding->type && binding->type->kind == TK_FUNCTION)
 			return LowerAddressExpr(node);
 		string address;
 		if ((binding && binding->kind == SB_FUNCTION) || node.fn_spec)
@@ -1058,6 +1065,16 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		// parameter materializes its temporary array.
 		string slot = AddMatSlot("argarr", LowerSlotType(bare));
 		return LowerLocalArrayInit(node, slot, bare);
+	}
+	if (node.kind == SN_CLOSURE_INIT && bare->kind == TK_CLASS)
+	{
+		// PA24: a closure temporary bound to a reference parameter
+		// materializes as an argument object.
+		string slot = AddMatSlot("arg", LowerSlotType(bare));
+		string address = NewTemp();
+		Emit(address + " = addr $" + slot);
+		LowerClosureInit(node, address);
+		return address;
 	}
 	if (node.kind == SN_CONSTRUCTOR_ACTION && bare->kind == TK_CLASS)
 	{
@@ -1125,9 +1142,14 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		return AdjustToBase(
 			address, BaseClassDistance(source->named, bare->named));
 	}
-	// 8.5.3p5: materialize a temporary with the converted value.
+	// 8.5.3p5: materialize a temporary with the converted value. A
+	// function source stores its plain address (the reference spells
+	// no decay for the bound temporary).
 	string slot = AddMatSlot("refarg", LowerSlotType(bare));
-	string value = LowerValueAs(node, bare, LCC_INIT);
+	string value = NodeType(node)->kind == TK_FUNCTION &&
+	        bare->kind == TK_POINTER
+		? LowerAddressExpr(node)
+		: LowerValueAs(node, bare, LCC_INIT);
 	Emit("store " + LowerValueType(bare) + " " + value + ", $" + slot);
 	string temp = NewTemp();
 	Emit(temp + " = addr $" + slot);

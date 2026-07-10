@@ -57,6 +57,9 @@ public:
 	virtual SemValue AnalyzeLambda(const AstExpr& expr);
 	virtual bool TryCaptureUse(const ScopeBinding& binding, SemValue& out);
 	virtual SemNodePtr ThisValueNode();
+	virtual bool CapturelessClosureFunction(const NamedTypeInfo* cls,
+	                                        const Scope*& owner,
+	                                        string& name, TypePtr& type);
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
@@ -811,6 +814,15 @@ private:
 	                         const vector<AstExprPtr>& items,
 	                         size_t at, bool top_braced,
 	                         vector<SemNodePtr>& out);
+	// The instantiated body's definition node (identity and linkage).
+	SemNodePtr MakeInstantiatedBodyNode(TemplateInfo& tmpl,
+	                                    FunctionSpecialization& spec,
+	                                    const DeclaratorInfo& composed);
+	// PA24: rewrites a deferred member's deduced placeholder return
+	// into its definition node and class-scope overload entry.
+	TypePtr PublishDeducedMemberReturn(const DeferredBody& body,
+	                                   TypePtr deduced_return,
+	                                   SemNode& node);
 	// The synthesized field-wise constructor used by aggregate
 	// temporaries and array elements; returns its this-adjusted type.
 	// `provided` extends the parameter cover (see the definition).
@@ -939,6 +951,9 @@ private:
 	};
 	LambdaFrame* ActiveLambdaFrame();
 	SemNodePtr ClosureThisId(const LambdaFrame& frame);
+	void EnsureThisField(LambdaFrame& frame);
+	size_t EnsureCaptureField(LambdaFrame& frame,
+	                          const ScopeBinding& binding);
 	SemValue MakeLambdaValue(const LambdaInfo& info);
 	TypePtr BindLambdaBody(const AstLambda& lambda, SemNode* node,
 	                       Scope* fn_scope, const MethodContext& context,
@@ -956,6 +971,18 @@ private:
 	vector<LambdaFrame> lambda_frames_;
 	std::map<std::pair<const void*, const void*>, LambdaInfo>
 		lambda_cache_;
+	// Captureless closures: the class entity's synthesized function
+	// identity (queried by conversions and deduction contexts).
+	struct ClosureFunction
+	{
+		const Scope* owner = 0;
+		string name;
+		TypePtr type;
+	};
+	std::map<const NamedTypeInfo*, ClosureFunction> closure_functions_;
+	// Captureless closures whose auto deduction keeps the closure
+	// object view (local-type-owning bodies; the reference shape).
+	std::set<const NamedTypeInfo*> closure_object_view_;
 	int lambda_counter_ = 0;
 
 	vector<ClassInfo*> open_classes_;
@@ -1096,6 +1123,8 @@ private:
 	bool saved_c_linkage_;
 	MethodContext saved_method_;
 	TypePtr saved_return_;
+	TypePtr saved_return_pattern_;
+	int saved_hidden_names_;
 	bool saved_bit_field_;
 	bool saved_instantiating_;
 	bool saved_unevaluated_;

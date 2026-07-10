@@ -812,10 +812,13 @@ void FunctionLowerer::RegisterCleanup(const vector<const SemNode*>& actions)
 
 bool FunctionLowerer::HaveCleanups() const
 {
+	// Parameter cleanups run at normal exits but do not arm unwind
+	// dispatch on their own (the reference protects calls only over
+	// local-object cleanups).
+	size_t groups = 0;
 	for (size_t i = 0; i < cleanup_scopes_.size(); i++)
-		if (!cleanup_scopes_[i].empty())
-			return true;
-	return false;
+		groups += cleanup_scopes_[i].size();
+	return groups > param_cleanup_count_;
 }
 
 void FunctionLowerer::EmitCleanupsFrom(size_t from)
