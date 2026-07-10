@@ -704,7 +704,6 @@ void SemBinder::FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 	}
 }
 
-
 void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
                                     const AstInitializer* init)
 {

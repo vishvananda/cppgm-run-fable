@@ -80,3 +80,59 @@ Status: complete — 94/94 pa24 tests and the full through-pa24 suite
   treated as part of the cluster's bug.
 - `perl scripts/cppgm_file_audit.pl --stage pa24 --paths dev/src` before
   committing; commit per cohesive cluster.
+
+## Architecture Review
+
+Audit of the landed implementation (loop 55) against the ownership
+boundaries above; full detail in `audit.md`.
+
+- **Layering held.** The AST layer carries only syntax for the new
+  forms: `ParseRangeForForm` stores the range declaration and
+  initializer unanalyzed; all desugaring lives in
+  `sem_auto.cpp::BindRangeForStatement`, which builds ordinary
+  synthesized AST fragments and binds them through the shared variable
+  and statement paths. Lowering never sees `auto`, an undesugared
+  range-for, or `EK_LAMBDA`; the lambda expression is consumed entirely
+  in sema (`AnalyzeLambda`).
+- **Typed facts throughout.** The captureless closure's function
+  identity is a typed record (`closure_functions_`, keyed by the class
+  entity) queried through a hook by the conversion classifier
+  (`closure_to_pointer` at exact rank) and applied in sema; lowering
+  does not recompute it. No new name-string comparisons encode
+  semantics: `__range`/`__begin`/`__lambda` strings are generated
+  identities, never matched against.
+- **One deviation found and fixed:** `LowerClosureInit` re-derived the
+  closure field offsets positionally (`i * 8`) while sema had already
+  recorded the authoritative offsets via the shared `LayoutField`
+  machinery. Construction now reads the class record's field offsets
+  (`LowerProgram::ProgramClass`), matching how the capture-read path
+  already consumes `member_offset`.
+- **One semantic corner found and fixed:** the plain-identifier range
+  shortcut (which matches the reference's `__range`-free shape) broke
+  when the loop variable shadowed the range name (`for (int a : a)`);
+  the shortcut now yields to the hidden `__range` binding exactly when
+  the names collide, so no pinned ref shape changes.
+- **Reviewed and accepted:** `DeduceAutoDeclared`/`MatchAutoPattern`
+  implement the 7.1.6.4p6 deduction rules directly instead of routing
+  through `template_deduce.cpp`'s bound-slot machinery. The deduced
+  type has a single owner (every auto context funnels through
+  `DeduceAutoDeclared`); reuse would need an invented-type-param shim
+  plus a carve-out for the namespace-scope function-view rule that
+  `DecayForDeduction` cannot express, a net complexity loss. Also
+  accepted: `SN_CLOSURE_INIT` is a sema-node construction shape (field
+  -wise pointer stores pinned by the refs), not a new LowIR concept —
+  the LowIR grammar is unchanged.
+
+## Final Architecture Review
+
+Post-fix state: sema owns deduction, desugaring, capture layout, and
+the closure-function fact; lowering consumes recorded offsets and typed
+node facts only; the AST stays syntactic. The hybrid captureless model
+(internal function + closure class, both bound from the same lambda
+body, emitted on demand through the weak-flag sweep) is a
+reference-pinned design cost — bounded at two binds per captureless
+lambda, cached per (lambda, enclosing body). Capture hooks are O(1)
+outside lambda bodies and capture-count bounded inside; the per-arity
+aggregate constructor is memoized per cover; no program-wide walks,
+timeouts, or fallback success paths were added. Gates after the audit
+fixes: pa24 94/94, through-pa24 2373/2373, file audit clean.

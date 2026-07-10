@@ -215,6 +215,9 @@ public:
 	// anywhere, and no call runs before the init store.
 	bool BranchSpellsFnPointerAddress(const Scope* scope,
 	                                  const string& name);
+	// The class record of `entity` across the added units (PA24: the
+	// closure-construction lowering reads sema's field offsets).
+	const ClassInfo* ProgramClass(const NamedTypeInfo* entity) const;
 
 private:
 	void CollectItem(const SemNode& item);
@@ -295,8 +298,6 @@ private:
 	                       unsigned long long offset,
 	                       unsigned long long& covered, string& out,
 	                       bool in_class);
-	// The class record of `entity` across the added units.
-	const ClassInfo* ProgramClass(const NamedTypeInfo* entity) const;
 	string RenderConstItem(const struct LowerConst& value,
 	                       const TypePtr& type, bool& is_zero_item);
 	string RenderAddress(const struct LowerConst& value);

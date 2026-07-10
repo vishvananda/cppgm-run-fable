@@ -349,6 +349,16 @@ void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 	const AstExpr* range_ast = stmt.for_range_init.get();
 	while (range_ast->kind == EK_PAREN)
 		range_ast = range_ast->operands[0].get();
+	// The declared loop name: a plain range identifier stands in for
+	// the hidden __range binding only while the loop declaration does
+	// not shadow it (6.5.4p1 evaluates range-init outside the loop
+	// -variable scope, so `for (int a : a)` reads the enclosing `a`).
+	string loop_name;
+	if (!stmt.for_range_decl->declarators.empty())
+		if (const AstName* loop_id =
+		        stmt.for_range_decl->declarators[0].declarator->IdName())
+			if (loop_id->IsPlainIdentifier())
+				loop_name = loop_id->parts[0].identifier;
 	string range_name;
 	TypePtr range_bare;
 	if (range_ast->kind == EK_BRACED)
@@ -384,7 +394,8 @@ void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 		SemValue range = analyzer_.Analyze(*range_ast);
 		range_bare = RemoveTopCv(range.type);
 		if (range_ast->kind == EK_ID &&
-		    range_ast->name.IsPlainIdentifier())
+		    range_ast->name.IsPlainIdentifier() &&
+		    range_ast->name.parts[0].identifier != loop_name)
 			range_name = range_ast->name.parts[0].identifier;
 		else
 		{

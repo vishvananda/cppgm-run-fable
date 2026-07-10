@@ -385,18 +385,23 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 // PA24 closure construction into `dest`: each child stores one ptr
 // field in order - an lvalue child stores its address (a by-reference
 // capture), a prvalue child its pointer value (a captured `this`).
+// The field offsets are sema's layout facts: child i pairs with the
+// closure class record's field i (capture order).
 void FunctionLowerer::LowerClosureInit(const SemNode& node,
                                        const string& dest)
 {
+	const ClassInfo* cls = program_.ProgramClass(node.type->named);
+	if (!cls || cls->fields.size() < node.children.size())
+		throw runtime_error("closure class record missing");
 	for (size_t i = 0; i < node.children.size(); i++)
 	{
 		const SemNode& child = *node.children[i];
 		string target = dest;
-		if (i)
+		if (cls->fields[i].offset)
 		{
 			target = NewTemp();
 			Emit(target + " = index i8 " + dest + ", " +
-			     to_string(i * 8));
+			     to_string(cls->fields[i].offset));
 		}
 		string value = child.category == VC_LVALUE
 			? LowerAddressExpr(child)
