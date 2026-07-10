@@ -1257,10 +1257,7 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// adjusted) object address as its leading argument.
 	bool pm_call = !direct && callee.kind == SN_MEMBER_POINTER_ACCESS;
 	if (pm_call)
-	{
 		object_text = LowerAddressExpr(*callee.children[0]);
-		arguments = object_text;
-	}
 	for (size_t i = 1; i < node.children.size(); i++)
 	{
 		TypePtr param = i - 1 < fn_type->parameters.size()
@@ -1271,10 +1268,14 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		arguments += (i > 1 || pm_call ? ", " : "") + text;
 	}
 	// The callee value of an indirect call lowers after the arguments
-	// (the oracle's evaluation order).
+	// (the oracle's evaluation order). A member-pointer callee over a
+	// displaced-base class also applies the value's this-adjustment to
+	// the object address here.
 	bool dispatch = direct && callee.vtable_slot >= 0;
 	string callee_text = LowerCalleeText(callee, fn_type, direct,
 	                                     dispatch, object_text);
+	if (pm_call)
+		arguments = object_text + arguments;
 	string return_text;
 	bool indirect_result = LowerAbiReturn(fn_type->target, return_text);
 	if (indirect_result)
@@ -1333,7 +1334,7 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 string FunctionLowerer::LowerCalleeText(const SemNode& callee,
                                         const TypePtr& fn_type,
                                         bool direct, bool dispatch,
-                                        const string& object_text)
+                                        string& object_text)
 {
 	if (dispatch)
 	{
@@ -1359,7 +1360,7 @@ string FunctionLowerer::LowerCalleeText(const SemNode& callee,
 		                            callee.entity_name, fn_type,
 		                            callee.fn_spec);
 	if (callee.kind == SN_MEMBER_POINTER_ACCESS)
-		return LowerMemberPointerCallee(callee);
+		return LowerMemberPointerCallee(callee, object_text);
 	if (NodeType(callee)->kind == TK_POINTER)
 		return LowerValueExpr(callee).text;
 	return LowerPointerOperand(callee);

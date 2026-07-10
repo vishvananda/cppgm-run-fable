@@ -146,17 +146,60 @@ LowerValue FunctionLowerer::ConvertPointerValue(LowerValue value,
 		value.type = target;
 		return value;
 	}
-	// 4.10p3: a derived-class pointer adjusts to the base subobject
-	// (offset 0 in the single-inheritance model).
+	// 4.10p3 / 5.2.9p11: class pointers adjust along the derivation
+	// path - toward the base by the path's offset, back toward the
+	// derived class by its negation. A null pointer stays null, so a
+	// displaced-base adjustment guards the runtime value; offset-0
+	// adjustments keep the unguarded single-projection shape (all the
+	// PA15-25 programs). Unrelated classes (reinterpret forms) copy.
 	if (source->kind == TK_POINTER &&
 	    source->target->kind == TK_CLASS &&
-	    target->target->kind == TK_CLASS)
+	    target->target->kind == TK_CLASS &&
+	    source->target->named != target->target->named)
 	{
-		value.text = AdjustToBase(value.text, source->target->named,
-		                          target->target->named);
+		const NamedTypeInfo* from = source->target->named;
+		const NamedTypeInfo* to = target->target->named;
+		int hops = 0;
+		unsigned long long offset = 0;
+		if (BaseSubobjectPath(from, to, hops, offset) == BP_UNIQUE)
+			value.text = offset
+				? AdjustPointerGuarded(value.text, (long long)offset)
+				: AdjustToBaseHops(value.text, hops, 0);
+		else if (BaseSubobjectPath(to, from, hops, offset) ==
+		             BP_UNIQUE && offset)
+			value.text = AdjustPointerGuarded(value.text,
+			                                  -(long long)offset);
 	}
 	value.type = target;
 	return value;
+}
+
+// A runtime class-pointer adjustment across a displaced base: null
+// stays null (4.10p3 / 5.2.9p11), so the displacement applies on the
+// non-null path only.
+string FunctionLowerer::AdjustPointerGuarded(const string& value,
+                                             long long delta)
+{
+	string slot = AddMatSlot("ptradj", "ptr");
+	Emit("store ptr " + value + ", $" + slot);
+	string is_null = NewTemp();
+	Emit(is_null + " = cmp eq ptr " + value + ", 0");
+	string shift_label = NewLabel("ptradj_shift");
+	string end_label = NewLabel("ptradj_end");
+	ReferenceLabel(end_label);
+	ReferenceLabel(shift_label);
+	Terminate("branch " + is_null + ", ^" + end_label + ", ^" +
+	          shift_label);
+	OpenBlock(shift_label);
+	string adjusted = NewTemp();
+	Emit(adjusted + " = index i8 " + value + ", " + to_string(delta));
+	Emit("store ptr " + adjusted + ", $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(end_label);
+	string result = NewTemp();
+	Emit(result + " = load ptr $" + slot);
+	return result;
 }
 
 LowerValue FunctionLowerer::ConvertValue(LowerValue value,
@@ -174,6 +217,47 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 	{
 		if (value.imm_null && value.text.empty())
 			value.text = "nullptr";
+		// 4.11p2 function member pointers: the base subobject's offset
+		// folds into the value's this-adjustment half (the high 64
+		// bits); call sites of displaced-base classes apply it. Null
+		// (0) survives unchanged.
+		if (source->kind == TK_MEMBER_POINTER &&
+		    target->target->kind == TK_FUNCTION &&
+		    target->named != source->named && !value.imm_null)
+		{
+			int hops = 0;
+			unsigned long long offset = 0;
+			if (BaseSubobjectPath(target->named, source->named, hops,
+			                      offset) == BP_UNIQUE && offset)
+			{
+				string slot = AddMatSlot("pmadj", "i128");
+				Emit("store i128 " + value.text + ", $" + slot);
+				string is_null = NewTemp();
+				Emit(is_null + " = cmp eq i128 " + value.text + ", 0");
+				string shift_label = NewLabel("pmadj_shift");
+				string end_label = NewLabel("pmadj_end");
+				ReferenceLabel(end_label);
+				ReferenceLabel(shift_label);
+				Terminate("branch " + is_null + ", ^" + end_label +
+				          ", ^" + shift_label);
+				OpenBlock(shift_label);
+				string delta = NewTemp();
+				Emit(delta + " = const i64 " + to_string(offset));
+				string wide = NewTemp();
+				Emit(wide + " = convert zext i128 i64 " + delta);
+				string high = NewTemp();
+				Emit(high + " = binary shl i128 " + wide + ", 64");
+				string adjusted = NewTemp();
+				Emit(adjusted + " = binary add i128 " + value.text +
+				     ", " + high);
+				Emit("store i128 " + adjusted + ", $" + slot);
+				ReferenceLabel(end_label);
+				Terminate("jump ^" + end_label);
+				OpenBlock(end_label);
+				value.text = NewTemp();
+				Emit(value.text + " = load i128 $" + slot);
+			}
+		}
 		if (source->kind == TK_MEMBER_POINTER &&
 		    target->target->kind != TK_FUNCTION &&
 		    target->named != source->named && !value.imm_null)
@@ -183,10 +267,28 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 			if (BaseSubobjectPath(target->named, source->named, hops,
 			                      offset) == BP_UNIQUE && offset)
 			{
+				// The null value (0) survives the conversion (4.11p2),
+				// so the displacement applies on the non-null path.
+				string slot = AddMatSlot("pmadj", "i64");
+				Emit("store i64 " + value.text + ", $" + slot);
+				string is_null = NewTemp();
+				Emit(is_null + " = cmp eq i64 " + value.text + ", 0");
+				string shift_label = NewLabel("pmadj_shift");
+				string end_label = NewLabel("pmadj_end");
+				ReferenceLabel(end_label);
+				ReferenceLabel(shift_label);
+				Terminate("branch " + is_null + ", ^" + end_label +
+				          ", ^" + shift_label);
+				OpenBlock(shift_label);
 				string temp = NewTemp();
 				Emit(temp + " = binary add i64 " + value.text + ", " +
 				     to_string(offset));
-				value.text = temp;
+				Emit("store i64 " + temp + ", $" + slot);
+				ReferenceLabel(end_label);
+				Terminate("jump ^" + end_label);
+				OpenBlock(end_label);
+				value.text = NewTemp();
+				Emit(value.text + " = load i64 $" + slot);
 				value.imm_int = false;
 			}
 		}

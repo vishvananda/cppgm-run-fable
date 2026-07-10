@@ -225,6 +225,10 @@ struct SemNode
 	unsigned long long member_offset;
 	int base_hops;
 	unsigned long long base_offset;
+	// PA26 5.2.9p11: the adjustment runs from a base view back to the
+	// derived object (a downcast) - the address shifts by -base_offset
+	// instead of projecting into a base subobject.
+	bool base_reverse;
 	bool is_bit_field;
 	unsigned long long bit_offset;  // within the unit at member_offset
 	unsigned long long bit_width;

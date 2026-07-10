@@ -47,11 +47,15 @@ bool BindingPassesFilter(const ScopeBinding& binding,
 // 10.2 member lookup over the non-virtual base DAG: the class's own
 // declarations hide base declarations; otherwise every direct base
 // subtree is searched, and distinct declarations found in sibling
-// subtrees make the name ambiguous.
-const ScopeBinding* ClassChainLookup(const Scope& scope, const string& name,
+// subtrees make the name ambiguous. The visited set keeps shared
+// subtrees (diamonds) linear.
+const ScopeBinding* ClassChainSearch(const Scope& scope, const string& name,
                                      EScopeLookupFilter filter,
-                                     bool skip_dependent_base = false)
+                                     bool skip_dependent_base,
+                                     set<const Scope*>& visited)
 {
+	if (!visited.insert(&scope).second)
+		return 0;
 	const ScopeBinding* own = FindOwnBinding(scope, name);
 	if (own && BindingPassesFilter(*own, filter))
 		return own;
@@ -66,16 +70,31 @@ const ScopeBinding* ClassChainLookup(const Scope& scope, const string& name,
 		                           : scope.class_extra_bases[b - 1];
 		if (!base)
 			continue;
-		const ScopeBinding* member = ClassChainLookup(
-			*base, name, filter, skip_dependent_base);
+		const ScopeBinding* member = ClassChainSearch(
+			*base, name, filter, skip_dependent_base, visited);
 		if (!member)
 			continue;
-		if (found && found != member)
+		// 10.2p3: using-declaration imports are replaced by the
+		// designated members - copies of one declaration (the shared
+		// original owner scope) are the same entity, not an ambiguity.
+		if (found && found != member &&
+		    (found->owner != member->owner ||
+		     found->kind != member->kind))
 			throw AmbiguousLookupError("ambiguous member lookup of " +
 			                           name);
-		found = member;
+		if (!found)
+			found = member;
 	}
 	return found;
+}
+
+const ScopeBinding* ClassChainLookup(const Scope& scope, const string& name,
+                                     EScopeLookupFilter filter,
+                                     bool skip_dependent_base = false)
+{
+	set<const Scope*> visited;
+	return ClassChainSearch(scope, name, filter, skip_dependent_base,
+	                        visited);
 }
 
 const Scope* EnclosingNamespace(const Scope* scope)

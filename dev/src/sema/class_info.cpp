@@ -1,5 +1,8 @@
 #include "sema/class_info.h"
 
+#include <map>
+#include <set>
+
 #include "ast/ast.h"
 
 namespace {
@@ -72,21 +75,60 @@ void InvalidateClassFacts()
 	g_class_facts_version++;
 }
 
-bool DerivedFromWithExtras(const ClassRegistry& classes,
-                           const NamedTypeInfo* from,
-                           const NamedTypeInfo* to)
+namespace {
+
+// The visited sets keep shared subtrees (diamonds) linear; a visited
+// class's chain and extras were already searched without finding `to`.
+bool DerivedFromExtrasSearch(const ClassRegistry& classes,
+                             const NamedTypeInfo* from,
+                             const NamedTypeInfo* to,
+                             std::set<const NamedTypeInfo*>& visited)
 {
 	for (const NamedTypeInfo* at = from; at; at = at->base_entity)
 	{
 		if (at == to)
 			return true;
+		if (!visited.insert(at).second)
+			return false;
 		if (const ClassInfo* info = classes.Find(at))
 			for (size_t i = 1; i < info->direct_bases.size(); i++)
-				if (DerivedFromWithExtras(
-				        classes, info->direct_bases[i].cls->entity, to))
+				if (DerivedFromExtrasSearch(
+				        classes, info->direct_bases[i].cls->entity, to,
+				        visited))
 					return true;
 	}
 	return false;
+}
+
+bool DerivedFromLinkedSearch(const NamedTypeInfo* from,
+                             const NamedTypeInfo* to,
+                             std::set<const NamedTypeInfo*>& visited)
+{
+	for (const NamedTypeInfo* at = from; at; at = at->base_entity)
+	{
+		if (at == to)
+			return true;
+		if (!visited.insert(at).second)
+			return false;
+		if (at->class_record)
+			for (size_t i = 1;
+			     i < at->class_record->direct_bases.size(); i++)
+				if (DerivedFromLinkedSearch(
+				        at->class_record->direct_bases[i].cls->entity,
+				        to, visited))
+					return true;
+	}
+	return false;
+}
+
+}  // namespace
+
+bool DerivedFromWithExtras(const ClassRegistry& classes,
+                           const NamedTypeInfo* from,
+                           const NamedTypeInfo* to)
+{
+	std::set<const NamedTypeInfo*> visited;
+	return DerivedFromExtrasSearch(classes, from, to, visited);
 }
 
 bool FriendClassMatches(const NamedTypeInfo* granted,
@@ -102,55 +144,120 @@ bool FriendClassMatches(const NamedTypeInfo* granted,
 bool DerivedFromWithExtrasLinked(const NamedTypeInfo* from,
                                  const NamedTypeInfo* to)
 {
-	for (const NamedTypeInfo* at = from; at; at = at->base_entity)
-	{
-		if (at == to)
-			return true;
-		if (at->class_record)
-			for (size_t i = 1;
-			     i < at->class_record->direct_bases.size(); i++)
-				if (DerivedFromWithExtrasLinked(
-				        at->class_record->direct_bases[i].cls->entity,
-				        to))
-					return true;
-	}
-	return false;
+	std::set<const NamedTypeInfo*> visited;
+	return DerivedFromLinkedSearch(from, to, visited);
 }
 
 namespace {
 
-// Accumulates every derivation path from `from` to `to`, keeping the
-// edge count and summed byte offset of each. Non-virtual bases only, so
-// two paths always mean two distinct subobjects.
-void CollectBasePaths(const NamedTypeInfo* from, const NamedTypeInfo* to,
-                      int hops, unsigned long long offset,
-                      vector<std::pair<int, unsigned long long>>& found)
+// The derivation-path facts of one class toward a fixed target: the
+// path count (capped at 2 - one and "more than one" are the only
+// distinctions 10.2 needs) and, for a unique path, its edge count and
+// summed byte offset. Non-virtual bases only, so two paths always mean
+// two distinct subobjects. Memoized per query so shared subtrees
+// (diamond ladders) stay linear.
+struct BasePathFact
 {
+	int count;
+	int hops;
+	unsigned long long offset;
+};
+
+BasePathFact CountBasePaths(const NamedTypeInfo* from,
+                            const NamedTypeInfo* to,
+                            std::map<const NamedTypeInfo*,
+                                     BasePathFact>& memo)
+{
+	BasePathFact fact;
+	fact.count = 0;
+	fact.hops = 0;
+	fact.offset = 0;
 	if (from == to)
 	{
-		found.push_back(std::make_pair(hops, offset));
-		return;
+		fact.count = 1;
+		return fact;
 	}
 	if (!from)
-		return;
+		return fact;
+	std::map<const NamedTypeInfo*, BasePathFact>::const_iterator seen =
+		memo.find(from);
+	if (seen != memo.end())
+		return seen->second;
 	const ClassInfo* record = from->class_record;
 	if (record && !record->direct_bases.empty())
 	{
 		for (size_t i = 0; i < record->direct_bases.size(); i++)
 		{
 			const ClassDirectBase& row = record->direct_bases[i];
-			CollectBasePaths(row.cls->entity, to, hops + 1,
-			                 offset + row.offset, found);
+			BasePathFact sub = CountBasePaths(row.cls->entity, to, memo);
+			if (!sub.count)
+				continue;
+			if (!fact.count)
+			{
+				fact.hops = sub.hops + 1;
+				fact.offset = sub.offset + row.offset;
+			}
+			fact.count = fact.count + sub.count > 2
+				? 2 : fact.count + sub.count;
 		}
-		return;
 	}
 	// Entities without a completed record (or whose record predates the
 	// base table) fall back to the primary chain at offset 0.
-	if (from->base_entity)
-		CollectBasePaths(from->base_entity, to, hops + 1, offset, found);
+	else if (from->base_entity)
+	{
+		BasePathFact sub = CountBasePaths(from->base_entity, to, memo);
+		if (sub.count)
+		{
+			fact.count = sub.count;
+			fact.hops = sub.hops + 1;
+			fact.offset = sub.offset;
+		}
+	}
+	memo[from] = fact;
+	return fact;
 }
 
 }  // namespace
+
+bool BaseAccessPath(const NamedTypeInfo* from, const NamedTypeInfo* to,
+                    vector<ClassBaseEdge>& edges)
+{
+	edges.clear();
+	if (!from || !to || from == to)
+		return false;
+	std::map<const NamedTypeInfo*, BasePathFact> memo;
+	if (CountBasePaths(from, to, memo).count != 1)
+		return false;
+	// A unique path means exactly one direct base reaches `to` at each
+	// step, so the memoized counts guide the walk. Link-only segments
+	// (no base table) contribute no edge and act as public.
+	const NamedTypeInfo* at = from;
+	while (at && at != to)
+	{
+		const ClassInfo* record = at->class_record;
+		if (!record || record->direct_bases.empty())
+		{
+			at = at->base_entity;
+			continue;
+		}
+		size_t next = record->direct_bases.size();
+		for (size_t i = 0; i < record->direct_bases.size(); i++)
+			if (CountBasePaths(record->direct_bases[i].cls->entity, to,
+			                   memo).count)
+			{
+				next = i;
+				break;
+			}
+		if (next == record->direct_bases.size())
+			return false;
+		ClassBaseEdge edge;
+		edge.derived = record;
+		edge.base_index = next;
+		edges.push_back(edge);
+		at = record->direct_bases[next].cls->entity;
+	}
+	return at == to;
+}
 
 EBasePath BaseSubobjectPath(const NamedTypeInfo* from,
                             const NamedTypeInfo* to,
@@ -162,14 +269,14 @@ EBasePath BaseSubobjectPath(const NamedTypeInfo* from,
 		return BP_NONE;
 	if (from == to)
 		return BP_UNIQUE;
-	vector<std::pair<int, unsigned long long>> found;
-	CollectBasePaths(from, to, 0, 0, found);
-	if (found.empty())
+	std::map<const NamedTypeInfo*, BasePathFact> memo;
+	BasePathFact fact = CountBasePaths(from, to, memo);
+	if (!fact.count)
 		return BP_NONE;
-	if (found.size() > 1)
+	if (fact.count > 1)
 		return BP_AMBIGUOUS;
-	hops = found[0].first;
-	offset = found[0].second;
+	hops = fact.hops;
+	offset = fact.offset;
 	return BP_UNIQUE;
 }
 
@@ -181,6 +288,22 @@ int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to)
 	unsigned long long offset = 0;
 	return BaseSubobjectPath(from, to, hops, offset) == BP_UNIQUE
 		? hops : -1;
+}
+
+bool ClassHasDisplacedBase(const ClassInfo* cls)
+{
+	if (!cls)
+		return false;
+	if (cls->direct_bases.empty())
+		return ClassHasDisplacedBase(cls->base);
+	for (size_t i = 0; i < cls->direct_bases.size(); i++)
+	{
+		if (cls->direct_bases[i].offset != 0)
+			return true;
+		if (ClassHasDisplacedBase(cls->direct_bases[i].cls))
+			return true;
+	}
+	return false;
 }
 
 void CollectClassAndBases(const ClassInfo* cls,

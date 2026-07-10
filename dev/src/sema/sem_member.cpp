@@ -230,24 +230,34 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 		value.node->op = op;
 	}
 	value.node->member_offset = field->offset;
-	// A using-imported member belongs to the importing class for
-	// addressing; otherwise the object adjusts to the declaring class's
-	// subobject (the unique-path offset, PA26).
+	// The object adjusts to the declaring class's subobject: only the
+	// owner's layout offset addresses the field. A using-imported
+	// member re-homes to the importing class for presentation (the
+	// pinned projection-free import shape), which is sound only while
+	// the declaring subobject sits at offset 0; a displaced subobject
+	// keeps its projection (PA26). 10.2: the import names the member,
+	// so the object still needs a unique owner subobject.
 	{
 		int hops = 0;
 		unsigned long long base_offset = 0;
 		EBasePath path = BaseSubobjectPath(
-			object_entity, host_.Model().ScopeEntity(member->home),
+			object_entity, host_.Model().ScopeEntity(member->owner),
 			hops, base_offset);
-		if (path != BP_UNIQUE)
-			path = BaseSubobjectPath(
-				object_entity,
-				host_.Model().ScopeEntity(member->owner), hops,
-				base_offset);
 		if (path == BP_AMBIGUOUS)
 			throw runtime_error("ambiguous base class subobject");
 		if (path == BP_UNIQUE)
 		{
+			if (base_offset == 0)
+			{
+				int home_hops = 0;
+				unsigned long long home_offset = 0;
+				if (BaseSubobjectPath(
+				        object_entity,
+				        host_.Model().ScopeEntity(member->home),
+				        home_hops, home_offset) == BP_UNIQUE &&
+				    home_offset == 0)
+					hops = home_hops;
+			}
 			value.node->base_hops = hops;
 			value.node->base_offset = base_offset;
 		}

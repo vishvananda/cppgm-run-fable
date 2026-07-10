@@ -275,10 +275,13 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		host_.CheckMemberAccess(cls->members, fn.access, fn.name);
 		int hops = 0;
 		unsigned long long base_offset = 0;
+		// The conversion set was collected along the base DAG, so the
+		// owning class resolves; a non-unique path means the inherited
+		// conversion's subobject is ambiguous (10.2).
 		if (BaseSubobjectPath(RemoveTopCv(value.type)->named,
 		                      conv.conv_class, hops,
 		                      base_offset) != BP_UNIQUE)
-			hops = 0;
+			throw runtime_error("ambiguous base class subobject");
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);

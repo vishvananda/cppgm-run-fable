@@ -213,13 +213,19 @@ private:
 	                    const NamedTypeInfo* to);
 	string AdjustToBaseHops(const string& address, int hops,
 	                        unsigned long long offset);
+	// A runtime class-pointer adjustment across a displaced base:
+	// branches so null stays null (4.10p3 / 5.2.9p11).
+	string AdjustPointerGuarded(const string& value, long long delta);
 	// PA26 member pointers (lower_member_pointer.cpp): `&C::member`
 	// constants, `.*` / `->*` data-member access, and the bound
 	// member-pointer call pieces.
 	LowerValue LowerMemberPointerConstant(const SemNode& node);
 	string MemberPointerAccessAddress(const SemNode& node);
 	LowerValue LowerMemberPointerValue(const SemNode& node);
-	string LowerMemberPointerCallee(const SemNode& callee);
+	// May shift `object_text` by the value's this-adjustment (a
+	// displaced-base class's runtime member pointer).
+	string LowerMemberPointerCallee(const SemNode& callee,
+	                                string& object_text);
 	TypePtr MemberPointerCallSignature(const TypePtr& fn_type);
 	// Registers a by-value class parameter's attached destructor
 	// actions as function-scope cleanups (the callee owns them).
@@ -338,7 +344,7 @@ private:
 	                                   const SemNode& callee);
 	string LowerCalleeText(const SemNode& callee, const TypePtr& fn_type,
 	                       bool direct, bool dispatch,
-	                       const string& object_text);
+	                       string& object_text);
 	// PA25 typeid: the address of the RTTI record the query denotes
 	// (static: the operand type's record; dynamic: read through the
 	// polymorphic operand's vpointer with a null-check).

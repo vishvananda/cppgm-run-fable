@@ -88,8 +88,12 @@ LowerValue FunctionLowerer::LowerMemberPointerValue(const SemNode& node)
 // The callee of a bound member-pointer call: a constant member pointer
 // (`&C::f`, incl. a folded non-type parameter) calls through its
 // address directly; otherwise the value's low 64 bits carry the code
-// address.
-string FunctionLowerer::LowerMemberPointerCallee(const SemNode& callee)
+// address. When the member pointer's class has a displaced base
+// subobject, a runtime value may carry a non-zero this-adjustment in
+// its high 64 bits (folded there by 4.11p2 conversions), so the object
+// address shifts by it; other classes keep the adjustment-free shape.
+string FunctionLowerer::LowerMemberPointerCallee(const SemNode& callee,
+                                                 string& object_text)
 {
 	const SemNode& pm_value = *callee.children[1];
 	if (pm_value.kind == SN_UNARY_EXPRESSION && pm_value.has_op &&
@@ -106,6 +110,17 @@ string FunctionLowerer::LowerMemberPointerCallee(const SemNode& callee)
 	Emit(bits + " = convert trunc i64 i128 " + pm.text);
 	string fn = NewTemp();
 	Emit(fn + " = copy ptr " + bits);
+	const NamedTypeInfo* pm_class = RemoveTopCv(pm_value.type)->named;
+	if (pm_class && ClassHasDisplacedBase(pm_class->class_record))
+	{
+		string high = NewTemp();
+		Emit(high + " = binary ushr i128 " + pm.text + ", 64");
+		string delta = NewTemp();
+		Emit(delta + " = convert trunc i64 i128 " + high);
+		string shifted = NewTemp();
+		Emit(shifted + " = index i8 " + object_text + ", " + delta);
+		object_text = shifted;
+	}
 	return fn;
 }
 

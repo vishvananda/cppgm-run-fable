@@ -117,17 +117,33 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 			return value;
 		}
 		// 5.2.9p2/p11 with op != KW_CONST_CAST: a downcast reference
-		// static_cast views the derived object (the single
-		// -inheritance base sits at offset 0, so no adjustment).
-		int down = from->kind == TK_CLASS && to->kind == TK_CLASS
-			? BaseClassDistance(to->named, from->named) : -1;
+		// static_cast views the derived object; a displaced-base view
+		// shifts back by the base subobject's offset (PA26).
+		int down_hops = 0;
+		unsigned long long down_offset = 0;
+		int down = -1;
+		if (from->kind == TK_CLASS && to->kind == TK_CLASS &&
+		    BaseSubobjectPath(to->named, from->named, down_hops,
+		                      down_offset) == BP_UNIQUE)
+			down = down_hops;
 		if (down > 0 && op == KW_STATIC_CAST)
 		{
 			value.type = to;
-			if (value.node)
-				value.node->type = to;
 			value.category = dest->kind == TK_RVALUE_REFERENCE
 				? VC_XVALUE : VC_LVALUE;
+			if (down_offset != 0)
+			{
+				SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+				adjusted->type = to;
+				adjusted->category = value.category;
+				adjusted->base_hops = down_hops;
+				adjusted->base_offset = down_offset;
+				adjusted->base_reverse = true;
+				adjusted->children.push_back(std::move(value.node));
+				value.node = std::move(adjusted);
+			}
+			else if (value.node)
+				value.node->type = to;
 			return value;
 		}
 		// PA25 5.2.7p2-p9: a polymorphic downcast reference

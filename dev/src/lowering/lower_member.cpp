@@ -117,8 +117,11 @@ string FunctionLowerer::AdjustToBase(const string& address,
 {
 	int hops = 0;
 	unsigned long long offset = 0;
+	// Sema accepted the conversion, so the path resolves; a non-unique
+	// result here is a desync between the layers, not a valid program.
 	if (BaseSubobjectPath(from, to, hops, offset) != BP_UNIQUE)
-		return address;
+		throw std::runtime_error(
+			"derived-to-base adjustment lost its unique path");
 	return AdjustToBaseHops(address, hops, offset);
 }
 
@@ -128,13 +131,27 @@ string FunctionLowerer::MemberAddress(const SemNode& node,
 	// PA25: a member reached through the lambda-captured this keeps
 	// one base-subobject adjustment step (the reference shape).
 	const SemNode& object = *node.children[0];
-	int hops = node.base_hops;
-	if (object.kind == SN_UNARY_EXPRESSION && object.op == OP_STAR &&
-	    object.has_op && !object.children.empty() &&
-	    object.children[0]->captured_this && hops == 0)
-		hops = 1;
-	string base = AdjustToBaseHops(LowerAddressExpr(*node.children[0]),
-	                               hops, node.base_offset);
+	string base;
+	if (node.base_reverse)
+	{
+		// 5.2.9p11: a downcast view shifts back to the derived object;
+		// the reference operand is never null.
+		base = LowerAddressExpr(object);
+		string shifted = NewTemp();
+		Emit(shifted + " = index i8 " + base + ", -" +
+		     to_string(node.base_offset));
+		base = shifted;
+	}
+	else
+	{
+		int hops = node.base_hops;
+		if (object.kind == SN_UNARY_EXPRESSION && object.op == OP_STAR &&
+		    object.has_op && !object.children.empty() &&
+		    object.children[0]->captured_this && hops == 0)
+			hops = 1;
+		base = AdjustToBaseHops(LowerAddressExpr(object), hops,
+		                        node.base_offset);
+	}
 	if (!node.name.empty())
 	{
 		string field = NewTemp();

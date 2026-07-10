@@ -386,6 +386,26 @@ EBasePath BaseSubobjectPath(const NamedTypeInfo* from,
 void CollectClassAndBases(const ClassInfo* cls,
                           vector<const ClassInfo*>& out);
 
+// PA26: whether any transitive non-virtual base subobject of `cls`
+// sits at a non-zero offset. A member-pointer value of such a class
+// may carry a non-zero this-adjustment, so its call sites apply the
+// dynamic adjustment; other classes keep the adjustment-free shape.
+bool ClassHasDisplacedBase(const ClassInfo* cls);
+
+// PA26 11.2: one derivation edge - the deriving class's record and the
+// direct-base row index taken.
+struct ClassBaseEdge
+{
+	const ClassInfo* derived;
+	size_t base_index;
+};
+
+// The unique derivation path's edges from `from` down to its base
+// `to`, outermost first, for base-specifier access checks. False when
+// there is no unique edge path.
+bool BaseAccessPath(const NamedTypeInfo* from, const NamedTypeInfo* to,
+                    vector<ClassBaseEdge>& edges);
+
 // --- layout -----------------------------------------------------------
 
 // Starts the layout of a freshly opened class: places the direct base

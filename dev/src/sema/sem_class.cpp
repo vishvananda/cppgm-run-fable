@@ -844,18 +844,26 @@ void SemBinder::BindInheritingConstructors(Scope* base_scope)
 	ClassInfo* cls = OpenClass();
 	if (!cls || current_ != cls->members)
 		throw runtime_error("using Base::Base outside a class");
-	if (!cls->base || cls->base->members != base_scope)
-		throw runtime_error("using Base::Base does not name the direct "
+	// PA26: the named class may be any direct base, not only the first.
+	const ClassInfo* named = 0;
+	for (size_t b = 0; b < cls->direct_bases.size(); b++)
+		if (cls->direct_bases[b].cls->members == base_scope)
+		{
+			named = cls->direct_bases[b].cls;
+			break;
+		}
+	if (!named)
+		throw runtime_error("using Base::Base does not name a direct "
 		                    "base");
 	bool any_inherited = false;
-	for (size_t i = 0; i < cls->base->ctors.size(); i++)
+	for (size_t i = 0; i < named->ctors.size(); i++)
 	{
 		// 12.9p3: copy/move constructors of the base are not inherited.
-		if (cls->base->ctors[i].kind != CK_ORDINARY)
+		if (named->ctors[i].kind != CK_ORDINARY)
 			continue;
-		ClassCtor ctor = cls->base->ctors[i];
+		ClassCtor ctor = named->ctors[i];
 		ctor.definition = 0;
-		ctor.inherited_base = cls->base->entity;
+		ctor.inherited_base = named->entity;
 		ctor.inherited_built = false;
 		cls->ctors.push_back(ctor);
 		any_inherited = true;
@@ -864,9 +872,9 @@ void SemBinder::BindInheritingConstructors(Scope* base_scope)
 	// as constructor templates; a deduced selection synthesizes a
 	// forwarding entry (EnsureCtorTemplateEntry marks it inherited by
 	// the template's owning class).
-	for (size_t i = 0; i < cls->base->ctor_templates.size(); i++)
+	for (size_t i = 0; i < named->ctor_templates.size(); i++)
 	{
-		cls->ctor_templates.push_back(cls->base->ctor_templates[i]);
+		cls->ctor_templates.push_back(named->ctor_templates[i]);
 		any_inherited = true;
 	}
 	cls->has_user_ctor = any_inherited || cls->has_user_ctor;
@@ -945,9 +953,28 @@ void SemBinder::EnsureInheritedCtor(const ClassInfo& cls_in, int index)
 		arg->entity_name = arg->name;
 		args.push_back(std::move(arg));
 	}
-	node->children.push_back(MakeConstructorCall(
-		*base, base_index, true, ThisBaseAddress(cls), std::move(args)));
+	// 12.9p8: the named base takes the forwarded call in its
+	// declaration-order slot; every other direct base
+	// default-initializes.
+	size_t inherited_at = cls.direct_bases.size();
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+		if (cls.direct_bases[b].cls->entity == ctor.inherited_base)
+		{
+			inherited_at = b;
+			break;
+		}
+	if (inherited_at == cls.direct_bases.size())
+		throw runtime_error("inherited constructor names no direct base");
 	vector<SemNodePtr> actions;
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+	{
+		if (b == inherited_at)
+			actions.push_back(MakeConstructorCall(
+				*base, base_index, true, ThisBaseAddress(cls, b),
+				std::move(args)));
+		else
+			AppendOneBaseDefaultInit(cls, b, actions, false);
+	}
 	if (cls.is_polymorphic)
 		actions.push_back(MakeVPointerStore(cls));
 	for (size_t i = 0; i < cls.fields.size(); i++)
@@ -1009,9 +1036,10 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
                                   const string& what,
                                   const NamedTypeInfo* naming)
 {
-	if (access == MA_PUBLIC)
-		return;
 	const NamedTypeInfo* owner_entity = model_.ScopeEntity(owner);
+	if (access == MA_PUBLIC &&
+	    (!naming || naming == owner_entity))
+		return;
 	const ClassInfo* owner_cls =
 		owner_entity ? unit_.classes.Find(owner_entity) : 0;
 	if (!owner_cls)
@@ -1026,15 +1054,34 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 			if (const NamedTypeInfo* entity = model_.ScopeEntity(scope))
 				if (const ClassInfo* cls = unit_.classes.Find(entity))
 					contexts.push_back(cls);
+	// 11.2p1/p4: each non-public base edge on the naming class's
+	// derivation path to the owner restricts access further - a private
+	// base's members are reachable only inside the deriving class (or
+	// its friends), a protected base's also inside classes derived from
+	// it.
+	if (naming && owner_entity && naming != owner_entity)
+	{
+		vector<ClassBaseEdge> edges;
+		if (BaseAccessPath(naming, owner_entity, edges))
+			for (size_t e = 0; e < edges.size(); e++)
+				CheckBaseEdgeAccess(edges[e], contexts, what);
+	}
+	if (access == MA_PUBLIC)
+		return;
 	for (size_t i = 0; i < contexts.size(); i++)
 	{
 		if (contexts[i]->members == owner)
 			return;
 		if (access == MA_PROTECTED)
-			for (const ClassInfo* link = contexts[i]; link;
-			     link = link->base)
-				if (link->members == owner)
+		{
+			// The context may derive from the owner through any path
+			// of the base DAG (PA26).
+			vector<const ClassInfo*> chain;
+			CollectClassAndBases(contexts[i], chain);
+			for (size_t j = 0; j < chain.size(); j++)
+				if (chain[j]->members == owner)
 					return;
+		}
 		// A friend class's members access everything (11.3); a friend
 		// class template's grant covers every specialization.
 		for (size_t j = 0; j < owner_cls->friend_classes.size(); j++)
@@ -1061,11 +1108,18 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 	// accessible to members and friends of any class P on the object
 	// expression's derivation path to the owner; the naming class is
 	// derived from P by construction, satisfying the 11.4 object-type
-	// restriction.
+	// restriction. The path may run through any branch of the base DAG
+	// (PA26).
 	if (access == MA_PROTECTED && naming)
-		for (const ClassInfo* p = unit_.classes.Find(naming);
-		     p && p->members != owner; p = p->base)
+	{
+		vector<const ClassInfo*> path;
+		CollectClassAndBases(unit_.classes.Find(naming), path);
+		for (size_t k = 0; k < path.size(); k++)
 		{
+			const ClassInfo* p = path[k];
+			if (p->members == owner ||
+			    !DerivedFromWithExtrasLinked(p->entity, owner_entity))
+				continue;
 			for (size_t i = 0; i < contexts.size(); i++)
 				for (size_t j = 0; j < p->friend_classes.size(); j++)
 					if (FriendClassMatches(p->friend_classes[j],
@@ -1078,6 +1132,42 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 					        method_.fn_name)
 						return;
 		}
+	}
+	throw runtime_error(what + " is inaccessible in this context");
+}
+
+// One base-specifier edge of the naming class's derivation path: a
+// non-public edge admits the deriving class itself, its friends, and
+// (protected) classes derived from it (11.2p1/p4).
+void SemBinder::CheckBaseEdgeAccess(const ClassBaseEdge& edge,
+                                    const vector<const ClassInfo*>& contexts,
+                                    const string& what)
+{
+	EMemberAccess edge_access =
+		edge.derived->direct_bases[edge.base_index].access;
+	if (edge_access == MA_PUBLIC)
+		return;
+	for (size_t i = 0; i < contexts.size(); i++)
+	{
+		if (contexts[i] == edge.derived)
+			return;
+		if (edge_access == MA_PROTECTED &&
+		    DerivedFromWithExtrasLinked(contexts[i]->entity,
+		                                edge.derived->entity))
+			return;
+		for (size_t j = 0; j < edge.derived->friend_classes.size(); j++)
+			if (FriendClassMatches(edge.derived->friend_classes[j],
+			                       contexts[i]->entity))
+				return;
+	}
+	const Scope* fn_home = method_.fn_owner;
+	while (fn_home && fn_home->kind == SCOPE_TEMPLATE_PARAMS)
+		fn_home = fn_home->parent;
+	if (!method_.fn_name.empty())
+		for (size_t i = 0; i < edge.derived->friend_functions.size(); i++)
+			if (edge.derived->friend_functions[i].first == fn_home &&
+			    edge.derived->friend_functions[i].second == method_.fn_name)
+				return;
 	throw runtime_error(what + " is inaccessible in this context");
 }
 
