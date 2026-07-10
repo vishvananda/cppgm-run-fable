@@ -1656,6 +1656,10 @@ bool FunctionLowerer::SegmentContainsCall(const SemNode& node,
 		if (!node.children.empty())
 		{
 			const SemNode& callee = *node.children[0];
+			// PA27: dispatched calls wrap lazily at the call site (the
+			// reference's eager scan skips them).
+			if (callee.kind == SN_CALLEE && callee.vtable_slot >= 0)
+				break;
 			if (!may_unwind_only || callee.kind != SN_CALLEE ||
 			    program_.CalleeMayUnwind(callee))
 				return true;

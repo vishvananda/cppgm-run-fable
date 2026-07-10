@@ -140,6 +140,29 @@ string LowerProgram::ExternalRuntimeFnRef(const string& object_name,
 	return "@" + low;
 }
 
+namespace {
+
+// PA27: RTTI record names omit the unnamed-namespace placeholder (the
+// reference presentation; the object names keep the full mangling).
+string RttiScopePath(const Scope* scope)
+{
+	vector<string> parts;
+	for (; scope && scope->parent; scope = scope->parent)
+	{
+		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
+			continue;
+		if (scope->name.empty())
+			continue;
+		parts.insert(parts.begin(), scope->name);
+	}
+	string path;
+	for (size_t i = 0; i < parts.size(); i++)
+		path += LowerSanitizeName(parts[i]) + "__";
+	return path;
+}
+
+}  // namespace
+
 // The RTTI record of `cls`, rendered on first use together with its
 // typeinfo-name byte data; a derived class's record links the direct
 // base's, so the whole chain renders transitively.
@@ -155,7 +178,7 @@ string LowerProgram::RttiRef(const ClassInfo* cls)
 	if (SimpleRttiTemplateArgs(cls->entity))
 	{
 		string tail = cls->entity->class_key + "_" +
-			LowerScopePath(cls->members->parent) +
+			RttiScopePath(cls->members->parent) +
 			LowerSanitizeName(cls->members->name);
 		low = UniqueSymbol("__rtti_" + tail);
 		name_low = UniqueSymbol("__typeinfo_name__" + tail);
@@ -663,7 +686,9 @@ string LowerProgram::RenderConstructionGroup(LowVTableInfo& entry)
 		text += "\nglobal @" + name +
 			" [storage=readonly, binding=weak, object=@" + name +
 			"] = {\n" + body + "}";
-		// s1..: the base's outermost views at complete positions.
+		// s1..: the base's outermost views - headers positioned in the
+		// complete object, slots as in the base's own view (thunks and
+		// adjustments follow the base's own layout).
 		vector<size_t> views;
 		OutermostViews(base, views);
 		for (size_t v = 0; v < views.size(); v++)
@@ -679,8 +704,8 @@ string LowerProgram::RenderConstructionGroup(LowVTableInfo& entry)
 			group.push_back(view_name);
 			string view_body = RenderVTableHeader(cls, base, position,
 			                                      RttiRef(view.cls));
-			view_body += RenderVTableSlots(base, &view, &base, offset,
-			                               position);
+			view_body += RenderVTableSlots(base, &view, &base, 0,
+			                               view.offset);
 			text += "\nglobal @" + view_name +
 				" [storage=readonly, binding=weak, object=@" +
 				view_name + "] = {\n" + view_body + "}";

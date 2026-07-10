@@ -57,28 +57,54 @@ NameComponent ScopeComponent(const Scope* scope)
 }
 
 // The named components (namespaces and classes) from the global scope
-// down to `scope`, outermost first.
+// down to `scope`, outermost first. PA27: the unnamed namespace spells
+// its Itanium placeholder component (_GLOBAL__N_1).
 vector<NameComponent> ScopeComponents(const Scope* scope)
 {
 	vector<NameComponent> parts;
 	for (; scope && scope->parent; scope = scope->parent)
-		if ((scope->kind == SCOPE_NAMESPACE ||
-		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
-			parts.insert(parts.begin(), ScopeComponent(scope));
+	{
+		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
+			continue;
+		if (scope->name.empty())
+		{
+			if (scope->kind == SCOPE_NAMESPACE)
+			{
+				NameComponent part;
+				part.name = "_GLOBAL__N_1";
+				parts.insert(parts.begin(), part);
+			}
+			continue;
+		}
+		parts.insert(parts.begin(), ScopeComponent(scope));
+	}
 	return parts;
 }
 
 // The named enclosing components (namespaces and classes) of a
-// named-type entity, outermost first; unnamed components are skipped
-// like the PA12 display qualification.
+// named-type entity, outermost first; unnamed class components are
+// skipped like the PA12 display qualification (the unnamed namespace
+// keeps its placeholder).
 vector<NameComponent> EntityComponents(const NamedTypeInfo& info)
 {
 	vector<NameComponent> parts;
 	for (const Scope* scope = info.scope; scope && scope->parent;
 	     scope = scope->parent)
-		if ((scope->kind == SCOPE_NAMESPACE ||
-		     scope->kind == SCOPE_CLASS) && !scope->name.empty())
-			parts.insert(parts.begin(), ScopeComponent(scope));
+	{
+		if (scope->kind != SCOPE_NAMESPACE && scope->kind != SCOPE_CLASS)
+			continue;
+		if (scope->name.empty())
+		{
+			if (scope->kind == SCOPE_NAMESPACE)
+			{
+				NameComponent part;
+				part.name = "_GLOBAL__N_1";
+				parts.insert(parts.begin(), part);
+			}
+			continue;
+		}
+		parts.insert(parts.begin(), ScopeComponent(scope));
+	}
 	NameComponent leaf;
 	if (info.spec_template && !info.is_template_anchor)
 	{

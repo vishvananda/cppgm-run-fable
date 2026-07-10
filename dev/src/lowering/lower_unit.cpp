@@ -1094,6 +1094,19 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 				info.scope, info.name, info.type,
 				info.special_code == "C2" ? "C1" : "D1"));
 	}
+	// PA27: a polymorphic virtual-base class's user-provided complete
+	// entry pairs its base entry as a real definition (the bodies
+	// differ - the base entry slices the construction table - so no
+	// alias can stand in; synthesized members keep the alias).
+	if ((info.special_code == "C1" || info.special_code == "D1") &&
+	    info.defined && info.definition && !info.definition->synthesized)
+	{
+		const ClassInfo* cls = MethodClass(info.type);
+		if (cls && cls->is_polymorphic && ClassHasVBases(*cls))
+			DemandFunction(MemberFunctionEntry(
+				info.scope, info.name, info.type,
+				info.special_code == "C1" ? "C2" : "D2"));
+	}
 }
 
 
@@ -1475,6 +1488,17 @@ void LowerProgram::Write(ostream& out)
 		if (!info.defined || info.body_text.empty() ||
 		    (info.weak && !info.used) || info.alias_object.empty())
 			continue;
+		// PA27: the base entry printed its own (differing) body, so
+		// its symbol no longer aliases the complete entry.
+		if (info.special_code == "C1" || info.special_code == "D1")
+		{
+			LowFunctionInfo& base_entry = MemberFunctionEntry(
+				info.scope, info.name, info.type,
+				info.special_code == "C1" ? "C2" : "D2");
+			if (base_entry.defined && base_entry.used &&
+			    !base_entry.body_text.empty())
+				continue;
+		}
 		sections[4].push_back("alias object " + info.alias_object +
 		                      " = @" + info.low_name);
 	}
