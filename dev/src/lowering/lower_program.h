@@ -186,6 +186,9 @@ public:
 	void RequireEhRuntime();
 	// Whether a direct callee may unwind (drives eh_try placement).
 	bool CalleeMayUnwind(const SemNode& callee);
+	// PA25: creates the operator() entries of closure-class spec
+	// arguments (emission-order parity with the reference).
+	void TouchClosureOperators(const FunctionSpecialization& spec);
 	// 3.2p3: a constructor selected for an elided copy/move is still
 	// odr-used; user-provided definitions reached through synthesized
 	// bodies must be emitted even though the call itself is dropped.
@@ -244,6 +247,8 @@ public:
 
 private:
 	void CollectItem(const SemNode& item);
+	void ApplyDeferredDefinition(const SemNode& item,
+	                             LowFunctionInfo& info);
 	void DemandTreeCallees(const SemNode& node);
 	void RegisterFunction(const SemNode& item, bool defined);
 	void RegisterDeferred(const SemNode& item);
@@ -378,4 +383,7 @@ private:
 	// and the rendered exception-object scaffolding globals.
 	map<string, string> external_rtti_names_;
 	set<string> ehobj_rendered_;
+	// PA25: instantiated bodies pending their first demand (their
+	// entries appear in demand order, not registration order).
+	map<string, const SemNode*> pending_fn_defs_;
 };

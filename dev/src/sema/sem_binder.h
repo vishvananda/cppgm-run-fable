@@ -931,6 +931,7 @@ private:
 		unsigned long long offset = 0;
 		TypePtr referee;  // captured entity type (references stripped)
 		bool is_this = false;
+		bool by_copy = false;  // PA25: a value field, not a reference
 	};
 	// The body-binding context of one lambda whose statements are
 	// currently being bound; `cls` is null for a captureless lambda.
@@ -940,10 +941,12 @@ private:
 		ClassInfo* cls = 0;
 		Scope* members = 0;
 		bool by_ref_default = false;   // [&] spelled
+		bool by_copy_default = false;  // PA25: [=] spelled
 		bool this_spelled = false;     // [this] spelled
 		TypePtr this_param_type;       // the closure's own this
 		TypePtr enclosing_this;        // the captured-this type (or null)
-		vector<string> explicit_names; // [&name] spellings
+		vector<string> explicit_names; // [&name] / [name] spellings
+		vector<char> explicit_copy;    // parallel: spelled by copy
 		vector<LambdaCapture> captures;
 		bool this_captured = false;
 		unsigned long long this_offset = 0;
@@ -963,7 +966,8 @@ private:
 	SemNodePtr ClosureThisId(const LambdaFrame& frame);
 	void EnsureThisField(LambdaFrame& frame);
 	size_t EnsureCaptureField(LambdaFrame& frame,
-	                          const ScopeBinding& binding);
+	                          const ScopeBinding& binding,
+	                          bool by_copy);
 	SemValue MakeLambdaValue(const LambdaInfo& info);
 	TypePtr BindLambdaBody(const AstLambda& lambda, SemNode* node,
 	                       Scope* fn_scope, const MethodContext& context,
@@ -978,6 +982,10 @@ private:
 	                       const vector<ParameterInfo>& parameters,
 	                       const vector<TypePtr>& param_types,
 	                       const TypePtr& ret, LambdaInfo& info);
+	// PA25 14.6.4.1: specializations odr-used inside an open
+	// instantiation, bound after the unit's forward pass.
+	vector<FunctionSpecialization*> pending_instantiations_;
+	void DrainPendingInstantiations();
 	vector<LambdaFrame> lambda_frames_;
 	std::map<std::pair<const void*, const void*>, LambdaInfo>
 		lambda_cache_;

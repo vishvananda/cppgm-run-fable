@@ -113,8 +113,17 @@ string FunctionLowerer::AdjustToBase(const string& address, int hops)
 string FunctionLowerer::MemberAddress(const SemNode& node,
                                       bool skip_ref_load)
 {
+	// PA25: a member reached through the lambda-captured this keeps
+	// one base-subobject adjustment step (the reference shape).
+	const SemNode& object = *node.children[0];
+	int hops = node.base_hops;
+	if (object.kind == SN_UNARY_EXPRESSION && object.op == OP_STAR &&
+	    object.has_op && !object.children.empty() &&
+	    object.children[0]->kind == SN_MEMBER_EXPRESSION &&
+	    object.children[0]->name == "__this" && hops == 0)
+		hops = 1;
 	string base = AdjustToBase(LowerAddressExpr(*node.children[0]),
-	                           node.base_hops);
+	                           hops);
 	if (!node.name.empty())
 	{
 		string field = NewTemp();
@@ -381,11 +390,13 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	ctor_depth_--;
 }
 
-// PA24 closure construction into `dest`: each child stores one ptr
-// field in order - an lvalue child stores its address (a by-reference
-// capture), a prvalue child its pointer value (a captured `this`).
-// The field offsets are sema's layout facts: child i pairs with the
-// closure class record's field i (capture order).
+// PA24/PA25 closure construction into `dest`, one child per closure
+// field in order. A reference field (by-reference capture) stores the
+// child lvalue's address, the __this pointer field stores the
+// captured pointer value, and a by-copy field copies the child's
+// value (class captures construct in place). The field offsets are
+// sema's layout facts: child i pairs with the closure class record's
+// field i (capture order).
 void FunctionLowerer::LowerClosureInit(const SemNode& node,
                                        const string& dest)
 {
@@ -395,17 +406,31 @@ void FunctionLowerer::LowerClosureInit(const SemNode& node,
 	for (size_t i = 0; i < node.children.size(); i++)
 	{
 		const SemNode& child = *node.children[i];
+		const ClassField& field = cls->fields[i];
 		string target = dest;
-		if (cls->fields[i].offset)
+		if (field.offset)
 		{
 			target = NewTemp();
 			Emit(target + " = index i8 " + dest + ", " +
-			     to_string(cls->fields[i].offset));
+			     to_string(field.offset));
 		}
-		string value = child.category == VC_LVALUE
-			? LowerAddressExpr(child)
-			: LowerValueExpr(child).text;
-		Emit("store ptr " + value + ", " + target);
+		if (IsReferenceType(field.type) || field.name == "__this")
+		{
+			string value = child.category == VC_LVALUE
+				? LowerAddressExpr(child)
+				: LowerValueExpr(child).text;
+			Emit("store ptr " + value + ", " + target);
+			continue;
+		}
+		TypePtr bare = RemoveTopCv(field.type);
+		if (bare->kind == TK_CLASS)
+		{
+			LowerClassInit(child, target);
+			continue;
+		}
+		string value = LowerValueAs(child, bare, LCC_INIT);
+		Emit("store " + LowerValueType(bare) + " " + value + ", " +
+		     target);
 	}
 }
 

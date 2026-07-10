@@ -560,8 +560,33 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 	if (!fn_type || !declaring)
 		throw OutsideBoundary("local entity mangling context");
 	if (declaring->kind == SCOPE_CLASS)
+	{
+		// The member encoding takes the this-adjusted type; a body
+		// scope's composed type carries only the declared signature.
+		TypePtr adjusted = fn_type;
+		bool has_this = !fn_type->parameters.empty() &&
+			fn_type->parameters[0]->kind == TK_POINTER &&
+			RemoveTopCv(fn_type->parameters[0]->target)->kind ==
+				TK_CLASS &&
+			RemoveTopCv(fn_type->parameters[0]->target)->named ==
+				declaring->entity;
+		if (!has_this && declaring->entity)
+		{
+			TypePtr class_type =
+				MakeNamedType(TK_CLASS, declaring->entity);
+			class_type = MakeCvQualifiedType(
+				class_type, fn_type->is_const, fn_type->is_volatile);
+			vector<TypePtr> params;
+			params.push_back(
+				MakePointerType(class_type, false, false));
+			for (size_t i = 0; i < fn_type->parameters.size(); i++)
+				params.push_back(fn_type->parameters[i]);
+			adjusted = MakeFunctionType(fn_type->target, params,
+			                            fn_type->variadic);
+		}
 		fn_object = MangleMemberFunctionObjectName(
-			declaring, fn_scope->name, fn_type, "");
+			declaring, fn_scope->name, adjusted, "");
+	}
 	else
 		fn_object = MangleFunctionObjectName(declaring, fn_scope->name,
 		                                     fn_type);

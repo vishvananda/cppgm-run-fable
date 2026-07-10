@@ -219,12 +219,35 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		member_defs_[key] = &item;
 		return;
 	}
+	// PA25: an instantiated body's entry appears at its first demand
+	// (the reference's emission order), not at registration.
+	if (item.from_instantiation && !item.demand_strong &&
+	    item.entity_scope)
+	{
+		string key = QualifiedKey(item.entity_scope, item.entity_name) +
+			"#" + DescribeType(item.type);
+		pending_fn_defs_[key] = &item;
+		return;
+	}
 	// Static member functions and hidden friends register as ordinary
 	// entries; friend definitions emit unconditionally, static members
 	// on demand.
 	LowFunctionInfo& info = FunctionEntry(item.entity_scope,
 	                                      item.entity_name, item.type,
 	                                      item.fn_spec);
+	ApplyDeferredDefinition(item, info);
+}
+
+// The shared definition-attachment of a deferred namespace-scope
+// item (immediate registration or first-demand creation).
+void LowerProgram::ApplyDeferredDefinition(const SemNode& item,
+                                           LowFunctionInfo& info)
+{
+	if (item.fn_spec && !info.fn_spec)
+	{
+		info.fn_spec = item.fn_spec;
+		info.object_name = MangleFunctionTemplateObjectName(*item.fn_spec);
+	}
 	if (!info.defined)
 	{
 		info.defined = true;
@@ -412,6 +435,14 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 			existing.object_name =
 				MangleFunctionTemplateObjectName(*spec);
 		}
+		map<string, const SemNode*>::iterator pending =
+			pending_fn_defs_.find(key);
+		if (pending != pending_fn_defs_.end())
+		{
+			const SemNode* item = pending->second;
+			pending_fn_defs_.erase(pending);
+			ApplyDeferredDefinition(*item, existing);
+		}
 		return existing;
 	}
 	LowFunctionInfo info;
@@ -468,6 +499,14 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 	info.index = functions_.size();
 	function_index_[key] = functions_.size();
 	functions_.push_back(info);
+	map<string, const SemNode*>::iterator pending =
+		pending_fn_defs_.find(key);
+	if (pending != pending_fn_defs_.end())
+	{
+		const SemNode* item = pending->second;
+		pending_fn_defs_.erase(pending);
+		ApplyDeferredDefinition(*item, functions_.back());
+	}
 	return functions_.back();
 }
 
@@ -849,6 +888,40 @@ void LowerProgram::DemandTreeCallees(const SemNode& node)
 			}
 		}
 		DemandTreeCallees(child);
+	}
+}
+
+// PA25: a specialization whose arguments carry closure classes
+// creates their operator() entries with it (the reference's emission
+// order); only real calls demand the bodies.
+void LowerProgram::TouchClosureOperators(const FunctionSpecialization& spec)
+{
+	for (size_t i = 0; i < spec.args.size(); i++)
+	{
+		const TemplateArg& arg = spec.args[i];
+		if (!arg.type)
+			continue;
+		TypePtr bare = RemoveTopCv(
+			IsReferenceType(arg.type) ? arg.type->target : arg.type);
+		if (bare->kind != TK_CLASS || !bare->named->is_closure ||
+		    !bare->named->class_record)
+			continue;
+		const ClassInfo* cls = bare->named->class_record;
+		const ScopeBinding* op =
+			FindOwnBinding(*cls->members, "operator ()");
+		if (!op || !op->type || op->type->kind != TK_FUNCTION)
+			continue;
+		TypePtr class_type = MakeNamedType(TK_CLASS, bare->named);
+		class_type = MakeCvQualifiedType(
+			class_type, op->type->is_const, op->type->is_volatile);
+		vector<TypePtr> params;
+		params.push_back(MakePointerType(class_type, false, false));
+		for (size_t p = 0; p < op->type->parameters.size(); p++)
+			params.push_back(op->type->parameters[p]);
+		MemberFunctionEntry(cls->members, "operator ()",
+		                    MakeFunctionType(op->type->target, params,
+		                                     op->type->variadic),
+		                    "");
 	}
 }
 

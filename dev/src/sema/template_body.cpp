@@ -109,8 +109,52 @@ void SemBinder::OnSpecializationOdrUsed(const FunctionSpecialization* spec)
 	FunctionSpecialization& used =
 		*const_cast<FunctionSpecialization*>(spec);
 	used.odr_used = true;
-	if (used.owner && used.owner->has_definition && !used.body_emitted)
-		InstantiateFunctionBody(*used.owner, used);
+	if (!used.owner || !used.owner->has_definition || used.body_emitted)
+		return;
+	// 14.6.4.1p3: a specialization odr-used inside another
+	// instantiation takes the enclosing specialization's point of
+	// instantiation - its body binds after the enclosing one
+	// completes (the reference's emission order). A constexpr pattern
+	// still binds immediately: constant evaluation may need its body
+	// before the unit's forward pass ends.
+	const AstDecl* pattern = used.explicit_def
+		? used.explicit_def
+		: used.owner->pattern_decl;
+	if (instantiating_ && (!pattern || !DeclHasConstexpr(*pattern)))
+	{
+		pending_instantiations_.push_back(&used);
+		return;
+	}
+	InstantiateFunctionBody(*used.owner, used);
+}
+
+// Binds the queued nested specializations (14.6.4.1p3) in odr-use
+// order; a drained body may queue more.
+void SemBinder::DrainPendingInstantiations()
+{
+	for (size_t i = 0; i < pending_instantiations_.size(); i++)
+	{
+		FunctionSpecialization* next = pending_instantiations_[i];
+		if (next->body_emitted || !next->owner ||
+		    !next->owner->has_definition)
+			continue;
+		// A failing nested instantiation poisons only itself: the
+		// specialization is ill-formed if demanded (14.7.1), like the
+		// retried member bodies.
+		bool saved = instantiating_;
+		instantiating_ = true;
+		try
+		{
+			InstantiateFunctionBody(*next->owner, *next);
+		}
+		catch (const std::exception&)
+		{
+			instantiating_ = saved;
+			continue;
+		}
+		instantiating_ = saved;
+	}
+	pending_instantiations_.clear();
 }
 
 // The conversion-type-id of a conversion-function template pattern

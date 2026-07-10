@@ -478,6 +478,11 @@ LowerValue FunctionLowerer::LowerUnary(const SemNode& node)
 			Emit(value.text + " = cmp eq " +
 			     LowerValueType(inner.type) + " " + inner.text +
 			     ", " + LowerFloatZero(inner.type));
+		else if (inner.type &&
+		         (inner.type->kind == TK_POINTER ||
+		          IsNullPtrType(inner.type)))
+			// A pointer operand compares in its own value space.
+			Emit(value.text + " = cmp eq ptr " + inner.text + ", 0");
 		else
 			Emit(value.text + " = cmp eq i64 " + inner.text + ", 0");
 		return value;
@@ -1197,6 +1202,17 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		return LowerTypeidAddress(node);
 	case SN_DYNAMIC_CAST:
 		return LowerDynamicCast(node);
+	case SN_CLOSURE_INIT:
+	{
+		// PA25: an immediately used closure temporary materializes in
+		// its own slot.
+		string slot = AddMatSlot("tmpobj",
+		                         LowerSlotType(RemoveTopCv(node.type)));
+		string address = NewTemp();
+		Emit(address + " = addr $" + slot);
+		LowerClosureInit(node, address);
+		return address;
+	}
 	case SN_CONSTRUCTOR_ACTION:
 		return MaterializeTemporary(node, "tmpobj", true);
 	case SN_UNARY_EXPRESSION:

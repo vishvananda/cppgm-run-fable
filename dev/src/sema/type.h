@@ -170,6 +170,9 @@ struct NamedTypeInfo
 	// specialization arrived with a full argument list.
 	size_t spec_spelled = (size_t)-1;
 	bool is_template_anchor;
+	// PA25: a lambda's closure class (spec-argument manglings touch
+	// its operator() entry so emission order follows the reference).
+	bool is_closure = false;
 	int param_index;
 };
 

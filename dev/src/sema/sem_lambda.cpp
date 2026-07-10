@@ -112,10 +112,13 @@ void SemBinder::EnsureThisField(LambdaFrame& frame)
 	frame.captures.push_back(capture);
 }
 
-// The by-reference capture field of one enclosing entity (created on
-// the spelled capture or the first use); returns its capture index.
+// The capture field of one enclosing entity (created on the spelled
+// capture or the first use); returns its capture index. A by-copy
+// capture lays out a value field, a by-reference one a reference
+// field.
 size_t SemBinder::EnsureCaptureField(LambdaFrame& frame,
-                                     const ScopeBinding& binding)
+                                     const ScopeBinding& binding,
+                                     bool by_copy)
 {
 	for (size_t i = 0; i < frame.captures.size(); i++)
 		if (frame.captures[i].binding == &binding)
@@ -123,16 +126,22 @@ size_t SemBinder::EnsureCaptureField(LambdaFrame& frame,
 	TypePtr referee = binding.type;
 	if (IsReferenceType(referee))
 		referee = referee->target;
+	if (by_copy)
+		referee = RemoveTopCv(referee);
 	ClassField field;
 	field.name = binding.name;
-	field.type = MakeReferenceType(referee, false, false);
+	field.type = by_copy ? referee
+	                     : MakeReferenceType(referee, false, false);
 	field.access = MA_PUBLIC;
+	if (by_copy && RemoveTopCv(referee)->kind == TK_CLASS)
+		RequireCompleteType(RemoveTopCv(referee)->named);
 	ClassField& placed = LayoutField(*frame.cls, field);
 	LambdaCapture capture;
 	capture.binding = &binding;
 	capture.name = binding.name;
 	capture.offset = placed.offset;
 	capture.referee = referee;
+	capture.by_copy = by_copy;
 	frame.captures.push_back(capture);
 	return frame.captures.size() - 1;
 }
@@ -146,7 +155,8 @@ SemNodePtr SemBinder::ThisValueNode()
 		// captured pointer field.
 		if (!frame->this_captured)
 		{
-			if (!frame->by_ref_default && !frame->this_spelled)
+			if (!frame->by_ref_default && !frame->by_copy_default &&
+			    !frame->this_spelled)
 				throw runtime_error("this is not captured");
 			EnsureThisField(*frame);
 		}
@@ -193,12 +203,16 @@ bool SemBinder::TryCaptureUse(const ScopeBinding& binding, SemValue& out)
 		throw runtime_error(binding.name + " is not captured by the "
 		                    "captureless lambda");
 	bool spelled = false;
+	bool by_copy = frame->by_copy_default;
 	for (size_t i = 0; i < frame->explicit_names.size(); i++)
 		if (frame->explicit_names[i] == binding.name)
+		{
 			spelled = true;
-	if (!frame->by_ref_default && !spelled)
+			by_copy = frame->explicit_copy[i] != 0;
+		}
+	if (!frame->by_ref_default && !frame->by_copy_default && !spelled)
 		throw runtime_error(binding.name + " is not captured");
-	size_t index = EnsureCaptureField(*frame, binding);
+	size_t index = EnsureCaptureField(*frame, binding, by_copy);
 	const LambdaCapture& capture = frame->captures[index];
 	out = SemValue();
 	out.type = capture.referee;
@@ -206,7 +220,7 @@ bool SemBinder::TryCaptureUse(const ScopeBinding& binding, SemValue& out)
 	out.node = MakeSemNode(SN_MEMBER_EXPRESSION);
 	out.node->name = capture.name;
 	out.node->type = capture.referee;
-	out.node->member_ref = true;
+	out.node->member_ref = !capture.by_copy;
 	out.node->category = VC_LVALUE;
 	out.node->member_offset = capture.offset;
 	out.node->children.push_back(ClosureThisId(*frame));
@@ -258,6 +272,30 @@ SemValue SemBinder::MakeLambdaValue(const LambdaInfo& info)
 		}
 		SemValue capture = analyzer_.Analyze(*source);
 		synth_exprs_.push_back(std::move(source));
+		if (info.captures[i].by_copy && capture.type &&
+		    RemoveTopCv(capture.type)->kind == TK_CLASS)
+		{
+			// PA25: a by-copy class capture copy-initializes its
+			// field from the enclosing object.
+			TypePtr bare = RemoveTopCv(capture.type);
+			const ClassInfo* cls = unit_.classes.Find(bare->named);
+			if (!cls)
+				throw runtime_error("captured class record missing");
+			vector<SemValue> args;
+			args.push_back(std::move(capture));
+			int index = ResolveClassConstructor(*cls, args, true,
+			                                    "capture");
+			vector<SemNodePtr> arg_nodes;
+			for (size_t a = 0; a < args.size(); a++)
+				arg_nodes.push_back(std::move(args[a].node));
+			SemNodePtr action = MakeConstructorCall(
+				*cls, index, false, SemNodePtr(),
+				std::move(arg_nodes));
+			action->type = bare;
+			action->category = VC_PRVALUE;
+			value.node->children.push_back(std::move(action));
+			continue;
+		}
 		value.node->children.push_back(std::move(capture.node));
 	}
 	return value;
@@ -274,17 +312,9 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	         LambdaInfo>::iterator found = lambda_cache_.find(key);
 	if (found != lambda_cache_.end())
 		return MakeLambdaValue(found->second);
-	if (lambda.mutable_specifier)
-		throw OutsideBoundary("mutable lambda");
-	if (lambda.has_capture_default && lambda.capture_default != OP_AMP)
-		throw OutsideBoundary("copy capture default");
 	for (size_t i = 0; i < lambda.captures.size(); i++)
-	{
-		if (lambda.captures[i].kind == LC_COPY)
-			throw OutsideBoundary("copy capture");
 		if (lambda.captures[i].pack)
 			throw OutsideBoundary("pack capture");
-	}
 	bool captureless = !lambda.has_capture_default &&
 		lambda.captures.empty();
 
@@ -552,6 +582,7 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	NamedTypeInfo* entity = model_.CreateNamedTypeInfo(
 		"class " + name, current_, name);
 	entity->class_key = "class";
+	entity->is_closure = true;
 	Scope* members = model_.CreateScope(SCOPE_CLASS, name, current_);
 	model_.SetMemberScope(entity, members);
 	ClassInfo& cls = unit_.classes.Create(entity);
@@ -560,9 +591,10 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	model_.MutableInfo(entity)->class_record = &cls;
 	BeginClassLayout(cls);
 
-	// operator(): const (non-mutable lambda), body-defined.
+	// operator(): const unless the lambda is mutable, body-defined.
 	TypePtr member_type = MakeFunctionType(ret, param_types, false);
-	member_type = MakeFunctionCvQualifiedType(member_type, true, false);
+	member_type = MakeFunctionCvQualifiedType(
+		member_type, !lambda.mutable_specifier, false);
 	TypePtr adjusted = MethodAdjustedType(cls, member_type);
 	fn_scope->fn_type = member_type;
 
@@ -606,7 +638,10 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	frame.fn_scope = fn_scope;
 	frame.cls = &cls;
 	frame.members = members;
-	frame.by_ref_default = lambda.has_capture_default;
+	frame.by_ref_default = lambda.has_capture_default &&
+		lambda.capture_default == OP_AMP;
+	frame.by_copy_default = lambda.has_capture_default &&
+		lambda.capture_default != OP_AMP;
 	frame.this_param_type = adjusted->parameters[0];
 	frame.enclosing_this = CurrentThisType();
 	for (size_t i = 0; i < lambda.captures.size(); i++)
@@ -614,8 +649,12 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 		if (lambda.captures[i].kind == LC_THIS)
 			frame.this_spelled = true;
 		else
+		{
 			frame.explicit_names.push_back(
 				lambda.captures[i].identifier);
+			frame.explicit_copy.push_back(
+				lambda.captures[i].kind == LC_COPY);
+		}
 	}
 	lambda_frames_.push_back(frame);
 	// 5.1.2p14: spelled captures are members regardless of use.
@@ -632,7 +671,8 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 			current_, lambda.captures[i].identifier, SLF_ANY);
 		if (named && (named->kind == SB_VARIABLE ||
 		              named->kind == SB_PARAMETER))
-			EnsureCaptureField(open, *named);
+			EnsureCaptureField(open, *named,
+			                   lambda.captures[i].kind == LC_COPY);
 	}
 	TypePtr deduced;
 	try
@@ -651,8 +691,8 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	if (TypeContainsAutoPlaceholder(ret))
 	{
 		member_type = MakeFunctionType(deduced, param_types, false);
-		member_type = MakeFunctionCvQualifiedType(member_type, true,
-		                                          false);
+		member_type = MakeFunctionCvQualifiedType(
+			member_type, !lambda.mutable_specifier, false);
 		adjusted = MethodAdjustedType(cls, member_type);
 		node->type = adjusted;
 		fn_scope->fn_type = member_type;
