@@ -434,6 +434,57 @@ void FunctionLowerer::LowerClosureInit(const SemNode& node,
 	}
 }
 
+// PA25 18.9: fills the initializer_list record at `dest`: the
+// elements store into a fresh backing array whose address and count
+// become the record's {begin, size} fields.
+void FunctionLowerer::LowerInitializerListInit(const SemNode& node,
+                                               const string& dest)
+{
+	const ClassInfo* cls = program_.ProgramClass(node.type->named);
+	if (!cls || cls->fields.empty() ||
+	    cls->fields[0].type->kind != TK_POINTER)
+		throw runtime_error("initializer_list record missing");
+	TypePtr element = RemoveTopCv(cls->fields[0].type->target);
+	unsigned long long size = TypeSize(element);
+	unsigned long long count = node.children.size();
+	TypePtr array = MakeArrayType(element, true, count ? count : 1);
+	string backing = AddMatSlot("initlist", LowerSlotType(array));
+	string base = NewTemp();
+	Emit(base + " = addr $" + backing);
+	for (size_t i = 0; i < node.children.size(); i++)
+	{
+		if (element->kind == TK_CLASS)
+		{
+			// A class element constructs (or copies) in place.
+			string target = base;
+			if (i)
+			{
+				target = NewTemp();
+				Emit(target + " = index i8 " + base + ", " +
+				     to_string(i * size));
+			}
+			LowerClassInit(*node.children[i], target);
+			continue;
+		}
+		// The element value evaluates before its target address.
+		string value = LowerValueAs(*node.children[i], element,
+		                            LCC_INIT);
+		string target = base;
+		if (i)
+		{
+			target = NewTemp();
+			Emit(target + " = index i8 " + base + ", " +
+			     to_string(i * size));
+		}
+		Emit("store " + LowerValueType(element) + " " + value + ", " +
+		     target);
+	}
+	Emit("store ptr " + base + ", " + dest);
+	string size_address = NewTemp();
+	Emit(size_address + " = index i8 " + dest + ", 8");
+	Emit("store i64 " + to_string(count) + ", " + size_address);
+}
+
 // Constructs the class value of `node` into the object at `dest`:
 // constructor actions run in place, class-valued calls write their
 // result there, conditionals construct per arm.
@@ -444,6 +495,11 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 	{
 	case SN_CLOSURE_INIT:
 		LowerClosureInit(node, dest);
+		return;
+	case SN_BRACED_INIT_LIST:
+		// PA25 8.5.4: a braced initializer_list value fills the
+		// {begin, size} record from its materialized backing array.
+		LowerInitializerListInit(node, dest);
 		return;
 	case SN_CONSTRUCTOR_ACTION:
 		if (node.trivial_copy)
@@ -862,6 +918,7 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 		case SN_CALL_EXPRESSION:
 		case SN_CONDITIONAL_EXPRESSION:
 		case SN_CLOSURE_INIT:
+		case SN_BRACED_INIT_LIST:
 			if (ElideEmptyOperatorInit(node, child))
 				break;
 			// A class prvalue initializer constructs the declared

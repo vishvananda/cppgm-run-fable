@@ -212,6 +212,7 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, spec.name,
 	                                     spec.param_scope);
 	fn_scope->fn_type = spec.type;
+	fn_scope->fn_spec = &spec;
 	InstantiationContext context(*this, fn_scope, true);
 	param_capture_scope_ = fn_scope;
 	// PA21 member templates: the trailing-return decltype may name

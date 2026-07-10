@@ -7,6 +7,7 @@
 #include "ast/ast_names.h"
 #include "ast/ast_text.h"
 #include "lowering/lower_name_parts.h"
+#include "sema/class_info.h"
 
 using std::runtime_error;
 using std::to_string;
@@ -559,7 +560,10 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 			fn_type = fn_binding->type;
 	if (!fn_type || !declaring)
 		throw OutsideBoundary("local entity mangling context");
-	if (declaring->kind == SCOPE_CLASS)
+	if (fn_scope->fn_spec)
+		fn_object =
+			MangleFunctionTemplateObjectName(*fn_scope->fn_spec);
+	else if (declaring->kind == SCOPE_CLASS)
 	{
 		// The member encoding takes the this-adjusted type; a body
 		// scope's composed type carries only the declared signature.
@@ -593,6 +597,29 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 	// The encoding is the object name without its _Z prefix.
 	string fn_encoding = fn_object.compare(0, 2, "_Z") == 0
 		? fn_object.substr(2) : fn_object;
+	// PA25: a closure class spells the Itanium <lambda-sig> local
+	// name (Ul <bare-params> E <discriminator> _).
+	if (info.is_closure)
+	{
+		string params = "v";
+		if (info.class_record && info.class_record->members)
+			if (const ScopeBinding* op = FindOwnBinding(
+			        *info.class_record->members, "operator ()"))
+				if (op->type && op->type->kind == TK_FUNCTION)
+					params = MangleBareParameters(op->type, subs, 0);
+		string signature = "Ul" + params + "E" +
+			(info.closure_discriminator > 0
+				 ? std::to_string(info.closure_discriminator - 1)
+				 : string()) + "_";
+		string key = "Z:" + fn_encoding + ":" + signature;
+		if (key_out)
+			*key_out = key;
+		string found = subs.Find(key);
+		if (!found.empty())
+			return found;
+		subs.Add(key);
+		return "Z" + fn_encoding + "E" + signature;
+	}
 	// The classes between the function and the entity, then the leaf.
 	string names;
 	string name_key;

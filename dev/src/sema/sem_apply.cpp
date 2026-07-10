@@ -107,6 +107,28 @@ void SemExprAnalyzer::ApplyListInitConversion(SemValue& value,
 	items.swap(value.list_values);
 	value.braced_list = false;
 	TypePtr bare = IsReferenceType(dest) ? dest->target : RemoveTopCv(dest);
+	// PA25 8.5.4p4: the initializer_list value is a typed braced node;
+	// the lowering materializes the backing array and the
+	// {begin, size} record.
+	TypePtr list_element;
+	if (conv.init_list_dest && IsStdInitializerList(bare, &list_element))
+	{
+		TypePtr element = RemoveTopCv(list_element);
+		host_.RequireCompleteType(RemoveTopCv(bare)->named);
+		SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+		list->type = MakeNamedType(TK_CLASS, RemoveTopCv(bare)->named);
+		list->category = VC_PRVALUE;
+		for (size_t i = 0; i < items.size(); i++)
+		{
+			CopyInitialize(items[i], element, "initializer-list "
+			               "element");
+			list->children.push_back(std::move(items[i].node));
+		}
+		value.type = list->type;
+		value.category = VC_PRVALUE;
+		value.node = std::move(list);
+		return;
+	}
 	if (bare->kind == TK_ARRAY)
 	{
 		TypePtr element = bare->target;

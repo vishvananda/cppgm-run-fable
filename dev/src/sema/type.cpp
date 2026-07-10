@@ -2,6 +2,9 @@
 
 #include <stdexcept>
 
+#include "sema/scope.h"
+#include "sema/template_info.h"
+
 using std::make_shared;
 using std::runtime_error;
 using std::to_string;
@@ -717,4 +720,30 @@ int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to)
 		distance++;
 	}
 	return -1;
+}
+
+// PA25 18.9: a std::initializer_list specialization - the class
+// template named initializer_list declared directly inside the
+// top-level namespace std.
+bool IsStdInitializerList(const TypePtr& type, TypePtr* element)
+{
+	if (!type)
+		return false;
+	TypePtr bare = RemoveTopCv(
+		IsReferenceType(type) ? type->target : type);
+	if ((bare->kind != TK_CLASS && bare->kind != TK_TEMPLATE_SPEC) ||
+	    !bare->named || !bare->named->spec_template)
+		return false;
+	const TemplateInfo* tmpl = bare->named->spec_template;
+	if (tmpl->name != "initializer_list" || !tmpl->declaring ||
+	    tmpl->declaring->kind != SCOPE_NAMESPACE ||
+	    tmpl->declaring->name != "std" || !tmpl->declaring->parent ||
+	    tmpl->declaring->parent->parent)
+		return false;
+	if (bare->named->spec_args.empty() ||
+	    !bare->named->spec_args[0].type)
+		return false;
+	if (element)
+		*element = bare->named->spec_args[0].type;
+	return true;
 }

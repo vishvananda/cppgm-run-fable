@@ -318,19 +318,42 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	bool captureless = !lambda.has_capture_default &&
 		lambda.captures.empty();
 
-	string name = "__lambda" + to_string(++lambda_counter_);
+	++lambda_counter_;
+	string name = "__lambda" + to_string(lambda_counter_);
 	if (!method_.fn_name.empty())
 	{
+		// The closure-class name: the enclosing function's qualified
+		// stem plus the lambda-declarator's token span.
+		string qualified = method_.fn_name;
+		for (const Scope* scope = method_.fn_owner; scope;
+		     scope = scope->parent)
+			if (scope->kind == SCOPE_CLASS && !scope->name.empty())
+				qualified = scope->name + "::" + qualified;
 		string stem;
-		for (size_t i = 0; i < method_.fn_name.size(); i++)
+		for (size_t i = 0; i < qualified.size(); i++)
 		{
-			char c = method_.fn_name[i];
+			char c = qualified[i];
 			bool word = (c >= 'a' && c <= 'z') ||
 				(c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
 				c == '_';
-			stem += word ? c : '_';
+			if (word)
+				stem += c;
+			else if (c == '<')
+				stem += "__";
+			else if (c == ':' && i + 1 < qualified.size() &&
+			         qualified[i + 1] == ':')
+			{
+				stem += "__";
+				i++;
+			}
+			else
+				stem += '_';
 		}
-		name = "__lambda_" + stem + "_" + to_string(lambda_counter_);
+		if (stem.empty() || stem[stem.size() - 1] != '_')
+			stem += '_';
+		name = "__lambda_" + stem + "t" +
+			to_string(lambda.declarator_begin_token) + "_" +
+			to_string(lambda.body_begin_token);
 	}
 
 	// The operator's scope chains to the surrounding context so
@@ -583,6 +606,8 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 		"class " + name, current_, name);
 	entity->class_key = "class";
 	entity->is_closure = true;
+	entity->closure_discriminator = closure_discriminators_[fn_scope
+		? fn_scope->parent : 0]++;
 	Scope* members = model_.CreateScope(SCOPE_CLASS, name, current_);
 	model_.SetMemberScope(entity, members);
 	ClassInfo& cls = unit_.classes.Create(entity);

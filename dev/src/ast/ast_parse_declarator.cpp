@@ -433,11 +433,21 @@ bool AstParser::ParseDirectDeclarator(AstDeclarator& declarator, bool named)
 		{
 			bool bare_type_id = false;
 			if (named && inner->items.size() == 1 &&
-			    inner->items[0].kind == DI_ID &&
-			    inner->items[0].name.IsPlainIdentifier())
+			    inner->items[0].kind == DI_ID)
 			{
-				int flags = ResolveName(inner->items[0].name);
-				bare_type_id = flags != kUnresolved && (flags & NF_TYPE);
+				const AstName& id = inner->items[0].name;
+				if (id.IsPlainIdentifier())
+				{
+					int flags = ResolveName(id);
+					bare_type_id = flags != kUnresolved &&
+						(flags & NF_TYPE);
+				}
+				else if (!id.parts.empty() &&
+				         id.parts.back().kind == NP_TEMPLATE_ID)
+					// PA25 8.2: `( qualified-template-id )` reads as
+					// a parameter type - the function declaration
+					// wins over an object declarator.
+					bare_type_id = true;
 			}
 			if (!bare_type_id)
 			{

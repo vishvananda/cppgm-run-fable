@@ -578,7 +578,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		else
 			throw runtime_error("member is not callable");
 		vector<SemValue> args;
-		AnalyzeArgumentList(expr.arguments, args);
+		AnalyzeArgumentList(expr.arguments, args, true);
 		CheckCallArguments(function_type, args);
 		SemValue value = CallResult(function_type);
 		value.node->children.push_back(std::move(fn.node));
@@ -806,7 +806,7 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 {
 	const NamedTypeInfo* object_entity = object.type->named;
 	vector<SemValue> args;
-	AnalyzeArgumentList(arguments, args);
+	AnalyzeArgumentList(arguments, args, true);
 	MemberCandidateSet set;
 	ComposeMethodCandidates(object, binding, args, explicit_part, set);
 	AugmentOverloadSetArguments(set.candidates, args, 1);
@@ -933,7 +933,7 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 	}
 	vector<SemValue> args;
 	vector<ConversionSource> sources;
-	AnalyzeArgumentList(expr.arguments, args);
+	AnalyzeArgumentList(expr.arguments, args, true);
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
 	// PA21: static member-template specializations join as candidates.

@@ -109,7 +109,37 @@ TypePtr SemBinder::DeduceAutoVariableType(const TypePtr& type,
 	if (!init || (!expr && init->kind != INIT_BRACED))
 		throw runtime_error("auto variable " + name +
 		                    " has no initializer");
-	if (!expr || expr->kind == EK_BRACED)
+	const AstExpr* braced = 0;
+	if (init->kind == INIT_BRACED)
+		braced = init->expr.get();
+	else if (expr && expr->kind == EK_BRACED)
+		braced = expr;
+	if (braced)
+	{
+		// PA25 7.1.6.4p6: a braced initializer deduces
+		// std::initializer_list over the elements' common type.
+		if (!type->is_auto_placeholder || IsReferenceType(type))
+			throw OutsideBoundary("braced auto initializer form");
+		if (braced->arguments.empty())
+			throw runtime_error("cannot deduce from an empty braced "
+			                    "list");
+		vector<SemValue> probes;
+		analyzer_.AnalyzeArgumentList(braced->arguments, probes);
+		TypePtr element;
+		for (size_t i = 0; i < probes.size(); i++)
+		{
+			TypePtr item = RemoveTopCv(
+				IsReferenceType(probes[i].type)
+					? probes[i].type->target : probes[i].type);
+			if (!element)
+				element = item;
+			else if (!TypeEquals(element, item))
+				throw runtime_error("inconsistent braced deduction "
+				                    "for " + name);
+		}
+		return StdInitializerListType(element);
+	}
+	if (!expr)
 		throw OutsideBoundary("braced auto initializer");
 	SemValue value = analyzer_.Analyze(*expr);
 	// PA24: auto deduced from a captureless lambda takes the function
@@ -455,6 +485,44 @@ void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 				member_form = true;
 				break;
 			}
+		if (!member_form && IsStdInitializerList(range_bare, 0))
+		{
+			// PA25: the builtin record iterates by index over its
+			// {__begin_, __size_} fields:
+			// for (int __idx = 0; __idx < r.__size_; ++__idx)
+			//     loop-decl = r.__begin_[__idx];
+			string idx_name = NextRangeForName("__idx");
+			DeclSpecifierInfo idx_specs;
+			idx_specs.type = MakeFundamentalType(FT_INT);
+			BindSynthesizedVariable(idx_name, idx_specs.type,
+			                        MakeSynthIntLiteral(0), idx_specs);
+			AstExprPtr size_member(new AstExpr(EK_MEMBER));
+			size_member->op = OP_DOT;
+			size_member->op_spelling = ".";
+			size_member->operands.push_back(MakeSynthId(range_name));
+			AstNamePart size_part;
+			size_part.kind = NP_IDENTIFIER;
+			size_part.identifier = "__size_";
+			size_member->name.parts.push_back(std::move(size_part));
+			cond_expr = MakeSynthBinary(OP_LT, "<",
+			                            MakeSynthId(idx_name),
+			                            std::move(size_member));
+			iter_expr = MakeSynthUnary(OP_INC, "++",
+			                           MakeSynthId(idx_name));
+			AstExprPtr begin_member(new AstExpr(EK_MEMBER));
+			begin_member->op = OP_DOT;
+			begin_member->op_spelling = ".";
+			begin_member->operands.push_back(MakeSynthId(range_name));
+			AstNamePart begin_part;
+			begin_part.kind = NP_IDENTIFIER;
+			begin_part.identifier = "__begin_";
+			begin_member->name.parts.push_back(std::move(begin_part));
+			AstExprPtr subscript(new AstExpr(EK_SUBSCRIPT));
+			subscript->operands.push_back(std::move(begin_member));
+			subscript->operands.push_back(MakeSynthId(idx_name));
+			loop_init = std::move(subscript);
+			goto desugared;
+		}
 		string begin_name = NextRangeForName("__begin");
 		string end_name = NextRangeForName("__end");
 		const char* fns[2] = {"begin", "end"};
@@ -495,6 +563,7 @@ void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 	else
 		throw OutsideBoundary("range-for initializer form");
 
+desugared:
 	SemNode* item = AppendItem(SN_FOR_STATEMENT);
 	parents_.push_back(item);
 	{

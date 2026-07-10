@@ -767,6 +767,29 @@ ImplicitConversion ClassifyListInitClass(const ConversionSource& source,
                                          bool allow_user)
 {
 	ImplicitConversion result;
+	// PA25 13.3.3.1.5p2: a std::initializer_list<T> destination
+	// converts each element to T; the worst element conversion ranks
+	// the sequence.
+	TypePtr list_element;
+	if (IsStdInitializerList(dest, &list_element))
+	{
+		DemandClassCompleteness(dest);
+		TypePtr element = RemoveTopCv(list_element);
+		EConversionRank worst = CR_EXACT;
+		for (size_t i = 0; i < source.list_items.size(); i++)
+		{
+			ImplicitConversion inner = ClassifyConversionImpl(
+				source.list_items[i], element, false, allow_user);
+			if (!inner.viable)
+				return result;
+			if (inner.rank > worst)
+				worst = inner.rank;
+		}
+		result.viable = true;
+		result.rank = worst;
+		result.init_list_dest = true;
+		return result;
+	}
 	if (!allow_user)
 		return result;
 	DemandClassCompleteness(dest);
@@ -857,7 +880,9 @@ ImplicitConversion ClassifyListInitSequence(const ConversionSource& source,
 		return result;
 	}
 	TypePtr bare = RemoveTopCv(dest);
-	if (bare->kind == TK_CLASS)
+	if (bare->kind == TK_CLASS ||
+	    (bare->kind == TK_TEMPLATE_SPEC &&
+	     IsStdInitializerList(bare, 0)))
 		return ClassifyListInitClass(source, bare, allow_user);
 	if (bare->kind == TK_ARRAY)
 		return result;  // arrays are never parameter values

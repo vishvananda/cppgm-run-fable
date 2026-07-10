@@ -162,6 +162,10 @@ private:
 	void LowerClassInit(const SemNode& node, const string& dest);
 	// PA24: closure construction (field-wise capture-pointer stores).
 	void LowerClosureInit(const SemNode& node, const string& dest);
+	// PA25 18.9: initializer_list record construction from its braced
+	// elements (backing array + {begin, size} stores).
+	void LowerInitializerListInit(const SemNode& node,
+	                              const string& dest);
 	// Materializes a class-valued call result in a fresh `kind` slot
 	// (or into `dest` when given); returns the object address text.
 	string MaterializeClassResult(const SemNode& call, const char* kind,

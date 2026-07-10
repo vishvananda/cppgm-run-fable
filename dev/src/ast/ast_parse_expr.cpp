@@ -873,6 +873,7 @@ AstExprPtr AstParser::ParseLambdaExpression()
 		Restore(state);
 		return AstExprPtr();
 	}
+	lambda->declarator_begin_token = Save().pos;
 	if (AtSimple(OP_LPAREN))
 	{
 		if (!ParseParameterClause(lambda->parameters))
@@ -914,6 +915,7 @@ AstExprPtr AstParser::ParseLambdaExpression()
 			lambda->trailing_type = move(type);
 		}
 	}
+	lambda->body_begin_token = Save().pos;
 	PushTransientScope();
 	if (lambda->parameters)
 	{

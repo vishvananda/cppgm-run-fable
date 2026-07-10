@@ -877,12 +877,43 @@ SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 	SemValue lhs = Analyze(*expr.operands[0]);
 	const AstExpr& right = *expr.operands[1];
 	SemValue rhs;
+	bool braced_assign_list = false;
 	if (right.kind == EK_BRACED && expr.op == OP_ASS &&
 	    lhs.type->kind == TK_CLASS)
-		// 5.17p9: a braced-init-list right operand list-initializes
-		// a temporary of the left operand's class type.
-		rhs = MakeTemporaryObject(RemoveTopCv(lhs.type),
-		                          right.arguments, true);
+	{
+		// PA25 13.5.3: when the class declares an operator= over
+		// std::initializer_list, the braced operand stays a list for
+		// overload resolution (5.17p9 otherwise builds the temporary).
+		const NamedTypeInfo* named = RemoveTopCv(lhs.type)->named;
+		for (const Scope* link = host_.Model().MemberScope(named);
+		     link && !braced_assign_list; link = link->class_base)
+			if (const ScopeBinding* assign =
+			        FindOwnBinding(*link, "operator ="))
+			{
+				vector<TypePtr> types;
+				if (assign->type)
+					types.push_back(assign->type);
+				for (size_t i = 0; i < assign->overloads.size(); i++)
+					types.push_back(assign->overloads[i]);
+				for (size_t i = 0; i < types.size(); i++)
+					if (types[i] && types[i]->kind == TK_FUNCTION &&
+					    !types[i]->parameters.empty() &&
+					    IsStdInitializerList(types[i]->parameters[0],
+					                         0))
+						braced_assign_list = true;
+			}
+		if (braced_assign_list)
+		{
+			rhs.braced_list = true;
+			AnalyzeArgumentList(right.arguments, rhs.list_values);
+		}
+		else
+			// 5.17p9: a braced-init-list right operand
+			// list-initializes a temporary of the left operand's
+			// class type.
+			rhs = MakeTemporaryObject(RemoveTopCv(lhs.type),
+			                          right.arguments, true);
+	}
 	else
 		rhs = Analyze(right);
 	if (lhs.type->kind == TK_CLASS || lhs.type->kind == TK_ENUM)

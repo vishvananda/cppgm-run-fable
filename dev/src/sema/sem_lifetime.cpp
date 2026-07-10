@@ -938,6 +938,37 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		AppendClassArrayInit(item, binding, init, cls);
 		return;
 	}
+	// PA25 8.5.4p3: a braced initializer over a std::initializer_list
+	// object fills the {begin, size} record from the elements.
+	TypePtr list_element;
+	if (init && IsStdInitializerList(binding.type, &list_element))
+	{
+		const AstExpr* braced = 0;
+		if (init->kind == INIT_BRACED)
+			braced = init->expr.get();
+		else if (init->kind == INIT_EQ &&
+		         init->expr->kind == EK_BRACED)
+			braced = init->expr.get();
+		if (braced)
+		{
+			TypePtr element = RemoveTopCv(list_element);
+			vector<SemValue> elements;
+			analyzer_.AnalyzeArgumentList(braced->arguments, elements);
+			SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+			list->type = RemoveTopCv(
+				IsReferenceType(binding.type) ? binding.type->target
+				                              : binding.type);
+			list->category = VC_PRVALUE;
+			for (size_t i = 0; i < elements.size(); i++)
+			{
+				analyzer_.CopyInitialize(elements[i], element,
+				                         "initializer-list element");
+				list->children.push_back(std::move(elements[i].node));
+			}
+			item.children.push_back(std::move(list));
+			return;
+		}
+	}
 	if (!init)
 	{
 		// Default-initialization. The PA12 dump pins the

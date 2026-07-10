@@ -70,6 +70,9 @@ struct ImplicitConversion
 
 	bool viable;
 	EConversionRank rank;
+	// PA25: the destination is a std::initializer_list specialization
+	// (the applied conversion materializes the backing array).
+	bool init_list_dest = false;
 	// 13.3.3.2p3: an exact-rank sequence with a real qualification
 	// conversion loses to the identity form; between two qualification
 	// conversions the destination whose cv-signature is a proper

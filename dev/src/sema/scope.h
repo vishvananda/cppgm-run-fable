@@ -1,11 +1,13 @@
 #pragma once
 
+#include <deque>
 #include <map>
 #include <memory>
 #include <ostream>
 #include <string>
 #include <vector>
 
+using std::deque;
 using std::map;
 using std::ostream;
 using std::string;
@@ -201,6 +203,9 @@ struct Scope
 	string name;  // empty for the global namespace, blocks, and
 	              // template-parameter scopes
 	Scope* parent;
+	// PA25: the function-template specialization a SCOPE_FUNCTION
+	// body belongs to (local-entity manglings spell it).
+	const struct FunctionSpecialization* fn_spec = 0;
 	// PA15 single inheritance: the direct base class's member scope
 	// (null otherwise); member lookup searches the base chain (10.2).
 	Scope* class_base;
@@ -223,7 +228,11 @@ struct Scope
 	// pattern.
 	size_t dependent_seq_limit = 0;
 
-	vector<ScopeBinding> bindings;      // first-binding (print) order
+	// A deque so AddBinding never moves existing entries: lookup
+	// results are held as ScopeBinding* across analysis that can
+	// declare new entities in the same scope (e.g. a closure type
+	// bound while the enclosing call's candidates are in hand).
+	deque<ScopeBinding> bindings;       // first-binding (print) order
 	map<string, size_t> binding_index;  // name -> bindings position
 	vector<Scope*> children;            // creation (print) order
 	// Namespace scopes nominated by using-directives that lexically

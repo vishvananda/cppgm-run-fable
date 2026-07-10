@@ -173,6 +173,9 @@ struct NamedTypeInfo
 	// PA25: a lambda's closure class (spec-argument manglings touch
 	// its operator() entry so emission order follows the reference).
 	bool is_closure = false;
+	// The lambda's position among the enclosing function's lambdas
+	// (the Itanium <lambda-sig> discriminator).
+	int closure_discriminator = 0;
 	int param_index;
 };
 
@@ -311,6 +314,11 @@ TypePtr MakeTemplateSpecType(const NamedTypeInfo* anchor,
 // dependence, a value-parameter slot, or an uninstantiated value
 // expression).
 bool TemplateArgEquals(const TemplateArg& a, const TemplateArg& b);
+
+// PA25 18.9: whether `type` names a std::initializer_list
+// specialization (the class template declared directly in namespace
+// std); `element` receives the element type when given.
+bool IsStdInitializerList(const TypePtr& type, TypePtr* element);
 bool TemplateArgIsDependent(const TemplateArg& arg);
 
 // PA18: whether any component of `type` is (or contains) a template

@@ -973,6 +973,28 @@ bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
 		return true;  // non-deduced context
 	if (!TypeIsDependent(pattern))
 		return true;  // ordinary conversion checking applies later
+	// PA25 14.8.2.1p1: a braced argument deduces only against a
+	// std::initializer_list<P> pattern - each element deduces P.
+	if (arg.braced_list)
+	{
+		TypePtr bare = RemoveTopCv(
+			IsReferenceType(pattern) ? pattern->target : pattern);
+		if ((bare->kind == TK_TEMPLATE_SPEC ||
+		     bare->kind == TK_CLASS) &&
+		    bare->named && bare->named->spec_template &&
+		    bare->named->spec_template->name == "initializer_list" &&
+		    !bare->named->spec_args.empty() &&
+		    bare->named->spec_args[0].type)
+		{
+			TypePtr element_pattern = bare->named->spec_args[0].type;
+			for (size_t i = 0; i < arg.list_values.size(); i++)
+				if (!DeduceFixedParameter(element_pattern,
+				                          arg.list_values[i], bound))
+					return false;
+			return true;
+		}
+		return true;  // otherwise a non-deduced context
+	}
 	// 14.8.2.1p6: an overload-set argument tries deduction per
 	// member; exactly one success binds, anything else leaves the
 	// parameter non-deduced (a set with function templates is

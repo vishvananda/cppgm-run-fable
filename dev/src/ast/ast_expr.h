@@ -90,6 +90,12 @@ struct AstLambda
 {
 	AstLambda();
 
+	// PA25: the PA6-terminal token span [declarator-begin, body-begin)
+	// of the lambda-declarator; deterministic closure-class names
+	// derive from it.
+	size_t declarator_begin_token = 0;
+	size_t body_begin_token = 0;
+
 	bool has_capture_default;
 	ETokenType capture_default;  // OP_AMP / OP_ASS
 	std::vector<AstLambdaCapture> captures;

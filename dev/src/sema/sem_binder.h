@@ -623,6 +623,11 @@ private:
 	void BindCapturedPackParameter(Scope* scope);
 	// The specialization record for `args`, instantiating the class
 	// body on demand when the definition is available.
+	// PA25 18.9: the builtin initializer_list record when the program
+	// only declares the template.
+	void BuildBuiltinInitializerList(NamedTypeInfo* info);
+	// PA25 7.1.6.4p6: the std::initializer_list<element> type.
+	TypePtr StdInitializerListType(const TypePtr& element);
 	ClassSpecialization* EnsureClassSpecialization(
 		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	// PA21: deferred-body helpers (14.7.1p4).
@@ -986,6 +991,9 @@ private:
 	// instantiation, bound after the unit's forward pass.
 	vector<FunctionSpecialization*> pending_instantiations_;
 	void DrainPendingInstantiations();
+	// PA25: per-enclosing-scope lambda ordinals (the Itanium
+	// <lambda-sig> discriminator).
+	std::map<const Scope*, int> closure_discriminators_;
 	vector<LambdaFrame> lambda_frames_;
 	std::map<std::pair<const void*, const void*>, LambdaInfo>
 		lambda_cache_;

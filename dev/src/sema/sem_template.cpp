@@ -1213,6 +1213,31 @@ void SemBinder::BindClassDeclaration(const AstDecl& decl)
 	BindClass(decl, true);
 }
 
+// PA25 18.9: the std::initializer_list<element> specialization type;
+// throws when the program declares no such template.
+TypePtr SemBinder::StdInitializerListType(const TypePtr& element)
+{
+	Scope* global = model_.global();
+	ScopeBinding* std_binding =
+		global ? FindOwnBinding(*global, "std") : 0;
+	TemplateInfo* tmpl = 0;
+	if (std_binding && std_binding->kind == SB_NAMESPACE &&
+	    std_binding->target)
+		if (ScopeBinding* binding = FindOwnBinding(*std_binding->target,
+		                                           "initializer_list"))
+			tmpl = binding->templ;
+	if (!tmpl || tmpl->kind != TMPL_CLASS)
+		throw std::runtime_error(
+			"braced deduction requires std::initializer_list");
+	vector<TemplateArg> args;
+	args.push_back(TemplateArg(element));
+	ClassSpecialization* spec = EnsureClassSpecialization(*tmpl, args);
+	if (!spec || !spec->entity)
+		throw std::runtime_error(
+			"std::initializer_list specialization failed");
+	return MakeNamedType(TK_CLASS, spec->entity);
+}
+
 void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 {
 	// PA21 14.7.3p6: a completeness demand pins the instantiation (an
@@ -1223,6 +1248,16 @@ void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 				record->hard_used = true;
 	if (!info || info->complete)
 		return;
+	// PA25 18.9: a program that only declares the std::initializer_list
+	// template gets the builtin {begin, size} record on the first
+	// completeness demand.
+	if (info->spec_template && !info->is_template_anchor &&
+	    !info->spec_template->has_definition &&
+	    IsStdInitializerList(MakeNamedType(TK_CLASS, info), 0))
+	{
+		BuildBuiltinInitializerList(const_cast<NamedTypeInfo*>(info));
+		return;
+	}
 	// PA21 14.7.1p4: a specialization whose body was deferred (an
 	// argument was still binding at resolution) instantiates at the
 	// first completeness demand.
