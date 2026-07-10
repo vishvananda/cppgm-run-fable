@@ -34,9 +34,10 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
 	  return_type_(definition.type->target),
 	  indirect_ret_(false), nrvo_scope_(0), nrvo_active_(false),
 	  temp_counter_(0), label_counter_(0), mat_counter_(0),
-	  eh_open_(false), in_lifetime_action_(false), eh_armed_(false),
-	  in_cleanup_emission_(false), ctor_depth_(0),
-	  param_cleanup_count_(0)
+	  param_cleanup_count_(0), eh_open_(false), eh_reused_(false),
+	  cond_arm_depth_(0), suppress_eh_regions_(false),
+	  in_lifetime_action_(false), eh_armed_(false),
+	  in_cleanup_emission_(false), ctor_depth_(0)
 {
 }
 
@@ -280,6 +281,9 @@ void FunctionLowerer::TerminateOpenEnd()
 		blocks_.pop_back();
 		return;
 	}
+	// Cleanups still registered at the implicit end (parameter
+	// objects) run before the synthesized return.
+	EmitCleanupsFrom(0);
 	if (IsVoidType(return_type_))
 	{
 		Terminate("return void");
@@ -667,7 +671,9 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 		if (RemoveTopCv(inner)->kind == TK_CLASS &&
 		    !IsReferenceType(declared))
 		{
-			BeginFullExpression(node);
+			// The object's construction opens its own region at the
+			// constructor call, after the declared address prints.
+			BeginFullExpression(node, false);
 			LowerClassLocal(node);
 			EndFullExpression();
 			// The object's own scope cleanup arms only once its
@@ -896,7 +902,10 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 	TypePtr ret_bare = RemoveTopCv(return_type_);
 	if (!IsReferenceType(return_type_) && ret_bare->kind == TK_CLASS)
 	{
-		BeginFullExpression(value);
+		// The return object's construction is the function's final
+		// action; it runs outside unwind-dispatch regions.
+		BeginFullExpression(value, false);
+		suppress_eh_regions_ = true;
 		if (indirect_ret_)
 		{
 			const SemNode* named = ReturnSourceLocal(node);
@@ -911,6 +920,7 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 			         !value.children[0]->children.empty())
 				program_.DemandElidedCtor(
 					*value.children[0]->children[0]);
+			suppress_eh_regions_ = false;
 			EndFullExpression();
 			EmitCleanupsFrom(0);
 			Terminate("return void");
@@ -925,6 +935,7 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 		string address = NewTemp();
 		Emit(address + " = addr $" + slot);
 		LowerClassInit(value, address);
+		suppress_eh_regions_ = false;
 		EndFullExpression();
 		EmitCleanupsFrom(0);
 		Terminate("return " + LowerSlotType(ret_bare) + " $" + slot);
@@ -1210,7 +1221,11 @@ void FunctionLowerer::LowerConditionInto(const SemNode& condition,
 	const SemNode& inner = *condition.children[0];
 	if (inner.kind != SN_CONDITION_DECLARATION)
 	{
+		// The condition is a full expression: its temporaries arm
+		// unwind dispatch and destroy on the branch edges.
+		BeginFullExpression(inner);
 		LowerCondition(inner, true_label, false_label);
+		EndFullExpression();
 		return;
 	}
 	// 6.4p4: the condition value is the declared variable, read back

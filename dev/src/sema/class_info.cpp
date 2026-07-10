@@ -272,8 +272,16 @@ bool ClassRegistry::ComputeDefaultConstructionEffects(
 			// constructor keeps its call (the reference outputs pin
 			// point-of-instantiation ordering, where the body is not
 			// yet analyzed when the enclosing constructor lowers)
-			// unless the caller asked for the syntactic walk.
-			if (!syntactic && EntityInInstantiation(info.entity))
+			// unless the caller asked for the syntactic walk. PA25:
+			// the syntactic walk elides only instantiated pattern
+			// bodies; a plain user-provided constructor keeps its
+			// call in the chain.
+			if (EntityInInstantiation(info.entity))
+			{
+				if (!syntactic)
+					return true;
+			}
+			else if (syntactic)
 				return true;
 			if (!found->type->parameters.empty())
 				return true;

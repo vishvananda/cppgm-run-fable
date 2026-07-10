@@ -370,11 +370,10 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	// A may-unwind construction runs under a dispatch region once
 	// destructible objects (argument temporaries, live locals) need
 	// cleanup on unwind.
-	bool guarded = eh_armed_
-		? (!temp_cleanups_.empty() || HaveCleanups())
-		: (!saved && HaveCleanups());
+	bool guarded = !temp_cleanups_.empty() ||
+		(!saved && HaveCleanups());
 	if (guarded && !in_cleanup_emission_ && !eh_open_ &&
-	    program_.CalleeMayUnwind(callee))
+	    !suppress_eh_regions_ && program_.CalleeMayUnwind(callee))
 		OpenEhRegion();
 	string callee_text = program_.MemberFunctionRef(callee);
 	Emit("call void " + callee_text + "(" + arguments + ")");
@@ -431,10 +430,22 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 		             SN_MEMBER_EXPRESSION)
 		{
 			// A subobject-targeted action addresses its own member.
+			// See LowerClassLocal: armed cleanups put a may-unwind
+			// member construction under its own dispatch region.
+			bool guard = !in_cleanup_emission_ && !eh_open_ &&
+				!suppress_eh_regions_ &&
+				(eh_armed_ || !temp_cleanups_.empty() ||
+				 HaveCleanups()) &&
+				program_.CalleeMayUnwind(
+					*node.children[0]->children[0]);
+			if (guard)
+				OpenEhRegion();
 			bool saved = in_lifetime_action_;
 			in_lifetime_action_ = true;
 			LowerCall(*node.children[0]);
 			in_lifetime_action_ = saved;
+			if (eh_open_)
+				CloseEhRegion();
 		}
 		else
 			LowerConstructorCall(node, dest);
@@ -449,11 +460,19 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 		string end_label = NewLabel("condobj_end");
 		BranchOnValue(*node.children[0], then_label, else_label);
 		OpenBlock(then_label);
+		cond_arm_depth_++;
+		OpenSegmentRegion(*node.children[1]);
 		LowerClassInit(*node.children[1], dest);
+		if (eh_open_)
+			CloseEhRegion();
 		ReferenceLabel(end_label);
 		Terminate("jump ^" + end_label);
 		OpenBlock(else_label);
+		OpenSegmentRegion(*node.children[2]);
 		LowerClassInit(*node.children[2], dest);
+		if (eh_open_)
+			CloseEhRegion();
+		cond_arm_depth_--;
 		ReferenceLabel(end_label);
 		Terminate("jump ^" + end_label);
 		OpenBlock(end_label);
@@ -506,12 +525,22 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 		if (!call.result_dtor)
 			throw runtime_error("class result temporary without a "
 			                    "resolved destructor");
+		// Registration invalidates the open dispatch; the region
+		// closes and immediately reopens on the widened cleanup set.
+		// A conditional arm's temporary stays unregistered (the
+		// reference does not track its cleanup across the join).
+		bool reopen = eh_open_;
 		if (eh_open_)
 			CloseEhRegion();
-		TempCleanup cleanup;
-		cleanup.address = address;
-		cleanup.action = call.result_dtor.get();
-		temp_cleanups_.push_back(cleanup);
+		if (!cond_arm_depth_)
+		{
+			TempCleanup cleanup;
+			cleanup.address = address;
+			cleanup.action = call.result_dtor.get();
+			temp_cleanups_.push_back(cleanup);
+			if (reopen)
+				OpenEhRegion();
+		}
 	}
 	return address;
 }
@@ -595,13 +624,21 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 		if (dtor)
 		{
 			// Registration invalidates the open dispatch (it now
-			// must destroy this temporary); close and reopen.
+			// must destroy this temporary); close and immediately
+			// reopen on the widened cleanup set. A conditional arm's
+			// temporary stays unregistered.
+			bool reopen = eh_open_;
 			if (eh_open_)
 				CloseEhRegion();
-			TempCleanup cleanup;
-			cleanup.address = address;
-			cleanup.action = dtor;
-			temp_cleanups_.push_back(cleanup);
+			if (!cond_arm_depth_)
+			{
+				TempCleanup cleanup;
+				cleanup.address = address;
+				cleanup.action = dtor;
+				temp_cleanups_.push_back(cleanup);
+				if (reopen)
+					OpenEhRegion();
+			}
 		}
 	}
 	return address;
@@ -771,9 +808,22 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 			             SN_MEMBER_EXPRESSION)
 			{
 				// A subobject-targeted action addresses its own member.
+				// A may-unwind member construction runs under its own
+				// dispatch region while cleanups are armed, closed as
+				// the subobject comes alive.
+				bool guard = !in_cleanup_emission_ && !eh_open_ &&
+					!suppress_eh_regions_ &&
+					(eh_armed_ || !temp_cleanups_.empty() ||
+					 HaveCleanups()) &&
+					program_.CalleeMayUnwind(
+						*child.children[0]->children[0]);
+				if (guard)
+					OpenEhRegion();
 				in_lifetime_action_ = true;
 				LowerCall(*child.children[0]);
 				in_lifetime_action_ = saved;
+				if (eh_open_)
+					CloseEhRegion();
 			}
 			else
 				LowerConstructorCall(child, decl_address);
@@ -873,6 +923,11 @@ void FunctionLowerer::CloseEhRegion()
 		return;
 	eh_open_ = false;
 	Emit("eh_end");
+	// A region on an already-emitted dispatch closes in place; only a
+	// fresh dispatch block splits the flow around its emission.
+	if (eh_reused_)
+		return;
+	eh_dispatch_cache_[eh_pending_signature_] = eh_dispatch_;
 	ReferenceLabel(eh_end_);
 	Terminate("jump ^" + eh_end_);
 	OpenBlock(eh_dispatch_);
@@ -882,28 +937,138 @@ void FunctionLowerer::CloseEhRegion()
 	OpenBlock(eh_end_);
 }
 
+// The content identity of the dispatch a region opened now would
+// emit: the live temporary cleanups then every scope's registered
+// actions, in emission order.
+string FunctionLowerer::CleanupSignature() const
+{
+	string signature;
+	char buffer[32];
+	for (size_t i = temp_cleanups_.size(); i-- > 0;)
+	{
+		snprintf(buffer, sizeof(buffer), "%p",
+		         (const void*)temp_cleanups_[i].action);
+		signature += "t" + temp_cleanups_[i].address + ":" + buffer +
+			";";
+	}
+	for (size_t scope = cleanup_scopes_.size(); scope-- > 0;)
+	{
+		const vector<vector<const SemNode*>>& groups =
+			cleanup_scopes_[scope];
+		for (size_t group = groups.size(); group-- > 0;)
+			for (size_t i = 0; i < groups[group].size(); i++)
+			{
+				snprintf(buffer, sizeof(buffer), "%p",
+				         (const void*)groups[group][i]);
+				signature += string("c") + buffer + ";";
+			}
+	}
+	return signature;
+}
+
 void FunctionLowerer::OpenEhRegion()
 {
-	// The unwind runtime declares appear exactly when a dispatch
-	// region exists in the emitted program.
-	program_.RequireEhRuntime();
-	eh_dispatch_ = NewLabel("call_unwind_dispatch");
-	eh_end_ = NewLabel("call_unwind_end");
+	string signature = CleanupSignature();
+	map<string, string>::const_iterator found =
+		eh_dispatch_cache_.find(signature);
+	if (found != eh_dispatch_cache_.end())
+	{
+		eh_dispatch_ = found->second;
+		eh_reused_ = true;
+	}
+	else
+	{
+		eh_dispatch_ = NewLabel("call_unwind_dispatch");
+		eh_end_ = NewLabel("call_unwind_end");
+		eh_reused_ = false;
+		eh_pending_signature_ = signature;
+	}
 	ReferenceLabel(eh_dispatch_);
 	Emit("eh_try ^" + eh_dispatch_);
 	eh_open_ = true;
 }
 
+// A straight-line segment (full expression, conditional arm) opens
+// its region up front when it will run a call with cleanups armed:
+// destructible temporaries protect every call of the segment, armed
+// locals only calls the unwind analysis cannot prove non-throwing.
+void FunctionLowerer::OpenSegmentRegion(const SemNode& root)
+{
+	if (eh_open_ || in_cleanup_emission_ || suppress_eh_regions_ ||
+	    in_lifetime_action_)
+		return;
+	if (eh_armed_ || !temp_cleanups_.empty())
+	{
+		if (SegmentContainsCall(root, false))
+			OpenEhRegion();
+		return;
+	}
+	if (HaveCleanups() && SegmentContainsCall(root, true))
+		OpenEhRegion();
+}
+
+// True when the segment itself runs a call (`may_unwind_only`: a call
+// the unwind analysis cannot prove non-throwing): conditionally
+// evaluated arms are their own segments, so only a conditional's
+// condition counts here. Destructor actions lower at cleanup time,
+// never in sequence.
+bool FunctionLowerer::SegmentContainsCall(const SemNode& node,
+                                          bool may_unwind_only)
+{
+	switch (node.kind)
+	{
+	case SN_DESTRUCTOR_ACTION:
+		return false;
+	case SN_CALL_EXPRESSION:
+		if (!node.children.empty())
+		{
+			const SemNode& callee = *node.children[0];
+			if (!may_unwind_only || callee.kind != SN_CALLEE ||
+			    program_.CalleeMayUnwind(callee))
+				return true;
+		}
+		break;
+	case SN_NEW_INIT:
+	case SN_NEW_ARRAY:
+	case SN_DELETE_EXPRESSION:
+	case SN_DELETE_ARRAY:
+		return true;
+	case SN_CONSTRUCTOR_ACTION:
+		if (!node.trivial_copy && !node.trivial_init && !node.elided &&
+		    !node.children.empty() &&
+		    !node.children[0]->children.empty())
+		{
+			if (!may_unwind_only ||
+			    program_.CalleeMayUnwind(*node.children[0]->children[0]))
+				return true;
+		}
+		break;
+	case SN_CONDITIONAL_EXPRESSION:
+		return !node.children.empty() &&
+			SegmentContainsCall(*node.children[0], may_unwind_only);
+	case SN_BINARY_EXPRESSION:
+		if (node.op == OP_LAND || node.op == OP_LOR)
+			return SegmentContainsCall(*node.children[0],
+			                           may_unwind_only);
+		break;
+	default:
+		break;
+	}
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (SegmentContainsCall(*node.children[i], may_unwind_only))
+			return true;
+	return false;
+}
+
 // --- full-expression temporaries ---------------------------------------------
 
 // Evaluation-order scan deciding whether the full expression arms
-// unwind dispatch: true when some call executes while a caller-owned
-// destructible temporary is live. Callee-owned by-value argument
-// objects never register a caller cleanup, and a result temporary
-// registers only after its producing call, so neither arms alone;
-// `skip_own_cleanup` marks a by-value argument position.
-bool FunctionLowerer::ScanArmsCleanups(const SemNode& node, bool& live,
-                                       bool skip_own_cleanup) const
+// unwind dispatch: true when some call executes while a destructible
+// temporary is live. Callee-owned by-value argument objects count
+// too - the reference protects the calls of their full expression
+// even though no caller cleanup registers for them.
+bool FunctionLowerer::ScanArmsCleanups(const SemNode& node,
+                                       bool& live) const
 {
 	if (node.kind == SN_DESTRUCTOR_ACTION)
 		return false;  // lowers at cleanup time, not in sequence
@@ -912,68 +1077,81 @@ bool FunctionLowerer::ScanArmsCleanups(const SemNode& node, bool& live,
 		// Constructor arguments evaluate before the construction runs.
 		const SemNode& call = *node.children[0];
 		for (size_t i = 1; i < call.children.size(); i++)
-			if (ScanArmsCleanups(*call.children[i], live, false))
+			if (ScanArmsCleanups(*call.children[i], live))
 				return true;
 		bool emits_call = !node.trivial_copy && !node.trivial_init &&
 			!node.elided;
 		if (emits_call && live)
 			return true;
-		if (node.needs_dtor && !skip_own_cleanup)
+		if (node.needs_dtor)
 			live = true;
 		return false;
 	}
 	if (node.kind == SN_CALL_EXPRESSION && !node.children.empty())
 	{
-		const SemNode& callee = *node.children[0];
-		TypePtr fn_type;
-		if (callee.kind == SN_CALLEE)
-			fn_type = callee.type;
-		else
-		{
-			TypePtr through = RemoveTopCv(StripRef(callee.type));
-			fn_type = through->kind == TK_POINTER ? through->target
-			                                      : through;
-		}
-		if (ScanArmsCleanups(callee, live, false))
+		if (ScanArmsCleanups(*node.children[0], live))
 			return true;
 		for (size_t i = 1; i < node.children.size(); i++)
-		{
-			TypePtr param;
-			if (fn_type && fn_type->kind == TK_FUNCTION &&
-			    i - 1 < fn_type->parameters.size())
-				param = fn_type->parameters[i - 1];
-			bool callee_owned = param && !IsReferenceType(param) &&
-				RemoveTopCv(param)->kind == TK_CLASS;
-			if (ScanArmsCleanups(*node.children[i], live, callee_owned))
+			if (ScanArmsCleanups(*node.children[i], live))
 				return true;
-		}
 		if (live)
 			return true;
-		if (node.needs_dtor && !skip_own_cleanup)
+		if (node.needs_dtor)
 			live = true;
+		return false;
+	}
+	if (node.kind == SN_CONDITIONAL_EXPRESSION &&
+	    node.children.size() == 3)
+	{
+		// The arms evaluate exclusively: one arm's temporary is never
+		// live during the other arm's calls. The conditional's own
+		// result temporary never registers (its cleanup is dropped),
+		// so it does not arm later calls either.
+		if (ScanArmsCleanups(*node.children[0], live))
+			return true;
+		bool live_then = live;
+		bool live_else = live;
+		if (ScanArmsCleanups(*node.children[1], live_then) ||
+		    ScanArmsCleanups(*node.children[2], live_else))
+			return true;
+		live = live_then || live_else;
+		return false;
+	}
+	if (node.kind == SN_BINARY_EXPRESSION &&
+	    (node.op == OP_LAND || node.op == OP_LOR) &&
+	    node.children.size() == 2)
+	{
+		if (ScanArmsCleanups(*node.children[0], live))
+			return true;
+		bool live_rhs = live;
+		if (ScanArmsCleanups(*node.children[1], live_rhs))
+			return true;
+		live = live_rhs;
 		return false;
 	}
 	bool call_event = node.kind == SN_NEW_INIT ||
 		node.kind == SN_NEW_ARRAY || node.kind == SN_DELETE_EXPRESSION ||
 		node.kind == SN_DELETE_ARRAY;
 	for (size_t i = 0; i < node.children.size(); i++)
-		if (ScanArmsCleanups(*node.children[i], live, false))
+		if (ScanArmsCleanups(*node.children[i], live))
 			return true;
 	if (call_event && live)
 		return true;
-	if (node.kind == SN_CONDITIONAL_EXPRESSION && node.needs_dtor &&
-	    !skip_own_cleanup)
+	if (node.kind == SN_CONDITIONAL_EXPRESSION && node.needs_dtor)
 		live = true;
 	return false;
 }
 
-void FunctionLowerer::BeginFullExpression(const SemNode& root)
+void FunctionLowerer::BeginFullExpression(const SemNode& root,
+                                          bool open_segment)
 {
 	fe_marks_.push_back(temp_cleanups_.size());
 	fe_armed_.push_back(eh_armed_);
 	bool live = !temp_cleanups_.empty();
-	if (ScanArmsCleanups(root, live, false))
+	if (ScanArmsCleanups(root, live))
 		eh_armed_ = true;
+	if (open_segment)
+		OpenSegmentRegion(root);
 }
 
 // Destruction order is the reverse of construction; the records stay

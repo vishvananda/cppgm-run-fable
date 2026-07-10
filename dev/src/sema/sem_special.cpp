@@ -141,9 +141,14 @@ bool SubobjectsConstCopy(const ClassInfo& cls)
 	return true;
 }
 
-// The per-subobject triviality predicate of one transfer form.
+// The per-subobject triviality predicate of one transfer form. A
+// subobject with a user-provided destructor transfers through its own
+// special member (the reference keeps the member call visible instead
+// of coalescing it into the storage prefix).
 bool TransferTrivial(const ClassInfo& member, bool is_move, bool assign)
 {
+	if (member.has_user_dtor)
+		return false;
 	if (assign)
 		return is_move ? ClassHasTrivialMoveAssign(member)
 		               : ClassHasTrivialCopyAssign(member);
@@ -530,7 +535,10 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 	size_t first_suffix = 0;
 	unsigned long long span = TrivialStoragePrefix(
 		cls, is_move, assign_form, alignment, first_suffix);
-	if (span)
+	// An empty object has no bytes to transfer (the PA15 convention).
+	if (span && cls.is_empty)
+		first_suffix = cls.fields.size();
+	else if (span)
 		out.push_back(StorageCopyAction(cls, source_proto, span,
 		                                alignment));
 	else if (cls.base)

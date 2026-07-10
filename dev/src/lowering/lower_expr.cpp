@@ -159,6 +159,31 @@ void FunctionLowerer::BranchOnValue(const SemNode& node,
 		return;
 	}
 	LowerValue truth = MaterializeTruth(LowerValueExpr(node));
+	// The dispatch region closes once the branch value is secured;
+	// pending condition temporaries destroy on per-edge cleanup
+	// trampolines before the real targets.
+	if (eh_open_)
+		CloseEhRegion();
+	size_t mark = fe_marks_.empty() ? 0 : fe_marks_.back();
+	if (temp_cleanups_.size() > mark && !in_cleanup_emission_)
+	{
+		string true_cleanup = NewLabel("cond_true_cleanup");
+		string false_cleanup = NewLabel("cond_false_cleanup");
+		ReferenceLabel(true_cleanup);
+		ReferenceLabel(false_cleanup);
+		Terminate("branch " + truth.text + ", ^" + true_cleanup +
+		          ", ^" + false_cleanup);
+		OpenBlock(true_cleanup);
+		EmitTempCleanups(mark);
+		ReferenceLabel(true_label);
+		Terminate("jump ^" + true_label);
+		OpenBlock(false_cleanup);
+		EmitTempCleanups(mark);
+		ReferenceLabel(false_label);
+		Terminate("jump ^" + false_label);
+		temp_cleanups_.resize(mark);
+		return;
+	}
 	ReferenceLabel(true_label);
 	ReferenceLabel(false_label);
 	Terminate("branch " + truth.text + ", ^" + true_label + ", ^" +
@@ -177,6 +202,7 @@ void FunctionLowerer::LowerCondition(const SemNode& node,
 		string rhs_label = NewLabel("land_rhs");
 		LowerCondition(*node.children[0], rhs_label, false_label);
 		OpenBlock(rhs_label);
+		OpenSegmentRegion(*node.children[1]);
 		LowerCondition(*node.children[1], true_label, false_label);
 		return;
 	}
@@ -185,6 +211,7 @@ void FunctionLowerer::LowerCondition(const SemNode& node,
 		string rhs_label = NewLabel("lor_rhs");
 		LowerCondition(*node.children[0], true_label, rhs_label);
 		OpenBlock(rhs_label);
+		OpenSegmentRegion(*node.children[1]);
 		LowerCondition(*node.children[1], true_label, false_label);
 		return;
 	}
@@ -650,6 +677,7 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	else
 		BranchOnValue(*node.children[0], short_label, rhs_label);
 	OpenBlock(rhs_label);
+	OpenSegmentRegion(*node.children[1]);
 	size_t rhs_mark = temp_cleanups_.size();
 	LowerValue operand = LowerValueExpr(*node.children[1]);
 	string truth = NewTemp();
@@ -689,9 +717,17 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 	{
 		BranchOnValue(*node.children[0], then_label, else_label);
 		OpenBlock(then_label);
+		cond_arm_depth_++;
+		OpenSegmentRegion(*node.children[1]);
 		LowerEffect(*node.children[1]);
+		if (eh_open_)
+			CloseEhRegion();
 		CloseInto(else_label);
+		OpenSegmentRegion(*node.children[2]);
 		LowerEffect(*node.children[2]);
+		if (eh_open_)
+			CloseEhRegion();
+		cond_arm_depth_--;
 		CloseInto(end_label);
 		LowerValue value;
 		value.type = NodeType(node);
@@ -701,13 +737,21 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 	string slot = AddMatSlot("cond", LowerValueType(type));
 	BranchOnValue(*node.children[0], then_label, else_label);
 	OpenBlock(then_label);
+	cond_arm_depth_++;
+	OpenSegmentRegion(*node.children[1]);
 	string first = LowerValueAs(*node.children[1], type, LCC_INIT);
 	Emit("store " + LowerValueType(type) + " " + first + ", $" + slot);
+	if (eh_open_)
+		CloseEhRegion();
 	ReferenceLabel(end_label);
 	Terminate("jump ^" + end_label);
 	OpenBlock(else_label);
+	OpenSegmentRegion(*node.children[2]);
 	string second = LowerValueAs(*node.children[2], type, LCC_INIT);
 	Emit("store " + LowerValueType(type) + " " + second + ", $" + slot);
+	if (eh_open_)
+		CloseEhRegion();
+	cond_arm_depth_--;
 	ReferenceLabel(end_label);
 	Terminate("jump ^" + end_label);
 	OpenBlock(end_label);
@@ -730,6 +774,8 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 	{
 		OpenBlock(arm == 1 ? then_label : else_label);
 		const SemNode& operand = *node.children[arm];
+		cond_arm_depth_++;
+		OpenSegmentRegion(operand);
 		string address = LowerAddressExpr(operand);
 		TypePtr source = NodeType(operand);
 		// A derived arm adjusts to the common base result (5.16p3).
@@ -740,6 +786,9 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 				BaseClassDistance(source->named, result_type->named));
 		}
 		Emit("store ptr " + address + ", $" + slot);
+		if (eh_open_)
+			CloseEhRegion();
+		cond_arm_depth_--;
 		ReferenceLabel(end_label);
 		Terminate("jump ^" + end_label);
 	}
@@ -1085,7 +1134,7 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		TypePtr made = RemoveTopCv(node.type);
 		bool exact = TypeEquals(made, bare);
 		if (!exact && eh_armed_ && !eh_open_ && !in_cleanup_emission_ &&
-		    program_.CalleeMayUnwind(*node.children[0]->children[0]))
+		    !suppress_eh_regions_)
 			OpenEhRegion();
 		string address =
 			MaterializeTemporary(node, exact ? "arg" : "tmpobj",
@@ -1244,16 +1293,22 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 		else
 			throw OutsideBoundary("call form");
 	}
-	// A call that can unwind while destructor-protected objects are
-	// alive runs under an unwind-dispatch region. The result
-	// preservation slot allocates at region entry.
-	bool protected_call = !in_cleanup_emission_ &&
-		(eh_armed_ || (!in_lifetime_action_ && HaveCleanups())) &&
-		(!direct || program_.CalleeMayUnwind(callee));
+	// A call with armed cleanups runs under an unwind-dispatch region:
+	// live temporaries protect every call, destructible locals only
+	// calls the unwind analysis cannot prove non-throwing. The result
+	// preservation slot allocates at region entry and applies to
+	// every call of an armed full expression, dispatched or not.
+	bool lazy_wrap = !in_cleanup_emission_ && !suppress_eh_regions_ &&
+		!in_lifetime_action_ &&
+		(!temp_cleanups_.empty() ||
+		 (HaveCleanups() &&
+		  (!direct || program_.CalleeMayUnwind(callee))));
+	bool preserved = !in_cleanup_emission_ &&
+		(eh_armed_ || eh_open_ || lazy_wrap);
 	string preserve_slot;
-	if (protected_call && !eh_open_)
+	if (lazy_wrap && !eh_open_)
 		OpenEhRegion();
-	if (protected_call && !IsVoidType(fn_type->target) &&
+	if (preserved && !IsVoidType(fn_type->target) &&
 	    RemoveTopCv(fn_type->target)->kind != TK_CLASS)
 		preserve_slot = AddMatSlot("call",
 		                           LowerValueType(fn_type->target));
@@ -1325,7 +1380,11 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	}
 	// Argument-temporary registration may have closed the region; the
 	// call itself still runs protected.
-	if (protected_call && !eh_open_ && !in_cleanup_emission_)
+	if (!eh_open_ && !in_cleanup_emission_ && !suppress_eh_regions_ &&
+	    !in_lifetime_action_ &&
+	    (!temp_cleanups_.empty() ||
+	     (HaveCleanups() &&
+	      (!direct || program_.CalleeMayUnwind(callee)))))
 		OpenEhRegion();
 	if (!direct || dispatch)
 		line += IndirectCallSignature(fn_type);
@@ -1333,11 +1392,10 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	bool class_result =
 		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&
 		!IsReferenceType(fn_type->target);
-	if (protected_call && eh_open_ && !IsVoidType(fn_type->target) &&
-	    !class_result && !preserve_slot.empty())
+	if (!class_result && !preserve_slot.empty())
 	{
-		// A protected call's result survives the region in a slot (a
-		// reference result survives as its pointer).
+		// A preserved call result survives in its slot (a reference
+		// result survives as its pointer).
 		Emit("store " + return_text + " " + result.text + ", $" +
 		     preserve_slot);
 		string reloaded = NewTemp();

@@ -264,12 +264,22 @@ private:
 		const SemNode* action;  // SN_DESTRUCTOR_ACTION (no address)
 	};
 	void LowerConstructorAction(const SemNode& node);
-	void BeginFullExpression(const SemNode& root);
+	void BeginFullExpression(const SemNode& root,
+	                         bool open_segment = true);
 	void EndFullExpression();
-	bool ScanArmsCleanups(const SemNode& node, bool& live,
-	                      bool skip_own_cleanup) const;
+	bool ScanArmsCleanups(const SemNode& node, bool& live) const;
 	void EmitTempCleanups(size_t from);
 	void OpenEhRegion();
+	// Opens the dispatch region at the start of a straight-line
+	// evaluation segment (a full expression or a conditionally
+	// evaluated arm) when the segment runs a call under pending
+	// cleanups or armed temporaries.
+	void OpenSegmentRegion(const SemNode& root);
+	bool SegmentContainsCall(const SemNode& node, bool may_unwind_only);
+	// The rendered content identity of the current unwind-dispatch
+	// cleanups; regions with equal signatures share one dispatch
+	// block.
+	string CleanupSignature() const;
 	void PushCleanupScope();
 	void PopCleanupScope(bool emit);
 	void RegisterCleanup(const vector<const SemNode*>& actions);
@@ -327,6 +337,19 @@ private:
 	bool eh_open_;
 	string eh_dispatch_;
 	string eh_end_;
+	// The open region reuses an already-emitted dispatch block (its
+	// close prints only `eh_end` and stays in the current block).
+	bool eh_reused_;
+	string eh_pending_signature_;
+	// Emitted dispatch blocks by cleanup-content signature.
+	map<string, string> eh_dispatch_cache_;
+	// Conditionally evaluated value arms drop their temporaries'
+	// cleanups (the reference leaves conditional-arm temporaries
+	// undestroyed rather than tracking them across the join).
+	int cond_arm_depth_;
+	// Class return-value construction into the result object never
+	// opens unwind regions (the reference's final-action form).
+	bool suppress_eh_regions_;
 	// Lifetime-machinery calls (constructor actions, cleanups) never
 	// open unwind regions.
 	bool in_lifetime_action_;

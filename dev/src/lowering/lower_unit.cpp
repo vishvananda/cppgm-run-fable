@@ -839,10 +839,12 @@ void LowerProgram::DemandTreeCallees(const SemNode& node)
 					                child.fn_spec);
 			if (info.definition)
 			{
-				if (!info.definition->synthesized)
-					DemandFunction(info);
-				else if (demanded_trees_.insert(
-				             info.definition).second)
+				// A member the elided body odr-uses appears whether
+				// user-provided or synthesized; only the elided body
+				// itself stays unprinted.
+				DemandFunction(info);
+				if (info.definition->synthesized &&
+				    demanded_trees_.insert(info.definition).second)
 					DemandTreeCallees(*info.definition);
 			}
 		}

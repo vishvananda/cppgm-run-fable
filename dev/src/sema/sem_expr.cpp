@@ -499,6 +499,11 @@ SemValue SemExprAnalyzer::CallResult(const TypePtr& function_type)
 	// materialization point (destroyed even when the chain is
 	// effect-free); the resolved destructor pins on the node.
 	if (!IsReferenceType(result) && RemoveTopCv(result)->kind == TK_CLASS)
+	{
+		// The called function's class result is complete at the call
+		// (5.2.2p3); a class-template result instantiates here so the
+		// temporary's destructor resolves.
+		host_.RequireCompleteType(RemoveTopCv(result)->named);
 		if (const ClassInfo* cls =
 		        host_.Classes().Find(RemoveTopCv(result)->named))
 			if (host_.Classes().NeedsDestruction(*cls))
@@ -506,6 +511,7 @@ SemValue SemExprAnalyzer::CallResult(const TypePtr& function_type)
 				value.node->needs_dtor = true;
 				value.node->result_dtor = host_.MakeTemporaryDtor(*cls);
 			}
+	}
 	if (result->kind == TK_LVALUE_REFERENCE)
 	{
 		value.category = VC_LVALUE;

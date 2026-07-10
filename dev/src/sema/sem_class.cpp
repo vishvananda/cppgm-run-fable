@@ -1383,9 +1383,24 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 			for (size_t f = 0; f < cls.fields.size(); f++)
 				if (RemoveTopCv(cls.fields[f].type)->kind == TK_ENUM)
 					enum_member = true;
-			trivial_transfer = selected.kind == CK_COPY
-				? ClassHasTrivialCopyCtor(cls)
-				: ClassHasTrivialMoveCtor(cls) && !enum_member;
+			// A class with a user-provided destructor - its own or a
+			// subobject's - keeps its transfer call visible: the
+			// implicit copy or move synthesizes a real member body
+			// (the reference's shape) instead of lowering to a raw
+			// object copy at the use site.
+			bool user_dtor_transfer = cls.has_user_dtor ||
+				(cls.base && cls.base->has_user_dtor);
+			for (size_t f = 0; f < cls.fields.size(); f++)
+			{
+				const ClassInfo* member =
+					SubobjectClass(cls.fields[f].type);
+				if (member && member->has_user_dtor)
+					user_dtor_transfer = true;
+			}
+			trivial_transfer = !user_dtor_transfer &&
+				(selected.kind == CK_COPY
+					 ? ClassHasTrivialCopyCtor(cls)
+					 : ClassHasTrivialMoveCtor(cls) && !enum_member);
 			if (trivial_transfer)
 			{
 				callee_unwind_no = true;
