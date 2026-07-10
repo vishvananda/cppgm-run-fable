@@ -528,6 +528,15 @@ SemNodePtr SemBinder::MakeTemporaryDtor(const ClassInfo& cls)
 	return MakeDestructorCall(cls, false, SemNodePtr());
 }
 
+// PA26: the collected written mem-initializers of one constructor.
+struct SemBinder::MemberInitPlan
+{
+	std::map<string, const AstMemInitializer*> by_field;
+	vector<const AstMemInitializer*> base_inits;  // by base index
+	vector<Scope*> base_init_scopes;  // pack-expansion elements
+	size_t base_init_count = 0;
+};
+
 // Collects the written mem-initializers: field initializers by name,
 // base initializers by direct-base index (pack-expanded entries carry
 // their element scopes). A delegating constructor analyzes in place;

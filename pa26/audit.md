@@ -211,7 +211,9 @@ re-probed after; suites stayed green throughout (pa26 51/51, through-pa26
   `BaseAccessPath` edges, `ClassBaseEdge`.
 - `dev/src/sema/sem_node.{h,cpp}` - `base_reverse` fact.
 - `dev/src/sema/sem_binder.h` - `CheckBaseEdgeAccess` declaration; unsplice
-  a tab-joined declaration pair.
+  a tab-joined declaration pair; `MemberInitPlan` moved to its only
+  consumer (`sem_ctor.cpp`), keeping the header inside the size gate the
+  audit additions had pushed past.
 - `dev/src/lowering/lower_convert.cpp` - null-guarded displaced-base
   pointer/data-pm/function-pm conversions (`AdjustPointerGuarded`).
 - `dev/src/lowering/lower_member.cpp` - `AdjustToBase` throws on non-unique

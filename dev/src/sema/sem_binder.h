@@ -243,14 +243,9 @@ private:
 	// The callee destroys its by-value class parameters at scope exit;
 	// the action attaches as a child of the parameter node.
 	void AttachParameterDtor(SemNode& parameter);
-	// PA26: the collected written mem-initializers of one constructor.
-	struct MemberInitPlan
-	{
-		std::map<string, const AstMemInitializer*> by_field;
-		vector<const AstMemInitializer*> base_inits;  // by base index
-		vector<Scope*> base_init_scopes;  // pack-expansion elements
-		size_t base_init_count = 0;
-	};
+	// PA26: the collected written mem-initializers of one constructor
+	// (defined in sem_ctor.cpp, its only consumer).
+	struct MemberInitPlan;
 	bool CollectMemberInits(const DeferredBody& body, SemNode& item,
 	                        MemberInitPlan& plan);
 	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);
