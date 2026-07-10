@@ -206,9 +206,13 @@ struct Scope
 	// PA25: the function-template specialization a SCOPE_FUNCTION
 	// body belongs to (local-entity manglings spell it).
 	const struct FunctionSpecialization* fn_spec = 0;
-	// PA15 single inheritance: the direct base class's member scope
-	// (null otherwise); member lookup searches the base chain (10.2).
+	// PA15: the first direct base class's member scope (null
+	// otherwise); member lookup searches the base DAG (10.2).
 	Scope* class_base;
+	// PA26: the member scopes of the extra direct bases, in declaration
+	// order. Lookup searches them beside `class_base`; a name found in
+	// more than one sibling subobject is ambiguous.
+	vector<Scope*> class_extra_bases;
 	// PA18 14.6.2p3: the base was dependent in the template pattern;
 	// unqualified lookup does not search it (qualified and member
 	// -access lookup still do).

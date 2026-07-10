@@ -90,8 +90,13 @@ struct AstTemplateParameter
 
 struct AstMemInitializer
 {
+	AstMemInitializer() : pack(false) {}
+
 	AstName id;
 	AstInitializerPtr init;  // INIT_PAREN or INIT_BRACED
+	// PA26 12.6.2p15: `base(args)...` expands one mem-initializer per
+	// pack-expanded base-specifier element.
+	bool pack;
 };
 
 struct AstMemberSpecifier

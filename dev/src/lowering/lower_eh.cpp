@@ -362,9 +362,8 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 		// A derived arm adjusts to the common base result (5.16p3).
 		if (source->kind == TK_CLASS && result_type->kind == TK_CLASS)
 		{
-			address = AdjustToBase(
-				address,
-				BaseClassDistance(source->named, result_type->named));
+			address = AdjustToBase(address, source->named,
+			                       result_type->named);
 		}
 		Emit("store ptr " + address + ", $" + slot);
 		if (eh_open_)

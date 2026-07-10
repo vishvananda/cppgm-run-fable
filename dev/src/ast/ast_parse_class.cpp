@@ -527,6 +527,7 @@ bool AstParser::ParseCtorInitializer(AstDecl& decl)
 		}
 		else
 			return false;
+		init.pack = MatchSimple(OP_DOTS);
 		decl.mem_initializers.push_back(move(init));
 		decl.has_ctor_initializer = true;
 		if (!MatchSimple(OP_COMMA))

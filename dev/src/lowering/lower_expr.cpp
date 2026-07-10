@@ -1022,9 +1022,8 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 			                     true);
 		if (!exact && made->kind == TK_CLASS)
 		{
-			address = AdjustToBase(
-				address,
-				BaseClassDistance(made->named, bare->named));
+			address = AdjustToBase(address, made->named,
+			                       bare->named);
 		}
 		return address;
 	}
@@ -1053,9 +1052,8 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 			: LowerAddressExpr(node);
 		if (source->kind == TK_CLASS && bare->kind == TK_CLASS)
 		{
-			address = AdjustToBase(
-				address,
-				BaseClassDistance(source->named, bare->named));
+			address = AdjustToBase(address, source->named,
+			                       bare->named);
 		}
 		return address;
 	}
@@ -1069,8 +1067,7 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		bool exact = TypeEquals(source, bare);
 		string address =
 			MaterializeClassResult(node, exact ? "arg" : "tmpobj", "");
-		return AdjustToBase(
-			address, BaseClassDistance(source->named, bare->named));
+		return AdjustToBase(address, source->named, bare->named);
 	}
 	// 8.5.3p5: materialize a temporary with the converted value. A
 	// function source stores its plain address (the reference spells

@@ -19,7 +19,7 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA15 assignment boundary");
 }
 
-// The lookup of `name` along the object class's base chain.
+// The lookup of `name` over the object class's base DAG (10.2).
 const ScopeBinding* FindMemberBinding(TypesModel& model,
                                       const NamedTypeInfo* cls,
                                       const string& name)
@@ -27,10 +27,7 @@ const ScopeBinding* FindMemberBinding(TypesModel& model,
 	Scope* members = model.MemberScope(cls);
 	if (!members)
 		return 0;
-	for (const Scope* link = members; link; link = link->class_base)
-		if (const ScopeBinding* own = FindOwnBinding(*link, name))
-			return own;
-	return 0;
+	return ClassMemberLookup(*members, name);
 }
 
 }  // namespace
@@ -234,13 +231,27 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 	}
 	value.node->member_offset = field->offset;
 	// A using-imported member belongs to the importing class for
-	// addressing (its base sits at offset zero either way).
-	value.node->base_hops =
-		BaseClassDistance(object_entity,
-		                  host_.Model().ScopeEntity(member->home));
-	if (value.node->base_hops < 0)
-		value.node->base_hops = BaseClassDistance(
-			object_entity, host_.Model().ScopeEntity(member->owner));
+	// addressing; otherwise the object adjusts to the declaring class's
+	// subobject (the unique-path offset, PA26).
+	{
+		int hops = 0;
+		unsigned long long base_offset = 0;
+		EBasePath path = BaseSubobjectPath(
+			object_entity, host_.Model().ScopeEntity(member->home),
+			hops, base_offset);
+		if (path != BP_UNIQUE)
+			path = BaseSubobjectPath(
+				object_entity,
+				host_.Model().ScopeEntity(member->owner), hops,
+				base_offset);
+		if (path == BP_AMBIGUOUS)
+			throw runtime_error("ambiguous base class subobject");
+		if (path == BP_UNIQUE)
+		{
+			value.node->base_hops = hops;
+			value.node->base_offset = base_offset;
+		}
+	}
 	value.node->is_bit_field = field->is_bit_field;
 	value.node->bit_offset = field->bit_offset;
 	value.node->bit_width = field->bit_width;
@@ -359,8 +370,20 @@ SemValue SemExprAnalyzer::AnalyzeImplicitMember(const ScopeBinding& binding,
 		value.node->member_ref = IsReferenceType(field->type);
 		value.node->category = VC_LVALUE;
 		value.node->member_offset = field->offset;
-		value.node->base_hops = BaseClassDistance(
-			this_entity, host_.Model().ScopeEntity(binding.owner));
+		{
+			int hops = 0;
+			unsigned long long base_offset = 0;
+			EBasePath path = BaseSubobjectPath(
+				this_entity, host_.Model().ScopeEntity(binding.owner),
+				hops, base_offset);
+			if (path == BP_AMBIGUOUS)
+				throw runtime_error("ambiguous base class subobject");
+			if (path == BP_UNIQUE)
+			{
+				value.node->base_hops = hops;
+				value.node->base_offset = base_offset;
+			}
+		}
 		value.node->is_bit_field = field->is_bit_field;
 		value.node->bit_offset = field->bit_offset;
 		value.node->bit_width = field->bit_width;
@@ -778,18 +801,24 @@ void SemExprAnalyzer::AttachMethodObjectArgument(
 	const NamedTypeInfo* callee_class)
 {
 	const NamedTypeInfo* object_entity = object.type->named;
-	int hops = binding.home != owner_scope && !spec
-		? 0 : BaseClassDistance(object_entity, callee_class);
-	if (hops < 0)
-		hops = object_entity != callee_class &&
-			DerivedFromWithExtras(host_.Classes(), object_entity,
-			                      callee_class) ? 1 : 0;
+	int hops = 0;
+	unsigned long long base_offset = 0;
+	if (!(binding.home != owner_scope && !spec))
+	{
+		EBasePath path = BaseSubobjectPath(object_entity, callee_class,
+		                                   hops, base_offset);
+		if (path == BP_AMBIGUOUS)
+			throw runtime_error("ambiguous base class subobject");
+		if (path != BP_UNIQUE)
+			hops = 0;
+	}
 	if (hops > 0)
 	{
 		SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
 		adjusted->type = MakeNamedType(TK_CLASS, callee_class);
 		adjusted->category = VC_LVALUE;
 		adjusted->base_hops = hops;
+		adjusted->base_offset = base_offset;
 		adjusted->children.push_back(std::move(object.node));
 		object.node = std::move(adjusted);
 	}

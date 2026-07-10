@@ -152,10 +152,8 @@ LowerValue FunctionLowerer::ConvertPointerValue(LowerValue value,
 	    source->target->kind == TK_CLASS &&
 	    target->target->kind == TK_CLASS)
 	{
-		value.text = AdjustToBase(
-			value.text,
-			BaseClassDistance(source->target->named,
-			                  target->target->named));
+		value.text = AdjustToBase(value.text, source->target->named,
+		                          target->target->named);
 	}
 	value.type = target;
 	return value;

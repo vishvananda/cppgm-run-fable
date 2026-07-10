@@ -142,9 +142,19 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 			// A qualified call adjusts to the named class first, then
 			// to the member's owner within it (the two-projection
 			// reference shape for `super::f()` chains).
-			int prefix_hops = qualified
-				? BaseClassDistance(RemoveTopCv(object.type)->named,
-				                    target) : 0;
+			int prefix_hops = 0;
+			unsigned long long prefix_offset = 0;
+			if (qualified)
+			{
+				EBasePath path = BaseSubobjectPath(
+					RemoveTopCv(object.type)->named, target,
+					prefix_hops, prefix_offset);
+				if (path == BP_AMBIGUOUS)
+					throw runtime_error(
+						"ambiguous base class subobject");
+				if (path != BP_UNIQUE)
+					prefix_hops = 0;
+			}
 			if (prefix_hops > 0)
 			{
 				SemNodePtr adjusted =
@@ -152,6 +162,7 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 				adjusted->type = MakeNamedType(TK_CLASS, target);
 				adjusted->category = VC_LVALUE;
 				adjusted->base_hops = prefix_hops;
+				adjusted->base_offset = prefix_offset;
 				adjusted->children.push_back(std::move(object.node));
 				object.node = std::move(adjusted);
 				object.type = MakeNamedType(TK_CLASS, target);

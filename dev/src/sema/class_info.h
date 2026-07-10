@@ -164,6 +164,20 @@ struct VirtualSlot
 	bool is_final;        // 10.3p4 method-level final
 };
 
+// PA26: one direct base-class subobject row - the base's class record,
+// its byte offset inside the derived object, and the declared access.
+// Bases lay out in declaration order; empty bases occupy no storage and
+// sit at offset 0 (the empty-base optimization), every other base
+// reserves its span before the first field.
+struct ClassDirectBase
+{
+	ClassDirectBase() : cls(0), offset(0), access(MA_PUBLIC) {}
+
+	const ClassInfo* cls;
+	unsigned long long offset;
+	EMemberAccess access;
+};
+
 struct ClassInfo
 {
 	ClassInfo()
@@ -189,11 +203,15 @@ struct ClassInfo
 
 	const NamedTypeInfo* entity;
 	Scope* members;
-	const ClassInfo* base;  // single direct base subobject (offset 0)
+	// The first direct base (the primary chain: vtable inheritance and
+	// the polymorphic layer flow through it; it always sits at offset 0).
+	const ClassInfo* base;
 	EMemberAccess base_access;
-	// PA21: additional (empty) direct bases beside the primary chain -
-	// pack-expanded and variadic-recursion bases; all at offset 0.
-	vector<const NamedTypeInfo*> extra_bases;
+	// PA26: every direct base in declaration order with its resolved
+	// subobject offset (direct_bases[0].cls == base when a base exists).
+	// Extra bases must stay non-polymorphic (polymorphic multiple
+	// inheritance is PA27 territory).
+	vector<ClassDirectBase> direct_bases;
 	vector<ClassField> fields;  // declaration order
 	bool is_union;
 	bool is_empty;  // no fields and no non-empty base
@@ -338,13 +356,35 @@ bool FriendClassMatches(const NamedTypeInfo* granted,
                         const NamedTypeInfo* context);
 
 // PA21: whether `to` is `from` or one of its bases, including the
-// (empty) extra bases beside the single-inheritance chain.
+// extra direct bases beside the primary chain.
 bool DerivedFromWithExtras(const ClassRegistry& classes,
                            const NamedTypeInfo* from,
                            const NamedTypeInfo* to);
 // The link-based variant (class_record chain; no registry needed).
 bool DerivedFromWithExtrasLinked(const NamedTypeInfo* from,
                                  const NamedTypeInfo* to);
+
+// PA26: the derivation path from `from` down to its base `to` over the
+// non-virtual base DAG (link-based through class_record/base_entity).
+enum EBasePath
+{
+	BP_NONE,       // `to` is not `from` or a base of `from`
+	BP_UNIQUE,     // exactly one subobject path
+	BP_AMBIGUOUS   // `to` names more than one subobject (10.2)
+};
+
+// Resolves the path: `hops` receives the direct-base edge count and
+// `offset` the summed byte offset of the unique path. An adjustment
+// lowers as a single base-subobject projection with the total offset.
+EBasePath BaseSubobjectPath(const NamedTypeInfo* from,
+                            const NamedTypeInfo* to,
+                            int& hops, unsigned long long& offset);
+
+// PA26: `cls` and its transitive non-virtual bases, depth-first in
+// declaration order, each class once. Conversion-function collection
+// walks it (12.3.2 conversions are inherited from every base).
+void CollectClassAndBases(const ClassInfo* cls,
+                          vector<const ClassInfo*>& out);
 
 // --- layout -----------------------------------------------------------
 

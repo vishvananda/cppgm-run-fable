@@ -21,8 +21,8 @@ SemNode::SemNode(ESemNodeKind kind_in)
 	  is_string_literal(false), is_static_decl(false),
 	  is_extern_decl(false), is_thread_local_decl(false),
 	  c_linkage(false), unwind_no(false), member_offset(0),
-	  base_hops(0), is_bit_field(false), bit_offset(0), bit_width(0),
-	  member_ref(false), is_method(false), special(SF_NONE),
+	  base_hops(0), base_offset(0), is_bit_field(false), bit_offset(0),
+	  bit_width(0), member_ref(false), is_method(false), special(SF_NONE),
 	  vtable_slot(-1),
 	  inline_def(false), needs_dtor(false), trivial_init(false),
 	  elided(false), bf_plain_store(false), synth_copy(false),
@@ -215,6 +215,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.unwind_no = node.unwind_no;
 	out.member_offset = node.member_offset;
 	out.base_hops = node.base_hops;
+	out.base_offset = node.base_offset;
 	out.is_bit_field = node.is_bit_field;
 	out.bit_offset = node.bit_offset;
 	out.bit_width = node.bit_width;

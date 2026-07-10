@@ -663,9 +663,11 @@ ImplicitConversion ClassifySourceConversionFunction(
 	// beats a deduced specialization with equal sequences.
 	bool tie = false;
 	bool best_is_template = false;
-	for (const ClassInfo* link = from->named->class_record; link;
-	     link = link->base)
+	vector<const ClassInfo*> subtree;
+	CollectClassAndBases(from->named->class_record, subtree);
+	for (size_t c = 0; c < subtree.size(); c++)
 	{
+		const ClassInfo* link = subtree[c];
 		for (size_t i = 0; i < link->conversions.size(); i++)
 		{
 			const ClassConversion& conv = link->conversions[i];

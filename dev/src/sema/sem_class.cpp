@@ -67,11 +67,12 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 {
 	(void)info;
 	ClassInfo* cls = OpenClass();
-	// PA19: base-specifier packs expand per element; the first
-	// resolved base is the (single-inheritance) primary chain, and any
-	// extra bases are supported only when empty (the fixtures use
-	// empty pack-expanded bases for layout/alignment only).
+	// PA26: base-specifier packs expand per element; every resolved
+	// base joins the direct-base table in declaration order. The first
+	// base carries the primary chain (vtable slots, the polymorphic
+	// layer); extra bases must stay non-polymorphic.
 	std::vector<TypePtr> base_types;
+	std::vector<const AstBaseSpecifier*> base_specs;
 	bool saved_implicit = in_implicit_type_context_;
 	in_implicit_type_context_ = true;
 	bool any_dependent = false;
@@ -82,16 +83,13 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 			const AstBaseSpecifier& spec = decl.bases[b];
 			if (spec.is_virtual)
 				throw OutsideBoundary("virtual inheritance");
-			if (spec.has_access && b > 0)
-				throw OutsideBoundary("access-specified extra base");
 			if (BaseClauseIsDependent(spec.name))
 				any_dependent = true;
 			if (spec.pack)
-			{
 				ExpandPackBases(spec, base_types);
-				continue;
-			}
-			base_types.push_back(ResolveTypeName(spec.name));
+			else
+				base_types.push_back(ResolveTypeName(spec.name));
+			base_specs.resize(base_types.size(), &spec);
 		}
 	}
 	catch (...)
@@ -108,60 +106,66 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 			scope->base_dependent = true;
 		return;
 	}
-	for (size_t b = 1; b < base_types.size(); b++)
+	for (size_t b = 0; b < base_types.size(); b++)
 	{
-		const TypePtr& extra = base_types[b];
-		if (extra->kind == TK_CLASS)
-			EnsureTypeCompleteness(extra->named);
-		if (extra->kind != TK_CLASS || !extra->named->complete)
+		TypePtr base_type = base_types[b];
+		if (base_type->kind == TK_CLASS)
+			EnsureTypeCompleteness(base_type->named);
+		if (base_type->kind != TK_CLASS || !base_type->named->complete)
 			throw runtime_error("base class is not a complete class");
-		const ClassInfo* extra_cls = unit_.classes.Find(extra->named);
-		if (!extra_cls || !extra_cls->is_empty)
-			throw OutsideBoundary("multiple inheritance");
-		// PA21: qualified member access reaches the extra base (all
-		// empty subobjects share offset 0).
-		if (cls)
-			cls->extra_bases.push_back(extra->named);
+		ClassInfo* base_cls = unit_.classes.Find(base_type->named);
+		if (!base_cls)
+			throw runtime_error("base class record missing");
+		// 10.1p3: a class may not appear twice as a direct base.
+		for (size_t prior = 0; prior < b; prior++)
+			if (base_types[prior]->named == base_type->named)
+				throw runtime_error("duplicate direct base class");
+		if (b > 0 && base_cls->is_polymorphic)
+			throw OutsideBoundary("polymorphic multiple inheritance");
+		const AstBaseSpecifier& spec = *base_specs[b];
+		ClassDirectBase row;
+		row.cls = base_cls;
+		// 11.2p2: the default base access is private for `class` keys
+		// and public otherwise.
+		if (spec.has_access)
+			row.access = spec.access == KW_PRIVATE ? MA_PRIVATE
+				: spec.access == KW_PROTECTED ? MA_PROTECTED : MA_PUBLIC;
+		else
+			row.access =
+				decl.class_key == KW_CLASS ? MA_PRIVATE : MA_PUBLIC;
+		cls->direct_bases.push_back(row);
+		if (b == 0)
+		{
+			cls->base = base_cls;
+			cls->base_access = row.access;
+			model_.MutableInfo(info)->base_entity = base_cls->entity;
+			// Base members become reachable through unqualified and
+			// qualified member lookup (10.2 over the base DAG).
+			scope->class_base = base_cls->members;
+		}
+		else
+			scope->class_extra_bases.push_back(base_cls->members);
 	}
-	const AstBaseSpecifier& base = decl.bases[0];
-	TypePtr base_type = base_types[0];
-	if (base_type->kind == TK_CLASS)
-		EnsureTypeCompleteness(base_type->named);
-	if (base_type->kind != TK_CLASS || !base_type->named->complete)
-		throw runtime_error("base class is not a complete class");
-	ClassInfo* base_cls = unit_.classes.Find(base_type->named);
-	if (!base_cls)
-		throw runtime_error("base class record missing");
-	cls->base = base_cls;
-	model_.MutableInfo(info)->base_entity = base_cls->entity;
-	// 11.2p2: the default base access is private for `class` keys and
-	// public otherwise.
-	if (base.has_access)
-		cls->base_access = base.access == KW_PRIVATE ? MA_PRIVATE
-			: base.access == KW_PROTECTED ? MA_PROTECTED : MA_PUBLIC;
-	else
-		cls->base_access =
-			decl.class_key == KW_CLASS ? MA_PRIVATE : MA_PUBLIC;
 	// 8.5.1p1: a class with bases is not an aggregate.
 	cls->is_aggregate = false;
-	// Base members become reachable through unqualified and qualified
-	// member lookup (10.2 subset: single inheritance, no hiding merge).
-	scope->class_base = base_cls->members;
 	// PA18 14.6.2p3: a base spelled with a template parameter is
 	// dependent; the instantiated scope remembers it so unqualified
 	// lookup skips the base subtree.
 	if (instantiating_ && any_dependent)
 		scope->base_dependent = true;
-	// PA17: the derived class inherits the base's vtable slots (an
-	// overrider replaces in place) and the virtual-destructor facts.
-	// Introducing the first vpointer over a non-empty non-polymorphic
-	// base would need base-subobject pointer adjustment (out of scope).
-	cls->vslots = base_cls->vslots;
-	cls->dtor_slot = base_cls->dtor_slot;
-	if (cls->declares_virtual && !base_cls->is_polymorphic &&
-	    !base_cls->is_empty)
-		throw OutsideBoundary("vpointer introduction over a non-empty "
-		                      "non-polymorphic base");
+	// PA17: the derived class inherits the first base's vtable slots
+	// (an overrider replaces in place) and the virtual-destructor
+	// facts. Introducing the first vpointer over a non-empty
+	// non-polymorphic base would need base-subobject pointer
+	// adjustment (out of scope).
+	cls->vslots = cls->base->vslots;
+	cls->dtor_slot = cls->base->dtor_slot;
+	if (cls->declares_virtual && !cls->base->is_polymorphic)
+		for (size_t b = 0; b < cls->direct_bases.size(); b++)
+			if (!cls->direct_bases[b].cls->is_empty)
+				throw OutsideBoundary(
+					"vpointer introduction over a non-empty "
+					"non-polymorphic base");
 	BeginClassLayout(*cls);
 }
 
@@ -1220,12 +1224,21 @@ SemNodePtr SemBinder::ThisFieldExpr(const ClassField& field)
 	return member;
 }
 
-SemNodePtr SemBinder::ThisBaseAddress(const ClassInfo& cls)
+SemNodePtr SemBinder::ThisBaseAddress(const ClassInfo& cls,
+                                      size_t base_index)
 {
+	const ClassInfo* base = cls.base;
+	unsigned long long offset = 0;
+	if (base_index < cls.direct_bases.size())
+	{
+		base = cls.direct_bases[base_index].cls;
+		offset = cls.direct_bases[base_index].offset;
+	}
 	SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
-	member->type = MakeNamedType(TK_CLASS, cls.base->entity);
+	member->type = MakeNamedType(TK_CLASS, base->entity);
 	member->category = VC_LVALUE;
 	member->base_hops = 1;
+	member->base_offset = offset;
 	member->children.push_back(ThisObjectExpr());
 	return AddressOfNode(std::move(member));
 }

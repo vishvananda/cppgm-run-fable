@@ -399,15 +399,17 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 	// trivial: constructor forms check copy/move constructors, assign
 	// forms check copy/move assignments (12.8p25/p28).
 	unsigned long long end = 0;
-	if (cls.base)
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
 	{
-		if (!TransferTrivial(*cls.base, is_move, assign_form))
+		const ClassDirectBase& row = cls.direct_bases[b];
+		if (!TransferTrivial(*row.cls, is_move, assign_form))
 			return 0;
-		if (!cls.base->is_empty)
+		if (!row.cls->is_empty)
 		{
-			end = cls.base->size;
-			if (cls.base->alignment > alignment)
-				alignment = cls.base->alignment;
+			if (row.offset + row.cls->size > end)
+				end = row.offset + row.cls->size;
+			if (row.cls->alignment > alignment)
+				alignment = row.cls->alignment;
 		}
 	}
 	for (size_t i = 0; i < cls.fields.size(); i++)
@@ -442,56 +444,64 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 	return cls.size;
 }
 
-// The base subobject transfers through its own special member.
+// The base subobjects transfer through their own special members, in
+// declaration order (12.8p28 / 12.6.2p10).
 void SemBinder::AppendBaseTransfer(const ClassInfo& cls, bool is_move,
                                    bool assign_form,
                                    const SemNode& source_proto,
                                    vector<SemNodePtr>& out)
 {
 	EValueCategory category = is_move ? VC_XVALUE : VC_LVALUE;
-	SemNodePtr base_source = MakeSemNode(SN_MEMBER_EXPRESSION);
-	base_source->type = MakeNamedType(TK_CLASS, cls.base->entity);
-	base_source->category = category;
-	base_source->base_hops = 1;
-	base_source->children.push_back(CloneSemNode(source_proto));
-	if (assign_form)
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
 	{
-		SemValue lhs;
-		lhs.node = MakeSemNode(SN_MEMBER_EXPRESSION);
-		lhs.node->type = MakeNamedType(TK_CLASS, cls.base->entity);
-		lhs.node->category = VC_LVALUE;
-		lhs.node->base_hops = 1;
-		lhs.node->children.push_back(ThisObjectExpr());
-		lhs.type = lhs.node->type;
-		lhs.category = VC_LVALUE;
-		SemValue rhs;
-		rhs.node = std::move(base_source);
-		rhs.type = lhs.type;
-		rhs.category = category;
-		vector<SemValue> operands;
-		operands.push_back(std::move(lhs));
-		operands.push_back(std::move(rhs));
-		SemValue result;
-		if (!analyzer_.ResolveOperatorCall("=", operands, true, result))
-			throw runtime_error("no base assignment operator");
-		SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
-		statement->children.push_back(std::move(result.node));
-		out.push_back(std::move(statement));
-		return;
+		const ClassDirectBase& row = cls.direct_bases[b];
+		SemNodePtr base_source = MakeSemNode(SN_MEMBER_EXPRESSION);
+		base_source->type = MakeNamedType(TK_CLASS, row.cls->entity);
+		base_source->category = category;
+		base_source->base_hops = 1;
+		base_source->base_offset = row.offset;
+		base_source->children.push_back(CloneSemNode(source_proto));
+		if (assign_form)
+		{
+			SemValue lhs;
+			lhs.node = MakeSemNode(SN_MEMBER_EXPRESSION);
+			lhs.node->type = MakeNamedType(TK_CLASS, row.cls->entity);
+			lhs.node->category = VC_LVALUE;
+			lhs.node->base_hops = 1;
+			lhs.node->base_offset = row.offset;
+			lhs.node->children.push_back(ThisObjectExpr());
+			lhs.type = lhs.node->type;
+			lhs.category = VC_LVALUE;
+			SemValue rhs;
+			rhs.node = std::move(base_source);
+			rhs.type = lhs.type;
+			rhs.category = category;
+			vector<SemValue> operands;
+			operands.push_back(std::move(lhs));
+			operands.push_back(std::move(rhs));
+			SemValue result;
+			if (!analyzer_.ResolveOperatorCall("=", operands, true,
+			                                   result))
+				throw runtime_error("no base assignment operator");
+			SemNodePtr statement = MakeSemNode(SN_EXPRESSION_STATEMENT);
+			statement->children.push_back(std::move(result.node));
+			out.push_back(std::move(statement));
+			continue;
+		}
+		SemValue source;
+		source.node = std::move(base_source);
+		source.type = MakeNamedType(TK_CLASS, row.cls->entity);
+		source.category = category;
+		vector<SemValue> args;
+		args.push_back(std::move(source));
+		int index = ResolveClassConstructor(*row.cls, args, false,
+		                                    "base subobject");
+		vector<SemNodePtr> arg_nodes;
+		arg_nodes.push_back(std::move(args[0].node));
+		out.push_back(MakeConstructorCall(*row.cls, index, true,
+		                                  ThisBaseAddress(cls, b),
+		                                  std::move(arg_nodes)));
 	}
-	SemValue source;
-	source.node = std::move(base_source);
-	source.type = MakeNamedType(TK_CLASS, cls.base->entity);
-	source.category = category;
-	vector<SemValue> args;
-	args.push_back(std::move(source));
-	int index = ResolveClassConstructor(*cls.base, args, false,
-	                                    "base subobject");
-	vector<SemNodePtr> arg_nodes;
-	arg_nodes.push_back(std::move(args[0].node));
-	out.push_back(MakeConstructorCall(*cls.base, index, true,
-	                                  ThisBaseAddress(cls),
-	                                  std::move(arg_nodes)));
 }
 
 // Per-element transfer of a class array member through the element

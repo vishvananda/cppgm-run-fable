@@ -710,17 +710,9 @@ EFundamentalType CombineSimpleTypeSpecifiers(
 	}
 }
 
-int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to)
-{
-	int distance = 0;
-	for (const NamedTypeInfo* link = from; link; link = link->base_entity)
-	{
-		if (link == to)
-			return distance;
-		distance++;
-	}
-	return -1;
-}
+// BaseClassDistance lives in class_info.cpp: with multiple direct bases
+// (PA26) the derivation relation is a DAG walk over the class records,
+// not a chase up the base_entity chain.
 
 // PA25 18.9: the class template named initializer_list declared
 // directly inside the top-level namespace std.

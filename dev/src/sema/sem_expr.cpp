@@ -885,8 +885,17 @@ SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 		// std::initializer_list, the braced operand stays a list for
 		// overload resolution (5.17p9 otherwise builds the temporary).
 		const NamedTypeInfo* named = RemoveTopCv(lhs.type)->named;
-		for (const Scope* link = host_.Model().MemberScope(named);
-		     link && !braced_assign_list; link = link->class_base)
+		vector<const Scope*> worklist;
+		if (const Scope* members = host_.Model().MemberScope(named))
+			worklist.push_back(members);
+		for (size_t w = 0; w < worklist.size() && !braced_assign_list;
+		     w++)
+		{
+			const Scope* link = worklist[w];
+			if (link->class_base)
+				worklist.push_back(link->class_base);
+			for (size_t b = 0; b < link->class_extra_bases.size(); b++)
+				worklist.push_back(link->class_extra_bases[b]);
 			if (const ScopeBinding* assign =
 			        FindOwnBinding(*link, "operator ="))
 			{
@@ -902,6 +911,7 @@ SemValue SemExprAnalyzer::AnalyzeAssignment(const AstExpr& expr)
 					                         0))
 						braced_assign_list = true;
 			}
+		}
 		if (braced_assign_list)
 		{
 			rhs.braced_list = true;

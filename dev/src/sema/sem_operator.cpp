@@ -44,8 +44,11 @@ TypePtr BuiltinOperandType(const SemValue& value)
 	TopCv(value.type, source_const, source_volatile);
 	const ClassConversion* found = 0;
 	int found_score = 3;
-	for (const ClassInfo* link = bare->named->class_record; link;
-	     link = link->base)
+	vector<const ClassInfo*> subtree;
+	CollectClassAndBases(bare->named->class_record, subtree);
+	for (size_t c = 0; c < subtree.size(); c++)
+	{
+		const ClassInfo* link = subtree[c];
 		for (size_t i = 0; i < link->conversions.size(); i++)
 		{
 			const ClassConversion& conv = link->conversions[i];
@@ -63,6 +66,7 @@ TypePtr BuiltinOperandType(const SemValue& value)
 				found_score = score;
 			}
 		}
+	}
 	if (!found)
 		return TypePtr();
 	TypePtr result = IsReferenceType(found->result)
@@ -334,16 +338,16 @@ void SemExprAnalyzer::CollectOperatorCandidates(
 		host_.RequireCompleteType(operands[0].type->named);
 		Scope* members =
 			host_.Model().MemberScope(operands[0].type->named);
-		for (const Scope* link = members; link;
-		     link = link->class_base)
-			if (const ScopeBinding* own = FindOwnBinding(*link, op_name))
+		// Derived declarations hide base ones over the base DAG (10.2).
+		if (members)
+			if (const ScopeBinding* own =
+			        ClassMemberLookup(*members, op_name))
 			{
 				AppendBindingOverloads(*own, true, true, out, seen);
 				// PA21: member operator templates deduce against the
 				// explicit operands.
 				AppendMemberTemplateCandidates(*own, operands, out,
 				                               seen);
-				break;  // derived declarations hide base ones (10.2)
 			}
 	}
 	if (member_only)
@@ -711,15 +715,25 @@ void SemExprAnalyzer::AppendOperatorOperands(
 {
 	if (is_member)
 	{
-		int hops = member_owner
-			? BaseClassDistance(operands[0].type->named, member_owner)
-			: 0;
+		int hops = 0;
+		unsigned long long base_offset = 0;
+		if (member_owner)
+		{
+			EBasePath path = BaseSubobjectPath(
+				operands[0].type->named, member_owner, hops,
+				base_offset);
+			if (path == BP_AMBIGUOUS)
+				throw runtime_error("ambiguous base class subobject");
+			if (path != BP_UNIQUE)
+				hops = 0;
+		}
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
 			adjusted->type = MakeNamedType(TK_CLASS, member_owner);
 			adjusted->category = VC_LVALUE;
 			adjusted->base_hops = hops;
+			adjusted->base_offset = base_offset;
 			adjusted->children.push_back(std::move(operands[0].node));
 			operands[0].node = std::move(adjusted);
 		}
@@ -820,9 +834,8 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 	}
 	const ScopeBinding* member = 0;
 	Scope* members = host_.Model().MemberScope(object.type->named);
-	for (const Scope* link = members; link; link = link->class_base)
-		if ((member = FindOwnBinding(*link, "operator ()")))
-			break;
+	if (members)
+		member = ClassMemberLookup(*members, "operator ()");
 	if (!member || member->kind != SB_FUNCTION)
 	{
 		// 13.3.1.1.2: a conversion function to pointer (or reference)
@@ -831,7 +844,11 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 		TypePtr bare = RemoveTopCv(object.type);
 		host_.RequireCompleteType(bare->named);
 		const ClassInfo* cls = host_.Classes().Find(bare->named);
-		for (const ClassInfo* link = cls; link; link = link->base)
+		vector<const ClassInfo*> subtree;
+		CollectClassAndBases(cls, subtree);
+		for (size_t c = 0; c < subtree.size(); c++)
+		{
+			const ClassInfo* link = subtree[c];
 			for (size_t i = 0; i < link->conversions.size(); i++)
 			{
 				const ClassConversion& conversion = link->conversions[i];
@@ -865,6 +882,7 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 						std::move(args[a].node));
 				return value;
 			}
+		}
 		throw runtime_error("object is not callable");
 	}
 	host_.CheckMemberAccess(member->home, member->access, "operator ()");

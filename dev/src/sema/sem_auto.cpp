@@ -477,14 +477,20 @@ void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 		// either name, argument-dependent lookup otherwise (6.5.4p1).
 		EnsureTypeCompleteness(range_bare->named);
 		bool member_form = false;
-		for (const Scope* link = model_.MemberScope(range_bare->named);
-		     link; link = link->class_base)
+		vector<const Scope*> base_walk;
+		if (Scope* members = model_.MemberScope(range_bare->named))
+			base_walk.push_back(members);
+		for (size_t w = 0; w < base_walk.size() && !member_form; w++)
+		{
+			const Scope* link = base_walk[w];
+			if (link->class_base)
+				base_walk.push_back(link->class_base);
+			for (size_t b = 0; b < link->class_extra_bases.size(); b++)
+				base_walk.push_back(link->class_extra_bases[b]);
 			if (FindOwnBinding(*link, "begin") ||
 			    FindOwnBinding(*link, "end"))
-			{
 				member_form = true;
-				break;
-			}
+		}
 		if (!member_form && IsStdInitializerList(range_bare, 0))
 		{
 			// PA25: the builtin record iterates by index over its

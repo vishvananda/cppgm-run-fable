@@ -212,10 +212,13 @@ struct SemNode
 
 	// --- PA15 object-model facts (never printed by the PA12 dump) ---
 	// SN_MEMBER_EXPRESSION: resolved layout of the named field. The
-	// address is children[0]'s address plus `base_hops` base-subobject
-	// projections (all at offset 0) and then `member_offset` bytes.
+	// address is children[0]'s address plus one base-subobject
+	// projection of `base_offset` bytes when `base_hops` is positive
+	// (the summed offset of the unique derivation path, PA26) and then
+	// `member_offset` bytes.
 	unsigned long long member_offset;
 	int base_hops;
+	unsigned long long base_offset;
 	bool is_bit_field;
 	unsigned long long bit_offset;  // within the unit at member_offset
 	unsigned long long bit_width;

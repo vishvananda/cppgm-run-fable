@@ -44,24 +44,38 @@ bool BindingPassesFilter(const ScopeBinding& binding,
 	}
 }
 
-// 10.2 single-inheritance member lookup: the class's own declarations
-// hide base declarations; otherwise the search continues up the base
-// chain.
+// 10.2 member lookup over the non-virtual base DAG: the class's own
+// declarations hide base declarations; otherwise every direct base
+// subtree is searched, and distinct declarations found in sibling
+// subtrees make the name ambiguous.
 const ScopeBinding* ClassChainLookup(const Scope& scope, const string& name,
                                      EScopeLookupFilter filter,
                                      bool skip_dependent_base = false)
 {
-	for (const Scope* link = &scope; link; link = link->class_base)
+	const ScopeBinding* own = FindOwnBinding(scope, name);
+	if (own && BindingPassesFilter(*own, filter))
+		return own;
+	// PA18 14.6.2p3: an unqualified name does not search a base that
+	// was dependent in the template pattern.
+	if (skip_dependent_base && scope.base_dependent)
+		return 0;
+	const ScopeBinding* found = 0;
+	for (size_t b = 0; b < scope.class_extra_bases.size() + 1; b++)
 	{
-		const ScopeBinding* own = FindOwnBinding(*link, name);
-		if (own && BindingPassesFilter(*own, filter))
-			return own;
-		// PA18 14.6.2p3: an unqualified name does not search a base
-		// that was dependent in the template pattern.
-		if (skip_dependent_base && link->base_dependent)
-			break;
+		const Scope* base = b == 0 ? scope.class_base
+		                           : scope.class_extra_bases[b - 1];
+		if (!base)
+			continue;
+		const ScopeBinding* member = ClassChainLookup(
+			*base, name, filter, skip_dependent_base);
+		if (!member)
+			continue;
+		if (found && found != member)
+			throw AmbiguousLookupError("ambiguous member lookup of " +
+			                           name);
+		found = member;
 	}
-	return 0;
+	return found;
 }
 
 const Scope* EnclosingNamespace(const Scope* scope)
@@ -282,6 +296,11 @@ const ScopeBinding* QualifiedNamespaceSearch(const Scope& scope,
 }
 
 }  // namespace
+
+const ScopeBinding* ClassMemberLookup(const Scope& scope, const string& name)
+{
+	return ClassChainLookup(scope, name, SLF_ANY);
+}
 
 const ScopeBinding* QualifiedLookup(const Scope& scope, const string& name,
                                     EScopeLookupFilter filter)

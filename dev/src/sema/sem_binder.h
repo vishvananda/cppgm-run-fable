@@ -254,6 +254,10 @@ private:
 	void AppendBaseDefaultInit(const ClassInfo& cls,
 	                           vector<SemNodePtr>& out,
 	                           bool syntactic);
+	// One direct base's implicit default-initialization (PA26).
+	void AppendOneBaseDefaultInit(const ClassInfo& cls, size_t base_index,
+	                              vector<SemNodePtr>& out,
+	                              bool syntactic);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,
@@ -263,7 +267,10 @@ private:
 	void CheckListInitNarrowing(const SemValue& value, const TypePtr& dest);
 	SemNodePtr ThisObjectExpr();
 	SemNodePtr ThisFieldExpr(const ClassField& field);
-	SemNodePtr ThisBaseAddress(const ClassInfo& cls);
+	// The address of the direct base subobject at `base_index` of the
+	// class's direct-base table (PA26; index 0 is the primary base).
+	SemNodePtr ThisBaseAddress(const ClassInfo& cls,
+	                           size_t base_index = 0);
 	SemNodePtr AddressOfNode(SemNodePtr operand);
 	SemNodePtr SubscriptNode(SemNodePtr array, unsigned long long index);
 	SemNodePtr MemberAssignAction(const ClassField& field,
@@ -528,6 +535,11 @@ private:
 	// `Base...` in a base clause: per-element base types.
 	void ExpandPackBases(const AstBaseSpecifier& base,
 	                     std::vector<TypePtr>& out);
+	// `Base(args)...` mem-initializer (PA26): per-element resolved base
+	// type plus the element scope the arguments analyze under.
+	void ExpandPackMemInitTargets(
+		const AstMemInitializer& mem,
+		std::vector<std::pair<TypePtr, Scope*>>& out);
 	// Aggregate braced init whose items contain pack expansions.
 	void AppendExpandedAggregateInit(const ClassInfo& cls,
 	                                 const SemNode& target_proto,

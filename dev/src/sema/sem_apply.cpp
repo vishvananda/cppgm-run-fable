@@ -252,14 +252,19 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 			                    "missing");
 		const ClassConversion& fn = cls->conversions[conv.conv_index];
 		host_.CheckMemberAccess(cls->members, fn.access, fn.name);
-		int hops = BaseClassDistance(RemoveTopCv(value.type)->named,
-		                             conv.conv_class);
+		int hops = 0;
+		unsigned long long base_offset = 0;
+		if (BaseSubobjectPath(RemoveTopCv(value.type)->named,
+		                      conv.conv_class, hops,
+		                      base_offset) != BP_UNIQUE)
+			hops = 0;
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
 			adjusted->type = MakeNamedType(TK_CLASS, conv.conv_class);
 			adjusted->category = VC_LVALUE;
 			adjusted->base_hops = hops;
+			adjusted->base_offset = base_offset;
 			adjusted->children.push_back(std::move(value.node));
 			value.node = std::move(adjusted);
 		}
@@ -417,8 +422,11 @@ bool SemExprAnalyzer::ConvertClassOperand(SemValue& value)
 	TopCv(value.type, source_const, source_volatile);
 	const ClassConversion* found = 0;
 	int found_score = 3;
-	for (const ClassInfo* link = bare->named->class_record; link;
-	     link = link->base)
+	vector<const ClassInfo*> subtree;
+	CollectClassAndBases(bare->named->class_record, subtree);
+	for (size_t c = 0; c < subtree.size(); c++)
+	{
+		const ClassInfo* link = subtree[c];
 		for (size_t i = 0; i < link->conversions.size(); i++)
 		{
 			const ClassConversion& conv = link->conversions[i];
@@ -438,6 +446,7 @@ bool SemExprAnalyzer::ConvertClassOperand(SemValue& value)
 				found_score = score;
 			}
 		}
+	}
 	if (!found)
 		return false;
 	TypePtr dest = IsReferenceType(found->result)

@@ -204,9 +204,14 @@ private:
 	// when the store binds the reference itself).
 	string MemberAddress(const SemNode& node, bool skip_ref_load = false);
 	// A derived-to-base address adjustment: one base-subobject
-	// projection regardless of derivation depth (every base sits at
-	// offset zero without multiple inheritance).
-	string AdjustToBase(const string& address, int hops);
+	// projection regardless of derivation depth, carrying the unique
+	// derivation path's total byte offset (PA26). The `from`/`to` form
+	// resolves the path from the typed class records; the hops form
+	// renders a sema-resolved adjustment.
+	string AdjustToBase(const string& address, const NamedTypeInfo* from,
+	                    const NamedTypeInfo* to);
+	string AdjustToBaseHops(const string& address, int hops,
+	                        unsigned long long offset);
 	// Registers a by-value class parameter's attached destructor
 	// actions as function-scope cleanups (the callee owns them).
 	void RegisterParameterCleanup(const SemNode& parameter);

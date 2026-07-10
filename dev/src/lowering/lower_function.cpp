@@ -717,9 +717,8 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 		TypePtr referee = RemoveTopCv(declared->target);
 		if (source && source->kind == TK_CLASS &&
 		    referee->kind == TK_CLASS)
-			address = AdjustToBase(
-				address,
-				BaseClassDistance(source->named, referee->named));
+			address = AdjustToBase(address, source->named,
+			                       referee->named);
 		Emit("store ptr " + address + ", $" + slot);
 		EndFullExpression();
 		return;
@@ -995,9 +994,8 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 		TypePtr referee = RemoveTopCv(return_type_->target);
 		if (source->kind == TK_CLASS && referee->kind == TK_CLASS)
 		{
-			address = AdjustToBase(
-				address,
-				BaseClassDistance(source->named, referee->named));
+			address = AdjustToBase(address, source->named,
+			                       referee->named);
 		}
 		EndFullExpression();
 		EmitEhReturnUnwind();

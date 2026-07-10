@@ -100,14 +100,26 @@ string MaskText(unsigned long long mask, const TypePtr& type)
 
 // --- member addressing -----------------------------------------------------
 
-string FunctionLowerer::AdjustToBase(const string& address, int hops)
+string FunctionLowerer::AdjustToBaseHops(const string& address, int hops,
+                                         unsigned long long offset)
 {
 	if (hops <= 0)
 		return address;
 	string hopped = NewTemp();
 	Emit(hopped + " = index i8 [projection=base_subobject] " + address +
-	     ", 0");
+	     ", " + to_string(offset));
 	return hopped;
+}
+
+string FunctionLowerer::AdjustToBase(const string& address,
+                                     const NamedTypeInfo* from,
+                                     const NamedTypeInfo* to)
+{
+	int hops = 0;
+	unsigned long long offset = 0;
+	if (BaseSubobjectPath(from, to, hops, offset) != BP_UNIQUE)
+		return address;
+	return AdjustToBaseHops(address, hops, offset);
 }
 
 string FunctionLowerer::MemberAddress(const SemNode& node,
@@ -121,8 +133,8 @@ string FunctionLowerer::MemberAddress(const SemNode& node,
 	    object.has_op && !object.children.empty() &&
 	    object.children[0]->captured_this && hops == 0)
 		hops = 1;
-	string base = AdjustToBase(LowerAddressExpr(*node.children[0]),
-	                           hops);
+	string base = AdjustToBaseHops(LowerAddressExpr(*node.children[0]),
+	                               hops, node.base_offset);
 	if (!node.name.empty())
 	{
 		string field = NewTemp();
@@ -677,8 +689,7 @@ void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
 	TypePtr source_type = RemoveTopCv(StripRef(source.type));
 	if (source_type->kind == TK_CLASS)
 	{
-		src = AdjustToBase(
-			src, BaseClassDistance(source_type->named, cls_type->named));
+		src = AdjustToBase(src, source_type->named, cls_type->named);
 	}
 	if (empty)
 		return;

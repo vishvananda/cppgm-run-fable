@@ -95,8 +95,12 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 		// reference views the base-class subobject.
 		TypePtr from = RemoveTopCv(value.type);
 		TypePtr to = RemoveTopCv(referee);
-		int hops = from->kind == TK_CLASS && to->kind == TK_CLASS
-			? BaseClassDistance(from->named, to->named) : -1;
+		int hops = -1;
+		unsigned long long base_offset = 0;
+		if (from->kind == TK_CLASS && to->kind == TK_CLASS &&
+		    BaseSubobjectPath(from->named, to->named, hops,
+		                      base_offset) != BP_UNIQUE)
+			hops = -1;
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
@@ -104,6 +108,7 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 			adjusted->category = value.category == VC_PRVALUE
 				? VC_XVALUE : value.category;
 			adjusted->base_hops = hops;
+			adjusted->base_offset = base_offset;
 			adjusted->children.push_back(std::move(value.node));
 			value.node = std::move(adjusted);
 			value.type = to;

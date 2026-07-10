@@ -56,3 +56,9 @@ const ScopeBinding* UnqualifiedLookup(const Scope* from, const string& name,
 // bindings only.
 const ScopeBinding* QualifiedLookup(const Scope& scope, const string& name,
                                     EScopeLookupFilter filter);
+
+// PA26 10.2: member lookup of `name` in a class member scope and its
+// non-virtual base DAG (own declarations hide base ones). Throws
+// AmbiguousLookupError when distinct declarations are reachable in
+// sibling base subobjects.
+const ScopeBinding* ClassMemberLookup(const Scope& scope, const string& name);

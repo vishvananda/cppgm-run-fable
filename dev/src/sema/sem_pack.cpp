@@ -338,6 +338,50 @@ void SemBinder::ExpandTemplateArgumentPack(TemplateInfo& tmpl,
 	}
 }
 
+// Expansion of one `Base(args)...` mem-initializer (PA26 12.6.2p15):
+// the initializer id and its arguments mention the same packs; each
+// element re-resolves the id under the element scope. The caller
+// analyzes the arguments under the returned scope.
+void SemBinder::ExpandPackMemInitTargets(
+	const AstMemInitializer& mem,
+	std::vector<std::pair<TypePtr, Scope*>>& out)
+{
+	PackMentions mentions;
+	CollectFromName(mem.id, current_, mentions);
+	if (mem.init)
+	{
+		if (mem.init->kind == INIT_PAREN)
+			for (size_t i = 0; i < mem.init->args.size(); i++)
+				CollectFromExpr(*mem.init->args[i], current_, mentions);
+		else if (mem.init->kind == INIT_BRACED && mem.init->expr)
+			for (size_t i = 0;
+			     i < mem.init->expr->arguments.size(); i++)
+				CollectFromExpr(*mem.init->expr->arguments[i], current_,
+				                mentions);
+	}
+	if (mentions.packs.empty() || PacksAreAbstract(mentions))
+		throw runtime_error("mem-initializer pack expansion names no "
+		                    "expandable pack");
+	size_t length = PackExpansionLength(mentions.packs);
+	for (size_t k = 0; k < length; k++)
+	{
+		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		Scope* saved = current_;
+		current_ = element_scope;
+		try
+		{
+			out.push_back(std::make_pair(ResolveTypeName(mem.id),
+			                             element_scope));
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+	}
+}
+
 // Expansion of one `Base...` base-specifier: the base name re-resolves
 // once per element.
 void SemBinder::ExpandPackBases(const AstBaseSpecifier& base,

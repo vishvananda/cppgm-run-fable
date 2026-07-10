@@ -50,6 +50,21 @@ bool FactStore(const ClassInfo& info, unsigned fact, bool value)
 	return value;
 }
 
+// The direct bases a subobject-fact walk traverses: the PA26 table
+// when present, the primary link otherwise.
+size_t DirectBaseCount(const ClassInfo& info)
+{
+	if (!info.direct_bases.empty())
+		return info.direct_bases.size();
+	return info.base ? 1 : 0;
+}
+
+const ClassInfo* DirectBaseAt(const ClassInfo& info, size_t index)
+{
+	return info.direct_bases.empty() ? info.base
+	                                 : info.direct_bases[index].cls;
+}
+
 }  // namespace
 
 void InvalidateClassFacts()
@@ -66,9 +81,9 @@ bool DerivedFromWithExtras(const ClassRegistry& classes,
 		if (at == to)
 			return true;
 		if (const ClassInfo* info = classes.Find(at))
-			for (size_t i = 0; i < info->extra_bases.size(); i++)
-				if (DerivedFromWithExtras(classes,
-				                          info->extra_bases[i], to))
+			for (size_t i = 1; i < info->direct_bases.size(); i++)
+				if (DerivedFromWithExtras(
+				        classes, info->direct_bases[i].cls->entity, to))
 					return true;
 	}
 	return false;
@@ -92,13 +107,98 @@ bool DerivedFromWithExtrasLinked(const NamedTypeInfo* from,
 		if (at == to)
 			return true;
 		if (at->class_record)
-			for (size_t i = 0;
-			     i < at->class_record->extra_bases.size(); i++)
+			for (size_t i = 1;
+			     i < at->class_record->direct_bases.size(); i++)
 				if (DerivedFromWithExtrasLinked(
-				        at->class_record->extra_bases[i], to))
+				        at->class_record->direct_bases[i].cls->entity,
+				        to))
 					return true;
 	}
 	return false;
+}
+
+namespace {
+
+// Accumulates every derivation path from `from` to `to`, keeping the
+// edge count and summed byte offset of each. Non-virtual bases only, so
+// two paths always mean two distinct subobjects.
+void CollectBasePaths(const NamedTypeInfo* from, const NamedTypeInfo* to,
+                      int hops, unsigned long long offset,
+                      vector<std::pair<int, unsigned long long>>& found)
+{
+	if (from == to)
+	{
+		found.push_back(std::make_pair(hops, offset));
+		return;
+	}
+	if (!from)
+		return;
+	const ClassInfo* record = from->class_record;
+	if (record && !record->direct_bases.empty())
+	{
+		for (size_t i = 0; i < record->direct_bases.size(); i++)
+		{
+			const ClassDirectBase& row = record->direct_bases[i];
+			CollectBasePaths(row.cls->entity, to, hops + 1,
+			                 offset + row.offset, found);
+		}
+		return;
+	}
+	// Entities without a completed record (or whose record predates the
+	// base table) fall back to the primary chain at offset 0.
+	if (from->base_entity)
+		CollectBasePaths(from->base_entity, to, hops + 1, offset, found);
+}
+
+}  // namespace
+
+EBasePath BaseSubobjectPath(const NamedTypeInfo* from,
+                            const NamedTypeInfo* to,
+                            int& hops, unsigned long long& offset)
+{
+	hops = 0;
+	offset = 0;
+	if (!from || !to)
+		return BP_NONE;
+	if (from == to)
+		return BP_UNIQUE;
+	vector<std::pair<int, unsigned long long>> found;
+	CollectBasePaths(from, to, 0, 0, found);
+	if (found.empty())
+		return BP_NONE;
+	if (found.size() > 1)
+		return BP_AMBIGUOUS;
+	hops = found[0].first;
+	offset = found[0].second;
+	return BP_UNIQUE;
+}
+
+// The hop count of the unique derivation path (0 when `from == to`),
+// or -1 when `to` is not an unambiguous base of `from`.
+int BaseClassDistance(const NamedTypeInfo* from, const NamedTypeInfo* to)
+{
+	int hops = 0;
+	unsigned long long offset = 0;
+	return BaseSubobjectPath(from, to, hops, offset) == BP_UNIQUE
+		? hops : -1;
+}
+
+void CollectClassAndBases(const ClassInfo* cls,
+                          vector<const ClassInfo*>& out)
+{
+	if (!cls)
+		return;
+	for (size_t i = 0; i < out.size(); i++)
+		if (out[i] == cls)
+			return;
+	out.push_back(cls);
+	if (cls->direct_bases.empty())
+	{
+		CollectClassAndBases(cls->base, out);
+		return;
+	}
+	for (size_t i = 0; i < cls->direct_bases.size(); i++)
+		CollectClassAndBases(cls->direct_bases[i].cls, out);
 }
 
 ClassInfo& ClassRegistry::Create(const NamedTypeInfo* entity)
@@ -143,8 +243,8 @@ bool ClassRegistry::NeedsDestruction(const ClassInfo& info) const
 	if (FactCached(info, CF_NEEDS_DESTRUCTION, value))
 		return value;
 	value = info.has_user_dtor;
-	if (!value && info.base)
-		value = NeedsDestruction(*info.base);
+	for (size_t i = 0; !value && i < DirectBaseCount(info); i++)
+		value = NeedsDestruction(*DirectBaseAt(info, i));
 	for (size_t i = 0; !value && i < info.fields.size(); i++)
 	{
 		const ClassInfo* member = MemberClass(info.fields[i].type);
@@ -160,8 +260,8 @@ bool ClassRegistry::NeedsConstruction(const ClassInfo& info) const
 		return value;
 	// PA17: constructing a polymorphic object must store the vpointer.
 	value = info.has_user_ctor || info.is_polymorphic;
-	if (!value && info.base)
-		value = NeedsConstruction(*info.base);
+	for (size_t i = 0; !value && i < DirectBaseCount(info); i++)
+		value = NeedsConstruction(*DirectBaseAt(info, i));
 	for (size_t i = 0; !value && i < info.fields.size(); i++)
 	{
 		const ClassInfo* member = MemberClass(info.fields[i].type);
@@ -188,8 +288,8 @@ bool ClassRegistry::DestructionHasEffects(const ClassInfo& info) const
 		(info.has_user_dtor &&
 		 (!info.dtor_definition ||
 		  !EmptyMemberBody(info.dtor_definition->body.get())));
-	if (!value && info.base)
-		value = DestructionHasEffects(*info.base);
+	for (size_t i = 0; !value && i < DirectBaseCount(info); i++)
+		value = DestructionHasEffects(*DirectBaseAt(info, i));
 	for (size_t i = 0; !value && i < info.fields.size(); i++)
 	{
 		const ClassInfo* member = MemberClass(info.fields[i].type);
@@ -291,10 +391,13 @@ bool ClassRegistry::ComputeDefaultConstructionEffects(
 				return true;
 		}
 	}
-	if (info.base &&
-	    (syntactic ? DefaultConstructionHasSyntacticEffects(*info.base)
-	               : DefaultConstructionHasEffects(*info.base)))
-		return true;
+	for (size_t i = 0; i < DirectBaseCount(info); i++)
+	{
+		const ClassInfo& base = *DirectBaseAt(info, i);
+		if (syntactic ? DefaultConstructionHasSyntacticEffects(base)
+		              : DefaultConstructionHasEffects(base))
+			return true;
+	}
 	for (size_t i = 0; i < info.fields.size(); i++)
 	{
 		if (info.fields[i].default_init)
@@ -317,17 +420,25 @@ void BeginClassLayout(ClassInfo& info)
 	info.is_empty = true;
 	info.is_polymorphic = info.declares_virtual ||
 		(info.base && info.base->is_polymorphic);
-	if (info.base)
+	// PA26: direct bases lay out in declaration order. An empty base
+	// occupies no storage and stays at offset 0 (the empty-base
+	// optimization; distinct empty subobjects share the offset in this
+	// ABI), every other base reserves its span before the next base or
+	// the first member.
+	for (size_t i = 0; i < info.direct_bases.size(); i++)
 	{
-		info.alignment = info.base->alignment;
-		// The direct base subobject sits at offset 0; an empty base
-		// occupies no storage (the empty-base optimization), every other
-		// base reserves its full size before the first member.
-		if (!info.base->is_empty)
+		ClassDirectBase& row = info.direct_bases[i];
+		if (row.cls->alignment > info.alignment)
+			info.alignment = row.cls->alignment;
+		if (row.cls->is_empty)
 		{
-			info.bit_cursor = info.base->size * 8;
-			info.is_empty = false;
+			row.offset = 0;
+			continue;
 		}
+		row.offset = RoundUpBits(info.bit_cursor,
+		                         row.cls->alignment * 8) / 8;
+		info.bit_cursor = (row.offset + row.cls->size) * 8;
+		info.is_empty = false;
 	}
 	// PA17: a class that introduces the polymorphic layer carries the
 	// vpointer at offset 0 ahead of every field. A polymorphic base
@@ -496,8 +607,9 @@ bool UserProvidedCtor(const ClassInfo& info, ECtorKind kind)
 template <bool (*Predicate)(const ClassInfo&)>
 bool SubobjectsSatisfy(const ClassInfo& info)
 {
-	if (info.base && !Predicate(*info.base))
-		return false;
+	for (size_t i = 0; i < DirectBaseCount(info); i++)
+		if (!Predicate(*DirectBaseAt(info, i)))
+			return false;
 	for (size_t i = 0; i < info.fields.size(); i++)
 	{
 		const ClassInfo* member = SubobjectClass(info.fields[i].type);

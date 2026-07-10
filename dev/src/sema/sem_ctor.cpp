@@ -434,7 +434,17 @@ void SemBinder::AppendBaseDefaultInit(const ClassInfo& cls,
                                       vector<SemNodePtr>& out,
                                       bool syntactic)
 {
-	const ClassInfo& base = *cls.base;
+	// PA26: every direct base default-initializes in declaration order.
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+		AppendOneBaseDefaultInit(cls, b, out, syntactic);
+}
+
+void SemBinder::AppendOneBaseDefaultInit(const ClassInfo& cls,
+                                         size_t base_index,
+                                         vector<SemNodePtr>& out,
+                                         bool syntactic)
+{
+	const ClassInfo& base = *cls.direct_bases[base_index].cls;
 	if (!base.has_user_ctor && !unit_.classes.NeedsConstruction(base))
 		return;
 	if (syntactic
@@ -451,7 +461,7 @@ void SemBinder::AppendBaseDefaultInit(const ClassInfo& cls,
 	for (size_t j = 0; j < no_args.size(); j++)
 		arg_nodes.push_back(std::move(no_args[j].node));
 	out.push_back(MakeConstructorCall(base, index, true,
-	                                  ThisBaseAddress(cls),
+	                                  ThisBaseAddress(cls, base_index),
 	                                  std::move(arg_nodes)));
 }
 
@@ -483,8 +493,8 @@ void SemBinder::AppendElidedCtorDemand(const ClassInfo& cls,
 	method_.fn_name = cls.members->name;
 	try
 	{
-		if (cls.base)
-			AppendElidedCtorDemand(*cls.base, true, out);
+		for (size_t b = 0; b < cls.direct_bases.size(); b++)
+			AppendElidedCtorDemand(*cls.direct_bases[b].cls, true, out);
 		for (size_t i = 0; i < cls.fields.size(); i++)
 		{
 			const ClassInfo* member =
@@ -511,10 +521,43 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 {
 	const ClassInfo& cls = *body.cls;
 	std::map<string, const AstMemInitializer*> by_field;
-	const AstMemInitializer* base_init = 0;
+	vector<const AstMemInitializer*> base_inits(cls.direct_bases.size(),
+	                                            (const AstMemInitializer*)0);
+	// PA26: a pack-expanded mem-initializer's element scope (the
+	// mentioned packs re-bound to the element); null for ordinary ones.
+	vector<Scope*> base_init_scopes(cls.direct_bases.size(), (Scope*)0);
+	size_t base_init_count = 0;
 	for (size_t i = 0; i < body.decl->mem_initializers.size(); i++)
 	{
 		const AstMemInitializer& mem = body.decl->mem_initializers[i];
+		if (mem.pack)
+		{
+			// 12.6.2p15: one initializer per pack-expanded base element.
+			std::vector<std::pair<TypePtr, Scope*>> elements;
+			ExpandPackMemInitTargets(mem, elements);
+			for (size_t k = 0; k < elements.size(); k++)
+			{
+				TypePtr element = elements[k].first;
+				size_t base_index = cls.direct_bases.size();
+				if (element->kind == TK_CLASS)
+					for (size_t b = 0; b < cls.direct_bases.size(); b++)
+						if (element->named ==
+						    cls.direct_bases[b].cls->entity)
+						{
+							base_index = b;
+							break;
+						}
+				if (base_index == cls.direct_bases.size())
+					throw runtime_error(
+						"member initializer names no member or base");
+				if (base_inits[base_index])
+					throw runtime_error("duplicate base initializer");
+				base_inits[base_index] = &mem;
+				base_init_scopes[base_index] = elements[k].second;
+			}
+			base_init_count++;
+			continue;
+		}
 		if (mem.id.IsPlainIdentifier() &&
 		    FindClassField(cls, mem.id.parts[0].identifier))
 		{
@@ -555,50 +598,73 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 				std::move(arg_nodes)));
 			return;
 		}
-		if (cls.base && named->kind == TK_CLASS &&
-		    named->named == cls.base->entity)
+		size_t base_index = cls.direct_bases.size();
+		if (named->kind == TK_CLASS)
+			for (size_t b = 0; b < cls.direct_bases.size(); b++)
+				if (named->named == cls.direct_bases[b].cls->entity)
+				{
+					base_index = b;
+					break;
+				}
+		if (base_index < cls.direct_bases.size())
 		{
-			if (base_init)
+			if (base_inits[base_index])
 				throw runtime_error("duplicate base initializer");
-			base_init = &mem;
+			base_inits[base_index] = &mem;
+			base_init_count++;
 			continue;
 		}
 		throw runtime_error("member initializer names no member or base");
 	}
 	bf_units_written_.clear();
 	vector<SemNodePtr> actions;
-	if (cls.base)
+	// 12.6.2p10: direct bases initialize in declaration order, each
+	// through its mem-initializer or by default-initialization.
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
 	{
-		if (base_init)
+		if (!base_inits[b])
 		{
-			vector<SemValue> values;
-			const AstInitializer& init = *base_init->init;
-			if (init.kind == INIT_PAREN)
-				for (size_t i = 0; i < init.args.size(); i++)
-					values.push_back(analyzer_.Analyze(*init.args[i]));
-			else if (init.kind == INIT_BRACED)
-				for (size_t i = 0; i < init.expr->arguments.size(); i++)
-					values.push_back(
-						analyzer_.Analyze(*init.expr->arguments[i]));
-			int index = ResolveClassConstructor(*cls.base, values, false,
-			                                    "base initializer");
-			vector<SemNodePtr> arg_nodes;
-			for (size_t i = 0; i < values.size(); i++)
-				arg_nodes.push_back(std::move(values[i].node));
-			actions.push_back(MakeConstructorCall(*cls.base, index, true,
-			                                      ThisBaseAddress(cls),
-			                                      std::move(arg_nodes)));
+			AppendOneBaseDefaultInit(cls, b, actions, true);
+			continue;
 		}
-		else
-			AppendBaseDefaultInit(cls, actions, true);
+		const ClassInfo& base = *cls.direct_bases[b].cls;
+		vector<SemValue> values;
+		const AstInitializer& init = *base_inits[b]->init;
+		// A pack-expanded initializer's arguments analyze under the
+		// element scope (the mentioned packs re-bound to the element).
+		Scope* saved_scope = current_;
+		if (base_init_scopes[b])
+			current_ = base_init_scopes[b];
+		try
+		{
+			// The list analyzer expands argument-level `pattern...`
+			// items in place (14.5.3).
+			if (init.kind == INIT_PAREN)
+				analyzer_.AnalyzeArgumentList(init.args, values);
+			else if (init.kind == INIT_BRACED)
+				analyzer_.AnalyzeArgumentList(init.expr->arguments,
+				                              values);
+		}
+		catch (...)
+		{
+			current_ = saved_scope;
+			throw;
+		}
+		current_ = saved_scope;
+		int index = ResolveClassConstructor(base, values, false,
+		                                    "base initializer");
+		vector<SemNodePtr> arg_nodes;
+		for (size_t i = 0; i < values.size(); i++)
+			arg_nodes.push_back(std::move(values[i].node));
+		actions.push_back(MakeConstructorCall(base, index, true,
+		                                      ThisBaseAddress(cls, b),
+		                                      std::move(arg_nodes)));
 	}
-	else if (base_init)
-		throw runtime_error("base initializer without a base class");
 	// PA17: the vpointer stores after base construction, before any
 	// member initialization.
 	if (cls.is_polymorphic)
 		actions.push_back(MakeVPointerStore(cls));
-	size_t matched = base_init ? 1 : 0;
+	size_t matched = base_init_count;
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassField& field = cls.fields[i];
@@ -656,9 +722,14 @@ void SemBinder::AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item)
 		actions.push_back(MakeDestructorCall(
 			*member_cls, false, AddressOfNode(ThisFieldExpr(field))));
 	}
-	if (cls.base && unit_.classes.DestructionHasEffects(*cls.base))
-		actions.push_back(MakeDestructorCall(*cls.base, true,
-		                                     ThisBaseAddress(cls)));
+	// 12.4p7: direct bases destroy in reverse declaration order.
+	for (size_t b = cls.direct_bases.size(); b-- > 0;)
+	{
+		const ClassInfo& base = *cls.direct_bases[b].cls;
+		if (unit_.classes.DestructionHasEffects(base))
+			actions.push_back(MakeDestructorCall(
+				base, true, ThisBaseAddress(cls, b)));
+	}
 	for (size_t i = 0; i < actions.size(); i++)
 		item.children.push_back(std::move(actions[i]));
 }
