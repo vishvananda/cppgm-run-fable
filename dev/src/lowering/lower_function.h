@@ -102,6 +102,25 @@ private:
 	                           const SemNode* object_node,
 	                           const string& object_text,
 	                           string& arguments);
+	// One lowered call's hidden row (registry signature for direct
+	// callees, the type-only rule otherwise).
+	void AppendCallHiddenArguments(const SemNode& node,
+	                               const SemNode& callee,
+	                               const TypePtr& fn_type, bool direct,
+	                               bool pm_call,
+	                               const vector<const SemNode*>& arg_nodes,
+	                               const vector<string>& arg_texts,
+	                               const string& object_text,
+	                               string& arguments);
+	// The declared argument row of one lowered call plus the hidden
+	// trailing pointers.
+	void LowerCallArgumentRow(const SemNode& node, const SemNode& callee,
+	                          const TypePtr& fn_type, bool direct,
+	                          bool pm_call, string& object_text,
+	                          string& arguments);
+	// PA27: a marked shared virtual-base action inside a base or
+	// deleting entry drops (its callee stays demanded).
+	bool SkipVBaseAction(const SemNode& node);
 	// The address of `entry_cls`'s subobject for one hidden argument,
 	// anchored on the argument expression (parameter maps, complete
 	// locals, dynamic vpointer offsets, static fallback).

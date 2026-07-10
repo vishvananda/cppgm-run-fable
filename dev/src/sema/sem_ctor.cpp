@@ -540,6 +540,20 @@ struct SemBinder::MemberInitPlan
 	size_t base_init_count = 0;
 };
 
+// PA27: the shared virtual-base subobject address at a table index.
+SemNodePtr SemBinder::ThisVBaseAddress(const ClassInfo& cls,
+                                       size_t vbase_index)
+{
+	const ClassVBase& row = cls.vbases[vbase_index];
+	SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
+	member->type = MakeNamedType(TK_CLASS, row.cls->entity);
+	member->category = VC_LVALUE;
+	member->base_hops = 1;
+	member->base_offset = row.offset;
+	member->children.push_back(ThisObjectExpr());
+	return AddressOfNode(std::move(member));
+}
+
 // PA27 12.6.2p10: the shared virtual bases initialize first, in vbase
 // table order, only in the complete-object constructor. Direct virtual
 // rows may carry a written mem-initializer; every other entry

@@ -223,6 +223,13 @@ public:
 	// PA27: the lowered callee body carries a null-guarded
 	// displaced-base adjustment (lazy dispatch-region wrapping).
 	bool CalleeGuardedBody(const SemNode& callee);
+	// PA27 comdat pairing: whether the lowering context (a weak
+	// constructor/destructor) pairs the demanded subobject entry's
+	// complete twin (lower_vbase.cpp).
+	bool ContextPairsSubobjectEntry(const ClassInfo* cls);
+	// The alias lines of the emitted definitions (lower_vbase.cpp owns
+	// the PA27 base-entry suppression).
+	void AppendAliasSection(vector<string>& section);
 	// The registered definition behind a method callee (null when
 	// none): the conversion-elision check reads its body shape.
 	const SemNode* MemberDefinitionFor(const SemNode& callee);

@@ -1271,55 +1271,9 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	bool pm_call = !direct && callee.kind == SN_MEMBER_POINTER_ACCESS;
 	if (pm_call)
 		object_text = LowerAddressExpr(*callee.children[0]);
-	// PA27: the argument nodes and lowered texts by callee parameter
-	// index anchor the hidden vbase-pointer supply (member-pointer
-	// calls count their prepended object parameter).
-	vector<const SemNode*> arg_nodes(
-		fn_type->parameters.size() + (pm_call ? 1 : 0), 0);
-	vector<string> arg_texts(arg_nodes.size());
-	if (pm_call && !arg_nodes.empty())
-	{
-		arg_nodes[0] = callee.children[0].get();
-		arg_texts[0] = object_text;
-	}
-	for (size_t i = 1; i < node.children.size(); i++)
-	{
-		TypePtr param = i - 1 < fn_type->parameters.size()
-			? fn_type->parameters[i - 1] : TypePtr();
-		string text = LowerCallArgument(*node.children[i], param);
-		if (i == 1 && !pm_call)
-			object_text = text;
-		size_t param_at = i - 1 + (pm_call ? 1 : 0);
-		if (param_at < arg_nodes.size())
-		{
-			arg_nodes[param_at] = node.children[i].get();
-			arg_texts[param_at] = text;
-		}
-		arguments += (i > 1 || pm_call ? ", " : "") + text;
-	}
-	// PA27: hidden trailing vbase pointers per the callee's signature.
-	{
-		vector<HiddenParam> type_hidden;
-		const vector<HiddenParam>* hidden = 0;
-		if (direct)
-			hidden = &HiddenSignatureParams(
-				program_.CalleeEntryInfo(callee));
-		else
-		{
-			HiddenParamsForType(
-				pm_call ? MemberPointerCallSignature(fn_type) : fn_type,
-				pm_call, type_hidden);
-			hidden = &type_hidden;
-		}
-		if (!hidden->empty())
-			AppendHiddenArguments(
-				*hidden, arg_nodes, arg_texts,
-				node.children.size() > 1 && (callee.is_method || pm_call)
-					? (pm_call ? callee.children[0].get()
-					           : node.children[1].get())
-					: 0,
-				object_text, arguments);
-	}
+	// The argument row plus its hidden vbase-pointer supply (PA27).
+	LowerCallArgumentRow(node, callee, fn_type, direct, pm_call,
+	                     object_text, arguments);
 	// The callee value of an indirect call lowers after the arguments
 	// (the oracle's evaluation order). A member-pointer callee over a
 	// displaced-base class also applies the value's this-adjustment to

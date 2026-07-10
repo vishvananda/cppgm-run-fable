@@ -19,8 +19,7 @@ public:
 	SemBinder(TypesModel& model, SemUnit& unit);
 	~SemBinder();
 
-	// PA18: the end-of-unit template re-checks run after the forward
-	// pass (definition-time sanity, 14.6p7).
+	// PA18: end-of-unit template re-checks follow the forward pass.
 	virtual void BindTranslationUnit(const AstDecl& unit);
 
 	// ISemExprHost
@@ -31,7 +30,6 @@ public:
 	virtual TypePtr TryResolveCalleeType(const AstName& name);
 	virtual TypePtr ResolveCastTypeId(const AstTypeId& type_id);
 	virtual bool TryEvaluateConstant(const AstExpr& expr, ConstValue& value);
-	// PA20: analyzed-tree constant evaluation (the DeclBinder seam).
 	virtual bool TryFullConstant(const AstExpr& expr, ConstValue& out);
 	virtual const ScopeBinding* ResolveBuiltinFunction(const string& name);
 	virtual ClassRegistry& Classes();
@@ -40,8 +38,7 @@ public:
 	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
 	                               const string& what,
 	                               const NamedTypeInfo* naming = 0);
-	// One base-specifier edge of the naming class's derivation path
-	// (11.2p1/p4, PA26).
+	// One base-specifier edge of the derivation path (11.2p1/p4).
 	void CheckBaseEdgeAccess(const ClassBaseEdge& edge,
 	                         const vector<const ClassInfo*>& contexts,
 	                         const string& what);
@@ -67,18 +64,15 @@ public:
 	                                 size_t overload_index);
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
 	                                          vector<SemValue> args);
-	// PA24 lambdas (sem_lambda.cpp).
-	virtual SemValue AnalyzeLambda(const AstExpr& expr);
+	virtual SemValue AnalyzeLambda(const AstExpr& expr);  // PA24
 	virtual bool TryCaptureUse(const ScopeBinding& binding, SemValue& out);
 	virtual SemNodePtr ThisValueNode();
 	virtual bool CapturelessClosureFunction(const NamedTypeInfo* cls,
 	                                        const Scope*& owner,
 	                                        string& name, TypePtr& type);
 
-	// ITypeBuilderHost: decltype over the full PA12 expression subset.
-	virtual TypePtr ResolveDecltype(const AstExpr& expr);
-	// PA15: type-name resolution checks member access (11.8 subset).
-	virtual TypePtr ResolveTypeName(const AstName& name);
+	virtual TypePtr ResolveDecltype(const AstExpr& expr);  // decltype
+	virtual TypePtr ResolveTypeName(const AstName& name);  // 11.8
 
 protected:
 	// DeclBinder seams
@@ -145,8 +139,7 @@ private:
 	void BindWhileStatement(const AstStmt& stmt);
 	void BindDoStatement(const AstStmt& stmt);
 	void BindForStatement(const AstStmt& stmt);
-	// PA24 6.5.4: desugars the range form into hidden range/index or
-	// begin/end declarations plus an ordinary loop node.
+	// PA24 6.5.4: desugars the range form into an ordinary loop node.
 	void BindRangeForStatement(const AstStmt& stmt);
 	string NextRangeForName(const char* stem);
 	void BindSynthesizedVariable(const string& name, const TypePtr& type,
@@ -243,9 +236,7 @@ private:
 	// The callee destroys its by-value class parameters at scope exit;
 	// the action attaches as a child of the parameter node.
 	void AttachParameterDtor(SemNode& parameter);
-	// PA26: the collected written mem-initializers of one constructor
-	// (defined in sem_ctor.cpp, its only consumer).
-	struct MemberInitPlan;
+	struct MemberInitPlan;  // written mem-initializers (sem_ctor.cpp)
 	bool CollectMemberInits(const DeferredBody& body, SemNode& item,
 	                        MemberInitPlan& plan);
 	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);
@@ -263,17 +254,16 @@ private:
 	                            vector<SemNodePtr>& out);
 	void AppendBaseDefaultInit(const ClassInfo& cls,
 	                           vector<SemNodePtr>& out, bool syntactic);
-	// One direct base's implicit default-initialization (PA26).
 	void AppendOneBaseDefaultInit(const ClassInfo& cls, size_t base_index,
 	                              vector<SemNodePtr>& out, bool syntactic);
-	// PA27: the shared virtual-base construction phase of a
-	// complete-object constructor (12.6.2p10: virtual bases first, in
-	// DFS appearance order). `plan` supplies mem-initializers matched
-	// to direct virtual rows (null for synthesized constructors); the
-	// appended actions carry vbase_action so base entries drop them.
+	// PA27: complete-object virtual-base phases (12.6.2p10 order; the
+	// actions carry vbase_action so base entries drop them).
 	void AppendVBaseInits(const ClassInfo& cls,
 	                      const MemberInitPlan* plan,
 	                      vector<SemNodePtr>& out, bool syntactic);
+	void AppendVBaseTransfers(const ClassInfo& cls, bool is_move,
+	                          const SemNode& source_proto,
+	                          vector<SemNodePtr>& out);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,
@@ -286,8 +276,6 @@ private:
 	// The direct base subobject's address at `base_index` (PA26).
 	SemNodePtr ThisBaseAddress(const ClassInfo& cls,
 	                           size_t base_index = 0);
-	// PA27: the shared virtual-base subobject's address at the given
-	// vbase-table index (a complete-object projection from `this`).
 	SemNodePtr ThisVBaseAddress(const ClassInfo& cls, size_t vbase_index);
 	SemNodePtr AddressOfNode(SemNodePtr operand);
 	SemNodePtr SubscriptNode(SemNodePtr array, unsigned long long index);

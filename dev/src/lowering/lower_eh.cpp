@@ -84,6 +84,26 @@ LowerValue FunctionLowerer::LowerTypeInfoComparison(const SemNode& node,
 	return result;
 }
 
+// The Itanium src2dst hint of a dynamic_cast: the static offset when
+// the source is a unique public base of the target, -3 when it
+// appears more than once, -1 across a virtual base, -2 when the
+// classes are unrelated (the sibling scan).
+static long long DynamicCastHint(const NamedTypeInfo* target,
+                                 const NamedTypeInfo* source)
+{
+	int hops = 0;
+	unsigned long long offset = 0;
+	EBasePath path = BaseSubobjectPath(target, source, hops, offset);
+	if (path == BP_UNIQUE)
+		return (long long)offset;
+	if (path == BP_AMBIGUOUS)
+		return -3;
+	if (target->class_record &&
+	    FindClassVBase(*target->class_record, source->class_record))
+		return -1;
+	return -2;
+}
+
 string FunctionLowerer::LowerDynamicCast(const SemNode& node)
 {
 	bool ref_form = node.category != VC_PRVALUE;
@@ -153,25 +173,8 @@ string FunctionLowerer::LowerDynamicCast(const SemNode& node)
 	// members) anchor in the program image.
 	if (target->kind == TK_CLASS && target->named->class_record)
 		program_.VTableRef(target->named->class_record);
-	// The Itanium src2dst hint: the static offset when the source is a
-	// unique public base of the target, -3 when it appears more than
-	// once, -2 when the classes are unrelated (the sibling scan).
-	long long hint = -2;
-	{
-		int hops = 0;
-		unsigned long long offset = 0;
-		EBasePath path = BaseSubobjectPath(
-			RemoveTopCv(target)->named, node.typeid_operand->named,
-			hops, offset);
-		if (path == BP_UNIQUE)
-			hint = (long long)offset;
-		else if (path == BP_AMBIGUOUS)
-			hint = -3;
-		else if (FindClassVBase(
-		             *RemoveTopCv(target)->named->class_record,
-		             node.typeid_operand->named->class_record))
-			hint = -1;
-	}
+	long long hint = DynamicCastHint(RemoveTopCv(target)->named,
+	                                 node.typeid_operand->named);
 	string result = NewTemp();
 	Emit(result + " = call ptr " +
 	     program_.ExternalRuntimeFnRef(

@@ -60,6 +60,50 @@ bool SimilarTypes(const TypePtr& a, const TypePtr& b)
 
 }  // namespace
 
+
+// The base-subobject view of an upcast reference cast: a non-virtual
+// path takes one projection; a shared virtual base rides the carrier
+// entry (5.2.9p2, PA27). False when `to` is not a base of the operand.
+bool SemExprAnalyzer::UpcastReferenceView(const TypePtr& dest,
+                                          const TypePtr& to,
+                                          SemValue& value)
+{
+	TypePtr from = RemoveTopCv(value.type);
+	int hops = 0;
+	unsigned long long base_offset = 0;
+	int vbase_index = -1;
+	if (BaseSubobjectPath(from->named, to->named, hops,
+	                      base_offset) != BP_UNIQUE)
+		hops = -1;
+	if (hops <= 0 && from->named->class_record)
+	{
+		size_t index = 0;
+		unsigned long long remainder = 0;
+		if (VirtualBasePath(*from->named->class_record, to->named,
+		                    index, remainder))
+		{
+			hops = 1;
+			base_offset = remainder;
+			vbase_index = (int)index;
+		}
+	}
+	if (hops <= 0)
+		return false;
+	SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+	adjusted->type = to;
+	adjusted->category = value.category == VC_PRVALUE
+		? VC_XVALUE : value.category;
+	adjusted->base_hops = hops;
+	adjusted->base_offset = base_offset;
+	adjusted->vbase_index = vbase_index;
+	adjusted->children.push_back(std::move(value.node));
+	value.node = std::move(adjusted);
+	value.type = to;
+	value.category = dest->kind == TK_RVALUE_REFERENCE
+		? VC_XVALUE : VC_LVALUE;
+	return true;
+}
+
 // 5.2.9p2-p4 / 5.2.11: a cast to reference type adjusts the operand's
 // category and printed type; no cast node is dumped. const_cast
 // accepts the 5.2.11 similar types.
@@ -91,56 +135,14 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 	}
 	if (!value.function_set && !compatible && op != KW_CONST_CAST)
 	{
-		// 5.2.9p2: a cast to a (no less cv-qualified) base
-		// reference views the base-class subobject.
+		// 5.2.9p2: a cast to a (no less cv-qualified) base reference
+		// views the base-class subobject (PA27: shared virtual bases
+		// ride their carrier entry).
 		TypePtr from = RemoveTopCv(value.type);
 		TypePtr to = RemoveTopCv(referee);
-		int hops = -1;
-		unsigned long long base_offset = 0;
 		if (from->kind == TK_CLASS && to->kind == TK_CLASS &&
-		    BaseSubobjectPath(from->named, to->named, hops,
-		                      base_offset) != BP_UNIQUE)
-			hops = -1;
-		if (hops > 0)
-		{
-			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
-			adjusted->type = to;
-			adjusted->category = value.category == VC_PRVALUE
-				? VC_XVALUE : value.category;
-			adjusted->base_hops = hops;
-			adjusted->base_offset = base_offset;
-			adjusted->children.push_back(std::move(value.node));
-			value.node = std::move(adjusted);
-			value.type = to;
-			value.category = dest->kind == TK_RVALUE_REFERENCE
-				? VC_XVALUE : VC_LVALUE;
+		    UpcastReferenceView(dest, to, value))
 			return value;
-		}
-		// PA27: a cast to a shared virtual-base reference rides the
-		// carrier entry (the lowering picks the pointer per context).
-		if (hops < 0 && from->kind == TK_CLASS && to->kind == TK_CLASS &&
-		    from->named->class_record)
-		{
-			size_t vbase_index = 0;
-			unsigned long long remainder = 0;
-			if (VirtualBasePath(*from->named->class_record, to->named,
-			                    vbase_index, remainder))
-			{
-				SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
-				adjusted->type = to;
-				adjusted->category = value.category == VC_PRVALUE
-					? VC_XVALUE : value.category;
-				adjusted->base_hops = 1;
-				adjusted->base_offset = remainder;
-				adjusted->vbase_index = (int)vbase_index;
-				adjusted->children.push_back(std::move(value.node));
-				value.node = std::move(adjusted);
-				value.type = to;
-				value.category = dest->kind == TK_RVALUE_REFERENCE
-					? VC_XVALUE : VC_LVALUE;
-				return value;
-			}
-		}
 		// 5.2.9p2/p11 with op != KW_CONST_CAST: a downcast reference
 		// static_cast views the derived object; a displaced-base view
 		// shifts back by the base subobject's offset (PA26).

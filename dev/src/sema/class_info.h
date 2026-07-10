@@ -233,38 +233,31 @@ struct ClassInfo
 
 	const NamedTypeInfo* entity;
 	Scope* members;
-	// The primary direct base (the primary chain: vtable inheritance
-	// and the polymorphic layer flow through it at offset 0). PA27: the
-	// first polymorphic non-virtual direct base when one exists, else
-	// the first non-virtual direct base; null for a class whose bases
-	// are all virtual.
+	// The primary direct base at offset 0 (PA27: the first polymorphic
+	// non-virtual base, else the first non-virtual base; null when
+	// every base is virtual). The vtable chain flows through it.
 	const ClassInfo* base;
 	EMemberAccess base_access;
-	// PA26: every direct base in declaration order with its resolved
-	// subobject offset. PA27: rows flagged is_virtual live in the
-	// shared virtual-base region; `primary_base` indexes the promoted
-	// primary row (-1 when none).
+	// Direct bases in declaration order with resolved offsets; virtual
+	// rows live in the shared region, primary_base indexes the
+	// promoted row (-1 none).
 	vector<ClassDirectBase> direct_bases;
 	int primary_base = -1;
-	// PA27: the complete virtual-base table (DFS first-appearance
-	// order) and the non-primary polymorphic base views.
+	// PA27: the virtual-base table (DFS order) and polymorphic views.
 	vector<ClassVBase> vbases;
 	vector<ClassView> views;
 	vector<ClassField> fields;  // declaration order
 	bool is_union;
 	bool is_empty;  // no fields, no non-empty base, no virtual base
-	// Occupied bytes (0 for an empty class); sizeof rounds dsize up to
-	// the alignment, with a 1-byte minimum (9p4). PA27: dsize/size span
-	// the complete object including the virtual-base region; the nv_*
-	// facts describe the non-virtual region only (the span a base
-	// subobject occupies inside a derived object).
+	// dsize/size/alignment span the complete object (9p4 rounding);
+	// nv_* cover the non-virtual region (a base subobject's span).
 	unsigned long long dsize;
 	unsigned long long size;
 	unsigned long long alignment;
 	unsigned long long nv_dsize = 0;
 	unsigned long long nv_size = 1;
 	unsigned long long nv_alignment = 1;
-	bool is_aggregate;  // 8.5.1p1 (C++11: default member inits disqualify)
+	bool is_aggregate;  // 8.5.1p1
 	bool has_user_ctor;
 	bool has_user_dtor;
 	vector<ClassCtor> ctors;
@@ -272,28 +265,19 @@ struct ClassInfo
 	EMemberAccess dtor_access;
 	const AstDecl* dtor_definition;  // user destructor body (null: implicit)
 	bool dtor_unwind_no;
-	// 11.3 friends: entities of friend classes (forward declarations
-	// included) and the declared (scope, name) of friend functions.
+	// 11.3 friends: friend-class entities and friend-function names.
 	vector<const NamedTypeInfo*> friend_classes;
 	vector<std::pair<const Scope*, string>> friend_functions;
-	// PA21: declared constructor templates (deduced against argument
-	// lists at construction sites; selected specializations synthesize
-	// ClassCtor entries).
+	// PA21/PA22: declared constructor / conversion-function templates
+	// (selected specializations synthesize ClassCtor / ClassConversion
+	// entries).
 	vector<struct TemplateInfo*> ctor_templates;
-	// PA22: declared conversion-function templates (deduced against
-	// the required destination type at classification; selected
-	// specializations synthesize ClassConversion entries).
 	vector<struct TemplateInfo*> conversion_templates;
-	// PA16 conversion functions in declaration order (12.3.2).
-	vector<ClassConversion> conversions;
+	vector<ClassConversion> conversions;  // declaration order (12.3.2)
 
-	// Layout cursor state used while the class is still open.
-	unsigned long long bit_cursor;  // next free bit from the object start
+	unsigned long long bit_cursor;  // open-class layout cursor (bits)
 
-	// Synthesized implicit special members (built on first demand).
-	// PA24: the field-wise aggregate constructor synthesizes one
-	// signature per distinct parameter cover (provided initializers
-	// extended through the last non-scalar field).
+	// PA24 aggregate-constructor covers (built on first demand).
 	std::map<unsigned long long, bool> aggregate_ctor_covers;
 	bool implicit_ctor_built;
 	bool implicit_dtor_built;
@@ -306,9 +290,8 @@ struct ClassInfo
 	bool has_user_move_ctor;
 	bool has_user_copy_assign;
 	bool has_user_move_assign;
-	bool specials_declared;   // implicit copy/move members appended
-	// Implicitly declared assignment operators: their overload position
-	// in the class's "operator =" member binding (-1 when absent).
+	bool specials_declared;
+	// Implicit assignment operators' overload positions (-1 absent).
 	int copy_assign_index;
 	int move_assign_index;
 	bool copy_assign_deleted;
@@ -318,37 +301,29 @@ struct ClassInfo
 	bool move_assign_unwind_no;
 
 	// --- PA17 polymorphic object-model facts (10.3) ---
-	// A polymorphic class carries the single shared vpointer at offset
-	// 0: inherited from a polymorphic direct base, or introduced by the
-	// first textually `virtual` member (pre-scanned before layout so
-	// fields declared ahead of the first virtual member still follow
-	// the vpointer).
+	// The vpointer sits at offset 0: inherited from a polymorphic
+	// direct base or introduced by the first `virtual` member
+	// (pre-scanned before layout).
 	bool is_polymorphic;
 	bool declares_virtual;  // own members spell the `virtual` keyword
-	// Vtable slot order: inherited base slots first (overriders replace
-	// in place), then newly introduced slots in declaration order.
-	// PA27: the primary list inherits along the promoted primary chain
-	// only; overrides of other bases' virtuals live in those bases'
-	// views and do not append here.
+	// Vtable slot order: primary-chain slots first (overriders replace
+	// in place), then new slots in declaration order. Overrides of
+	// other bases' virtuals live in those bases' views (PA27).
 	vector<VirtualSlot> vslots;
-	// PA27: the virtual members this class itself declares (overrides
-	// included), for resolving view final overriders.
+	// PA27: own declared virtuals (view final-overrider resolution).
 	vector<VirtualSlot> declared_virtuals;
-	bool dtor_virtual;  // declared virtual or inherits a virtual dtor
-	int dtor_slot;      // VS_DTOR_COMPLETE position (-1 when none)
+	bool dtor_virtual;
+	int dtor_slot;  // VS_DTOR_COMPLETE position (-1 when none)
 	// Itanium-style key function: the first declared non-pure virtual
-	// member (destructor included) without an in-class definition. The
-	// vtable emits strong in the translation unit that defines it, weak
-	// on demand when no key function exists.
+	// member without an in-class definition (the vtable emits strong
+	// where it is defined).
 	string key_name;    // empty when the class has no key function
 	TypePtr key_type;   // declared (unadjusted) function type
 	bool key_is_dtor;
 	bool key_defined_in_tu;
-	// Lazily memoized recursive class facts (triviality and
-	// construction/destruction queries). Out-of-class special-member
-	// definitions can change the underlying facts after class
-	// completion; each such mutation bumps the global facts version
-	// (InvalidateClassFacts) and stale memos recompute on next query.
+	// Lazily memoized recursive class facts; post-completion mutations
+	// bump the global version (InvalidateClassFacts) and stale memos
+	// recompute on the next query.
 	mutable unsigned long long facts_version;
 	mutable unsigned facts_valid;
 	mutable unsigned facts_value;

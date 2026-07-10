@@ -740,39 +740,6 @@ string LowerProgram::MemberFunctionRef(const SemNode& callee)
 	return "@" + info.low_name;
 }
 
-// PA27: whether the (already lowered) callee body carries a
-// null-guarded displaced-base adjustment; callers under cleanups wrap
-// such calls in a lazy dispatch region even when the sema unwind fact
-// stayed non-throwing.
-bool LowerProgram::CalleeGuardedBody(const SemNode& callee)
-{
-	if (callee.kind != SN_CALLEE || !callee.entity_scope)
-		return false;
-	return CalleeEntryInfo(callee).guarded_body;
-}
-
-// PA27: the registry entry a direct call resolves to (for the hidden
-// vbase-pointer signature), without demanding it.
-LowFunctionInfo& LowerProgram::CalleeEntryInfo(const SemNode& callee)
-{
-	if (callee.is_method || callee.special != SF_NONE)
-	{
-		const char* code = "";
-		switch (callee.special)
-		{
-		case SF_CONSTRUCTOR: code = "C1"; break;
-		case SF_CONSTRUCTOR_BASE: code = "C2"; break;
-		case SF_DESTRUCTOR: code = "D1"; break;
-		case SF_DESTRUCTOR_BASE: code = "D2"; break;
-		default:
-			break;
-		}
-		return MemberFunctionEntry(callee.entity_scope,
-		                           callee.entity_name, callee.type, code);
-	}
-	return FunctionEntry(callee.entity_scope, callee.entity_name,
-	                     callee.type, callee.fn_spec);
-}
 
 void LowerProgram::RequireEhRuntime()
 {
@@ -1044,24 +1011,7 @@ void LowerProgram::DemandFunction(LowFunctionInfo& info)
 		// virtual bases pairs every user-provided subobject entry; a
 		// polymorphic context pairs the entries on its primary chain
 		// (reference-observed comdat behavior).
-		bool ctx_pair = false;
-		if (lowering_context_ && lowering_context_->is_method &&
-		    lowering_context_->weak &&
-		    !lowering_context_->special_code.empty())
-		{
-			const ClassInfo* ctx_cls =
-				MethodClass(lowering_context_->type);
-			if (ctx_cls && ClassHasVBases(*ctx_cls))
-				ctx_pair = true;
-			else if (ctx_cls && ctx_cls->is_polymorphic)
-				for (const ClassInfo* at = ctx_cls->base; at;
-				     at = at->base)
-					if (at == cls)
-					{
-						ctx_pair = true;
-						break;
-					}
-		}
+		bool ctx_pair = ContextPairsSubobjectEntry(cls);
 		bool comdat_pair = cls &&
 			((cls->is_polymorphic && cls->dtor_virtual) || ctx_pair ||
 			 (cls->entity && cls->entity->spec_template &&
@@ -1481,27 +1431,7 @@ void LowerProgram::Write(ostream& out)
 	sections[1].insert(sections[1].begin(), runtime_declares_.begin(),
 	                   runtime_declares_.end());
 
-	// Aliases follow the definitions without a separating blank line.
-	for (size_t i = 0; i < functions_.size(); i++)
-	{
-		const LowFunctionInfo& info = functions_[i];
-		if (!info.defined || info.body_text.empty() ||
-		    (info.weak && !info.used) || info.alias_object.empty())
-			continue;
-		// PA27: the base entry printed its own (differing) body, so
-		// its symbol no longer aliases the complete entry.
-		if (info.special_code == "C1" || info.special_code == "D1")
-		{
-			LowFunctionInfo& base_entry = MemberFunctionEntry(
-				info.scope, info.name, info.type,
-				info.special_code == "C1" ? "C2" : "D2");
-			if (base_entry.defined && base_entry.used &&
-			    !base_entry.body_text.empty())
-				continue;
-		}
-		sections[4].push_back("alias object " + info.alias_object +
-		                      " = @" + info.low_name);
-	}
+	AppendAliasSection(sections[4]);
 	bool first = true;
 	for (int kind = 0; kind < 5; kind++)
 	{

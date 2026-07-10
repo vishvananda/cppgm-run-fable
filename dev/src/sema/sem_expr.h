@@ -419,6 +419,10 @@ private:
 	                              EValueCategory& category);
 	SemValue AnalyzeSubscript(const AstExpr& expr);
 	SemValue AnalyzeMember(const AstExpr& expr);
+	// PA27: the base-subobject view of an upcast reference cast
+	// (virtual bases ride their carrier entry).
+	bool UpcastReferenceView(const TypePtr& dest, const TypePtr& to,
+	                         SemValue& value);
 	SemValue AnalyzeCastToReference(const TypePtr& dest, SemValue value,
 	                                ETokenType op);
 	// PA25/PA26 5.2.7: the pointer dynamic_cast forms (downcast and
