@@ -125,6 +125,31 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 				? VC_XVALUE : VC_LVALUE;
 			return value;
 		}
+		// PA25 5.2.7p2-p9: a polymorphic downcast reference
+		// dynamic_cast queries the runtime; a failed cast raises
+		// std::bad_cast through __cxa_bad_cast.
+		if (down > 0 && op == KW_DYNAMIC_CAST &&
+		    value.category != VC_PRVALUE)
+		{
+			host_.RequireCompleteType(from->named);
+			host_.RequireCompleteType(to->named);
+			const ClassInfo* src_cls = host_.Classes().Find(from->named);
+			if (src_cls && src_cls->is_polymorphic)
+			{
+				SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);
+				node->type = to;
+				node->category = dest->kind == TK_RVALUE_REFERENCE
+					? VC_XVALUE : VC_LVALUE;
+				node->typeid_operand = from;
+				node->children.push_back(std::move(value.node));
+				value.node = std::move(node);
+				value.type = to;
+				value.category = dest->kind == TK_RVALUE_REFERENCE
+					? VC_XVALUE : VC_LVALUE;
+				value.null_pointer_literal = false;
+				return value;
+			}
+		}
 	}
 	if (value.function_set || !compatible)
 		throw OutsideBoundary("reference cast form");
@@ -151,6 +176,39 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 	if (value.function_set && value.overloads.size() > 1)
 		throw OutsideBoundary("cast of an overloaded name");
 	TypePtr to = RemoveTopCv(dest);
+	// PA25 5.2.7: a polymorphic downcast pointer dynamic_cast queries
+	// the runtime; a failed cast yields a null pointer.
+	if (op == KW_DYNAMIC_CAST && to->kind == TK_POINTER &&
+	    !value.function_set)
+	{
+		TypePtr target_class = RemoveTopCv(to->target);
+		TypePtr source = RemoveTopCv(value.type);
+		if (target_class->kind == TK_CLASS &&
+		    source->kind == TK_POINTER &&
+		    RemoveTopCv(source->target)->kind == TK_CLASS)
+		{
+			TypePtr source_class = RemoveTopCv(source->target);
+			host_.RequireCompleteType(source_class->named);
+			host_.RequireCompleteType(target_class->named);
+			const ClassInfo* src_cls =
+				host_.Classes().Find(source_class->named);
+			int down = BaseClassDistance(target_class->named,
+			                             source_class->named);
+			if (src_cls && src_cls->is_polymorphic && down > 0)
+			{
+				SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);
+				node->type = to;
+				node->category = VC_PRVALUE;
+				node->typeid_operand = source_class;
+				node->children.push_back(std::move(value.node));
+				SemValue result;
+				result.type = to;
+				result.category = VC_PRVALUE;
+				result.node = std::move(node);
+				return result;
+			}
+		}
+	}
 	if (to->kind != TK_CLASS && !value.function_set &&
 	    RemoveTopCv(value.type)->kind == TK_CLASS)
 	{

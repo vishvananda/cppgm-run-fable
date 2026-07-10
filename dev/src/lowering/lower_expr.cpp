@@ -391,6 +391,13 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 	}
 	case SN_MEMBER_EXPRESSION:
 		return LowerMemberValue(node);
+	case SN_DYNAMIC_CAST:
+	{
+		LowerValue value;
+		value.type = NodeType(node);
+		value.text = LowerDynamicCast(node);
+		return value;
+	}
 	case SN_NEW_ARRAY:
 		return LowerNewArray(node);
 	case SN_NEW_INIT:
@@ -968,6 +975,84 @@ bool FunctionLowerer::IsTypeInfoComparison(const SemNode& node)
 		!callee.entity_scope->parent->parent->parent;
 }
 
+// PA25 5.2.7: a polymorphic downcast dynamic_cast. The result slot
+// pre-nulls, a null operand short-circuits, and the runtime
+// __dynamic_cast query fills the slot; the reference form raises
+// __cxa_bad_cast when the query fails.
+string FunctionLowerer::LowerDynamicCast(const SemNode& node)
+{
+	bool ref_form = node.category != VC_PRVALUE;
+	string operand = ref_form
+		? LowerAddressExpr(*node.children[0])
+		: LowerValueExpr(*node.children[0]).text;
+	TypePtr target = ref_form ? node.type
+	                          : RemoveTopCv(node.type->target);
+	string slot = AddMatSlot("dyn_cast", "ptr");
+	string scan_label = NewLabel("dyn_cast_scan");
+	string end_label = NewLabel("dyn_cast_end");
+	Emit("store ptr 0, $" + slot);
+	string is_null = NewTemp();
+	Emit(is_null + " = cmp eq ptr " + operand + ", 0");
+	ReferenceLabel(end_label);
+	ReferenceLabel(scan_label);
+	Terminate("branch " + is_null + ", ^" + end_label + ", ^" +
+	          scan_label);
+	OpenBlock(scan_label);
+	string src_rtti = NewTemp();
+	Emit(src_rtti + " = addr " +
+	     program_.RttiTypeRef(node.typeid_operand));
+	string dst_rtti = NewTemp();
+	Emit(dst_rtti + " = addr " + program_.RttiTypeRef(target));
+	// The queried class is dynamically used: its vtable (and virtual
+	// members) anchor in the program image.
+	if (target->kind == TK_CLASS && target->named->class_record)
+		program_.VTableRef(target->named->class_record);
+	string result = NewTemp();
+	Emit(result + " = call ptr " +
+	     program_.ExternalRuntimeFnRef(
+			"__dynamic_cast",
+			"(%arg0 : ptr, %arg1 : ptr, %arg2 : ptr, %arg3 : i64) -> "
+			"ptr [linkage=c, binding=strong, object=__dynamic_cast]") +
+	     "(" + operand + ", " + src_rtti + ", " + dst_rtti + ", 0)");
+	Emit("store ptr " + result + ", $" + slot);
+	if (!ref_form)
+	{
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+	}
+	else
+	{
+		string fail_label = NewLabel("dyn_cast_fail");
+		string found_label = NewLabel("dyn_cast_found");
+		string failed = NewTemp();
+		Emit(failed + " = cmp eq ptr " + result + ", 0");
+		ReferenceLabel(fail_label);
+		ReferenceLabel(found_label);
+		Terminate("branch " + failed + ", ^" + fail_label + ", ^" +
+		          found_label);
+		OpenBlock(fail_label);
+		Emit("call void " +
+		     program_.ExternalRuntimeFnRef(
+				"__cxa_bad_cast",
+				"() -> void [effects=readnone, unwind=may, "
+				"return=noreturn, linkage=c, binding=strong, "
+				"object=__cxa_bad_cast]") + "()");
+		EmitZeroValueReturn();
+		OpenBlock(found_label);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		// The reference presentation keeps a dead continuation block
+		// between the found edge and the join.
+		OpenBlock(NewLabel("block"));
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+	}
+	OpenBlock(end_label);
+	string loaded = NewTemp();
+	Emit(loaded + " = load ptr $" + slot);
+	return loaded;
+}
+
 // PA25 5.2.8: the address of the RTTI record a typeid query denotes.
 // The static form addresses the operand type's record; the dynamic
 // form null-checks the polymorphic glvalue, reads its vpointer, and
@@ -1098,6 +1183,8 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		return MemberAddress(node);
 	case SN_TYPEID:
 		return LowerTypeidAddress(node);
+	case SN_DYNAMIC_CAST:
+		return LowerDynamicCast(node);
 	case SN_CONSTRUCTOR_ACTION:
 		return MaterializeTemporary(node, "tmpobj", true);
 	case SN_UNARY_EXPRESSION:
@@ -1540,6 +1627,10 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 			return;
 		}
 		break;
+	case SN_DYNAMIC_CAST:
+		// A discarded cast still runs its runtime query.
+		LowerDynamicCast(node);
+		return;
 	case SN_CALL_EXPRESSION:
 		if (!IsReferenceType(node.type) &&
 		    RemoveTopCv(NodeType(node))->kind == TK_CLASS)

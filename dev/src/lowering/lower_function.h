@@ -273,6 +273,10 @@ private:
 	// PA25 5.2.8: a call node that is std::type_info::operator== or
 	// operator!= over typeid results (folds to RTTI address identity).
 	static bool IsTypeInfoComparison(const SemNode& node);
+	// PA25 5.2.7 dynamic_cast: null-checks the operand, calls the
+	// __dynamic_cast runtime, and (reference form) raises
+	// __cxa_bad_cast on failure; returns the result pointer text.
+	string LowerDynamicCast(const SemNode& node);
 	// PA25 typeid: the address of the RTTI record the query denotes
 	// (static: the operand type's record; dynamic: read through the
 	// polymorphic operand's vpointer with a null-check).

@@ -122,7 +122,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		                     *expr.operands[0], true, OP_LPAREN, "");
 	case EK_KEYWORD_CAST:
 		if (expr.op != KW_STATIC_CAST && expr.op != KW_CONST_CAST &&
-		    expr.op != KW_REINTERPET_CAST)
+		    expr.op != KW_REINTERPET_CAST &&
+		    expr.op != KW_DYNAMIC_CAST)
 			throw OutsideBoundary("cast keyword");
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
 		                     *expr.operands[0], true, expr.op,

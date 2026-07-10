@@ -96,6 +96,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_VPOINTER_STORE: return "vpointer-store";
 	case SN_STATIC_GUARD: return "static-guard";
 	case SN_TYPEID: return "typeid-expression";
+	case SN_DYNAMIC_CAST: return "dynamic-cast-expression";
 	}
 	throw runtime_error("unknown semantic node kind");
 }

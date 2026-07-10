@@ -126,7 +126,13 @@ enum ESemNodeKind
 	// PA25 typeid: an lvalue of const std::type_info. `typeid_operand`
 	// carries the resolved (cv/reference-stripped) operand type; a
 	// dynamic query keeps the polymorphic glvalue as children[0].
-	SN_TYPEID
+	SN_TYPEID,
+	// PA25 dynamic_cast over a polymorphic single-inheritance operand:
+	// children[0] is the operand (a pointer value for the pointer
+	// form, a glvalue for the reference form - the node's category
+	// tells them apart); `typeid_operand` is the operand's static
+	// class type, the node's type the target.
+	SN_DYNAMIC_CAST
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete
