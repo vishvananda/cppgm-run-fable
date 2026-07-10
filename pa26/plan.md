@@ -181,6 +181,66 @@ This reuses `RttiRef`/`ExternalRuntimeFnRef`; the only new external is the
 5. Sweep the remaining misc tests; through-check; audit; commit in cohesive
    slices per phase.
 
+## Architecture Review
+
+Where the built slice landed against the plan:
+
+- `ClassInfo::direct_bases` (typed rows: class record, byte offset, access)
+  is the single source of base facts, written only by
+  `sem_bases.cpp::BindBaseClause`; `base`/`base_access` remain as the
+  documented primary-chain alias (`direct_bases[0]`) that the PA15-25
+  surface reads. The audit converted the last predicates still reading only
+  the alias (12.8 copy/move/assign classification) to the table.
+- Derivation paths collapsed from the planned per-edge `base_steps` list to
+  `(base_hops, base_offset[, base_reverse])` on `SemNode`: the refs pin one
+  total-offset projection per adjustment, so the pair (plus the downcast
+  direction flag added during audit) is the whole fact. `BaseSubobjectPath`
+  in `class_info.cpp` is the one path oracle (memoized, tri-state);
+  lowering either renders stamped node facts or queries the same oracle
+  from types at conversion sites - a desync throws instead of emitting
+  unadjusted addresses.
+- Member lookup: `Scope::class_base` + `class_extra_bases` mirror the base
+  table's order (same single writer) and `ClassChainLookup` walks the DAG
+  with a visited set; ambiguity is entity-based (10.2p3 import copies dedup
+  by original owner). Base-specifier access is enforced at member naming
+  through `BaseAccessPath` edges (11.2), which the plan had left implicit.
+- Member pointers: values are typed everywhere - `(entity_scope,
+  entity_name)` pairs in template args and const-eval, i64/i128 value forms
+  only at the LowIR boundary. The this-adjustment lives in the i128 high
+  half; `ClassHasDisplacedBase` gates the call-site application so
+  non-displaced classes keep the pinned adjustment-free shape. Non-type pm
+  arguments apply no conversions (14.3.2p5, g++-aligned), which superseded
+  the plan's broader 4.11p2 wording for the argument context; 4.11p2
+  remains expression-level.
+- dynamic_cast<void*> landed as planned (offset-to-top scan + the dead
+  runtime presentation block, `_ZTIv` external via `ExternalVoidRttiRef`).
+
+## Final Architecture Review
+
+Post-audit state, confirmed by probes and the full through-pa26 suite:
+
+- Ownership: sema owns layout, paths, ambiguity, access, and pm identity as
+  typed state; lowering renders. No stringly facts (base matching, pm
+  identity, and import dedup are entity-pointer comparisons; operator names
+  use the codebase's established `operator X` encoding). No fixture-named
+  or source-shape gates: the two reference-presentation quirks
+  (`fn_pointer_fold`, shared offset-0 empty bases) are typed general rules
+  the checked-in oracle pins, documented in `audit.md`.
+- Correctness at non-zero offsets: every producer threads real offsets -
+  member access, implicit this, up/downcasts (null-preserving), generated
+  special members, inheriting ctors, member pointers (value, conversion,
+  application, non-type args), and base-edge access control. All were
+  probe-verified; the fixture suite pins the offset-0 presentations.
+- Performance: path queries are memoized per call and lookups carry
+  visited sets - diamond-ladder hierarchies are linear (26 levels: ~12ms).
+  No repeated full-suite walks or hot-path recomputation remain; the
+  remaining per-conversion class-vector allocation is bounded by DAG size
+  and measured insignificant.
+- Handoff to PA27: polymorphic/virtual MI stays a loud `OutsideBoundary`
+  in `sem_bases.cpp`; the vtable layer still flows through the first base
+  only; `dynamic_cast` reference/downcast RTTI forms beyond void* remain
+  PA25's runtime-call shapes.
+
 ## Outcome Notes
 
 - An adjustment lowers as **one** base-subobject projection carrying the
