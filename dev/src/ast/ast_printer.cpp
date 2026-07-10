@@ -11,6 +11,7 @@ namespace {
 void PrintDecl(const AstDecl& decl, ostream& out, int depth);
 void PrintStmt(const AstStmt& stmt, ostream& out, int depth);
 void PrintExpr(const AstExpr& expr, ostream& out, int depth);
+void PrintExprTail(const AstExpr& expr, ostream& out, int depth);
 void PrintTypeId(const AstTypeId& type, ostream& out, int depth);
 void PrintDeclarator(const AstDeclarator& declarator, ostream& out,
                      int depth, const char* label);
@@ -351,6 +352,18 @@ void PrintExpr(const AstExpr& expr, ostream& out, int depth)
 		PrintExpr(*expr.operands[0], out, depth + 1);
 		Line(out, depth + 1, "identifier " + FlattenName(expr.name));
 		break;
+	default:
+		PrintExprTail(expr, out, depth);
+		break;
+	}
+}
+
+// The cast, sizeof, trait, allocation, closure, and list forms
+// (split from PrintExpr for size).
+void PrintExprTail(const AstExpr& expr, ostream& out, int depth)
+{
+	switch (expr.kind)
+	{
 	case EK_CSTYLE_CAST:
 		Line(out, depth, "cast-expression " + TokenAnno(OP_LPAREN, ""));
 		PrintTypeId(*expr.type, out, depth + 1);
@@ -402,6 +415,8 @@ void PrintExpr(const AstExpr& expr, ostream& out, int depth)
 		Line(out, depth, "braced-init-list");
 		for (size_t i = 0; i < expr.arguments.size(); i++)
 			PrintExpr(*expr.arguments[i], out, depth + 1);
+		break;
+	default:
 		break;
 	}
 }

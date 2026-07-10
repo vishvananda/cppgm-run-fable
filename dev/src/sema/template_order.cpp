@@ -153,7 +153,17 @@ bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
 {
 	EnsureFunctionPattern(a);
 	EnsureFunctionPattern(b);
-	if (a.param_patterns.size() < argc || b.param_patterns.size() < argc)
+	// A trailing parameter pack covers every later argument position
+	// (14.8.2.4p8), so a shorter pattern list with a pack tail still
+	// orders against argc arguments.
+	bool a_pack_tail = !a.param_pattern_packs.empty() &&
+		a.param_pattern_packs.back();
+	bool b_pack_tail = !b.param_pattern_packs.empty() &&
+		b.param_pattern_packs.back();
+	if ((a.param_patterns.size() < argc && !a_pack_tail) ||
+	    (b.param_patterns.size() < argc && !b_pack_tail))
+		return false;
+	if (argc && (a.param_patterns.empty() || b.param_patterns.empty()))
 		return false;
 	vector<TypePtr> uniques;
 	for (size_t i = 0; i < a.params.size(); i++)
@@ -163,17 +173,32 @@ bool SemBinder::OrderingAtLeastAsSpecialized(TemplateInfo& a,
 		bound[i].is_pack_slot = b.params[i].pack;
 	for (size_t i = 0; i < argc; i++)
 	{
+		size_t ai = i < a.param_patterns.size()
+			? i : a.param_patterns.size() - 1;
+		size_t bi = i < b.param_patterns.size()
+			? i : b.param_patterns.size() - 1;
+		bool a_pack = ai < a.param_pattern_packs.size() &&
+			a.param_pattern_packs[ai];
+		bool b_pack = bi < b.param_pattern_packs.size() &&
+			b.param_pattern_packs[bi];
 		// 14.8.2.4p8: an argument transformed from a function
 		// parameter pack does not deduce against a non-pack parameter
 		// (`f(F&&, Args&&...)` is more specialized than
 		// `f(Args&&...)`).
-		if (i < a.param_pattern_packs.size() && a.param_pattern_packs[i] &&
-		    (i >= b.param_pattern_packs.size() ||
-		     !b.param_pattern_packs[i]))
+		if (a_pack && !b_pack)
 			return false;
+		// Each argument position pairs with the pack independently;
+		// earlier elements must not constrain later ones.
+		if (b_pack)
+			for (size_t j = 0; j < bound.size(); j++)
+				if (b.params[j].pack)
+				{
+					bound[j] = TemplateArg();
+					bound[j].is_pack_slot = true;
+				}
 		TypePtr transformed = SubstituteOrderingTypes(
-			a.param_patterns[i], uniques);
-		TypePtr pattern = b.param_patterns[i];
+			a.param_patterns[ai], uniques);
+		TypePtr pattern = b.param_patterns[bi];
 		if (!transformed || !pattern)
 			return false;
 		// 14.8.2.4p5-7: references and top-level cv-qualifiers drop

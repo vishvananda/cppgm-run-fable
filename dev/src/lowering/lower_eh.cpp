@@ -1,0 +1,683 @@
+#include "lowering/lower_function.h"
+
+#include <stdexcept>
+
+#include "lowering/lower_types.h"
+
+using std::runtime_error;
+using std::to_string;
+
+// PA25 exception handling and RTTI expressions: source-level
+// throw/try/catch statement lowering (15.1/15.3) plus the typeid and
+// dynamic_cast expression forms (5.2.7/5.2.8) that share the EH
+// runtime scaffolding. The hidden unwind-region machinery lives in
+// lower_member.cpp; the remaining statement and expression halves in
+// lower_function.cpp and lower_expr.cpp.
+
+namespace {
+
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA14 assignment boundary");
+}
+
+TypePtr StripReference(const TypePtr& type)
+{
+	return IsReferenceType(type) ? type->target : type;
+}
+
+// The computation type of a node: declared type with references and
+// top-level cv stripped.
+TypePtr NodeType(const SemNode& node)
+{
+	return RemoveTopCv(StripReference(node.type));
+}
+
+TypePtr BoolType()
+{
+	return MakeFundamentalType(FT_BOOL);
+}
+
+}  // namespace
+
+bool FunctionLowerer::IsTypeInfoComparison(const SemNode& node)
+{
+	if (node.kind != SN_CALL_EXPRESSION || node.children.size() != 3 ||
+	    node.children[0]->kind != SN_CALLEE)
+		return false;
+	const SemNode& callee = *node.children[0];
+	return callee.is_method &&
+		(callee.entity_name == "operator ==" ||
+		 callee.entity_name == "operator !=") &&
+		callee.entity_scope && callee.entity_scope->entity &&
+		callee.entity_scope->name == "type_info" &&
+		callee.entity_scope->parent &&
+		callee.entity_scope->parent->kind == SCOPE_NAMESPACE &&
+		callee.entity_scope->parent->name == "std" &&
+		callee.entity_scope->parent->parent &&
+		!callee.entity_scope->parent->parent->parent;
+}
+
+// PA25 5.2.7: a polymorphic downcast dynamic_cast. The result slot
+// pre-nulls, a null operand short-circuits, and the runtime
+// __dynamic_cast query fills the slot; the reference form raises
+// __cxa_bad_cast when the query fails.
+// 5.2.8: std::type_info operator==/!= folds to RTTI record address
+// identity - no runtime call.
+LowerValue FunctionLowerer::LowerTypeInfoComparison(const SemNode& node,
+                                                    const SemNode& callee)
+{
+	// The implicit object argument arrives as an address-of wrapper;
+	// the reference parameter binds the lvalue directly.
+	const SemNode& lhs_node =
+		node.children[1]->kind == SN_UNARY_EXPRESSION &&
+		node.children[1]->op == OP_AMP
+			? *node.children[1]->children[0] : *node.children[1];
+	const SemNode& rhs_node =
+		node.children[2]->kind == SN_UNARY_EXPRESSION &&
+		node.children[2]->op == OP_AMP
+			? *node.children[2]->children[0] : *node.children[2];
+	string lhs = LowerAddressExpr(lhs_node);
+	string rhs = LowerAddressExpr(rhs_node);
+	LowerValue result;
+	result.type = BoolType();
+	result.text = NewTemp();
+	Emit(result.text + " = cmp " +
+	     (callee.entity_name == "operator ==" ? "eq" : "ne") +
+	     " ptr " + lhs + ", " + rhs);
+	return result;
+}
+
+string FunctionLowerer::LowerDynamicCast(const SemNode& node)
+{
+	bool ref_form = node.category != VC_PRVALUE;
+	string operand = ref_form
+		? LowerAddressExpr(*node.children[0])
+		: LowerValueExpr(*node.children[0]).text;
+	TypePtr target = ref_form ? node.type
+	                          : RemoveTopCv(node.type->target);
+	string slot = AddMatSlot("dyn_cast", "ptr");
+	string scan_label = NewLabel("dyn_cast_scan");
+	string end_label = NewLabel("dyn_cast_end");
+	Emit("store ptr 0, $" + slot);
+	string is_null = NewTemp();
+	Emit(is_null + " = cmp eq ptr " + operand + ", 0");
+	ReferenceLabel(end_label);
+	ReferenceLabel(scan_label);
+	Terminate("branch " + is_null + ", ^" + end_label + ", ^" +
+	          scan_label);
+	OpenBlock(scan_label);
+	string src_rtti = NewTemp();
+	Emit(src_rtti + " = addr " +
+	     program_.RttiTypeRef(node.typeid_operand));
+	string dst_rtti = NewTemp();
+	Emit(dst_rtti + " = addr " + program_.RttiTypeRef(target));
+	// The queried class is dynamically used: its vtable (and virtual
+	// members) anchor in the program image.
+	if (target->kind == TK_CLASS && target->named->class_record)
+		program_.VTableRef(target->named->class_record);
+	string result = NewTemp();
+	Emit(result + " = call ptr " +
+	     program_.ExternalRuntimeFnRef(
+			"__dynamic_cast",
+			"(%arg0 : ptr, %arg1 : ptr, %arg2 : ptr, %arg3 : i64) -> "
+			"ptr [linkage=c, binding=strong, object=__dynamic_cast]") +
+	     "(" + operand + ", " + src_rtti + ", " + dst_rtti + ", 0)");
+	Emit("store ptr " + result + ", $" + slot);
+	if (!ref_form)
+	{
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+	}
+	else
+	{
+		string fail_label = NewLabel("dyn_cast_fail");
+		string found_label = NewLabel("dyn_cast_found");
+		string failed = NewTemp();
+		Emit(failed + " = cmp eq ptr " + result + ", 0");
+		ReferenceLabel(fail_label);
+		ReferenceLabel(found_label);
+		Terminate("branch " + failed + ", ^" + fail_label + ", ^" +
+		          found_label);
+		OpenBlock(fail_label);
+		Emit("call void " +
+		     program_.ExternalRuntimeFnRef(
+				"__cxa_bad_cast",
+				"() -> void [effects=readnone, unwind=may, "
+				"return=noreturn, linkage=c, binding=strong, "
+				"object=__cxa_bad_cast]") + "()");
+		EmitZeroValueReturn();
+		OpenBlock(found_label);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		// The reference presentation keeps a dead continuation block
+		// between the found edge and the join.
+		OpenBlock(NewLabel("block"));
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+	}
+	OpenBlock(end_label);
+	string loaded = NewTemp();
+	Emit(loaded + " = load ptr $" + slot);
+	return loaded;
+}
+
+// PA25 5.2.8: the address of the RTTI record a typeid query denotes.
+// The static form addresses the operand type's record; the dynamic
+// form null-checks the polymorphic glvalue, reads its vpointer, and
+// loads the record pointer stored one slot before the first virtual
+// entry (the vtable's RTTI head slot).
+string FunctionLowerer::LowerTypeidAddress(const SemNode& node)
+{
+	if (!node.typeid_dynamic)
+	{
+		string result = NewTemp();
+		Emit(result + " = addr " +
+		     program_.RttiTypeRef(node.typeid_operand));
+		return result;
+	}
+	string object = LowerAddressExpr(*node.children[0]);
+	string is_null = NewTemp();
+	Emit(is_null + " = cmp eq ptr " + object + ", 0");
+	string fail_label = NewLabel("typeid_fail");
+	string scan_label = NewLabel("typeid_scan");
+	ReferenceLabel(fail_label);
+	ReferenceLabel(scan_label);
+	Terminate("branch " + is_null + ", ^" + fail_label + ", ^" +
+	          scan_label);
+	OpenBlock(fail_label);
+	Emit("call void " +
+	     program_.ExternalRuntimeFnRef(
+			"__cxa_bad_typeid",
+			"() -> void [effects=readnone, unwind=may, "
+			"return=noreturn, linkage=c, binding=strong, "
+			"object=__cxa_bad_typeid]") + "()");
+	EmitZeroValueReturn();
+	OpenBlock(scan_label);
+	string vpointer = NewTemp();
+	Emit(vpointer + " = load ptr " + object);
+	string slot = NewTemp();
+	Emit(slot + " = index i8 " + vpointer + ", -8");
+	string record = NewTemp();
+	Emit(record + " = load ptr " + slot);
+	return record;
+}
+
+void FunctionLowerer::EmitZeroValueReturn()
+{
+	if (indirect_ret_ || IsVoidType(return_type_))
+	{
+		Terminate("return void");
+		return;
+	}
+	TypePtr ret_bare = RemoveTopCv(return_type_);
+	if (!IsReferenceType(return_type_) && ret_bare->kind == TK_CLASS)
+	{
+		if (retobj_slot_.empty())
+			retobj_slot_ = AddMatSlot("retobj",
+			                          LowerSlotType(ret_bare));
+		Emit("zeroinit " + LowerObjSpan(ret_bare) + " $" +
+		     retobj_slot_);
+		Terminate("return " + LowerSlotType(ret_bare) + " $" +
+		          retobj_slot_);
+		return;
+	}
+	string type_text = LowerValueType(return_type_);
+	if (LowerFloatType(return_type_))
+		Terminate("return " + type_text + " " +
+		          LowerFloatZero(return_type_));
+	else if (type_text == "ptr")
+	{
+		string temp = NewTemp();
+		Emit(temp + " = copy ptr nullptr");
+		Terminate("return ptr " + temp);
+	}
+	else
+		Terminate("return " + type_text + " 0");
+}
+
+void FunctionLowerer::BranchOnValue(const SemNode& node,
+                                    const string& true_label,
+                                    const string& false_label)
+{
+	// Reference parity: a branch on a namespace-scope
+	// pointer-to-function object spells the object's address - but
+	// only when the program proves the stored value non-null and
+	// unaliased (the address is truth-equivalent then); otherwise the
+	// value loads like any other condition.
+	if (node.kind == SN_ID_EXPRESSION && node.entity_scope &&
+	    node.entity_scope->kind == SCOPE_NAMESPACE &&
+	    node.type && RemoveTopCv(node.type)->kind == TK_POINTER &&
+	    RemoveTopCv(node.type)->target->kind == TK_FUNCTION &&
+	    program_.BranchSpellsFnPointerAddress(node.entity_scope,
+	                                          node.entity_name))
+	{
+		string address = NewTemp();
+		Emit(address + " = addr " +
+		     program_.GlobalRef(node.entity_scope, node.entity_name));
+		ReferenceLabel(true_label);
+		ReferenceLabel(false_label);
+		Terminate("branch " + address + ", ^" + true_label + ", ^" +
+		          false_label);
+		return;
+	}
+	LowerValue truth = MaterializeTruth(LowerValueExpr(node));
+	// The dispatch region closes once the branch value is secured;
+	// pending condition temporaries destroy on per-edge cleanup
+	// trampolines before the real targets.
+	if (eh_open_)
+		CloseEhRegion();
+	size_t mark = fe_marks_.empty() ? 0 : fe_marks_.back();
+	if (temp_cleanups_.size() > mark && !in_cleanup_emission_)
+	{
+		string true_cleanup = NewLabel("cond_true_cleanup");
+		string false_cleanup = NewLabel("cond_false_cleanup");
+		ReferenceLabel(true_cleanup);
+		ReferenceLabel(false_cleanup);
+		Terminate("branch " + truth.text + ", ^" + true_cleanup +
+		          ", ^" + false_cleanup);
+		OpenBlock(true_cleanup);
+		EmitTempCleanups(mark);
+		ReferenceLabel(true_label);
+		Terminate("jump ^" + true_label);
+		OpenBlock(false_cleanup);
+		EmitTempCleanups(mark);
+		ReferenceLabel(false_label);
+		Terminate("jump ^" + false_label);
+		temp_cleanups_.resize(mark);
+		return;
+	}
+	ReferenceLabel(true_label);
+	ReferenceLabel(false_label);
+	Terminate("branch " + truth.text + ", ^" + true_label + ", ^" +
+	          false_label);
+}
+
+LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
+{
+	string then_label = NewLabel("cond_then");
+	string else_label = NewLabel("cond_else");
+	string end_label = NewLabel("cond_end");
+	if (IsVoidType(node.type))
+	{
+		BranchOnValue(*node.children[0], then_label, else_label);
+		OpenBlock(then_label);
+		cond_arm_depth_++;
+		OpenSegmentRegion(*node.children[1]);
+		LowerEffect(*node.children[1]);
+		if (eh_open_)
+			CloseEhRegion();
+		CloseInto(else_label);
+		OpenSegmentRegion(*node.children[2]);
+		LowerEffect(*node.children[2]);
+		if (eh_open_)
+			CloseEhRegion();
+		cond_arm_depth_--;
+		CloseInto(end_label);
+		LowerValue value;
+		value.type = NodeType(node);
+		return value;
+	}
+	TypePtr type = NodeType(node);
+	string slot = AddMatSlot("cond", LowerValueType(type));
+	BranchOnValue(*node.children[0], then_label, else_label);
+	OpenBlock(then_label);
+	cond_arm_depth_++;
+	OpenSegmentRegion(*node.children[1]);
+	string first = LowerValueAs(*node.children[1], type, LCC_INIT);
+	Emit("store " + LowerValueType(type) + " " + first + ", $" + slot);
+	if (eh_open_)
+		CloseEhRegion();
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(else_label);
+	OpenSegmentRegion(*node.children[2]);
+	string second = LowerValueAs(*node.children[2], type, LCC_INIT);
+	Emit("store " + LowerValueType(type) + " " + second + ", $" + slot);
+	if (eh_open_)
+		CloseEhRegion();
+	cond_arm_depth_--;
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(end_label);
+	LowerValue value;
+	value.type = type;
+	value.text = NewTemp();
+	Emit(value.text + " = load " + LowerValueType(type) + " $" + slot);
+	return value;
+}
+
+string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
+{
+	string slot = AddMatSlot("condaddr", "ptr");
+	string then_label = NewLabel("condaddr_then");
+	string else_label = NewLabel("condaddr_else");
+	string end_label = NewLabel("condaddr_end");
+	TypePtr result_type = NodeType(node);
+	BranchOnValue(*node.children[0], then_label, else_label);
+	for (int arm = 1; arm <= 2; arm++)
+	{
+		OpenBlock(arm == 1 ? then_label : else_label);
+		const SemNode& operand = *node.children[arm];
+		cond_arm_depth_++;
+		OpenSegmentRegion(operand);
+		string address = LowerAddressExpr(operand);
+		TypePtr source = NodeType(operand);
+		// A derived arm adjusts to the common base result (5.16p3).
+		if (source->kind == TK_CLASS && result_type->kind == TK_CLASS)
+		{
+			address = AdjustToBase(
+				address,
+				BaseClassDistance(source->named, result_type->named));
+		}
+		Emit("store ptr " + address + ", $" + slot);
+		if (eh_open_)
+			CloseEhRegion();
+		cond_arm_depth_--;
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+	}
+	OpenBlock(end_label);
+	string result = NewTemp();
+	Emit(result + " = load ptr $" + slot);
+	return result;
+}
+
+// Emits one eh_catch/eh_catch_all marker per handler, assigning the
+// function-global selector ids on first emission.
+void FunctionLowerer::EmitTryMarkers(EhContext& context)
+{
+	for (size_t i = 0; i < context.handlers.size(); i++)
+	{
+		EhHandler& handler = context.handlers[i];
+		if (!handler.selector)
+			handler.selector = ++catch_selector_counter_;
+		if (handler.catch_all)
+			Emit("eh_catch_all, " + to_string(handler.selector));
+		else
+			Emit("eh_catch " + handler.rtti + ", " +
+			     to_string(handler.selector));
+	}
+}
+
+// A return crossing active try/catch contexts pops their markers: the
+// catch contexts close (and end the caught exception) before the
+// scope cleanups run, the try contexts after.
+void FunctionLowerer::EmitEhReturnUnwind()
+{
+	for (size_t i = eh_contexts_.size(); i-- > 0;)
+		if (eh_contexts_[i].is_catch)
+		{
+			Emit("eh_end");
+			Emit("call void " +
+			     program_.ExternalRuntimeFnRef(
+					"__cxa_end_catch",
+					"() -> void [role=eh_end_catch, linkage=c, "
+					"binding=strong, object=__cxa_end_catch]") + "()");
+		}
+	EmitCleanupsFrom(0);
+	for (size_t i = eh_contexts_.size(); i-- > 0;)
+		if (!eh_contexts_[i].is_catch)
+			Emit("eh_end");
+}
+
+void FunctionLowerer::LowerTry(const SemNode& node)
+{
+	program_.RequireEhRuntime();
+	EhContext context;
+	context.dispatch_label = NewLabel("catch_dispatch");
+	context.entry_label = NewLabel("catch_entry");
+	context.end_label = NewLabel("try_end");
+	context.cleanup_depth = cleanup_scopes_.size();
+	for (size_t i = 1; i < node.children.size(); i++)
+	{
+		const SemNode& handler_node = *node.children[i];
+		EhHandler handler;
+		handler.node = &handler_node;
+		if (handler_node.type)
+			handler.rtti = program_.ThrowRttiRef(
+				RemoveTopCv(StripReference(handler_node.type)));
+		else
+			handler.catch_all = true;
+		context.handlers.push_back(handler);
+	}
+	ReferenceLabel(context.dispatch_label);
+	Emit("eh_try ^" + context.dispatch_label);
+	eh_contexts_.push_back(context);
+	LowerStatement(*node.children[0]);
+	context = eh_contexts_.back();
+	eh_contexts_.pop_back();
+	if (!blocks_.back().terminated)
+	{
+		Emit("eh_end");
+		ReferenceLabel(context.end_label);
+		Terminate("jump ^" + context.end_label);
+	}
+	// The landing dispatch: the handler markers, then the shared
+	// selector comparison chain.
+	OpenBlock(context.dispatch_label);
+	EmitTryMarkers(context);
+	ReferenceLabel(context.entry_label);
+	Terminate("jump ^" + context.entry_label);
+	OpenBlock(context.entry_label);
+	string exc = NewTemp();
+	Emit(exc + " = exception ptr");
+	string selector = NewTemp();
+	Emit(selector + " = exception_selector i32");
+	for (size_t i = 0; i < context.handlers.size(); i++)
+		context.handlers[i].body_label = NewLabel("catch_body");
+	context.next_label = NewLabel("catch_next");
+	for (size_t i = 0; i < context.handlers.size(); i++)
+	{
+		EhHandler& handler = context.handlers[i];
+		string miss = i + 1 < context.handlers.size()
+			? NewLabel("catch_check") : context.next_label;
+		string matched = NewTemp();
+		Emit(matched + " = cmp eq i32 " + selector + ", " +
+		     to_string(handler.selector));
+		ReferenceLabel(handler.body_label);
+		ReferenceLabel(miss);
+		Terminate("branch " + matched + ", ^" + handler.body_label +
+		          ", ^" + miss);
+		if (i + 1 < context.handlers.size())
+			OpenBlock(miss);
+	}
+	for (size_t i = 0; i < context.handlers.size(); i++)
+		EmitCatchHandler(context, context.handlers[i], exc);
+	EmitCatchNext(context);
+	// The join survives even when every path terminated (the
+	// reference keeps the dead continuation).
+	ReferenceLabel(context.end_label);
+	OpenBlock(context.end_label);
+}
+
+// One catch handler: __cxa_begin_catch, the declared entity binding,
+// the guarded body, and the handler's own unwind path (ending the
+// caught exception before continuing outward).
+void FunctionLowerer::EmitCatchHandler(EhContext& context,
+                                       EhHandler& handler,
+                                       const string& exc)
+{
+	string end_catch_ref = program_.ExternalRuntimeFnRef(
+		"__cxa_end_catch",
+		"() -> void [role=eh_end_catch, linkage=c, binding=strong, "
+		"object=__cxa_end_catch]");
+	{
+		const SemNode& handler_node = *handler.node;
+		OpenBlock(handler.body_label);
+		string object = NewTemp();
+		Emit(object + " = call ptr " +
+		     program_.ExternalRuntimeFnRef(
+				"__cxa_begin_catch",
+				"(%arg0 : ptr) -> ptr [role=eh_begin_catch, linkage=c, "
+				"binding=strong, object=__cxa_begin_catch]") +
+		     "(" + exc + ")");
+		if (!handler_node.entity_name.empty())
+		{
+			string slot = AddMatSlot("catch", "ptr");
+			Emit("store ptr " + object + ", $" + slot);
+		}
+		string cleanup_label = NewLabel("catch_cleanup");
+		ReferenceLabel(cleanup_label);
+		Emit("eh_cleanup ^" + cleanup_label);
+		if (!handler_node.entity_name.empty())
+		{
+			TypePtr declared = handler_node.type;
+			if (IsReferenceType(declared))
+			{
+				string slot = AddSlot(handler_node.entity_scope,
+				                      handler_node.entity_name, "ptr");
+				Emit("store ptr " + object + ", $" + slot);
+			}
+			else
+			{
+				TypePtr bare = RemoveTopCv(declared);
+				if (bare->kind == TK_CLASS)
+					throw OutsideBoundary("by-value class handler");
+				string slot = AddSlot(handler_node.entity_scope,
+				                      handler_node.entity_name,
+				                      LowerSlotType(bare));
+				string value = NewTemp();
+				Emit(value + " = load " + LowerValueType(bare) + " " +
+				     object);
+				Emit("store " + LowerValueType(bare) + " " + value +
+				     ", $" + slot);
+			}
+		}
+		EhContext catch_context;
+		catch_context.is_catch = true;
+		catch_context.cleanup_label = cleanup_label;
+		catch_context.cleanup_depth = cleanup_scopes_.size();
+		eh_contexts_.push_back(catch_context);
+		LowerStatement(*handler_node.children[0]);
+		eh_contexts_.pop_back();
+		if (!blocks_.back().terminated)
+		{
+			Emit("eh_end");
+			Emit("call void " + end_catch_ref + "()");
+			ReferenceLabel(context.end_label);
+			Terminate("jump ^" + context.end_label);
+		}
+		// The unwind path out of the handler ends the caught
+		// exception, pops the try marker, and continues.
+		OpenBlock(cleanup_label);
+		size_t enclosing = eh_contexts_.size();
+		while (enclosing > 0 && eh_contexts_[enclosing - 1].is_catch)
+			enclosing--;
+		if (enclosing > 0)
+		{
+			EhContext& outer = eh_contexts_[enclosing - 1];
+			EmitTryMarkers(outer);
+			Emit("call void " + end_catch_ref + "()");
+			Emit("eh_end");
+			Emit("eh_end");
+			ReferenceLabel(outer.entry_label);
+			Terminate("jump ^" + outer.entry_label);
+		}
+		else
+		{
+			Emit("call void " + end_catch_ref + "()");
+			Emit("eh_end");
+			Terminate("resume");
+		}
+	}
+}
+
+// The selector missed every handler of this try: continue to the
+// enclosing in-function try (running the scopes between) or resume
+// unwinding.
+void FunctionLowerer::EmitCatchNext(EhContext& context)
+{
+	OpenBlock(context.next_label);
+	size_t enclosing = eh_contexts_.size();
+	while (enclosing > 0 && eh_contexts_[enclosing - 1].is_catch)
+		enclosing--;
+	if (enclosing > 0)
+	{
+		EhContext& outer = eh_contexts_[enclosing - 1];
+		EmitCleanupsFrom(outer.cleanup_depth);
+		ReferenceLabel(outer.entry_label);
+		Terminate("jump ^" + outer.entry_label);
+	}
+	else
+		Terminate("resume");
+}
+
+// PA25 15.1: throw allocates the exception object, builds the payload
+// (a stored scalar or a copy-construction), and raises it through
+// __cxa_throw; a rethrow re-raises the caught exception. Both are
+// noreturn - a zero-valued return terminates the dead continuation.
+void FunctionLowerer::LowerThrow(const SemNode& node)
+{
+	program_.RequireEhRuntime();
+	if (node.children.empty())
+	{
+		Emit("call void " +
+		     program_.ExternalRuntimeFnRef(
+				"__cxa_rethrow",
+				"() -> void [return=noreturn, role=eh_rethrow, "
+				"linkage=c, binding=strong, object=__cxa_rethrow]") +
+		     "()");
+		EmitZeroValueReturn();
+		return;
+	}
+	TypePtr type = node.typeid_operand;
+	bool is_class = type->kind == TK_CLASS;
+	program_.EhObjGlobal(type);
+	string alloc_ref = program_.ExternalRuntimeFnRef(
+		"__cxa_allocate_exception",
+		"(%arg0 : i64) -> ptr [role=eh_allocate_exception, linkage=c, "
+		"binding=strong, object=__cxa_allocate_exception]");
+	string throw_ref = program_.ExternalRuntimeFnRef(
+		"__cxa_throw",
+		"(%arg0 : ptr, %arg1 : ptr, %arg2 : ptr) -> void "
+		"[return=noreturn, role=eh_throw, linkage=c, binding=strong, "
+		"object=__cxa_throw]");
+	bool wrap = !in_cleanup_emission_ && !suppress_eh_regions_ &&
+		(eh_armed_ || !temp_cleanups_.empty());
+	if (wrap && !eh_open_)
+		OpenEhRegion("throw_alloc_unwind_end");
+	string storage = NewTemp();
+	Emit(storage + " = call ptr " + alloc_ref + "(" +
+	     to_string(TypeSize(type)) + ")");
+	if (is_class)
+	{
+		// The storage pointer survives the allocation's dispatch
+		// region in its slot; the payload copy-constructs into it.
+		string slot = AddMatSlot("throw_alloc", "ptr");
+		Emit("store ptr " + storage + ", $" + slot);
+		if (eh_open_)
+			CloseEhRegion();
+		storage = NewTemp();
+		Emit(storage + " = load ptr $" + slot);
+		LowerClassInit(*node.children[0], storage);
+		if (wrap && !eh_open_)
+			OpenEhRegion();
+	}
+	else
+	{
+		string value = LowerValueAs(*node.children[0],
+		                            RemoveTopCv(type), LCC_INIT);
+		Emit("store " + LowerValueType(type) + " " + value + ", " +
+		     storage);
+	}
+	string rtti = NewTemp();
+	Emit(rtti + " = addr " + program_.ThrowRttiRef(type));
+	string dtor_arg = "0";
+	if (is_class && node.children.size() > 1)
+	{
+		const SemNode& dtor_call = *node.children[1]->children[0];
+		string target =
+			program_.MemberFunctionRef(*dtor_call.children[0]);
+		dtor_arg = NewTemp();
+		Emit(dtor_arg + " = addr " + target);
+	}
+	Emit("call void " + throw_ref + "(" + storage + ", " + rtti + ", " +
+	     dtor_arg + ")");
+	if (eh_open_)
+		CloseEhRegion();
+	if (!eh_contexts_.empty() && !eh_contexts_.back().is_catch)
+		Emit("eh_end");
+	EmitZeroValueReturn();
+}

@@ -210,10 +210,13 @@ string MangleSubstitutable(const string& key, const string& spelling,
 	return spelling;
 }
 
-// The structural key of a type, independent of any substitution state.
-string TypeKey(const TypePtr& type)
+// The structural key of a type, independent of any substitution
+// state; the pattern context carries through so template-parameter
+// keys stay consistent with the spelling passes.
+string TypeKey(const TypePtr& type, const vector<TemplateParam>* params)
 {
 	Substitutions throwaway;
+	throwaway.pattern_params = params;
 	string key;
 	MangleType(type, throwaway, &key);
 	return key;
@@ -225,7 +228,8 @@ string TypeKey(const TypePtr& type)
 // The structural key of one template argument (types recurse through
 // TypeKey; values key by declared type + bits; pattern slots by their
 // parameter index; a `...` expansion pattern marks its element key).
-string ArgKeyBase(const TemplateArg& arg)
+string ArgKeyBase(const TemplateArg& arg,
+                  const vector<TemplateParam>* params)
 {
 	if (arg.template_entity)
 		return "tt:" + LowerScopeKey(arg.template_entity->declaring) +
@@ -239,7 +243,7 @@ string ArgKeyBase(const TemplateArg& arg)
 		return "tdep:" +
 			FlattenSpecifierSeq(arg.dependent_type->specifiers);
 	if (!arg.is_value)
-		return TypeKey(arg.type);
+		return TypeKey(arg.type, params);
 	if (arg.value_param >= 0)
 		return "vp" + to_string(arg.value_param);
 	if (arg.dependent_value)
@@ -247,16 +251,18 @@ string ArgKeyBase(const TemplateArg& arg)
 	if (arg.entity_scope)
 		return "ven:" + LowerScopeKey(arg.entity_scope) +
 			arg.entity_name;
-	return "v" + TypeKey(arg.type) + ":" + to_string(arg.value_bits);
+	return "v" + TypeKey(arg.type, params) + ":" +
+		to_string(arg.value_bits);
 }
 
-string ArgKey(const TemplateArg& arg)
+string ArgKey(const TemplateArg& arg, const vector<TemplateParam>* params)
 {
-	return ArgKeyBase(arg) + (arg.pack_pattern ? "..." : "");
+	return ArgKeyBase(arg, params) + (arg.pack_pattern ? "..." : "");
 }
 
 void ComponentKeys(const NameComponent& part, const string& prev,
-                   string& name_key, string& full_key)
+                   const vector<TemplateParam>* params, string& name_key,
+                   string& full_key)
 {
 	name_key = (prev.empty() ? string("T:") : prev + "::") + part.name;
 	full_key = name_key;
@@ -264,7 +270,7 @@ void ComponentKeys(const NameComponent& part, const string& prev,
 	{
 		full_key += "<";
 		for (size_t i = 0; i < part.args->size(); i++)
-			full_key += ArgKey((*part.args)[i]) + ",";
+			full_key += ArgKey((*part.args)[i], params) + ",";
 		full_key += ">";
 	}
 }
@@ -290,7 +296,7 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 		TemplateArg element = arg;
 		element.pack_pattern = false;
 		string inner = MangleTemplateArg(element, subs);
-		string key = "Dp|" + ArgKey(element);
+		string key = "Dp|" + ArgKey(element, subs.pattern_params);
 		return "J" + MangleSubstitutable(key, "Dp" + inner, subs) + "E";
 	}
 	if (arg.template_entity)
@@ -419,7 +425,8 @@ string MangleComponentList(const vector<NameComponent>& parts,
 	string prev;
 	for (size_t i = 0; i < parts.size(); i++)
 	{
-		ComponentKeys(parts[i], prev, name_keys[i], full_keys[i]);
+		ComponentKeys(parts[i], prev, subs.pattern_params, name_keys[i],
+		              full_keys[i]);
 		prev = full_keys[i];
 	}
 	if (key_out)
@@ -489,16 +496,37 @@ string MangleComponentList(const vector<NameComponent>& parts,
 string ManglePrefixComponents(const vector<NameComponent>& parts,
                               Substitutions& subs, string& encoding)
 {
+	// Longest already-substituted head: an encoding embedded in a
+	// larger name (5.1.7 Z...E forms) compresses the prefix seen by
+	// the outer spelling (`ZNS_8lookup_aE...`).
+	vector<string> name_keys;
+	vector<string> full_keys;
 	string prev;
 	for (size_t i = 0; i < parts.size(); i++)
 	{
 		string name_key;
 		string full_key;
-		ComponentKeys(parts[i], prev, name_key, full_key);
-		AppendComponentSpelling(parts[i], name_key, subs, encoding,
-		                        false);
-		subs.Add(full_key);
+		ComponentKeys(parts[i], prev, subs.pattern_params, name_key,
+		              full_key);
+		name_keys.push_back(name_key);
+		full_keys.push_back(full_key);
 		prev = full_key;
+	}
+	size_t start = 0;
+	for (size_t k = parts.size(); k > 0; k--)
+	{
+		string sub = subs.Find(full_keys[k - 1]);
+		if (sub.empty())
+			continue;
+		encoding += sub;
+		start = k;
+		break;
+	}
+	for (size_t i = start; i < parts.size(); i++)
+	{
+		AppendComponentSpelling(parts[i], name_keys[i], subs, encoding,
+		                        false);
+		subs.Add(full_keys[i]);
 	}
 	return prev;
 }
@@ -544,12 +572,24 @@ const Scope* LocalEntityFunctionScope(const NamedTypeInfo& info)
 	return 0;
 }
 
-// 5.1.7: a function-local entity mangles as
-// `Z <function encoding> E <entity name>`.
-string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
-                       Substitutions& subs, string* key_out)
+// Pointer-identity substitution key: stable within one mangled name
+// and independent of the substitution-dependent spelling (the same
+// entity mangled later in the name must compress even though its
+// components would then substitute differently).
+string PointerKey(const void* p)
 {
-	string fn_object;
+	char buffer[24];
+	snprintf(buffer, sizeof(buffer), "%p", p);
+	return buffer;
+}
+
+// 5.1.7: the encoding of the function enclosing a local entity,
+// sharing the caller's substitution table so the components register
+// for later compression (`ZNS_8lookup_aE...EUlS6_PKcE_`).
+string MangleEnclosingFunctionEncoding(const Scope* fn_scope,
+                                       Substitutions& subs)
+{
+	subs.encoding_instance++;
 	const Scope* declaring = fn_scope->parent;
 	// The body scope carries its own composed type; a name lookup
 	// would find only the first overload of the name.
@@ -561,9 +601,9 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 	if (!fn_type || !declaring)
 		throw OutsideBoundary("local entity mangling context");
 	if (fn_scope->fn_spec)
-		fn_object =
-			MangleFunctionTemplateObjectName(*fn_scope->fn_spec);
-	else if (declaring->kind == SCOPE_CLASS)
+		return MangleFunctionTemplateEncoding(*fn_scope->fn_spec,
+		                                      subs);
+	if (declaring->kind == SCOPE_CLASS)
 	{
 		// The member encoding takes the this-adjusted type; a body
 		// scope's composed type carries only the declared signature.
@@ -588,56 +628,57 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 			adjusted = MakeFunctionType(fn_type->target, params,
 			                            fn_type->variadic);
 		}
-		fn_object = MangleMemberFunctionObjectName(
-			declaring, fn_scope->name, adjusted, "");
+		return MangleMemberFunctionEncoding(declaring, fn_scope->name,
+		                                    adjusted, "", subs);
 	}
-	else
-		fn_object = MangleFunctionObjectName(declaring, fn_scope->name,
-		                                     fn_type);
-	// The encoding is the object name without its _Z prefix.
-	string fn_encoding = fn_object.compare(0, 2, "_Z") == 0
-		? fn_object.substr(2) : fn_object;
-	// PA25: a closure class spells the Itanium <lambda-sig> local
-	// name (Ul <bare-params> E <discriminator> _).
-	if (info.is_closure)
-	{
-		string params = "v";
-		if (info.class_record && info.class_record->members)
-			if (const ScopeBinding* op = FindOwnBinding(
-			        *info.class_record->members, "operator ()"))
-				if (op->type && op->type->kind == TK_FUNCTION)
-					params = MangleBareParameters(op->type, subs, 0);
-		string signature = "Ul" + params + "E" +
-			(info.closure_discriminator > 0
-				 ? std::to_string(info.closure_discriminator - 1)
-				 : string()) + "_";
-		string key = "Z:" + fn_encoding + ":" + signature;
-		if (key_out)
-			*key_out = key;
-		string found = subs.Find(key);
-		if (!found.empty())
-			return found;
-		subs.Add(key);
-		return "Z" + fn_encoding + "E" + signature;
-	}
-	// The classes between the function and the entity, then the leaf.
-	string names;
-	string name_key;
-	for (const Scope* scope = info.scope;
-	     scope && scope != fn_scope; scope = scope->parent)
-		if (scope->kind == SCOPE_CLASS && !scope->name.empty())
-		{
-			names = SourceName(scope->name) + names;
-			name_key = scope->name + "::" + name_key;
-		}
-	names += SourceName(info.name);
-	name_key += info.name;
-	string key = "Z:" + fn_encoding + ":" + name_key;
+	return MangleFunctionEncoding(declaring, fn_scope->name, fn_type,
+	                              subs);
+}
+
+// The Itanium <lambda-sig> of a closure class
+// (Ul <bare-params> E <discriminator> _).
+string ClosureLambdaSignature(const NamedTypeInfo& info,
+                              Substitutions& subs)
+{
+	string params = "v";
+	if (info.class_record && info.class_record->members)
+		if (const ScopeBinding* op = FindOwnBinding(
+		        *info.class_record->members, "operator ()"))
+			if (op->type && op->type->kind == TK_FUNCTION)
+				params = MangleBareParameters(op->type, subs, 0);
+	return "Ul" + params + "E" +
+		(info.closure_discriminator > 0
+			 ? std::to_string(info.closure_discriminator - 1)
+			 : string()) + "_";
+}
+
+// 5.1.7: a function-local entity mangles as
+// `Z <function encoding> E <entity name>`.
+string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
+                       Substitutions& subs, string* key_out)
+{
+	string key = "ZL:" + PointerKey(&info);
 	if (key_out)
 		*key_out = key;
 	string found = subs.Find(key);
 	if (!found.empty())
 		return found;
+	string fn_encoding = MangleEnclosingFunctionEncoding(fn_scope, subs);
+	// PA25: a closure class spells the Itanium <lambda-sig> local
+	// name (Ul <bare-params> E <discriminator> _).
+	if (info.is_closure)
+	{
+		string signature = ClosureLambdaSignature(info, subs);
+		subs.Add(key);
+		return "Z" + fn_encoding + "E" + signature;
+	}
+	// The classes between the function and the entity, then the leaf.
+	string names;
+	for (const Scope* scope = info.scope;
+	     scope && scope != fn_scope; scope = scope->parent)
+		if (scope->kind == SCOPE_CLASS && !scope->name.empty())
+			names = SourceName(scope->name) + names;
+	names += SourceName(info.name);
 	subs.Add(key);
 	return "Z" + fn_encoding + "E" + names;
 }
@@ -740,12 +781,20 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 		int index = type->named->param_index;
 		if (index < 0)
 			throw OutsideBoundary("mangled type form");
-		string key = "TP:" + to_string(index);
+		// The key carries the owning template's parameter list: an
+		// embedded local encoding's T<n>_ names a different template's
+		// parameter than the outer pattern's T<n>_.
+		string key = "TP:" + PointerKey(subs.pattern_params) + ":" +
+			to_string(index);
 		if (key_out)
 			*key_out = key;
+		string found = subs.FindParam(key);
+		if (!found.empty())
+			return found;
 		string spelling = index == 0
 			? string("T_") : "T" + to_string(index - 1) + "_";
-		return MangleSubstitutable(key, spelling, subs);
+		subs.AddParam(key);
+		return spelling;
 	}
 	default:
 		throw OutsideBoundary("mangled type form");
@@ -1026,10 +1075,9 @@ bool LowerInUnnamedNamespace(const Scope* scope)
 	return false;
 }
 
-string MangleFunctionObjectName(const Scope* scope, const string& name,
-                                const TypePtr& type)
+string MangleFunctionEncoding(const Scope* scope, const string& name,
+                              const TypePtr& type, Substitutions& subs)
 {
-	Substitutions subs;
 	vector<NameComponent> parts = ScopeComponents(scope);
 	string encoding;
 	if (parts.empty())
@@ -1041,7 +1089,14 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 		encoding = "N" + prefix +
 			MangleTerminalName(name, type->parameters.size()) + "E";
 	}
-	return "_Z" + encoding + MangleBareParameters(type, subs);
+	return encoding + MangleBareParameters(type, subs);
+}
+
+string MangleFunctionObjectName(const Scope* scope, const string& name,
+                                const TypePtr& type)
+{
+	Substitutions subs;
+	return "_Z" + MangleFunctionEncoding(scope, name, type, subs);
 }
 
 string MangleVariableObjectName(const Scope* scope, const string& name)
@@ -1075,7 +1130,7 @@ string MangleVariableTemplateObjectName(const Scope* scope,
 		prev = ManglePrefixComponents(parts, subs, encoding);
 	string name_key;
 	string full_key;
-	ComponentKeys(leaf, prev, name_key, full_key);
+	ComponentKeys(leaf, prev, subs.pattern_params, name_key, full_key);
 	AppendComponentSpelling(leaf, name_key, subs, encoding, false);
 	if (parts.empty())
 		return "_Z" + encoding;
@@ -1094,13 +1149,12 @@ string MangleTypeEncoding(const TypePtr& type)
 	return MangleType(type, subs);
 }
 
-string MangleMemberFunctionObjectName(const Scope* scope,
-                                      const string& name,
-                                      const TypePtr& type,
-                                      const string& special_code)
+string MangleMemberFunctionEncoding(const Scope* scope,
+                                    const string& name,
+                                    const TypePtr& type,
+                                    const string& special_code,
+                                    Substitutions& subs)
 {
-	Substitutions subs;
-	vector<NameComponent> parts = ScopeComponents(scope);
 	// The implicit object parameter carries the method cv-qualifiers
 	// and is dropped from the bare signature.
 	bool is_const = false;
@@ -1113,6 +1167,48 @@ string MangleMemberFunctionObjectName(const Scope* scope,
 		                       type->parameters.end());
 		bare = MakeFunctionType(type->target, params, type->variadic);
 	}
+	// The terminal mangles at its spelling position (a conversion
+	// function's "cv <type>" registers substitutions after the
+	// prefix), so it composes lazily here.
+	struct Terminal
+	{
+		static string Spell(const string& name, const TypePtr& bare,
+		                    const string& special_code,
+		                    Substitutions& subs)
+		{
+			if (!special_code.empty())
+				return special_code;
+			// A conversion function encodes "cv <type>"; member
+			// operators count the implicit object argument.
+			string code;
+			bool conversion = name.compare(0, 9, "operator ") == 0 &&
+				name.compare(0, 10, "operator \"") != 0 &&
+				!LookupOperatorCode(name.substr(9), code);
+			if (conversion)
+				return "cv" + MangleType(bare->target, subs);
+			return MangleTerminalName(name,
+			                          bare->parameters.size() + 1);
+		}
+	};
+	// PA25 5.1.7: a closure member spells the local-name form
+	// `Z <function encoding> E N [K] <lambda-sig> <member> E`.
+	const NamedTypeInfo* entity = scope ? scope->entity : 0;
+	if (entity && entity->is_closure)
+		if (const Scope* fn_scope = LocalEntityFunctionScope(*entity))
+		{
+			string encoding = "Z" +
+				MangleEnclosingFunctionEncoding(fn_scope, subs) +
+				"EN";
+			if (is_volatile)
+				encoding += "V";
+			if (is_const)
+				encoding += "K";
+			encoding += ClosureLambdaSignature(*entity, subs);
+			encoding += Terminal::Spell(name, bare, special_code,
+			                            subs);
+			encoding += "E";
+			return encoding + MangleBareParameters(bare, subs);
+		}
 	string encoding = "N";
 	if (is_volatile)
 		encoding += "V";
@@ -1122,23 +1218,19 @@ string MangleMemberFunctionObjectName(const Scope* scope,
 		encoding += "R";
 	else if (type->ref_qual == 2)
 		encoding += "O";
+	vector<NameComponent> parts = ScopeComponents(scope);
 	ManglePrefixComponents(parts, subs, encoding);
-	if (!special_code.empty())
-		encoding += special_code;
-	else
-	{
-		// A conversion function encodes "cv <type>"; member operators
-		// count the implicit object argument.
-		string code;
-		bool conversion = name.compare(0, 9, "operator ") == 0 &&
-			name.compare(0, 10, "operator \"") != 0 &&
-			!LookupOperatorCode(name.substr(9), code);
-		if (conversion)
-			encoding += "cv" + MangleType(bare->target, subs);
-		else
-			encoding += MangleTerminalName(
-				name, bare->parameters.size() + 1);
-	}
+	encoding += Terminal::Spell(name, bare, special_code, subs);
 	encoding += "E";
-	return "_Z" + encoding + MangleBareParameters(bare, subs);
+	return encoding + MangleBareParameters(bare, subs);
+}
+
+string MangleMemberFunctionObjectName(const Scope* scope,
+                                      const string& name,
+                                      const TypePtr& type,
+                                      const string& special_code)
+{
+	Substitutions subs;
+	return "_Z" + MangleMemberFunctionEncoding(scope, name, type,
+	                                           special_code, subs);
 }

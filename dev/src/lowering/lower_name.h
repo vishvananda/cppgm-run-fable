@@ -8,6 +8,8 @@ using std::string;
 #include "sema/template_info.h"
 #include "sema/type.h"
 
+namespace lower_mangle { class Substitutions; }
+
 // PA14 symbol naming: deterministic LowIR symbol spellings derived
 // from the resolved scope model, plus the Itanium object-name encoding
 // carried as `object=` metadata for later object emission.
@@ -72,6 +74,19 @@ string MangleMemberFunctionObjectName(const Scope* scope,
                                       const string& name,
                                       const TypePtr& type,
                                       const string& special_code);
+
+// PA25: the same encodings without the _Z prefix, threaded through an
+// external substitution table so a local entity's Z<encoding>E form
+// (5.1.7) shares one table with the name that embeds it.
+string MangleFunctionEncoding(const Scope* scope, const string& name,
+                              const TypePtr& type,
+                              lower_mangle::Substitutions& subs);
+string MangleMemberFunctionEncoding(const Scope* scope, const string& name,
+                                    const TypePtr& type,
+                                    const string& special_code,
+                                    lower_mangle::Substitutions& subs);
+string MangleFunctionTemplateEncoding(const FunctionSpecialization& spec,
+                                      lower_mangle::Substitutions& subs);
 
 // PA21: the Itanium spelling of a constructor-template specialization
 // entry (`C1I<args>E` with pattern-based parameters).

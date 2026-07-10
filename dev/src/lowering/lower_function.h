@@ -298,6 +298,7 @@ private:
 		bool is_catch;
 		string dispatch_label;
 		string entry_label;
+		string next_label;
 		string end_label;
 		string cleanup_label;  // catch contexts: the unwind path
 		vector<EhHandler> handlers;
@@ -306,6 +307,9 @@ private:
 	// Emits the try's handler markers (eh_catch/eh_catch_all lines),
 	// assigning function-global selectors on first emission.
 	void EmitTryMarkers(EhContext& context);
+	void EmitCatchHandler(EhContext& context, EhHandler& handler,
+	                      const string& exc);
+	void EmitCatchNext(EhContext& context);
 	// The eh_end / __cxa_end_catch pops a return crossing the active
 	// contexts must run, interleaved with the scope cleanups.
 	void EmitEhReturnUnwind();
@@ -315,6 +319,11 @@ private:
 	// __dynamic_cast runtime, and (reference form) raises
 	// __cxa_bad_cast on failure; returns the result pointer text.
 	string LowerDynamicCast(const SemNode& node);
+	LowerValue LowerTypeInfoComparison(const SemNode& node,
+	                                   const SemNode& callee);
+	string LowerCalleeText(const SemNode& callee, const TypePtr& fn_type,
+	                       bool direct, bool dispatch,
+	                       const string& object_text);
 	// PA25 typeid: the address of the RTTI record the query denotes
 	// (static: the operand type's record; dynamic: read through the
 	// polymorphic operand's vpointer with a null-check).

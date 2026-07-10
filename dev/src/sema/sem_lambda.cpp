@@ -606,8 +606,26 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 		"class " + name, current_, name);
 	entity->class_key = "class";
 	entity->is_closure = true;
-	entity->closure_discriminator = closure_discriminators_[fn_scope
-		? fn_scope->parent : 0]++;
+	{
+		// 5.1.7: the <lambda-sig> discriminator counts earlier
+		// lambdas with the same signature in the same context.
+		std::vector<std::vector<TypePtr>>& seen =
+			closure_discriminators_[fn_scope ? fn_scope->parent : 0];
+		int matching = 0;
+		for (size_t i = 0; i < seen.size(); i++)
+		{
+			if (seen[i].size() != param_types.size())
+				continue;
+			bool same = true;
+			for (size_t j = 0; same && j < seen[i].size(); j++)
+				if (!TypeEquals(seen[i][j], param_types[j]))
+					same = false;
+			if (same)
+				matching++;
+		}
+		seen.push_back(param_types);
+		entity->closure_discriminator = matching;
+	}
 	Scope* members = model_.CreateScope(SCOPE_CLASS, name, current_);
 	model_.SetMemberScope(entity, members);
 	ClassInfo& cls = unit_.classes.Create(entity);

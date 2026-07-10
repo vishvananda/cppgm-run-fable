@@ -41,6 +41,15 @@ public:
 	                               const string& what,
 	                               const NamedTypeInfo* naming = 0);
 	virtual bool InClassContextOrFriend(const NamedTypeInfo* cls);
+	bool AppendInitializerListObjectInit(SemNode& item,
+	                                     ScopeBinding& binding,
+	                                     const AstInitializer& init);
+	void AppendClassDefaultInit(SemNode& item, ScopeBinding& binding,
+	                            const ClassInfo& cls);
+	size_t AggregateCtorCover(ClassInfo& cls, size_t provided,
+	                          vector<const ClassField*>& named);
+	bool ClassifyTransferCtor(const ClassInfo& cls, int ctor_index,
+	                          bool& callee_unwind_no);
 	virtual SemNodePtr MakeConstructorCall(const ClassInfo& cls,
 	                                       int ctor_index, bool base_entry,
 	                                       SemNodePtr address,
@@ -589,6 +598,12 @@ private:
 	                               const AstNamePart& part,
 	                               vector<TemplateArg>& bound,
 	                               vector<TemplateArg>& pack_elements);
+	bool DeducePackArgument(const TypePtr& pattern, const SemValue& arg,
+	                        bool has_pack, size_t call_pack,
+	                        vector<TemplateArg>& bound,
+	                        vector<TemplateArg>& pack_elements,
+	                        size_t explicit_elements,
+	                        size_t& deduced_elements);
 	bool DeduceFixedParameter(const TypePtr& pattern, const SemValue& arg,
 	                          vector<TemplateArg>& bound);
 	bool DeducePackElement(const TypePtr& pattern, const SemValue& arg,
@@ -993,7 +1008,10 @@ private:
 	void DrainPendingInstantiations();
 	// PA25: per-enclosing-scope lambda ordinals (the Itanium
 	// <lambda-sig> discriminator).
-	std::map<const Scope*, int> closure_discriminators_;
+	// Prior closure operator parameter lists per enclosing context:
+	// 5.1.7 numbers lambdas per signature, not per context.
+	std::map<const Scope*, std::vector<std::vector<TypePtr>>>
+		closure_discriminators_;
 	vector<LambdaFrame> lambda_frames_;
 	std::map<std::pair<const void*, const void*>, LambdaInfo>
 		lambda_cache_;

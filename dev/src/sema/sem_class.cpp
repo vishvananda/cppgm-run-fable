@@ -1324,51 +1324,49 @@ bool SemBinder::DerivedToBaseClass(const TypePtr& from, const TypePtr& to)
 	return false;
 }
 
-// PA25 18.9: the builtin std::initializer_list<T> record for a
-// program that only declares the template: {const T* __begin_,
-// long __size_}, 16 bytes.
-void SemBinder::BuildBuiltinInitializerList(NamedTypeInfo* info)
+
+// An implicit/defaulted copy or move constructor: a trivial one
+// lowers as a raw object copy; otherwise the field-wise definition
+// synthesizes on first demand. The reference keeps the synthesized
+// call for a move over enumeration members and for a class with a
+// user-provided destructor - its own or a subobject's (their pinned
+// shapes). Returns whether the call stays a raw transfer and updates
+// the callee's unwind fact.
+bool SemBinder::ClassifyTransferCtor(const ClassInfo& cls, int ctor_index,
+                                     bool& callee_unwind_no)
 {
-	if (info->complete)
-		return;
-	TypePtr element = RemoveTopCv(info->spec_args[0].type);
-	ClassInfo& cls = unit_.classes.Create(info);
-	Scope* members = model_.MemberScope(info);
-	if (!members)
+	const ClassCtor& selected = cls.ctors[ctor_index];
+	bool enum_member = false;
+	for (size_t f = 0; f < cls.fields.size(); f++)
+		if (RemoveTopCv(cls.fields[f].type)->kind == TK_ENUM)
+			enum_member = true;
+	bool user_dtor_transfer = cls.has_user_dtor ||
+		(cls.base && cls.base->has_user_dtor);
+	for (size_t f = 0; f < cls.fields.size(); f++)
 	{
-		members = model_.CreateScope(
-			SCOPE_CLASS, info->name,
-			const_cast<Scope*>(
-				info->spec_template->declaring
-					? info->spec_template->declaring
-					: model_.global()));
-		model_.SetMemberScope(info, members);
+		const ClassInfo* member = SubobjectClass(cls.fields[f].type);
+		if (member && member->has_user_dtor)
+			user_dtor_transfer = true;
 	}
-	cls.members = members;
-	cls.is_aggregate = false;
-	model_.MutableInfo(info)->class_record = &cls;
-	BeginClassLayout(cls);
-	static const char* const names[2] = {"__begin_", "__size_"};
-	TypePtr types[2];
-	types[0] = MakePointerType(
-		MakeCvQualifiedType(element, true, false), false, false);
-	types[1] = MakeFundamentalType(FT_LONG_INT);
-	for (int i = 0; i < 2; i++)
+	bool trivial_transfer = !user_dtor_transfer &&
+		(selected.kind == CK_COPY
+			 ? ClassHasTrivialCopyCtor(cls)
+			 : ClassHasTrivialMoveCtor(cls) && !enum_member);
+	if (trivial_transfer)
 	{
-		ScopeBinding binding;
-		binding.kind = SB_VARIABLE;
-		binding.name = names[i];
-		binding.type = types[i];
-		binding.home = members;
-		AddBinding(*members, binding);
-		ClassField field;
-		field.name = names[i];
-		field.type = types[i];
-		field.access = MA_PUBLIC;
-		LayoutField(cls, field);
+		callee_unwind_no = true;
+		// PA18: a user-defaulted trivial copy/move selected inside an
+		// instantiated body still synthesizes its weak definition;
+		// the call itself stays a raw copy.
+		if (instantiating_ && selected.defaulted)
+			EnsureSpecialCtor(cls, ctor_index);
 	}
-	FinishClassLayout(cls, *model_.MutableInfo(info), 0);
-	model_.MutableInfo(info)->complete = true;
+	else
+	{
+		EnsureSpecialCtor(cls, ctor_index);
+		callee_unwind_no = cls.ctors[ctor_index].built_unwind_no;
+	}
+	return trivial_transfer;
 }
 
 SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
@@ -1420,49 +1418,8 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 		else if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
 		         !selected.definition &&
 		         (selected.implicit || selected.defaulted))
-		{
-			// An implicit/defaulted copy or move constructor: a trivial
-			// one lowers as a raw object copy; otherwise the field-wise
-			// definition synthesizes on first demand. The reference
-			// keeps the synthesized call for a move over enumeration
-			// members (its pinned shape).
-			bool enum_member = false;
-			for (size_t f = 0; f < cls.fields.size(); f++)
-				if (RemoveTopCv(cls.fields[f].type)->kind == TK_ENUM)
-					enum_member = true;
-			// A class with a user-provided destructor - its own or a
-			// subobject's - keeps its transfer call visible: the
-			// implicit copy or move synthesizes a real member body
-			// (the reference's shape) instead of lowering to a raw
-			// object copy at the use site.
-			bool user_dtor_transfer = cls.has_user_dtor ||
-				(cls.base && cls.base->has_user_dtor);
-			for (size_t f = 0; f < cls.fields.size(); f++)
-			{
-				const ClassInfo* member =
-					SubobjectClass(cls.fields[f].type);
-				if (member && member->has_user_dtor)
-					user_dtor_transfer = true;
-			}
-			trivial_transfer = !user_dtor_transfer &&
-				(selected.kind == CK_COPY
-					 ? ClassHasTrivialCopyCtor(cls)
-					 : ClassHasTrivialMoveCtor(cls) && !enum_member);
-			if (trivial_transfer)
-			{
-				callee_unwind_no = true;
-				// PA18: a user-defaulted trivial copy/move selected
-				// inside an instantiated body still synthesizes its
-				// weak definition; the call itself stays a raw copy.
-				if (instantiating_ && selected.defaulted)
-					EnsureSpecialCtor(cls, ctor_index);
-			}
-			else
-			{
-				EnsureSpecialCtor(cls, ctor_index);
-				callee_unwind_no = cls.ctors[ctor_index].built_unwind_no;
-			}
-		}
+			trivial_transfer = ClassifyTransferCtor(cls, ctor_index,
+			                                        callee_unwind_no);
 	}
 	TypePtr adjusted = MethodAdjustedType(cls, ctor_type);
 	const string& base_name = cls.members->name;

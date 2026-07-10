@@ -965,6 +965,44 @@ bool SemBinder::DeducePatternType(const TypePtr& pattern,
 
 // One fixed (non-pack) parameter pattern against one call argument
 // (14.8.2.1 subset with the p3 forwarding-reference rule).
+// One argument against the trailing pack pattern: each deduces one
+// element (14.8.2.1p1 last clause); an explicitly bound element must
+// agree, and a braced argument is a non-deduced context (an explicit
+// element stands, otherwise the pack cannot complete and the
+// template contributes no candidate).
+bool SemBinder::DeducePackArgument(const TypePtr& pattern,
+                                   const SemValue& arg, bool has_pack,
+                                   size_t call_pack,
+                                   vector<TemplateArg>& bound,
+                                   vector<TemplateArg>& pack_elements,
+                                   size_t explicit_elements,
+                                   size_t& deduced_elements)
+{
+	if (arg.braced_list)
+	{
+		if (deduced_elements < explicit_elements)
+		{
+			deduced_elements++;
+			return true;
+		}
+		return false;
+	}
+	TemplateArg element;
+	if (!has_pack ||
+	    !DeducePackElement(pattern, arg, call_pack, bound, element))
+		return false;
+	if (deduced_elements < explicit_elements)
+	{
+		if (!TemplateArgEquals(element,
+		                       pack_elements[deduced_elements]))
+			return false;
+	}
+	else
+		pack_elements.push_back(element);
+	deduced_elements++;
+	return true;
+}
+
 bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
                                      const SemValue& arg,
                                      vector<TemplateArg>& bound)
@@ -979,14 +1017,20 @@ bool SemBinder::DeduceFixedParameter(const TypePtr& pattern,
 	{
 		TypePtr bare = RemoveTopCv(
 			IsReferenceType(pattern) ? pattern->target : pattern);
-		if ((bare->kind == TK_TEMPLATE_SPEC ||
-		     bare->kind == TK_CLASS) &&
-		    bare->named && bare->named->spec_template &&
-		    bare->named->spec_template->name == "initializer_list" &&
-		    !bare->named->spec_args.empty() &&
-		    bare->named->spec_args[0].type)
+		// A dependent spec keeps its written arguments on the type
+		// node (targs); an instantiated one on the entity record.
+		const TemplateArg* first = 0;
+		if (bare->named && bare->named->spec_template &&
+		    bare->named->spec_template->name == "initializer_list")
 		{
-			TypePtr element_pattern = bare->named->spec_args[0].type;
+			if (bare->kind == TK_TEMPLATE_SPEC && !bare->targs.empty())
+				first = &bare->targs[0];
+			else if (!bare->named->spec_args.empty())
+				first = &bare->named->spec_args[0];
+		}
+		if (first && first->type)
+		{
+			TypePtr element_pattern = first->type;
 			for (size_t i = 0; i < arg.list_values.size(); i++)
 				if (!DeduceFixedParameter(element_pattern,
 				                          arg.list_values[i], bound))
@@ -1207,22 +1251,10 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 				return 0;
 			continue;
 		}
-		// The trailing pack pattern: each remaining argument deduces
-		// one element (14.8.2.1p1 last clause).
-		TemplateArg element;
-		if (!has_pack ||
-		    !DeducePackElement(pattern, args[i], call_pack, bound,
-		                       element))
+		if (!DeducePackArgument(pattern, args[i], has_pack, call_pack,
+		                        bound, pack_elements,
+		                        explicit_elements, deduced_elements))
 			return 0;
-		if (deduced_elements < explicit_elements)
-		{
-			if (!TemplateArgEquals(element,
-			                       pack_elements[deduced_elements]))
-				return 0;
-		}
-		else
-			pack_elements.push_back(element);
-		deduced_elements++;
 	}
 	// The trailing pack's run completes its slot, so the flatten and
 	// the alias scope read every pack from its own slot (multiple

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -87,8 +88,32 @@ private:
 	}
 
 	vector<string> seen_;
+	std::map<string, int> param_instance_;
 
 public:
+	// The embedded-encoding instance counter (5.1.7 Z...E forms bump
+	// it): a bare template-parameter substitution only compresses
+	// against a spelling from the same encoding instance, while
+	// composites over the parameter compress across instances (the
+	// checked g++ encodings pin both behaviors).
+	int encoding_instance = 0;
+
+	string FindParam(const string& key)
+	{
+		std::map<string, int>::const_iterator found =
+			param_instance_.find(key);
+		if (found == param_instance_.end() ||
+		    found->second != encoding_instance)
+			return "";
+		return Find(key);
+	}
+
+	void AddParam(const string& key)
+	{
+		Add(key);
+		param_instance_[key] = encoding_instance;
+	}
+
 	// The enclosing function template's parameters while its abstract
 	// pattern mangles: deferred dependent type-ids (14.5.2 written
 	// forms kept as ASTs) spell parameter references T_/Tn_ through
@@ -101,6 +126,16 @@ public:
 };
 
 string SourceName(const string& name);
+
+// A pointer-identity substitution key fragment (stable within one
+// mangled name, independent of substitution-dependent spellings).
+string PointerKey(const void* p);
+
+// The structural substitution keys of one name component (the leaf
+// name alone and the full chain through `prev`).
+void ComponentKeys(const NameComponent& part, const string& prev,
+                   const vector<TemplateParam>* params, string& name_key,
+                   string& full_key);
 
 string MangleSubstitutable(const string& key, const string& spelling,
                            Substitutions& subs);

@@ -90,11 +90,14 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 		// Direct- or list-initialization by constructor.
 		vector<SemValue> values;
 		if (braced)
+		{
+			vector<const AstExpr*> items;
 			for (size_t i = 0; i < braced->arguments.size(); i++)
-				values.push_back(analyzer_.Analyze(*braced->arguments[i]));
+				items.push_back(braced->arguments[i].get());
+			AnalyzeInitArguments(items, values);
+		}
 		else
-			for (size_t i = 0; i < args.size(); i++)
-				values.push_back(analyzer_.Analyze(*args[i]));
+			AnalyzeInitArguments(args, values);
 		if (values.size() == 1 && values[0].node &&
 		    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
 		    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
@@ -956,13 +959,8 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		                            (int)winner);
 	const ClassCtor& ctor = cls.ctors[winner];
 	if (ctor.deleted)
-	{
-		fprintf(stderr, "DBG deleted ctor cls=%s what=%s winner=%zu kind=%d nctors=%zu\n",
-		        cls.entity->display.c_str(), what, winner,
-		        (int)ctor.kind, cls.ctors.size());
 		throw runtime_error(string("use of deleted constructor for ") +
 		                    what);
-	}
 	if (copy_init && ctor.is_explicit)
 	{
 		// 13.3.1.4: an explicit constructor is not a candidate here;

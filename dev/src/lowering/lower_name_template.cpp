@@ -171,8 +171,16 @@ string MangleWrittenExprNode(const AstExpr& expr, Substitutions& subs)
 							: "fp" + to_string(i - 1) + "_";
 			int index = TemplateParamIndex(subs, TPK_VALUE, id);
 			if (index >= 0)
-				return MangleSubstitutable("TP:" + to_string(index),
-				                           ParamSpelling(index), subs);
+			{
+				string key = "TP:" +
+					PointerKey(subs.pattern_params) + ":" +
+					to_string(index);
+				string found = subs.FindParam(key);
+				if (!found.empty())
+					return found;
+				subs.AddParam(key);
+				return ParamSpelling(index);
+			}
 		}
 		throw OutsideBoundary("mangled dependent expression form");
 	}
@@ -303,9 +311,17 @@ string MangleDependentName(const AstName& name, Substitutions& subs,
 			                               part.identifier);
 			if (index >= 0)
 			{
-				prev_key = "TP:" + to_string(index);
-				body = MangleSubstitutable(prev_key,
-				                           ParamSpelling(index), subs);
+				prev_key = "TP:" +
+					PointerKey(subs.pattern_params) + ":" +
+					to_string(index);
+				string found = subs.FindParam(prev_key);
+				if (!found.empty())
+					body = found;
+				else
+				{
+					subs.AddParam(prev_key);
+					body = ParamSpelling(index);
+				}
 				continue;
 			}
 		}
@@ -712,10 +728,9 @@ string MangleSignatureParameters(const TemplateInfo& tmpl,
 // reproduces the pre-PA22 concrete fallback (the total spelling for
 // forms outside the written subset).
 string MangleFunctionTemplateSpelled(const FunctionSpecialization& spec,
-                                     bool written)
+                                     bool written, Substitutions& subs)
 {
 	const TemplateInfo& tmpl = *spec.owner;
-	Substitutions subs;
 	subs.pattern_params = &tmpl.params;
 	// The written parameter names: decltype-return expressions spell
 	// fp_/fp<n-1>_ references through them.
@@ -760,17 +775,40 @@ string MangleFunctionTemplateSpelled(const FunctionSpecialization& spec,
 		else if (pattern->ref_qual == 2)
 			cv += "O";
 	}
-	string prefix;
-	string prev = ManglePrefixComponents(parts, subs, prefix);
-	string name_key = (prev.empty() ? string("T:") : prev + "::") +
+	// The template-name (prefix plus terminal) is itself a
+	// substitution candidate: a re-encounter in the same mangled
+	// name compresses wholesale (`ZNS7_IS4_SE_EE...`).
+	string key_chain;
+	for (size_t i = 0; i < parts.size(); i++)
+	{
+		string part_name_key;
+		string part_full_key;
+		ComponentKeys(parts[i], key_chain, subs.pattern_params,
+		              part_name_key, part_full_key);
+		key_chain = part_full_key;
+	}
+	string name_key = (key_chain.empty() ? string("T:")
+	                                     : key_chain + "::") +
 		tmpl.name;
-	subs.Add(name_key);
-	// A conversion-function template's terminal encodes `cv` with the
-	// abstract conversion pattern; the return type re-spells it.
-	string terminal = tmpl.conversion_pattern
-		? "cv" + MangleType(tmpl.conversion_pattern, subs)
-		: MangleTerminalName(tmpl.name, pattern->parameters.size() +
-		                                (member ? 1 : 0));
+	string name_sub = tmpl.conversion_pattern ? string()
+	                                          : subs.Find(name_key);
+	string prefix;
+	string terminal;
+	if (!name_sub.empty())
+		terminal = name_sub;
+	else
+	{
+		ManglePrefixComponents(parts, subs, prefix);
+		subs.Add(name_key);
+		// A conversion-function template's terminal encodes `cv`
+		// with the abstract conversion pattern; the return type
+		// re-spells it.
+		terminal = tmpl.conversion_pattern
+			? "cv" + MangleType(tmpl.conversion_pattern, subs)
+			: MangleTerminalName(tmpl.name,
+			                     pattern->parameters.size() +
+			                         (member ? 1 : 0));
+	}
 	size_t pack_start;
 	size_t pack_end;
 	ArgsPackSpan(tmpl.params, spec.args.size(), pack_start, pack_end);
@@ -808,18 +846,49 @@ string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
 
 using namespace lower_mangle;
 
+string MangleFunctionTemplateEncoding(const FunctionSpecialization& spec,
+                                      Substitutions& subs)
+{
+	// The embedded encoding shares the outer substitution table; the
+	// pattern context switches to this template's parameters for the
+	// duration (T_/T<n>_ inside name a different parameter list).
+	const vector<TemplateParam>* saved_params = subs.pattern_params;
+	const vector<string>* saved_names = subs.fn_param_names;
+	string mangled;
+	try
+	{
+		mangled = MangleFunctionTemplateSpelled(spec, true, subs);
+	}
+	catch (const std::exception&)
+	{
+		subs.pattern_params = saved_params;
+		subs.fn_param_names = saved_names;
+		// Forms outside the written-signature subset keep the
+		// isolated concrete spelling as a pairing hint; the outer
+		// table stays as-is.
+		Substitutions isolated;
+		mangled = MangleFunctionTemplateSpelled(spec, false, isolated);
+	}
+	subs.pattern_params = saved_params;
+	subs.fn_param_names = saved_names;
+	return mangled.compare(0, 2, "_Z") == 0 ? mangled.substr(2)
+	                                        : mangled;
+}
+
 string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec)
 {
 	string mangled;
 	try
 	{
-		mangled = MangleFunctionTemplateSpelled(spec, true);
+		Substitutions subs;
+		mangled = MangleFunctionTemplateSpelled(spec, true, subs);
 	}
 	catch (const std::exception&)
 	{
 		// Forms outside the written-signature subset keep the total
 		// concrete spelling (`object=` stays a pairing hint).
-		mangled = MangleFunctionTemplateSpelled(spec, false);
+		Substitutions subs;
+		mangled = MangleFunctionTemplateSpelled(spec, false, subs);
 	}
 	// PA24: concrete spellings that embed a lambda-owning local scope
 	// can carry punctuation the LowIR metadata grammar rejects; the

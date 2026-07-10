@@ -367,18 +367,16 @@ size_t SemBinder::ConsumeArrayItems(const ClassField& field,
 	return inner_at;
 }
 
-// The synthesized field-wise constructor that aggregate temporaries
-// and array elements call: one parameter per covered named field,
-// stored in order; named fields beyond the cover (an omitted scalar
-// tail) zero-initialize inside the body. The cover spans the provided
-// initializers extended through the last non-scalar field (class and
-// array members always take a parameter the call site materializes),
-// so each distinct use arity gets its own signature.
-TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
-                                       size_t provided)
+// The named fields of an aggregate and how many leading parameters
+// the synthesized per-arity constructor must take: at least the
+// provided count, extended over every field the body cannot
+// value-initialize internally. A copyable omitted class member
+// arrives as a materialized by-value argument (the pinned PA24
+// shape); PA25: one whose copy is unusable value-initializes inside
+// the synthesized body instead.
+size_t SemBinder::AggregateCtorCover(ClassInfo& cls, size_t provided,
+                                     vector<const ClassField*>& named)
 {
-	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
-	vector<const ClassField*> named;
 	size_t non_scalar = 0;  // one past the last named field the ctor
 	                        // cannot value-initialize internally
 	for (size_t i = 0; i < cls.fields.size(); i++)
@@ -387,10 +385,6 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 			continue;
 		named.push_back(&cls.fields[i]);
 		TypePtr bare = RemoveTopCv(cls.fields[i].type);
-		// A copyable omitted class member arrives as a materialized
-		// by-value argument (the pinned PA24 shape); PA25: one whose
-		// copy is unusable value-initializes inside the synthesized
-		// body instead.
 		bool internal_class_init = false;
 		if (bare->kind == TK_CLASS)
 		{
@@ -414,6 +408,22 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 	size_t cover = provided > non_scalar ? provided : non_scalar;
 	if (cover > named.size())
 		cover = named.size();
+	return cover;
+}
+
+// The synthesized field-wise constructor that aggregate temporaries
+// and array elements call: one parameter per covered named field,
+// stored in order; named fields beyond the cover (an omitted scalar
+// tail) zero-initialize inside the body. The cover spans the provided
+// initializers extended through the last non-scalar field (class and
+// array members always take a parameter the call site materializes),
+// so each distinct use arity gets its own signature.
+TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
+                                       size_t provided)
+{
+	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
+	vector<const ClassField*> named;
+	size_t cover = AggregateCtorCover(cls, provided, named);
 	vector<TypePtr> params;
 	vector<string> names;
 	for (size_t i = 0; i < cover; i++)
@@ -925,8 +935,88 @@ void SemBinder::AnalyzeInitArguments(const vector<const AstExpr*>& items,
 				                    "expandable context");
 			continue;
 		}
+		if (items[i]->kind == EK_BRACED)
+		{
+			// 8.5.4: the list defers; overload resolution picks the
+			// parameter it initializes.
+			SemValue value;
+			value.braced_list = true;
+			analyzer_.AnalyzeArgumentList(items[i]->arguments,
+			                              value.list_values);
+			values.push_back(std::move(value));
+			continue;
+		}
 		values.push_back(analyzer_.Analyze(*items[i]));
 	}
+}
+
+// PA25 8.5.4p3: a braced initializer over a std::initializer_list
+// object fills the {begin, size} record from the elements; returns
+// whether the initializer took this form.
+bool SemBinder::AppendInitializerListObjectInit(SemNode& item,
+                                                ScopeBinding& binding,
+                                                const AstInitializer& init)
+{
+	TypePtr list_element;
+	if (!IsStdInitializerList(binding.type, &list_element))
+		return false;
+	const AstExpr* braced = 0;
+	if (init.kind == INIT_BRACED)
+		braced = init.expr.get();
+	else if (init.kind == INIT_EQ && init.expr->kind == EK_BRACED)
+		braced = init.expr.get();
+	if (!braced)
+		return false;
+	TypePtr element = RemoveTopCv(list_element);
+	vector<SemValue> elements;
+	analyzer_.AnalyzeArgumentList(braced->arguments, elements);
+	SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+	list->type = RemoveTopCv(IsReferenceType(binding.type)
+	                             ? binding.type->target : binding.type);
+	list->category = VC_PRVALUE;
+	for (size_t i = 0; i < elements.size(); i++)
+	{
+		analyzer_.CopyInitialize(elements[i], element,
+		                         "initializer-list element");
+		list->children.push_back(std::move(elements[i].node));
+	}
+	item.children.push_back(std::move(list));
+	return true;
+}
+
+// Default-initialization. The PA12 dump pins the constructor-action
+// plus synthesized empty definition shape for the trivial subset;
+// richer classes resolve a real constructor.
+void SemBinder::AppendClassDefaultInit(SemNode& item,
+                                       ScopeBinding& binding,
+                                       const ClassInfo& cls)
+{
+	if (!cls.has_user_ctor)
+	{
+		TypePtr ctor_type;
+		EnsureDefaultConstructor(RemoveTopCv(binding.type), ctor_type);
+	}
+	vector<SemValue> no_args;
+	int index = ResolveClassConstructor(cls, no_args, false,
+	                                    binding.name.c_str());
+	vector<SemNodePtr> arg_nodes;
+	for (size_t j = 0; j < no_args.size(); j++)
+		arg_nodes.push_back(std::move(no_args[j].node));
+	SemNodePtr action = MakeConstructorCall(
+		cls, index, false, AddressOfNode(VariableObjectExpr(binding)),
+		std::move(arg_nodes));
+	// An implicitly-declared default constructor over an effect-free
+	// chain (empty user default-constructor bodies in the members
+	// included) elides its call; the selected constructor stays
+	// odr-used. A user-provided constructor selected directly keeps
+	// its explicit call (the reference pins both shapes).
+	bool implicit_selected = index < 0 ||
+		(index < (int)cls.ctors.size() &&
+		 (cls.ctors[index].implicit || cls.ctors[index].defaulted));
+	if (implicit_selected &&
+	    !unit_.classes.DefaultConstructionHasSyntacticEffects(cls))
+		action->elided = true;
+	item.children.push_back(std::move(action));
 }
 
 void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
@@ -940,70 +1030,11 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 	}
 	// PA25 8.5.4p3: a braced initializer over a std::initializer_list
 	// object fills the {begin, size} record from the elements.
-	TypePtr list_element;
-	if (init && IsStdInitializerList(binding.type, &list_element))
-	{
-		const AstExpr* braced = 0;
-		if (init->kind == INIT_BRACED)
-			braced = init->expr.get();
-		else if (init->kind == INIT_EQ &&
-		         init->expr->kind == EK_BRACED)
-			braced = init->expr.get();
-		if (braced)
-		{
-			TypePtr element = RemoveTopCv(list_element);
-			vector<SemValue> elements;
-			analyzer_.AnalyzeArgumentList(braced->arguments, elements);
-			SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
-			list->type = RemoveTopCv(
-				IsReferenceType(binding.type) ? binding.type->target
-				                              : binding.type);
-			list->category = VC_PRVALUE;
-			for (size_t i = 0; i < elements.size(); i++)
-			{
-				analyzer_.CopyInitialize(elements[i], element,
-				                         "initializer-list element");
-				list->children.push_back(std::move(elements[i].node));
-			}
-			item.children.push_back(std::move(list));
-			return;
-		}
-	}
+	if (init && AppendInitializerListObjectInit(item, binding, *init))
+		return;
 	if (!init)
 	{
-		// Default-initialization. The PA12 dump pins the
-		// constructor-action plus synthesized empty definition shape
-		// for the trivial subset; richer classes resolve a real
-		// constructor.
-		if (!cls.has_user_ctor)
-		{
-			TypePtr ctor_type;
-			EnsureDefaultConstructor(RemoveTopCv(binding.type),
-			                         ctor_type);
-		}
-		vector<SemValue> no_args;
-		int index = ResolveClassConstructor(cls, no_args, false,
-		                                    binding.name.c_str());
-		vector<SemNodePtr> arg_nodes;
-		for (size_t j = 0; j < no_args.size(); j++)
-			arg_nodes.push_back(std::move(no_args[j].node));
-		SemNodePtr action = MakeConstructorCall(
-			cls, index, false,
-			AddressOfNode(VariableObjectExpr(binding)),
-			std::move(arg_nodes));
-		// An implicitly-declared default constructor over an
-		// effect-free chain (empty user default-constructor bodies in
-		// the members included) elides its call; the selected
-		// constructor stays odr-used. A user-provided constructor
-		// selected directly keeps its explicit call (the reference
-		// pins both shapes).
-		bool implicit_selected = index < 0 ||
-			(index < (int)cls.ctors.size() &&
-			 (cls.ctors[index].implicit || cls.ctors[index].defaulted));
-		if (implicit_selected &&
-		    !unit_.classes.DefaultConstructionHasSyntacticEffects(cls))
-			action->elided = true;
-		item.children.push_back(std::move(action));
+		AppendClassDefaultInit(item, binding, cls);
 		return;
 	}
 	// Initialized class object: direct (paren), list (braced), or
