@@ -284,6 +284,14 @@ private:
 	void DeclareImplicitAssign(ClassInfo& cls, bool is_move, bool deleted);
 	void EnsureSpecialCtor(const ClassInfo& cls, int index,
 	                       bool out_of_class = false);
+	virtual void EnsureSpecialCtorHost(const ClassInfo& cls, int index)
+	{
+		const ClassCtor& selected = cls.ctors[index];
+		if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
+		    !selected.definition &&
+		    (selected.implicit || selected.defaulted))
+			EnsureSpecialCtor(cls, index);
+	}
 	void BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
 	                        bool out_of_class);
 	// Recomputes the user-provided-constructor fact after an
@@ -1096,6 +1104,7 @@ public:
 	virtual const FunctionSpecialization* InstantiateCharPackLiteral(
 		const ScopeBinding& binding, const string& chars);
 	virtual bool SwapUnevaluatedOperand(bool active);
+	virtual const NamedTypeInfo* StdTypeInfoEntity();
 	virtual void OnMemberSignatureBegin(Scope* class_scope);
 	virtual void OnMemberSignatureEnd();
 	virtual void OnParameterComposed(const string& name,

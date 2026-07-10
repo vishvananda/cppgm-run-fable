@@ -23,6 +23,43 @@ const ClassInfo* LowerProgram::MethodClass(const TypePtr& adjusted) const
 	return target->kind == TK_CLASS ? target->named->class_record : 0;
 }
 
+namespace {
+
+// A specialization whose arguments all sanitize (type arguments that
+// are fundamentals, enumerations, or such classes; value arguments)
+// keeps the readable class-keyed RTTI naming; any other argument
+// switches the record to its encoding-keyed name.
+bool SimpleRttiTemplateArg(const TemplateArg& arg);
+
+bool SimpleRttiTemplateArgs(const NamedTypeInfo* entity)
+{
+	if (!entity->spec_template)
+		return true;
+	for (size_t i = 0; i < entity->spec_args.size(); i++)
+		if (!SimpleRttiTemplateArg(entity->spec_args[i]))
+			return false;
+	return true;
+}
+
+bool SimpleRttiTemplateArg(const TemplateArg& arg)
+{
+	for (size_t i = 0; i < arg.pack_elements.size(); i++)
+		if (!SimpleRttiTemplateArg(arg.pack_elements[i]))
+			return false;
+	if (arg.is_value || arg.template_entity)
+		return true;
+	if (!arg.type)
+		return !arg.pack_elements.empty();
+	TypePtr bare = RemoveTopCv(arg.type);
+	if (bare->kind == TK_FUNDAMENTAL || bare->kind == TK_ENUM)
+		return true;
+	if (bare->kind == TK_CLASS)
+		return SimpleRttiTemplateArgs(bare->named);
+	return false;
+}
+
+}  // namespace
+
 LowVTableInfo& LowerProgram::VTableEntry(const ClassInfo* cls)
 {
 	map<const ClassInfo*, size_t>::iterator found =
@@ -31,9 +68,13 @@ LowVTableInfo& LowerProgram::VTableEntry(const ClassInfo* cls)
 		return vtables_[found->second];
 	LowVTableInfo info;
 	info.cls = cls;
-	info.low_name = UniqueSymbol(
-		LowerScopePath(cls->members->parent) +
-		LowerSanitizeName(cls->members->name) + "__vtable");
+	if (SimpleRttiTemplateArgs(cls->entity))
+		info.low_name = UniqueSymbol(
+			LowerScopePath(cls->members->parent) +
+			LowerSanitizeName(cls->members->name) + "__vtable");
+	else
+		info.low_name = UniqueSymbol(
+			"__vtable_type_" + MangleClassTypeEncoding(cls->entity));
 	info.object_name = "_ZTV" + MangleClassTypeEncoding(cls->entity);
 	vtable_index_[cls] = vtables_.size();
 	vtables_.push_back(info);
@@ -47,21 +88,40 @@ string LowerProgram::VTableRef(const ClassInfo* cls)
 	return "@" + entry.low_name;
 }
 
-string LowerProgram::ExternalRttiVtableRef(bool si)
+string LowerProgram::ExternalRttiVtableRef(ERttiVtableKind kind)
 {
-	string& name = si ? external_si_rtti_name_
-	                  : external_class_rtti_name_;
+	static const char* const tails[4] = {
+		"__class_type_info", "__si_class_type_info",
+		"__fundamental_type_info", "__pointer_type_info"};
+	static const char* const objects[4] = {
+		"_ZTVN10__cxxabiv117__class_type_infoE",
+		"_ZTVN10__cxxabiv120__si_class_type_infoE",
+		"_ZTVN10__cxxabiv123__fundamental_type_infoE",
+		"_ZTVN10__cxxabiv119__pointer_type_infoE"};
+	string& name = external_rtti_vtable_names_[kind];
 	if (name.empty())
 	{
-		name = UniqueSymbol(
-			si ? "__external_rtti_vtable____si_class_type_info"
-			   : "__external_rtti_vtable____class_type_info");
+		name = UniqueSymbol(string("__external_rtti_vtable__") +
+		                    tails[kind]);
 		poly_declare_globals_.push_back(
 			"declare global @" + name + " [binding=strong, object=" +
-			(si ? "_ZTVN10__cxxabiv120__si_class_type_infoE"
-			    : "_ZTVN10__cxxabiv117__class_type_infoE") + "]");
+			objects[kind] + "]");
 	}
 	return "@" + name;
+}
+
+string LowerProgram::ExternalRuntimeFnRef(const string& object_name,
+                                          const string& declare_suffix)
+{
+	map<string, string>::iterator found =
+		runtime_fn_names_.find(object_name);
+	if (found != runtime_fn_names_.end())
+		return "@" + found->second;
+	string low = UniqueSymbol("__external_runtime__" + object_name);
+	runtime_fn_names_[object_name] = low;
+	runtime_declares_.push_back("declare function @" + low +
+	                            declare_suffix);
+	return "@" + low;
 }
 
 // The RTTI record of `cls`, rendered on first use together with its
@@ -73,13 +133,23 @@ string LowerProgram::RttiRef(const ClassInfo* cls)
 		rtti_names_.find(cls);
 	if (found != rtti_names_.end())
 		return "@" + found->second;
-	string tail = cls->entity->class_key + "_" +
-		LowerScopePath(cls->members->parent) +
-		LowerSanitizeName(cls->members->name);
 	string encoding = MangleClassTypeEncoding(cls->entity);
-	string low = UniqueSymbol("__rtti_" + tail);
+	string low;
+	string name_low;
+	if (SimpleRttiTemplateArgs(cls->entity))
+	{
+		string tail = cls->entity->class_key + "_" +
+			LowerScopePath(cls->members->parent) +
+			LowerSanitizeName(cls->members->name);
+		low = UniqueSymbol("__rtti_" + tail);
+		name_low = UniqueSymbol("__typeinfo_name__" + tail);
+	}
+	else
+	{
+		low = UniqueSymbol("__rtti_type_" + encoding);
+		name_low = UniqueSymbol("__typeinfo_name_type_" + encoding);
+	}
 	rtti_names_[cls] = low;
-	string name_low = UniqueSymbol("__typeinfo_name__" + tail);
 	string name_body;
 	for (size_t i = 0; i < encoding.size(); i++)
 		name_body += "  i8 " + to_string((int)encoding[i]) + "\n";
@@ -89,7 +159,8 @@ string LowerProgram::RttiRef(const ClassInfo* cls)
 		" [storage=readonly, binding=weak, object=_ZTS" + encoding +
 		"] = {\n" + name_body + "}");
 	string items = "  ptr addr " +
-		ExternalRttiVtableRef(cls->base != 0) + " + 16\n" +
+		ExternalRttiVtableRef(cls->base ? RTTI_VT_SI_CLASS
+		                                : RTTI_VT_CLASS) + " + 16\n" +
 		"  ptr addr @" + name_low + "\n";
 	if (cls->base)
 		items += "  ptr addr " + RttiRef(cls->base) + "\n";
@@ -97,6 +168,80 @@ string LowerProgram::RttiRef(const ClassInfo* cls)
 		"global @" + low +
 		" [storage=readonly, binding=weak, object=_ZTI" + encoding +
 		"] = {\n" + items + "}");
+	return "@" + low;
+}
+
+// The RTTI record of an arbitrary typeid operand type. Complete
+// classes route through their class records; fundamentals, pointers,
+// and never-completed class specializations render encoding-keyed
+// records on first use.
+string LowerProgram::RttiTypeRef(const TypePtr& type_in)
+{
+	TypePtr type = RemoveTopCv(type_in);
+	if (type->kind == TK_CLASS && type->named->class_record)
+		return RttiRef(type->named->class_record);
+	string encoding = MangleTypeEncoding(type);
+	map<string, string>::iterator found =
+		rtti_type_names_.find(encoding);
+	if (found != rtti_type_names_.end())
+		return "@" + found->second;
+	string low;
+	string name_low;
+	string head;
+	string extra;
+	switch (type->kind)
+	{
+	case TK_FUNDAMENTAL:
+	{
+		string tail = LowerSanitizeName(DescribeType(type));
+		low = UniqueSymbol("__rtti_" + tail);
+		name_low = UniqueSymbol("__typeinfo_name__" + tail);
+		head = ExternalRttiVtableRef(RTTI_VT_FUNDAMENTAL);
+		break;
+	}
+	case TK_POINTER:
+	{
+		low = UniqueSymbol("__rtti_type_" + encoding);
+		name_low = UniqueSymbol("__typeinfo_name_type_" + encoding);
+		head = ExternalRttiVtableRef(RTTI_VT_POINTER);
+		// __pointer_type_info: qualifier flags (0x8 marks an
+		// incomplete pointee class), then the pointee's record.
+		rtti_type_names_[encoding] = low;
+		{
+			TypePtr pointee = RemoveTopCv(type->target);
+			bool incomplete = pointee->kind == TK_CLASS &&
+				(!pointee->named->class_record ||
+				 !pointee->named->complete);
+			extra = string("  i32 ") + (incomplete ? "8" : "0") +
+				"\n  ptr addr " + RttiTypeRef(type->target) + "\n";
+		}
+		break;
+	}
+	case TK_CLASS:
+		// A never-completed specialization: a plain class record with
+		// no base information.
+		low = UniqueSymbol("__rtti_type_" + encoding);
+		name_low = UniqueSymbol("__typeinfo_name_type_" + encoding);
+		head = ExternalRttiVtableRef(RTTI_VT_CLASS);
+		break;
+	default:
+		throw runtime_error("typeid operand type is outside the PA25 "
+		                    "assignment boundary");
+	}
+	rtti_type_names_[encoding] = low;
+	string name_body;
+	for (size_t i = 0; i < encoding.size(); i++)
+		name_body += "  i8 " + to_string((int)encoding[i]) + "\n";
+	name_body += "  i8 0\n";
+	poly_globals_.push_back(
+		"global @" + name_low +
+		" [storage=readonly, binding=weak, object=_ZTS" + encoding +
+		"] = {\n" + name_body + "}");
+	poly_globals_.push_back(
+		"global @" + low +
+		" [storage=readonly, binding=weak, object=_ZTI" + encoding +
+		"] = {\n  ptr addr " + head + " + 16\n  ptr addr @" + name_low +
+		"\n" + extra + "}");
 	return "@" + low;
 }
 

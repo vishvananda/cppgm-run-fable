@@ -95,6 +95,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_DELETE_ARRAY: return "delete-array";
 	case SN_VPOINTER_STORE: return "vpointer-store";
 	case SN_STATIC_GUARD: return "static-guard";
+	case SN_TYPEID: return "typeid-expression";
 	}
 	throw runtime_error("unknown semantic node kind");
 }
@@ -236,6 +237,8 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.fn_spec = node.fn_spec;
 	out.weak_def = node.weak_def;
 	out.instantiation_error = node.instantiation_error;
+	out.typeid_operand = node.typeid_operand;
+	out.typeid_dynamic = node.typeid_dynamic;
 	if (node.result_dtor)
 		out.result_dtor = CloneSemNode(*node.result_dtor);
 	for (size_t i = 0; i < node.children.size(); i++)

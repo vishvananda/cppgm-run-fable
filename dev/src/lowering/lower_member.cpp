@@ -1020,6 +1020,9 @@ bool FunctionLowerer::SegmentContainsCall(const SemNode& node,
 	case SN_DESTRUCTOR_ACTION:
 		return false;
 	case SN_CALL_EXPRESSION:
+		// A std::type_info comparison folds to a pointer compare.
+		if (IsTypeInfoComparison(node))
+			break;
 		if (!node.children.empty())
 		{
 			const SemNode& callee = *node.children[0];

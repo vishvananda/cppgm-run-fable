@@ -284,6 +284,11 @@ SemValue SemExprAnalyzer::AnalyzeNew(const AstExpr& expr)
 	SemNodePtr action = host_.MakeConstructorCall(
 		*cls, ctor_index, false, std::move(alloc.node),
 		std::move(arg_nodes));
+	// A new-initializer always calls the selected constructor; a
+	// trivially-transferable implicit copy/move still needs its
+	// synthesized body behind the call.
+	if (ctor_index >= 0 && action->trivial_copy)
+		host_.EnsureSpecialCtorHost(*cls, ctor_index);
 	action->type = pointer;
 	action->category = VC_PRVALUE;
 	action->null_pointer = unwind_no;

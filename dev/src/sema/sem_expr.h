@@ -92,6 +92,10 @@ struct ISemExprHost
 	// operator selected by overload resolution.
 	virtual void EnsureAssignSpecial(const NamedTypeInfo* cls_entity,
 	                                 size_t overload_index) = 0;
+	// PA25: demand-synthesis of the selected constructor's body for a
+	// context that always keeps the call (new-expressions).
+	virtual void EnsureSpecialCtorHost(const ClassInfo& cls,
+	                                   int index) = 0;
 	// A braced aggregate temporary: the synthesized field-wise
 	// constructor over the converted items (8.5.1 over a prvalue).
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
@@ -131,6 +135,9 @@ struct ISemExprHost
 	// Marks an unevaluated operand (3.2p2: no odr-use inside); returns
 	// the previous state for restoring.
 	virtual bool SwapUnevaluatedOperand(bool active) = 0;
+	// PA25 5.2.8: the declared std::type_info class entity; throws
+	// when the program has not declared it.
+	virtual const NamedTypeInfo* StdTypeInfoEntity() = 0;
 	// PA19 14.7.1: a reference to a static data member of a
 	// class-template specialization - the host instantiates the
 	// specialization's registered out-of-class definitions on this
@@ -408,6 +415,8 @@ private:
 	SemValue AnalyzeSizeof(const AstExpr& expr);
 	// PA20 5.3.7: noexcept(expression) over resolved unwind facts.
 	SemValue AnalyzeNoexcept(const AstExpr& expr);
+	// PA25 5.2.8: typeid over a type-id or expression operand.
+	SemValue AnalyzeTypeid(const AstExpr& expr);
 	void FillFunctionSetValue(const ScopeBinding& binding,
 	                          const NamedTypeInfo* member_class,
 	                          SemValue& value);

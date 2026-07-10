@@ -356,11 +356,77 @@ SemValue SemExprAnalyzer::AnalyzeNoexcept(const AstExpr& expr)
 	return value;
 }
 
+// PA25 5.2.8: the result is an lvalue of const std::type_info tied to
+// an RTTI record. A polymorphic glvalue operand reads its dynamic
+// type through the vpointer at runtime; every other operand resolves
+// statically (unevaluated, 5.2.8p3) with top-level cv-qualification
+// and referenceness stripped (5.2.8p4-5).
+SemValue SemExprAnalyzer::AnalyzeTypeid(const AstExpr& expr)
+{
+	const NamedTypeInfo* info_entity = host_.StdTypeInfoEntity();
+	TypePtr result_type = MakeCvQualifiedType(
+		MakeNamedType(TK_CLASS, info_entity), true, false);
+	SemValue value;
+	value.type = result_type;
+	value.category = VC_LVALUE;
+	value.node = MakeSemNode(SN_TYPEID);
+	value.node->type = result_type;
+	value.node->category = VC_LVALUE;
+	TypePtr operand;
+	if (expr.is_type_operand)
+		operand = host_.ResolveCastTypeId(*expr.type);
+	else
+	{
+		// `typeid(x)` parses as an expression; a bare type-name
+		// operand still disambiguates to the type form semantically.
+		const AstExpr* inner = StripParens(expr.operands[0].get());
+		if (inner->kind == EK_ID)
+			operand = host_.TryResolveCalleeType(inner->name);
+		if (!operand)
+		{
+			bool saved = host_.SwapUnevaluatedOperand(true);
+			SemValue analyzed;
+			try
+			{
+				analyzed = Analyze(*expr.operands[0]);
+			}
+			catch (...)
+			{
+				host_.SwapUnevaluatedOperand(saved);
+				throw;
+			}
+			host_.SwapUnevaluatedOperand(saved);
+			operand = analyzed.type;
+			TypePtr bare = RemoveTopCv(
+				IsReferenceType(operand) ? operand->target : operand);
+			if (bare->kind == TK_CLASS &&
+			    analyzed.category != VC_PRVALUE)
+			{
+				host_.RequireCompleteType(bare->named);
+				const ClassInfo* cls =
+					host_.Classes().Find(bare->named);
+				if (cls && cls->is_polymorphic)
+				{
+					value.node->typeid_dynamic = true;
+					value.node->children.push_back(
+						std::move(analyzed.node));
+				}
+			}
+		}
+	}
+	if (IsReferenceType(operand))
+		operand = operand->target;
+	value.node->typeid_operand = RemoveTopCv(operand);
+	return value;
+}
+
 SemValue SemExprAnalyzer::AnalyzeSizeof(const AstExpr& expr)
 {
 	bool alignment = expr.kind == EK_TYPE_TRAIT;
 	if (alignment && expr.op == KW_NOEXCEPT)
 		return AnalyzeNoexcept(expr);
+	if (alignment && expr.op == KW_TYPEID)
+		return AnalyzeTypeid(expr);
 	if (alignment && expr.op != KW_ALIGNOF)
 		throw OutsideBoundary("type trait expression");
 	TypePtr operand_type;

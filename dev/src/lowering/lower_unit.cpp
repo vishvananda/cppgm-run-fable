@@ -1329,6 +1329,10 @@ void LowerProgram::Write(ostream& out)
 		sections[1].insert(sections[1].begin(), declares.begin(),
 		                   declares.end());
 	}
+	// PA25 external runtime helpers (__cxa_bad_typeid, __dynamic_cast,
+	// ...) declared on first use.
+	sections[1].insert(sections[1].begin(), runtime_declares_.begin(),
+	                   runtime_declares_.end());
 
 	// Aliases follow the definitions without a separating blank line.
 	for (size_t i = 0; i < functions_.size(); i++)

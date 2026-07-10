@@ -83,3 +83,7 @@ string MangleMemberFunctionTemplateObjectName(
 // "N2ns1XE"); vtable/typeinfo object names prefix it with _ZTV, _ZTI,
 // or _ZTS, and the typeinfo-name data holds its characters.
 string MangleClassTypeEncoding(const NamedTypeInfo* entity);
+
+// PA25: the bare Itanium encoding of an arbitrary type ("i", "Pi",
+// "A4_c"); typeid RTTI records for non-class operands key on it.
+string MangleTypeEncoding(const TypePtr& type);

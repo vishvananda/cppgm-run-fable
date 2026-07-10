@@ -270,6 +270,16 @@ private:
 	bool ScanArmsCleanups(const SemNode& node, bool& live) const;
 	void EmitTempCleanups(size_t from);
 	void OpenEhRegion();
+	// PA25 5.2.8: a call node that is std::type_info::operator== or
+	// operator!= over typeid results (folds to RTTI address identity).
+	static bool IsTypeInfoComparison(const SemNode& node);
+	// PA25 typeid: the address of the RTTI record the query denotes
+	// (static: the operand type's record; dynamic: read through the
+	// polymorphic operand's vpointer with a null-check).
+	string LowerTypeidAddress(const SemNode& node);
+	// A zero-valued return matching the function's return type (the
+	// dead terminator after a noreturn runtime call).
+	void EmitZeroValueReturn();
 	// Opens the dispatch region at the start of a straight-line
 	// evaluation segment (a full expression or a conditionally
 	// evaluated arm) when the segment runs a call under pending

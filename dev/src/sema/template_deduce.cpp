@@ -30,6 +30,14 @@ TypePtr StripPatternCv(const TypePtr& pattern, const TypePtr& deduced)
 		stripped.is_const = false;
 	if (pattern->is_volatile)
 		stripped.is_volatile = false;
+	// 3.9.3p5: an array's cv-qualification lives on its elements, so
+	// the pattern's qualifiers strip through the element chain
+	// (`T const&` binding `const char[4]` deduces `T = char[4]`).
+	if (stripped.kind == TK_ARRAY)
+	{
+		TypePtr element = StripPatternCv(pattern, stripped.target);
+		stripped.target = element;
+	}
 	return TypePtr(new Type(stripped));
 }
 

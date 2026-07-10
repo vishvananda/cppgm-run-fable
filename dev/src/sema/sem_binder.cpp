@@ -327,6 +327,26 @@ bool SemBinder::SwapUnevaluatedOperand(bool active)
 	return previous;
 }
 
+// PA25 5.2.8p1: typeid names the class std::type_info; the program
+// must have declared it in namespace std (18.7.1).
+const NamedTypeInfo* SemBinder::StdTypeInfoEntity()
+{
+	Scope* global = model_.global();
+	ScopeBinding* std_binding =
+		global ? FindOwnBinding(*global, "std") : 0;
+	if (std_binding && std_binding->kind == SB_NAMESPACE &&
+	    std_binding->target)
+	{
+		ScopeBinding* info =
+			FindOwnBinding(*std_binding->target, "type_info");
+		if (info && info->kind == SB_TYPE && info->type &&
+		    RemoveTopCv(info->type)->kind == TK_CLASS)
+			return RemoveTopCv(info->type)->named;
+	}
+	throw std::runtime_error(
+		"typeid requires a declaration of std::type_info");
+}
+
 TypePtr SemBinder::TryAnalyzeExpressionType(const AstExpr& expr)
 {
 	// 5.3.3p1: the operand is unevaluated, so names in it are not

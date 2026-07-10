@@ -1036,6 +1036,12 @@ string MangleClassTypeEncoding(const NamedTypeInfo* entity)
 	return MangleType(MakeNamedType(TK_CLASS, entity), subs);
 }
 
+string MangleTypeEncoding(const TypePtr& type)
+{
+	Substitutions subs;
+	return MangleType(type, subs);
+}
+
 string MangleMemberFunctionObjectName(const Scope* scope,
                                       const string& name,
                                       const TypePtr& type,

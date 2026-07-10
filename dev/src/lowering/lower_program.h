@@ -207,6 +207,22 @@ public:
 	// PA17: the "@name" spelling of a polymorphic class's vtable
 	// (demand-marks it for emission; lower_vtable.cpp).
 	string VTableRef(const ClassInfo* cls);
+	// PA25: the "@name" of the RTTI record of an arbitrary typeid
+	// operand type (classes route through RttiRef; fundamentals,
+	// pointers and incomplete class specializations render
+	// encoding-keyed records).
+	string RttiTypeRef(const TypePtr& type);
+	enum ERttiVtableKind
+	{
+		RTTI_VT_CLASS,
+		RTTI_VT_SI_CLASS,
+		RTTI_VT_FUNDAMENTAL,
+		RTTI_VT_POINTER
+	};
+	// PA25: the "@name" of an external runtime helper, declared on
+	// first use with the given signature/metadata suffix.
+	string ExternalRuntimeFnRef(const string& object_name,
+	                            const string& declare_suffix);
 	// PA18 reference-parity fold (lower_expr.cpp BranchOnValue): a
 	// branch on this namespace-scope pointer-to-function object may
 	// spell the object's address only when that is provably
@@ -266,8 +282,8 @@ private:
 	// The "@name" of a class's RTTI record, rendering it (and its
 	// typeinfo-name data and base chain) on first use.
 	string RttiRef(const ClassInfo* cls);
-	// The "@name" of the external abi class/si_class typeinfo-vtable.
-	string ExternalRttiVtableRef(bool si);
+	// The "@name" of the external abi typeinfo-vtable of that kind.
+	string ExternalRttiVtableRef(ERttiVtableKind kind);
 	void EnsurePureVirtualDeclare(const TypePtr& adjusted);
 	void AppendDynamicInit(LowGlobalInfo& info, const SemNode& child,
 	                       bool ref, SemNode& init_def);
@@ -342,6 +358,13 @@ private:
 	vector<string> poly_globals_;          // RTTI + typeinfo-name texts
 	string pure_virtual_name_;     // "" until a pure slot renders
 	string pure_virtual_declare_;
-	string external_class_rtti_name_;
-	string external_si_rtti_name_;
+	// PA25: encoding-keyed RTTI records (fundamentals, pointers,
+	// incomplete or non-simple template classes) and the external
+	// __cxxabiv1 vtable declares, by ERttiVtableKind.
+	map<string, string> rtti_type_names_;
+	string external_rtti_vtable_names_[4];
+	// PA25: external runtime helper declares (__cxa_bad_typeid,
+	// __dynamic_cast, ...), keyed by their object name.
+	map<string, string> runtime_fn_names_;
+	vector<string> runtime_declares_;
 };

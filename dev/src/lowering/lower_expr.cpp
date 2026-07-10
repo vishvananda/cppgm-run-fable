@@ -950,6 +950,86 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 
 // --- addresses and pointers -------------------------------------------------
 
+bool FunctionLowerer::IsTypeInfoComparison(const SemNode& node)
+{
+	if (node.kind != SN_CALL_EXPRESSION || node.children.size() != 3 ||
+	    node.children[0]->kind != SN_CALLEE)
+		return false;
+	const SemNode& callee = *node.children[0];
+	return callee.is_method &&
+		(callee.entity_name == "operator ==" ||
+		 callee.entity_name == "operator !=") &&
+		callee.entity_scope && callee.entity_scope->entity &&
+		callee.entity_scope->name == "type_info" &&
+		callee.entity_scope->parent &&
+		callee.entity_scope->parent->kind == SCOPE_NAMESPACE &&
+		callee.entity_scope->parent->name == "std" &&
+		callee.entity_scope->parent->parent &&
+		!callee.entity_scope->parent->parent->parent;
+}
+
+// PA25 5.2.8: the address of the RTTI record a typeid query denotes.
+// The static form addresses the operand type's record; the dynamic
+// form null-checks the polymorphic glvalue, reads its vpointer, and
+// loads the record pointer stored one slot before the first virtual
+// entry (the vtable's RTTI head slot).
+string FunctionLowerer::LowerTypeidAddress(const SemNode& node)
+{
+	if (!node.typeid_dynamic)
+	{
+		string result = NewTemp();
+		Emit(result + " = addr " +
+		     program_.RttiTypeRef(node.typeid_operand));
+		return result;
+	}
+	string object = LowerAddressExpr(*node.children[0]);
+	string is_null = NewTemp();
+	Emit(is_null + " = cmp eq ptr " + object + ", 0");
+	string fail_label = NewLabel("typeid_fail");
+	string scan_label = NewLabel("typeid_scan");
+	ReferenceLabel(fail_label);
+	ReferenceLabel(scan_label);
+	Terminate("branch " + is_null + ", ^" + fail_label + ", ^" +
+	          scan_label);
+	OpenBlock(fail_label);
+	Emit("call void " +
+	     program_.ExternalRuntimeFnRef(
+			"__cxa_bad_typeid",
+			"() -> void [effects=readnone, unwind=may, "
+			"return=noreturn, linkage=c, binding=strong, "
+			"object=__cxa_bad_typeid]") + "()");
+	EmitZeroValueReturn();
+	OpenBlock(scan_label);
+	string vpointer = NewTemp();
+	Emit(vpointer + " = load ptr " + object);
+	string slot = NewTemp();
+	Emit(slot + " = index i8 " + vpointer + ", -8");
+	string record = NewTemp();
+	Emit(record + " = load ptr " + slot);
+	return record;
+}
+
+void FunctionLowerer::EmitZeroValueReturn()
+{
+	if (indirect_ret_ || IsVoidType(return_type_))
+	{
+		Terminate("return void");
+		return;
+	}
+	string type_text = LowerValueType(return_type_);
+	if (LowerFloatType(return_type_))
+		Terminate("return " + type_text + " " +
+		          LowerFloatZero(return_type_));
+	else if (type_text == "ptr")
+	{
+		string temp = NewTemp();
+		Emit(temp + " = copy ptr nullptr");
+		Terminate("return ptr " + temp);
+	}
+	else
+		Terminate("return " + type_text + " 0");
+}
+
 string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 {
 	switch (node.kind)
@@ -1016,6 +1096,8 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	}
 	case SN_MEMBER_EXPRESSION:
 		return MemberAddress(node);
+	case SN_TYPEID:
+		return LowerTypeidAddress(node);
 	case SN_CONSTRUCTOR_ACTION:
 		return MaterializeTemporary(node, "tmpobj", true);
 	case SN_UNARY_EXPRESSION:
@@ -1292,6 +1374,30 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 			fn_type = through;
 		else
 			throw OutsideBoundary("call form");
+	}
+	// PA25 5.2.8: std::type_info comparison folds to RTTI record
+	// address identity - no runtime call.
+	if (IsTypeInfoComparison(node))
+	{
+		// The implicit object argument arrives as an address-of
+		// wrapper; the reference parameter binds the lvalue directly.
+		const SemNode& lhs_node =
+			node.children[1]->kind == SN_UNARY_EXPRESSION &&
+			node.children[1]->op == OP_AMP
+				? *node.children[1]->children[0] : *node.children[1];
+		const SemNode& rhs_node =
+			node.children[2]->kind == SN_UNARY_EXPRESSION &&
+			node.children[2]->op == OP_AMP
+				? *node.children[2]->children[0] : *node.children[2];
+		string lhs = LowerAddressExpr(lhs_node);
+		string rhs = LowerAddressExpr(rhs_node);
+		LowerValue result;
+		result.type = BoolType();
+		result.text = NewTemp();
+		Emit(result.text + " = cmp " +
+		     (callee.entity_name == "operator ==" ? "eq" : "ne") +
+		     " ptr " + lhs + ", " + rhs);
+		return result;
 	}
 	// A call with armed cleanups runs under an unwind-dispatch region:
 	// live temporaries protect every call, destructible locals only

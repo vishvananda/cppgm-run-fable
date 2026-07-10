@@ -122,7 +122,11 @@ enum ESemNodeKind
 	// symbol of an i64 guard global; the children run when the guard
 	// is still zero, then the guard is set. Lowering-only; never
 	// printed by the PA12 dump.
-	SN_STATIC_GUARD
+	SN_STATIC_GUARD,
+	// PA25 typeid: an lvalue of const std::type_info. `typeid_operand`
+	// carries the resolved (cv/reference-stripped) operand type; a
+	// dynamic query keeps the polymorphic glvalue as children[0].
+	SN_TYPEID
 };
 
 // PA15: which ABI entry a function definition / callee names. Complete
@@ -302,6 +306,11 @@ struct SemNode
 	// re-derives the callee. Kept out of `children` so argument
 	// lowering and may-throw analysis see only the call's operands.
 	SemNodePtr result_dtor;
+	// PA25 SN_TYPEID: the resolved operand type of the query, and
+	// whether the result reads the operand's dynamic type through its
+	// vpointer (children[0] is the polymorphic glvalue then).
+	TypePtr typeid_operand;
+	bool typeid_dynamic = false;
 };
 
 SemNodePtr MakeSemNode(ESemNodeKind kind);
