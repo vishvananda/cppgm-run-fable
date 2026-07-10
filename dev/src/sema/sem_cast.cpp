@@ -116,6 +116,31 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 				? VC_XVALUE : VC_LVALUE;
 			return value;
 		}
+		// PA27: a cast to a shared virtual-base reference rides the
+		// carrier entry (the lowering picks the pointer per context).
+		if (hops < 0 && from->kind == TK_CLASS && to->kind == TK_CLASS &&
+		    from->named->class_record)
+		{
+			size_t vbase_index = 0;
+			unsigned long long remainder = 0;
+			if (VirtualBasePath(*from->named->class_record, to->named,
+			                    vbase_index, remainder))
+			{
+				SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
+				adjusted->type = to;
+				adjusted->category = value.category == VC_PRVALUE
+					? VC_XVALUE : value.category;
+				adjusted->base_hops = 1;
+				adjusted->base_offset = remainder;
+				adjusted->vbase_index = (int)vbase_index;
+				adjusted->children.push_back(std::move(value.node));
+				value.node = std::move(adjusted);
+				value.type = to;
+				value.category = dest->kind == TK_RVALUE_REFERENCE
+					? VC_XVALUE : VC_LVALUE;
+				return value;
+			}
+		}
 		// 5.2.9p2/p11 with op != KW_CONST_CAST: a downcast reference
 		// static_cast views the derived object; a displaced-base view
 		// shifts back by the base subobject's offset (PA26).
@@ -211,8 +236,12 @@ bool SemExprAnalyzer::TryDynamicCastPointer(const TypePtr& to,
 	if (!to_void)
 	{
 		host_.RequireCompleteType(target_class->named);
-		if (BaseClassDistance(target_class->named,
-		                      source_class->named) <= 0)
+		// Identity casts and upcasts stay static conversions; a
+		// downcast queries the runtime, and PA27 also accepts the
+		// sibling scan (a polymorphic target unrelated to the source).
+		if (target_class->named == source_class->named ||
+		    DerivedFromWithExtrasLinked(source_class->named,
+		                                target_class->named))
 			return false;
 	}
 	SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);

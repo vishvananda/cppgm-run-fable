@@ -117,25 +117,46 @@ string FunctionLowerer::AdjustToBase(const string& address,
 {
 	int hops = 0;
 	unsigned long long offset = 0;
+	if (BaseSubobjectPath(from, to, hops, offset) == BP_UNIQUE)
+		return AdjustToBaseHops(address, hops, offset);
+	// PA27: a shared virtual-base target projects its static
+	// complete-object offset (the supported binding contexts view
+	// complete objects).
+	unsigned long long complete = 0;
+	if (from && from->class_record &&
+	    CompleteObjectOffset(*from->class_record, to, complete))
+		return AdjustToBaseHops(address, 1, complete);
 	// Sema accepted the conversion, so the path resolves; a non-unique
 	// result here is a desync between the layers, not a valid program.
-	if (BaseSubobjectPath(from, to, hops, offset) != BP_UNIQUE)
-		throw std::runtime_error(
-			"derived-to-base adjustment lost its unique path");
-	return AdjustToBaseHops(address, hops, offset);
+	throw std::runtime_error(
+		"derived-to-base adjustment lost its unique path");
 }
 
 // --- PA27 hidden vbase-pointer machinery -----------------------------------
 
 // The id-expression an object/argument expression bottoms out at,
-// peeling dereferences and projection wrappers ("this" included).
+// peeling dereferences, casts, and unnamed base projections ("this"
+// included). A named member access (a field read) breaks the
+// identity: the value no longer designates the parameter's subobject.
 static const SemNode* BottomIdExpression(const SemNode& node)
 {
 	const SemNode* at = &node;
 	while (at)
 	{
-		if (at->kind == SN_ID_EXPRESSION)
+		switch (at->kind)
+		{
+		case SN_ID_EXPRESSION:
 			return at;
+		case SN_UNARY_EXPRESSION:
+		case SN_CAST_EXPRESSION:
+			break;
+		case SN_MEMBER_EXPRESSION:
+			if (!at->name.empty())
+				return 0;
+			break;
+		default:
+			return 0;
+		}
 		if (at->children.empty())
 			return 0;
 		at = at->children[0].get();
@@ -150,6 +171,10 @@ void FunctionLowerer::EmitParamVBasePointers(size_t param_pos,
                                              size_t type_index,
                                              const SemNode& child)
 {
+	// The hidden `this` parameter carries no __pvbptr row; base
+	// entries and member functions ride their own __vbptrN map.
+	if (child.name == "this")
+		return;
 	bool collapsed = false;
 	const ClassInfo* cls = ParamVBaseClass(child.type, collapsed);
 	if (!cls)
@@ -485,6 +510,7 @@ string FunctionLowerer::VBaseRemainderHops(const string& base_in,
 	string base = base_in;
 	const ClassInfo* at = &carrier;
 	unsigned long long nv_offset = remainder;
+	bool hopped_any = false;
 	while (owner)
 	{
 		int hops = 0;
@@ -505,8 +531,11 @@ string FunctionLowerer::VBaseRemainderHops(const string& base_in,
 		base = hopped;
 		at = at->vbases[index].cls;
 		nv_offset = inner;
+		hopped_any = true;
 	}
-	if (!with_projection && nv_offset == 0)
+	// A bare adjustment suppresses a zero remainder only after a hop
+	// already moved the address (the reference keeps one projection).
+	if (!with_projection && nv_offset == 0 && hopped_any)
 		return base;
 	string projected = NewTemp();
 	Emit(projected + " = index i8 [projection=base_subobject] " + base +
@@ -524,7 +553,11 @@ string FunctionLowerer::MemberAddress(const SemNode& node,
 	if (node.base_reverse)
 	{
 		// 5.2.9p11: a downcast view shifts back to the derived object;
-		// the reference operand is never null.
+		// the reference operand is never null. PA27: a displaced view
+		// still counts as unwind-relevant control flow for callers
+		// under cleanups (mirrors the guarded pointer form).
+		if (node.base_offset)
+			const_cast<LowFunctionInfo&>(info_).guarded_body = true;
 		base = LowerAddressExpr(object);
 		string shifted = NewTemp();
 		Emit(shifted + " = index i8 " + base + ", -" +

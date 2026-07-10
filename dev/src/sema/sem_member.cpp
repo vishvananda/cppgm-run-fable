@@ -374,7 +374,10 @@ SemValue SemExprAnalyzer::AnalyzeImplicitMember(const ScopeBinding& binding,
 	if (this_type)
 	{
 		const NamedTypeInfo* this_entity = this_type->target->named;
-		have_this = BaseClassDistance(this_entity, home_entity) >= 0;
+		// PA27: members of shared virtual bases are reachable through
+		// `this` as well (the derivation includes virtual edges).
+		have_this = BaseClassDistance(this_entity, home_entity) >= 0 ||
+			DerivedFromWithExtrasLinked(this_entity, home_entity);
 	}
 	if (binding.kind == SB_VARIABLE)
 	{
@@ -421,15 +424,30 @@ SemValue SemExprAnalyzer::AnalyzeImplicitMember(const ScopeBinding& binding,
 		{
 			int hops = 0;
 			unsigned long long base_offset = 0;
-			EBasePath path = BaseSubobjectPath(
-				this_entity, host_.Model().ScopeEntity(binding.owner),
-				hops, base_offset);
+			const NamedTypeInfo* owner_entity =
+				host_.Model().ScopeEntity(binding.owner);
+			EBasePath path = BaseSubobjectPath(this_entity, owner_entity,
+			                                   hops, base_offset);
 			if (path == BP_AMBIGUOUS)
 				throw runtime_error("ambiguous base class subobject");
 			if (path == BP_UNIQUE)
 			{
 				value.node->base_hops = hops;
 				value.node->base_offset = base_offset;
+			}
+			else if (this_entity && this_entity->class_record)
+			{
+				// PA27: the owner subobject sits behind a virtual edge.
+				size_t vbase_index = 0;
+				unsigned long long remainder = 0;
+				if (VirtualBasePath(*this_entity->class_record,
+				                    owner_entity, vbase_index,
+				                    remainder))
+				{
+					value.node->base_hops = 1;
+					value.node->base_offset = remainder;
+					value.node->vbase_index = (int)vbase_index;
+				}
 			}
 		}
 		value.node->is_bit_field = field->is_bit_field;
@@ -851,6 +869,7 @@ void SemExprAnalyzer::AttachMethodObjectArgument(
 	const NamedTypeInfo* object_entity = object.type->named;
 	int hops = 0;
 	unsigned long long base_offset = 0;
+	int vbase_index = -1;
 	if (!(binding.home != owner_scope && !spec))
 	{
 		EBasePath path = BaseSubobjectPath(object_entity, callee_class,
@@ -858,7 +877,20 @@ void SemExprAnalyzer::AttachMethodObjectArgument(
 		if (path == BP_AMBIGUOUS)
 			throw runtime_error("ambiguous base class subobject");
 		if (path != BP_UNIQUE)
+		{
 			hops = 0;
+			// PA27: the callee's class sits behind a virtual edge.
+			size_t index = 0;
+			unsigned long long remainder = 0;
+			if (object_entity && object_entity->class_record &&
+			    VirtualBasePath(*object_entity->class_record,
+			                    callee_class, index, remainder))
+			{
+				hops = 1;
+				base_offset = remainder;
+				vbase_index = (int)index;
+			}
+		}
 	}
 	if (hops > 0)
 	{
@@ -867,6 +899,7 @@ void SemExprAnalyzer::AttachMethodObjectArgument(
 		adjusted->category = VC_LVALUE;
 		adjusted->base_hops = hops;
 		adjusted->base_offset = base_offset;
+		adjusted->vbase_index = vbase_index;
 		adjusted->children.push_back(std::move(object.node));
 		object.node = std::move(adjusted);
 	}

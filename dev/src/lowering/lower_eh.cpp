@@ -153,13 +153,33 @@ string FunctionLowerer::LowerDynamicCast(const SemNode& node)
 	// members) anchor in the program image.
 	if (target->kind == TK_CLASS && target->named->class_record)
 		program_.VTableRef(target->named->class_record);
+	// The Itanium src2dst hint: the static offset when the source is a
+	// unique public base of the target, -3 when it appears more than
+	// once, -2 when the classes are unrelated (the sibling scan).
+	long long hint = -2;
+	{
+		int hops = 0;
+		unsigned long long offset = 0;
+		EBasePath path = BaseSubobjectPath(
+			RemoveTopCv(target)->named, node.typeid_operand->named,
+			hops, offset);
+		if (path == BP_UNIQUE)
+			hint = (long long)offset;
+		else if (path == BP_AMBIGUOUS)
+			hint = -3;
+		else if (FindClassVBase(
+		             *RemoveTopCv(target)->named->class_record,
+		             node.typeid_operand->named->class_record))
+			hint = -1;
+	}
 	string result = NewTemp();
 	Emit(result + " = call ptr " +
 	     program_.ExternalRuntimeFnRef(
 			"__dynamic_cast",
 			"(%arg0 : ptr, %arg1 : ptr, %arg2 : ptr, %arg3 : i64) -> "
 			"ptr [linkage=c, binding=strong, object=__dynamic_cast]") +
-	     "(" + operand + ", " + src_rtti + ", " + dst_rtti + ", 0)");
+	     "(" + operand + ", " + src_rtti + ", " + dst_rtti + ", " +
+	     to_string(hint) + ")");
 	Emit("store ptr " + result + ", $" + slot);
 	if (!ref_form)
 	{
