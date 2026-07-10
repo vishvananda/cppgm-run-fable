@@ -1077,6 +1077,12 @@ const ClassInfo* SemBinder::CurrentClass()
 
 TypePtr SemBinder::CurrentThisType()
 {
+	// PA24: inside a lambda body, `this` means the enclosing member
+	// function's object; a captureless lambda has none (frame.cls
+	// null leaves the placeholder-free null result and the ordinary
+	// diagnostics fire).
+	if (LambdaFrame* frame = ActiveLambdaFrame())
+		return frame->cls ? frame->enclosing_this : TypePtr();
 	return method_.this_type;
 }
 

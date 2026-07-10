@@ -53,6 +53,10 @@ public:
 	                                 size_t overload_index);
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
 	                                          vector<SemValue> args);
+	// PA24 lambdas (sem_lambda.cpp).
+	virtual SemValue AnalyzeLambda(const AstExpr& expr);
+	virtual bool TryCaptureUse(const ScopeBinding& binding, SemValue& out);
+	virtual SemNodePtr ThisValueNode();
 
 	// ITypeBuilderHost: decltype over the full PA12 expression subset.
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);
@@ -846,6 +850,11 @@ private:
 	// their qualified constructor names.
 	std::map<const NamedTypeInfo*, string> constructors_;
 	TypePtr current_return_;  // return type of the open function body
+	// PA24 7.1.6.4: the spelled placeholder return pattern of the open
+	// body (null when the return type was not a placeholder); later
+	// return statements re-deduce against it for the p9 consistency
+	// check.
+	TypePtr auto_return_pattern_;
 	int local_types_;
 	bool pending_local_type_;
 
@@ -890,6 +899,64 @@ private:
 		// under the template name match through it.
 		string fn_template_name;
 	};
+
+	// --- PA24 lambda state (sem_lambda.cpp) ---
+	// One capture of an open (or synthesized) lambda, in field order.
+	struct LambdaCapture
+	{
+		const ScopeBinding* binding = 0;  // null for `this`
+		string name;
+		unsigned long long offset = 0;
+		TypePtr referee;  // captured entity type (references stripped)
+		bool is_this = false;
+	};
+	// The body-binding context of one lambda whose statements are
+	// currently being bound; `cls` is null for a captureless lambda.
+	struct LambdaFrame
+	{
+		Scope* fn_scope = 0;
+		ClassInfo* cls = 0;
+		Scope* members = 0;
+		bool by_ref_default = false;   // [&] spelled
+		bool this_spelled = false;     // [this] spelled
+		TypePtr this_param_type;       // the closure's own this
+		TypePtr enclosing_this;        // the captured-this type (or null)
+		vector<string> explicit_names; // [&name] spellings
+		vector<LambdaCapture> captures;
+		bool this_captured = false;
+		unsigned long long this_offset = 0;
+	};
+	// The synthesized identity of an analyzed lambda-expression,
+	// cached per (lambda AST, enclosing body) so the deduction and
+	// initialization analyses of one declaration share one synthesis.
+	struct LambdaInfo
+	{
+		bool captureless = true;
+		string fn_name;   // captureless: the internal function
+		TypePtr fn_type;
+		ClassInfo* cls = 0;  // capturing: the closure class
+		vector<LambdaCapture> captures;
+	};
+	LambdaFrame* ActiveLambdaFrame();
+	SemNodePtr ClosureThisId(const LambdaFrame& frame);
+	SemValue MakeLambdaValue(const LambdaInfo& info);
+	TypePtr BindLambdaBody(const AstLambda& lambda, SemNode* node,
+	                       Scope* fn_scope, const MethodContext& context,
+	                       const TypePtr& ret);
+	void BindCapturelessLambda(const AstLambda& lambda, const string& name,
+	                           Scope* fn_scope,
+	                           const vector<ParameterInfo>& parameters,
+	                           const vector<TypePtr>& param_types,
+	                           const TypePtr& ret, LambdaInfo& info);
+	void BindClosureLambda(const AstLambda& lambda, const string& name,
+	                       Scope* fn_scope,
+	                       const vector<ParameterInfo>& parameters,
+	                       const vector<TypePtr>& param_types,
+	                       const TypePtr& ret, LambdaInfo& info);
+	vector<LambdaFrame> lambda_frames_;
+	std::map<std::pair<const void*, const void*>, LambdaInfo>
+		lambda_cache_;
+	int lambda_counter_ = 0;
 
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;

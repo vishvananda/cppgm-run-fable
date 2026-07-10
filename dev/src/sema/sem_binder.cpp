@@ -750,7 +750,13 @@ TypePtr SemBinder::DeduceAutoDeclared(const TypePtr& type,
 	if (from->kind == TK_ARRAY)
 		from = MakePointerType(from->target, false, false);
 	else if (from->kind == TK_FUNCTION)
-		from = MakePointerType(from, false, false);
+	{
+		// The reference model keeps a namespace-scope auto variable
+		// deduced from a (lambda) function at the function type: its
+		// storage holds the address and calls spell `addr` directly.
+		if (current_->kind != SCOPE_NAMESPACE)
+			from = MakePointerType(from, false, false);
+	}
 	else
 		from = RemoveTopCv(from);
 	TypePtr deduced = MatchAutoPattern(type, from);
@@ -848,6 +854,16 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 		return;
 	}
 	SemValue value = analyzer_.Analyze(*expr);
+	// PA24: a function-typed namespace-scope variable (auto deduced
+	// from a captureless lambda) stores the function's address.
+	if (binding.type->kind == TK_FUNCTION)
+	{
+		analyzer_.CopyInitialize(
+			value, MakePointerType(binding.type, false, false),
+			"initialization");
+		item.children.push_back(std::move(value.node));
+		return;
+	}
 	// 8.5.2: an array of matching character type initializes from a
 	// string literal; the code units (with the terminator) initialize
 	// the elements like a braced list, and an omitted bound completes
@@ -1096,6 +1112,7 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	}
 	parents_.push_back(item);
 	TypePtr saved_return = current_return_;
+	TypePtr saved_pattern = auto_return_pattern_;
 	MethodContext saved_method = method_;
 	int saved_hidden = range_hidden_counter_;
 	range_hidden_counter_ = 0;
@@ -1104,9 +1121,12 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	method_.fn_owner = declaring;
 	method_.fn_name = name;
 	current_return_ = composed.type->target;
+	auto_return_pattern_ = TypeContainsAutoPlaceholder(current_return_)
+		? current_return_ : TypePtr();
 	DeclBinder::BindFunctionBody(decl, composed, name);
 	TypePtr deduced_return = current_return_;
 	current_return_ = saved_return;
+	auto_return_pattern_ = saved_pattern;
 	method_ = saved_method;
 	range_hidden_counter_ = saved_hidden;
 	parents_.pop_back();
@@ -1275,6 +1295,15 @@ void SemBinder::BindReturnStatement(const AstStmt& stmt)
 		current_return_ = DeduceAutoDeclared(current_return_, value,
 		                                     "return value");
 		bare = RemoveTopCv(current_return_);
+	}
+	else if (auto_return_pattern_ && stmt.expr->kind != EK_BRACED)
+	{
+		// 7.1.6.4p9: every return statement must deduce the same type.
+		TypePtr again = DeduceAutoDeclared(auto_return_pattern_, value,
+		                                   "return value");
+		if (!TypeEquals(again, current_return_))
+			throw runtime_error("inconsistent auto return type "
+			                    "deduction");
 	}
 	if (!IsReferenceType(current_return_) && bare->kind == TK_CLASS &&
 	    value.type && RemoveTopCv(value.type)->kind == TK_CLASS &&

@@ -91,20 +91,7 @@ SemValue SemExprAnalyzer::MakeExplicitDestructorCall(SemValue object,
 SemNodePtr SemExprAnalyzer::ImplicitThisObject()
 {
 	TypePtr this_type = host_.CurrentThisType();
-	SemNodePtr id = MakeSemNode(SN_ID_EXPRESSION);
-	id->name = "this";
-	id->type = this_type;
-	id->category = VC_PRVALUE;
-	id->entity_scope = host_.CurrentScope();
-	// The `this` binding lives in the enclosing function scope.
-	for (const Scope* scope = host_.CurrentScope(); scope;
-	     scope = scope->parent)
-		if (FindOwnBinding(*scope, "this"))
-		{
-			id->entity_scope = scope;
-			break;
-		}
-	id->entity_name = "this";
+	SemNodePtr id = host_.ThisValueNode();
 	SemNodePtr deref = MakeSemNode(SN_UNARY_EXPRESSION);
 	deref->type = this_type->target;
 	deref->category = VC_LVALUE;

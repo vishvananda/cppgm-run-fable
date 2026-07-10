@@ -382,6 +382,29 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	ctor_depth_--;
 }
 
+// PA24 closure construction into `dest`: each child stores one ptr
+// field in order - an lvalue child stores its address (a by-reference
+// capture), a prvalue child its pointer value (a captured `this`).
+void FunctionLowerer::LowerClosureInit(const SemNode& node,
+                                       const string& dest)
+{
+	for (size_t i = 0; i < node.children.size(); i++)
+	{
+		const SemNode& child = *node.children[i];
+		string target = dest;
+		if (i)
+		{
+			target = NewTemp();
+			Emit(target + " = index i8 " + dest + ", " +
+			     to_string(i * 8));
+		}
+		string value = child.category == VC_LVALUE
+			? LowerAddressExpr(child)
+			: LowerValueExpr(child).text;
+		Emit("store ptr " + value + ", " + target);
+	}
+}
+
 // Constructs the class value of `node` into the object at `dest`:
 // constructor actions run in place, class-valued calls write their
 // result there, conditionals construct per arm.
@@ -390,6 +413,9 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 {
 	switch (node.kind)
 	{
+	case SN_CLOSURE_INIT:
+		LowerClosureInit(node, dest);
+		return;
 	case SN_CONSTRUCTOR_ACTION:
 		if (node.trivial_copy)
 			LowerTrivialCopyAction(node, dest);
@@ -755,6 +781,7 @@ void FunctionLowerer::LowerClassLocal(const SemNode& node)
 			break;
 		case SN_CALL_EXPRESSION:
 		case SN_CONDITIONAL_EXPRESSION:
+		case SN_CLOSURE_INIT:
 			if (ElideEmptyOperatorInit(node, child))
 				break;
 			// A class prvalue initializer constructs the declared

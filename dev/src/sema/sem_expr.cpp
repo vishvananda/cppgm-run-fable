@@ -167,6 +167,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeNew(expr);
 	case EK_DELETE:
 		return AnalyzeDelete(expr);
+	case EK_LAMBDA:
+		return host_.AnalyzeLambda(expr);
 	default:
 		throw OutsideBoundary("expression form");
 	}
@@ -243,23 +245,13 @@ SemValue SemExprAnalyzer::AnalyzeKeywordLiteral(const AstExpr& expr)
 	case KW_THIS:
 	{
 		// 9.3.2: prvalue pointer to the cv-qualified class inside a
-		// non-static member function.
+		// non-static member function. Inside a lambda body the value
+		// reads the captured-this field (PA24 5.1.2).
 		TypePtr this_type = host_.CurrentThisType();
 		if (!this_type)
 			throw runtime_error("this outside a member function");
 		value.type = this_type;
-		value.node->kind = SN_ID_EXPRESSION;
-		value.node->name = "this";
-		value.node->token.clear();
-		value.node->entity_scope = host_.CurrentScope();
-		for (const Scope* scope = host_.CurrentScope(); scope;
-		     scope = scope->parent)
-			if (FindOwnBinding(*scope, "this"))
-			{
-				value.node->entity_scope = scope;
-				break;
-			}
-		value.node->entity_name = "this";
+		value.node = host_.ThisValueNode();
 		break;
 	}
 	default:
@@ -352,6 +344,10 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 		// every use folds to its converted constant value (14.1p4).
 		if (binding->no_object)
 			return FoldObjectlessConstant(*binding);
+		// PA24: an enclosing function-local used inside an open lambda
+		// body reads through the closure's capture field.
+		if (host_.TryCaptureUse(*binding, value))
+			return value;
 		// A constant static member named through a qualified-id folds
 		// like an enumerator (9.4.2p4 constant initializer). A
 		// decltype-scoped qualified-id reads the entity itself (the

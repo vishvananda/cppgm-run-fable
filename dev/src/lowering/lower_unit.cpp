@@ -237,6 +237,14 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 		info.friend_def = item.entity_scope &&
 			item.entity_scope->kind == SCOPE_NAMESPACE &&
 			!item.is_constexpr_fn && !item.from_instantiation;
+		if (item.internal_fn)
+		{
+			// PA24: a captureless lambda's function has internal
+			// linkage and no external object identity.
+			info.internal = true;
+			info.weak = false;
+			info.object_name.clear();
+		}
 	}
 }
 

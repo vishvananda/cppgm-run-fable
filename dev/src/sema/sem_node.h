@@ -91,6 +91,11 @@ enum ESemNodeKind
 	// to the address of children[0]. Lowering-only; never printed by
 	// the PA12 dump.
 	SN_STORAGE_COPY,
+	// PA24 closure construction: one child per closure field, in field
+	// order - an lvalue child stores its address (a by-reference
+	// capture), a prvalue child stores its pointer value (a captured
+	// `this`). The node's type names the closure class.
+	SN_CLOSURE_INIT,
 	// PA16 scalar new of a non-class type: children[0] is the
 	// allocation call, children[1] (optional) the converted
 	// initializer value stored into the result. `null_pointer` marks a
@@ -212,6 +217,9 @@ struct SemNode
 	// emitted only on demand like an instantiation, but with a strong
 	// binding (PA23; the reference omits an unused one).
 	bool demand_strong = false;
+	// PA24 SN_FUNCTION_DEFINITION: a captureless lambda's synthesized
+	// function - internal linkage, emitted on demand.
+	bool internal_fn = false;
 	// SN_CALL_EXPRESSION: the call invokes a user conversion function
 	// (12.3.2); object initialization uses the fact to elide an
 	// effect-free conversion of an empty class (PA23).

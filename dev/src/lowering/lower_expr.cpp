@@ -1026,6 +1026,11 @@ string FunctionLowerer::LowerPointerOperand(const SemNode& node)
 	{
 		const ScopeBinding* binding = node.kind == SN_ID_EXPRESSION
 			? EntityBinding(node) : 0;
+		// PA24: a function-typed variable (a namespace-scope auto
+		// deduced from a lambda) is its storage address, undecayed
+		// (the reference call shape).
+		if (binding && binding->kind == SB_VARIABLE)
+			return LowerAddressExpr(node);
 		string address;
 		if ((binding && binding->kind == SB_FUNCTION) || node.fn_spec)
 			address = LowerAddressExpr(node);

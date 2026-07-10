@@ -160,6 +160,8 @@ private:
 	// Constructs/copies the class value of `node` into the object at
 	// `dest` (constructor actions, class-valued calls, conditionals).
 	void LowerClassInit(const SemNode& node, const string& dest);
+	// PA24: closure construction (field-wise capture-pointer stores).
+	void LowerClosureInit(const SemNode& node, const string& dest);
 	// Materializes a class-valued call result in a fresh `kind` slot
 	// (or into `dest` when given); returns the object address text.
 	string MaterializeClassResult(const SemNode& call, const char* kind,
