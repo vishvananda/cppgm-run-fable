@@ -188,6 +188,29 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 	{
 		TypePtr target_class = RemoveTopCv(to->target);
 		TypePtr source = RemoveTopCv(value.type);
+		// PA26 5.2.7p7: dynamic_cast<void*> of a pointer to a
+		// polymorphic class yields the most derived object's address.
+		if (IsVoidType(target_class) && source->kind == TK_POINTER &&
+		    RemoveTopCv(source->target)->kind == TK_CLASS)
+		{
+			TypePtr source_class = RemoveTopCv(source->target);
+			host_.RequireCompleteType(source_class->named);
+			const ClassInfo* src_cls =
+				host_.Classes().Find(source_class->named);
+			if (src_cls && src_cls->is_polymorphic)
+			{
+				SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);
+				node->type = to;
+				node->category = VC_PRVALUE;
+				node->typeid_operand = source_class;
+				node->children.push_back(std::move(value.node));
+				SemValue result;
+				result.type = to;
+				result.category = VC_PRVALUE;
+				result.node = std::move(node);
+				return result;
+			}
+		}
 		if (target_class->kind == TK_CLASS &&
 		    source->kind == TK_POINTER &&
 		    RemoveTopCv(source->target)->kind == TK_CLASS)

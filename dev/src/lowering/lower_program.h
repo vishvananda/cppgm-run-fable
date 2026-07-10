@@ -230,6 +230,9 @@ public:
 	// strong external record for fundamentals (with the weak record
 	// rendered beside it), the program's own record otherwise.
 	string ThrowRttiRef(const TypePtr& type);
+	// PA26 dynamic_cast<void*>: the C++ library's void type_info
+	// record (_ZTIv); the runtime-call presentation block names it.
+	string ExternalVoidRttiRef();
 	// PA25 15.1: the weak zero-filled exception-object scaffolding
 	// global of a thrown type.
 	void EhObjGlobal(const TypePtr& type);

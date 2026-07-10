@@ -102,6 +102,47 @@ string FunctionLowerer::LowerDynamicCast(const SemNode& node)
 	ReferenceLabel(scan_label);
 	Terminate("branch " + is_null + ", ^" + end_label + ", ^" +
 	          scan_label);
+	if (!ref_form && IsVoidType(target))
+	{
+		// PA26 5.2.7p7: the void* form adjusts the operand to the most
+		// derived object through the vtable's offset-to-top slot (the
+		// i64 one slot before the RTTI pointer). The runtime-call form
+		// stays beside it as the reference's dead presentation block.
+		OpenBlock(scan_label);
+		string vpointer = NewTemp();
+		Emit(vpointer + " = load ptr " + operand);
+		string top_slot = NewTemp();
+		Emit(top_slot + " = index i8 " + vpointer + ", -16");
+		string top_offset = NewTemp();
+		Emit(top_offset + " = load i64 " + top_slot);
+		string adjusted = NewTemp();
+		Emit(adjusted + " = index i8 " + operand + ", " + top_offset);
+		Emit("store ptr " + adjusted + ", $" + slot);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		OpenBlock(NewLabel("block"));
+		string void_src = NewTemp();
+		Emit(void_src + " = addr " +
+		     program_.RttiTypeRef(node.typeid_operand));
+		string void_dst = NewTemp();
+		Emit(void_dst + " = addr " + program_.ExternalVoidRttiRef());
+		string runtime = NewTemp();
+		Emit(runtime + " = call ptr " +
+		     program_.ExternalRuntimeFnRef(
+				"__dynamic_cast",
+				"(%arg0 : ptr, %arg1 : ptr, %arg2 : ptr, %arg3 : i64)"
+				" -> ptr [linkage=c, binding=strong, "
+				"object=__dynamic_cast]") +
+		     "(" + operand + ", " + void_src + ", " + void_dst +
+		     ", -2)");
+		Emit("store ptr " + runtime + ", $" + slot);
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		OpenBlock(end_label);
+		string result = NewTemp();
+		Emit(result + " = load ptr $" + slot);
+		return result;
+	}
 	OpenBlock(scan_label);
 	string src_rtti = NewTemp();
 	Emit(src_rtti + " = addr " +

@@ -366,6 +366,18 @@ string LowerProgram::ThrowRttiRef(const TypePtr& type_in)
 	return "@" + name;
 }
 
+string LowerProgram::ExternalVoidRttiRef()
+{
+	map<string, string>::iterator found = external_rtti_names_.find("v");
+	if (found != external_rtti_names_.end())
+		return "@" + found->second;
+	string name = UniqueSymbol("__external_rtti__void");
+	external_rtti_names_["v"] = name;
+	poly_declare_globals_.push_back(
+		"declare global @" + name + " [binding=strong, object=_ZTIv]");
+	return "@" + name;
+}
+
 // The weak zero-filled exception-object scaffolding global beside a
 // throw of `type` (the reference presentation).
 void LowerProgram::EhObjGlobal(const TypePtr& type_in)
