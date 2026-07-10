@@ -100,6 +100,20 @@ string FunctionLowerer::LowerMemberPointerCallee(const SemNode& callee,
 	    pm_value.op == OP_AMP && !pm_value.children.empty() &&
 	    RemoveTopCv(pm_value.type)->kind == TK_MEMBER_POINTER)
 	{
+		// The object was adjusted to the member pointer's class; a
+		// constant naming a displaced base's member (a folded non-type
+		// parameter) still steps down to its owner subobject.
+		const SemNode& member = *pm_value.children[0];
+		const NamedTypeInfo* pm_class =
+			RemoveTopCv(pm_value.type)->named;
+		const NamedTypeInfo* owner = member.entity_scope
+			? member.entity_scope->entity : 0;
+		int hops = 0;
+		unsigned long long offset = 0;
+		if (pm_class && owner && pm_class != owner &&
+		    BaseSubobjectPath(pm_class, owner, hops, offset) ==
+		        BP_UNIQUE && offset)
+			object_text = AdjustToBaseHops(object_text, hops, offset);
 		string address = NewTemp();
 		Emit(address + " = addr " +
 		     program_.MemberFunctionRef(*pm_value.children[0]));
