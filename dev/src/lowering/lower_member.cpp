@@ -122,53 +122,6 @@ string FunctionLowerer::AdjustToBase(const string& address,
 	return AdjustToBaseHops(address, hops, offset);
 }
 
-// PA26 5.3.1p3-p4: a member pointer constant. A data member renders
-// its field offset + 1 through a `const` instruction (0 is the null
-// value); a member function renders its code address zero-extended
-// into the i128 {address, this-adjustment} pair.
-LowerValue FunctionLowerer::LowerMemberPointerConstant(const SemNode& node)
-{
-	const SemNode& member = *node.children[0];
-	LowerValue value;
-	value.type = RemoveTopCv(node.type);
-	if (value.type->target->kind == TK_FUNCTION)
-	{
-		string fn = program_.MemberFunctionRef(member);
-		string address = NewTemp();
-		Emit(address + " = addr " + fn);
-		string bits = NewTemp();
-		Emit(bits + " = copy i64 " + address);
-		value.text = NewTemp();
-		Emit(value.text + " = convert zext i128 i64 " + bits);
-		return value;
-	}
-	const NamedTypeInfo* owner = member.entity_scope
-		? member.entity_scope->entity : 0;
-	const ClassInfo* record = owner ? owner->class_record : 0;
-	const ClassField* field = record
-		? FindClassField(*record, member.entity_name) : 0;
-	if (!field)
-		throw runtime_error("member pointer names no field");
-	value.text = NewTemp();
-	Emit(value.text + " = const i64 " + to_string(field->offset + 1));
-	return value;
-}
-
-// PA26 5.5: the address of `object .* pm` for a data member — the
-// stored value is the field offset + 1, so the field projection
-// indexes by the decremented value.
-string FunctionLowerer::MemberPointerAccessAddress(const SemNode& node)
-{
-	string base = LowerAddressExpr(*node.children[0]);
-	LowerValue pm = LowerValueExpr(*node.children[1]);
-	string offset = NewTemp();
-	Emit(offset + " = binary sub i64 " + pm.text + ", 1");
-	string field = NewTemp();
-	Emit(field + " = index i8 [projection=field] " + base + ", " +
-	     offset);
-	return field;
-}
-
 string FunctionLowerer::MemberAddress(const SemNode& node,
                                       bool skip_ref_load)
 {

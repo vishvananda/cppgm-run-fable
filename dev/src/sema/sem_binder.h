@@ -238,8 +238,17 @@ private:
 	// The callee destroys its by-value class parameters at scope exit;
 	// the action attaches as a child of the parameter node.
 	void AttachParameterDtor(SemNode& parameter);
-	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);
-	void AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item);
+	// PA26: the collected written mem-initializers of one constructor.
+	struct MemberInitPlan
+	{
+		std::map<string, const AstMemInitializer*> by_field;
+		vector<const AstMemInitializer*> base_inits;  // by base index
+		vector<Scope*> base_init_scopes;  // pack-expansion elements
+		size_t base_init_count = 0;
+	};
+	bool CollectMemberInits(const DeferredBody& body, SemNode& item,
+	                        MemberInitPlan& plan);
+	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);	void AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item);
 	void AppendMemberInit(const ClassInfo& cls, const ClassField& field,
 	                      const AstInitializer* init,
 	                      vector<SemNodePtr>& out);
@@ -252,12 +261,10 @@ private:
 	                            const ClassField& field,
 	                            vector<SemNodePtr>& out);
 	void AppendBaseDefaultInit(const ClassInfo& cls,
-	                           vector<SemNodePtr>& out,
-	                           bool syntactic);
+	                           vector<SemNodePtr>& out, bool syntactic);
 	// One direct base's implicit default-initialization (PA26).
 	void AppendOneBaseDefaultInit(const ClassInfo& cls, size_t base_index,
-	                              vector<SemNodePtr>& out,
-	                              bool syntactic);
+	                              vector<SemNodePtr>& out, bool syntactic);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,
@@ -267,8 +274,7 @@ private:
 	void CheckListInitNarrowing(const SemValue& value, const TypePtr& dest);
 	SemNodePtr ThisObjectExpr();
 	SemNodePtr ThisFieldExpr(const ClassField& field);
-	// The address of the direct base subobject at `base_index` of the
-	// class's direct-base table (PA26; index 0 is the primary base).
+	// The direct base subobject's address at `base_index` (PA26).
 	SemNodePtr ThisBaseAddress(const ClassInfo& cls,
 	                           size_t base_index = 0);
 	SemNodePtr AddressOfNode(SemNodePtr operand);
@@ -302,14 +308,7 @@ private:
 	void DeclareImplicitAssign(ClassInfo& cls, bool is_move, bool deleted);
 	void EnsureSpecialCtor(const ClassInfo& cls, int index,
 	                       bool out_of_class = false);
-	virtual void EnsureSpecialCtorHost(const ClassInfo& cls, int index)
-	{
-		const ClassCtor& selected = cls.ctors[index];
-		if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
-		    !selected.definition &&
-		    (selected.implicit || selected.defaulted))
-			EnsureSpecialCtor(cls, index);
-	}
+	virtual void EnsureSpecialCtorHost(const ClassInfo& cls, int index);
 	void BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
 	                        bool out_of_class);
 	// Recomputes the user-provided-constructor fact after an
@@ -539,8 +538,8 @@ private:
 	// `Base...` in a base clause: per-element base types.
 	void ExpandPackBases(const AstBaseSpecifier& base,
 	                     std::vector<TypePtr>& out);
-	// `Base(args)...` mem-initializer (PA26): per-element resolved base
-	// type plus the element scope the arguments analyze under.
+	// `Base(args)...` mem-initializer (PA26): element base types plus
+	// the scopes the arguments analyze under.
 	void ExpandPackMemInitTargets(
 		const AstMemInitializer& mem,
 		std::vector<std::pair<TypePtr, Scope*>>& out);

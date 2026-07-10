@@ -395,6 +395,11 @@ private:
 	                        const AstNamePart* explicit_part = 0);
 	SemValue AnalyzeBuiltinConstantP(const AstExpr& expr);
 	SemValue AnalyzeUnary(const AstExpr& expr);
+	// The SB_VARIABLE leg of AnalyzeId (true: `value` is complete).
+	bool AnalyzeVariableIdValue(const AstExpr& expr,
+	                            const ScopeBinding& binding,
+	                            const NamedTypeInfo*& member_class,
+	                            const string& written, SemValue& value);
 	SemValue AnalyzeAddressOf(const AstExpr& expr);
 	// PA26: a member-function pointer template parameter use.
 	SemValue MemberPointerParamConstant(const ScopeBinding& binding,
@@ -416,6 +421,10 @@ private:
 	SemValue AnalyzeMember(const AstExpr& expr);
 	SemValue AnalyzeCastToReference(const TypePtr& dest, SemValue value,
 	                                ETokenType op);
+	// PA25/PA26 5.2.7: the pointer dynamic_cast forms (downcast and
+	// void*); false when the generic cast classification applies.
+	bool TryDynamicCastPointer(const TypePtr& to, SemValue& value,
+	                           SemValue& result);
 	SemValue AnalyzeCastTo(const TypePtr& dest, const AstExpr& operand,
 	                       bool has_anno, ETokenType op,
 	                       const string& op_spelling);

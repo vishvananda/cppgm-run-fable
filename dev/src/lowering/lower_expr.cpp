@@ -345,22 +345,9 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 	case SN_MEMBER_EXPRESSION:
 		return LowerMemberValue(node);
 	case SN_MEMBER_POINTER_ACCESS:
-	{
 		// PA26 5.5: a data member access loads through the computed
 		// field address.
-		string address = MemberPointerAccessAddress(node);
-		LowerValue value;
-		value.type = RemoveTopCv(StripRef(node.type));
-		if (value.type->kind == TK_ARRAY)
-		{
-			value.text = address;
-			return value;
-		}
-		value.text = NewTemp();
-		Emit(value.text + " = load " + LowerValueType(value.type) +
-		     " " + address);
-		return value;
-	}
+		return LowerMemberPointerValue(node);
 	case SN_DYNAMIC_CAST:
 	{
 		LowerValue value;
@@ -437,6 +424,16 @@ LowerValue FunctionLowerer::LowerUnary(const SemNode& node)
 		// PA26 5.3.1p3-p4: &C::member renders the member pointer value.
 		if (value.type && value.type->kind == TK_MEMBER_POINTER)
 			return LowerMemberPointerConstant(node);
+		// PA26: a folded const function-pointer member read addresses
+		// its symbolic (declare-only) function.
+		if (operand.kind == SN_CALLEE)
+		{
+			string name = program_.FunctionRef(
+				operand.entity_scope, operand.entity_name, operand.type);
+			value.text = NewTemp();
+			Emit(value.text + " = addr " + name);
+			return value;
+		}
 		value.text = LowerAddressExpr(operand);
 		return value;
 	case OP_INC:
@@ -963,14 +960,7 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		}
 		throw OutsideBoundary("address form");
 	case SN_CALL_EXPRESSION:
-		if (!IsReferenceType(node.type))
-		{
-			if (NodeType(node)->kind == TK_CLASS)
-				// A class prvalue call: the materialized result.
-				return MaterializeClassResult(node, "tmpobj", "");
-			throw OutsideBoundary("address of a call result");
-		}
-		return LowerCall(node).text;
+		return CallResultAddress(node);
 	case SN_CONDITIONAL_EXPRESSION:
 		return LowerConditionalAddress(node);
 	case SN_BINARY_EXPRESSION:
@@ -990,6 +980,19 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	default:
 		throw OutsideBoundary("address form");
 	}
+}
+
+// The address of a call result: a reference result is its pointer; a
+// class prvalue call materializes its result object.
+string FunctionLowerer::CallResultAddress(const SemNode& node)
+{
+	if (!IsReferenceType(node.type))
+	{
+		if (NodeType(node)->kind == TK_CLASS)
+			return MaterializeClassResult(node, "tmpobj", "");
+		throw OutsideBoundary("address of a call result");
+	}
+	return LowerCall(node).text;
 }
 
 string FunctionLowerer::LowerPointerOperand(const SemNode& node)
@@ -1306,20 +1309,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	      (!direct || program_.CalleeMayUnwind(callee)))))
 		OpenEhRegion();
 	if (!direct || dispatch)
-	{
-		TypePtr signature_type = fn_type;
-		if (pm_call)
-		{
-			vector<TypePtr> parameters;
-			parameters.push_back(MakePointerType(
-				MakeFundamentalType(FT_VOID), false, false));
-			for (size_t i = 0; i < fn_type->parameters.size(); i++)
-				parameters.push_back(fn_type->parameters[i]);
-			signature_type = MakeFunctionType(
-				fn_type->target, parameters, fn_type->variadic);
-		}
-		line += IndirectCallSignature(signature_type);
-	}
+		line += IndirectCallSignature(
+			pm_call ? MemberPointerCallSignature(fn_type) : fn_type);
 	Emit(line);
 	bool class_result =
 		RemoveTopCv(fn_type->target)->kind == TK_CLASS &&
@@ -1368,27 +1359,7 @@ string FunctionLowerer::LowerCalleeText(const SemNode& callee,
 		                            callee.entity_name, fn_type,
 		                            callee.fn_spec);
 	if (callee.kind == SN_MEMBER_POINTER_ACCESS)
-	{
-		// PA26: a constant member pointer (`&C::f`, incl. a folded
-		// non-type parameter) calls through its address directly.
-		const SemNode& pm_value = *callee.children[1];
-		if (pm_value.kind == SN_UNARY_EXPRESSION && pm_value.has_op &&
-		    pm_value.op == OP_AMP && !pm_value.children.empty() &&
-		    RemoveTopCv(pm_value.type)->kind == TK_MEMBER_POINTER)
-		{
-			string address = NewTemp();
-			Emit(address + " = addr " +
-			     program_.MemberFunctionRef(*pm_value.children[0]));
-			return address;
-		}
-		// Otherwise the value's low 64 bits carry the code address.
-		LowerValue pm = LowerValueExpr(pm_value);
-		string bits = NewTemp();
-		Emit(bits + " = convert trunc i64 i128 " + pm.text);
-		string fn = NewTemp();
-		Emit(fn + " = copy ptr " + bits);
-		return fn;
-	}
+		return LowerMemberPointerCallee(callee);
 	if (NodeType(callee)->kind == TK_POINTER)
 		return LowerValueExpr(callee).text;
 	return LowerPointerOperand(callee);

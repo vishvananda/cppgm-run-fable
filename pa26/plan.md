@@ -180,3 +180,24 @@ This reuses `RttiRef`/`ExternalRuntimeFnRef`; the only new external is the
 4. dynamic_cast<void*> shape.
 5. Sweep the remaining misc tests; through-check; audit; commit in cohesive
    slices per phase.
+
+## Outcome Notes
+
+- An adjustment lowers as **one** base-subobject projection carrying the
+  unique derivation path's *total* byte offset (preserving the PA15-25
+  single-projection shapes); a qualified call chains two projections
+  (naming class, then member owner), which is what the
+  qualified-typedef fixture pins.
+- The reference presentation quirks the fixtures pin, reproduced as
+  general rules: an instantiated const function-pointer static member's
+  read folds to the address of a symbolic declare-only function named
+  by the member (storage keeps its dynamic init); `&&`/`||` pointer
+  right-operands test in the `ptr` value space while member pointers
+  test in `i64`.
+- Partial-explicit function template-ids stay overload sets when a
+  sibling template's remaining parameters could deduce from the use
+  context (14.8.1); associated-namespace collection carries a visited
+  set (CRTP bases no longer recurse).
+- New files: `sema/sem_bases.cpp` (base-clause binding),
+  `sema/sem_member_pointer.cpp` (pm semantics + nontype args),
+  `lowering/lower_member_pointer.cpp` (pm value/access/call lowering).

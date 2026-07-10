@@ -141,6 +141,7 @@ private:
 	                                    const TypePtr& source,
 	                                    const TypePtr& target);
 	string LowerAddressExpr(const SemNode& node);
+	string CallResultAddress(const SemNode& node);
 	string LowerPointerOperand(const SemNode& node);
 	string LowerPointerCmpOperand(const SemNode& node);
 	void LowerCondition(const SemNode& node, const string& true_label,
@@ -212,10 +213,14 @@ private:
 	                    const NamedTypeInfo* to);
 	string AdjustToBaseHops(const string& address, int hops,
 	                        unsigned long long offset);
-	// PA26 member pointers: `&C::member` constants and `.*` / `->*`
-	// data-member addressing.
+	// PA26 member pointers (lower_member_pointer.cpp): `&C::member`
+	// constants, `.*` / `->*` data-member access, and the bound
+	// member-pointer call pieces.
 	LowerValue LowerMemberPointerConstant(const SemNode& node);
 	string MemberPointerAccessAddress(const SemNode& node);
+	LowerValue LowerMemberPointerValue(const SemNode& node);
+	string LowerMemberPointerCallee(const SemNode& callee);
+	TypePtr MemberPointerCallSignature(const TypePtr& fn_type);
 	// Registers a by-value class parameter's attached destructor
 	// actions as function-scope cleanups (the callee owns them).
 	void RegisterParameterCleanup(const SemNode& parameter);

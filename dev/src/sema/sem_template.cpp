@@ -739,10 +739,25 @@ TemplateInfo* SemBinder::ResolveMemberOwnerTemplate(const AstName& id,
 			                    SLF_SCOPE_NAMES);
 		if (!found)
 			return 0;
-		if (found->kind != SB_NAMESPACE &&
-		    found->kind != SB_NAMESPACE_ALIAS)
-			return 0;
-		scope = found->target;
+		if (found->kind == SB_NAMESPACE ||
+		    found->kind == SB_NAMESPACE_ALIAS)
+		{
+			scope = found->target;
+			continue;
+		}
+		// PA26: a plain class qualifier hosts member templates
+		// (`Class::MemberTemplate<T>::member` definitions); the walk
+		// continues into its member scope.
+		if (found->kind == SB_TYPE && found->type &&
+		    found->type->kind == TK_CLASS)
+		{
+			Scope* members = model_.MemberScope(found->type->named);
+			if (!members)
+				return 0;
+			scope = members;
+			continue;
+		}
+		return 0;
 	}
 	return 0;
 }

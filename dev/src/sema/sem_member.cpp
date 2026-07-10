@@ -286,6 +286,29 @@ SemValue SemExprAnalyzer::AnalyzeStaticMemberValue(
 	// the binding its value (a first read instantiating the
 	// definition), so foldability rechecks after it.
 	host_.OnStaticMemberReferenced(binding, StaticMemberValueFolds(binding));
+	// PA26: an instantiated const function-pointer member read folds
+	// to the address of a symbolic function named by the member (the
+	// reference presentation; the storage keeps its dynamic init).
+	if (binding.fn_pointer_fold)
+	{
+		SemNodePtr fn = MakeSemNode(SN_CALLEE);
+		fn->name = binding.name;
+		fn->type = RemoveTopCv(binding.type)->target;
+		fn->category = VC_LVALUE;
+		fn->entity_scope = binding.owner;
+		fn->entity_name = binding.name;
+		SemValue folded;
+		folded.type = RemoveTopCv(binding.type);
+		folded.category = VC_PRVALUE;
+		folded.node = MakeSemNode(SN_UNARY_EXPRESSION);
+		folded.node->type = folded.type;
+		folded.node->category = VC_PRVALUE;
+		folded.node->has_op = true;
+		folded.node->op = OP_AMP;
+		folded.node->op_spelling = "&";
+		folded.node->children.push_back(std::move(fn));
+		return folded;
+	}
 	if (StaticMemberValueFolds(binding))
 	{
 		// Constant static members fold like enumerators.

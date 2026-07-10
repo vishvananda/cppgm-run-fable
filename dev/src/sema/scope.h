@@ -100,6 +100,11 @@ struct ScopeBinding
 	// parse-scope use in instantiation order. Only instantiated
 	// bodies fold it; parse-scope reads keep loading the storage.
 	bool value_from_def = false;
+	// PA26: an instantiated const function-pointer member definition -
+	// reads fold to the address of a symbolic (declare-only) function
+	// named by the member, the reference presentation; the storage
+	// keeps its dynamic initialization.
+	bool fn_pointer_fold = false;
 	// PA19: a constant binding with no object behind it (a non-type
 	// template parameter): every use folds to `value`; odr-use
 	// (address, reference binding) is ill-formed. In an abstract

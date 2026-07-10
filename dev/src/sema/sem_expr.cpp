@@ -290,36 +290,6 @@ TypePtr SemExprAnalyzer::ThisAdjustedType(const NamedTypeInfo* cls,
 
 // PA19 14.1p4: the constant prvalue behind an objectless binding (a
 // non-type template parameter or variable-template specialization).
-// PA26 14.1p4: a member-function pointer template parameter's use
-// re-forms the `&C::f` constant over the argument's member entity (the
-// lowering renders the member's address pair from the id node).
-SemValue SemExprAnalyzer::MemberPointerParamConstant(
-	const ScopeBinding& binding, const TypePtr& pm)
-{
-	const Scope* members = binding.owner;
-	const ScopeBinding* entity =
-		FindOwnBinding(*members, binding.pack_element_name);
-	if (!entity || entity->kind != SB_FUNCTION)
-		throw runtime_error("member pointer parameter entity missing");
-	SemNodePtr member = MakeSemNode(SN_ID_EXPRESSION);
-	member->name = binding.pack_element_name;
-	member->type = ThisAdjustedType(members->entity, pm->target);
-	member->category = VC_LVALUE;
-	member->entity_scope = members;
-	member->entity_name = binding.pack_element_name;
-	SemValue value;
-	value.type = pm;
-	value.category = VC_PRVALUE;
-	value.node = MakeSemNode(SN_UNARY_EXPRESSION);
-	value.node->type = pm;
-	value.node->category = VC_PRVALUE;
-	value.node->has_op = true;
-	value.node->op = OP_AMP;
-	value.node->op_spelling = "&";
-	value.node->children.push_back(std::move(member));
-	return value;
-}
-
 SemValue SemExprAnalyzer::FoldObjectlessConstant(const ScopeBinding& binding)
 {
 	if (!binding.has_value)
@@ -354,6 +324,103 @@ bool SemExprAnalyzer::QualifiedFieldThroughThis(
 	return owner_cls && FindClassField(*owner_cls, binding.name) != 0;
 }
 
+// The SB_VARIABLE / SB_PARAMETER leg of an id-expression: folded
+// constants, capture reads, static-member folds, and the member-fact
+// stripping of static members. Returns true when `value` is complete;
+// false falls through to the common id-node tail (with `member_class`
+// possibly narrowed).
+bool SemExprAnalyzer::AnalyzeVariableIdValue(const AstExpr& expr,
+                                             const ScopeBinding& binding,
+                                             const NamedTypeInfo*& member_class,
+                                             const string& written,
+                                             SemValue& value)
+{
+	// PA19: a non-type template parameter has no object behind it;
+	// every use folds to its converted constant value (14.1p4).
+	if (binding.no_object)
+	{
+		// PA26: a member-function pointer parameter re-forms the
+		// `&C::f` constant over its member entity.
+		TypePtr declared_pm = RemoveTopCv(binding.type);
+		if (!binding.has_value && binding.param_index < 0 &&
+		    declared_pm->kind == TK_MEMBER_POINTER &&
+		    declared_pm->target->kind == TK_FUNCTION &&
+		    binding.owner && binding.owner->kind == SCOPE_CLASS)
+		{
+			value = MemberPointerParamConstant(binding, declared_pm);
+			return true;
+		}
+		value = FoldObjectlessConstant(binding);
+		return true;
+	}
+	// PA24: an enclosing function-local used inside an open lambda
+	// body reads through the closure's capture field.
+	if (host_.TryCaptureUse(binding, value))
+		return true;
+	// A constant static member named through a qualified-id folds
+	// like an enumerator (9.4.2p4 constant initializer). A
+	// decltype-scoped qualified-id reads the entity itself (the
+	// reference resolution keeps the odr-use).
+	if (member_class && StaticMemberValueFolds(binding) &&
+	    (expr.name.parts.empty() ||
+	     expr.name.parts[0].kind != NP_DECLTYPE))
+	{
+		value = AnalyzeStaticMemberValue(binding, written);
+		return true;
+	}
+	// PA26: an instantiated const function-pointer member's read
+	// folds to its symbolic function address (the reference
+	// presentation). The registered definition instantiates on
+	// this demand before the fold decision.
+	if (member_class && !binding.has_value && binding.type &&
+	    binding.type->is_const && !binding.type->is_volatile &&
+	    RemoveTopCv(binding.type)->kind == TK_POINTER &&
+	    RemoveTopCv(binding.type)->target->kind == TK_FUNCTION)
+		host_.OnStaticMemberReferenced(binding, false);
+	if (member_class && binding.fn_pointer_fold)
+	{
+		value = AnalyzeStaticMemberValue(binding, written);
+		return true;
+	}
+	// 5.3.1p3: only non-static data members carry the member
+	// -pointer facts; a static member behaves as an ordinary
+	// namespace-scope object.
+	if (member_class)
+	{
+		const ClassInfo* owner_cls = 0;
+		if (const NamedTypeInfo* owner_entity =
+		        host_.Model().ScopeEntity(binding.owner))
+			owner_cls = host_.Classes().Find(owner_entity);
+		if (!owner_cls || !FindClassField(*owner_cls, binding.name))
+			member_class = 0;
+	}
+	// 5p5: the expression type is the declared type with references
+	// stripped; the result is an lvalue either way.
+	TypePtr declared = binding.type;
+	if (IsReferenceType(declared))
+		declared = declared->target;
+	value.type = declared;
+	value.category = VC_LVALUE;
+	value.member_class = member_class;
+	value.member_type = declared;
+	if (!binding.anon_storage_name.empty())
+	{
+		// Injected anonymous-union member (9.5p5): a synthesized
+		// access through the storage variable.
+		SemNodePtr storage = MakeSemNode(SN_ID_EXPRESSION);
+		storage->name = binding.anon_storage_name;
+		storage->type = binding.anon_storage_type;
+		storage->category = VC_LVALUE;
+		value.node = MakeSemNode(SN_MEMBER_EXPRESSION);
+		value.node->name = written;
+		value.node->type = declared;
+		value.node->category = VC_LVALUE;
+		value.node->children.push_back(std::move(storage));
+		return true;
+	}
+	return false;
+}
+
 SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 {
 	const NamedTypeInfo* member_class = 0;
@@ -374,72 +441,10 @@ SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 	{
 	case SB_VARIABLE:
 	case SB_PARAMETER:
-	{
-		// PA19: a non-type template parameter has no object behind it;
-		// every use folds to its converted constant value (14.1p4).
-		if (binding->no_object)
-		{
-			// PA26: a member-function pointer parameter re-forms the
-			// `&C::f` constant over its member entity.
-			TypePtr declared_pm = RemoveTopCv(binding->type);
-			if (!binding->has_value && binding->param_index < 0 &&
-			    declared_pm->kind == TK_MEMBER_POINTER &&
-			    declared_pm->target->kind == TK_FUNCTION &&
-			    binding->owner &&
-			    binding->owner->kind == SCOPE_CLASS)
-				return MemberPointerParamConstant(*binding, declared_pm);
-			return FoldObjectlessConstant(*binding);
-		}
-		// PA24: an enclosing function-local used inside an open lambda
-		// body reads through the closure's capture field.
-		if (host_.TryCaptureUse(*binding, value))
+		if (AnalyzeVariableIdValue(expr, *binding, member_class,
+		                           written, value))
 			return value;
-		// A constant static member named through a qualified-id folds
-		// like an enumerator (9.4.2p4 constant initializer). A
-		// decltype-scoped qualified-id reads the entity itself (the
-		// reference resolution keeps the odr-use).
-		if (member_class && StaticMemberValueFolds(*binding) &&
-		    (expr.name.parts.empty() ||
-		     expr.name.parts[0].kind != NP_DECLTYPE))
-			return AnalyzeStaticMemberValue(*binding, written);
-		// 5.3.1p3: only non-static data members carry the member
-		// -pointer facts; a static member behaves as an ordinary
-		// namespace-scope object.
-		if (member_class)
-		{
-			const ClassInfo* owner_cls = 0;
-			if (const NamedTypeInfo* owner_entity =
-			        host_.Model().ScopeEntity(binding->owner))
-				owner_cls = host_.Classes().Find(owner_entity);
-			if (!owner_cls || !FindClassField(*owner_cls, binding->name))
-				member_class = 0;
-		}
-		// 5p5: the expression type is the declared type with references
-		// stripped; the result is an lvalue either way.
-		TypePtr declared = binding->type;
-		if (IsReferenceType(declared))
-			declared = declared->target;
-		value.type = declared;
-		value.category = VC_LVALUE;
-		value.member_class = member_class;
-		value.member_type = declared;
-		if (!binding->anon_storage_name.empty())
-		{
-			// Injected anonymous-union member (9.5p5): a synthesized
-			// access through the storage variable.
-			SemNodePtr storage = MakeSemNode(SN_ID_EXPRESSION);
-			storage->name = binding->anon_storage_name;
-			storage->type = binding->anon_storage_type;
-			storage->category = VC_LVALUE;
-			value.node = MakeSemNode(SN_MEMBER_EXPRESSION);
-			value.node->name = written;
-			value.node->type = declared;
-			value.node->category = VC_LVALUE;
-			value.node->children.push_back(std::move(storage));
-			return value;
-		}
 		break;
-	}
 	case SB_FUNCTION:
 		// 9.4p2: a set of only static member functions behaves as
 		// ordinary functions (its address is a plain function
@@ -819,90 +824,6 @@ SemValue SemExprAnalyzer::AnalyzeAdditive(const AstExpr& expr, SemValue& lhs,
 	}
 	return MakeBinaryNode(expr, lhs, rhs, VC_PRVALUE,
 	                      UsualArithmeticConversions(lhs.type, rhs.type));
-}
-
-// 5.5: `object .* pm` / `pointer ->* pm` over the non-virtual object
-// model. The object adjusts to the member pointer's class subobject; a
-// data access yields the member lvalue, a function access a call-only
-// bound value carrying the pointed-to function type.
-SemValue SemExprAnalyzer::AnalyzeMemberPointerBinary(const AstExpr& expr,
-                                                     SemValue& lhs,
-                                                     SemValue& rhs)
-{
-	TypePtr pm = RemoveTopCv(rhs.type);
-	if (pm->kind != TK_MEMBER_POINTER)
-		throw runtime_error("right operand is not a member pointer");
-	SemValue object = std::move(lhs);
-	if (expr.op == OP_ARROWSTAR)
-	{
-		TypePtr pointer = object.type;
-		if (pointer->kind != TK_POINTER ||
-		    RemoveTopCv(pointer->target)->kind != TK_CLASS)
-			throw runtime_error("->* left operand is not a pointer to "
-			                    "class");
-		SemNodePtr deref = MakeSemNode(SN_UNARY_EXPRESSION);
-		deref->type = pointer->target;
-		deref->category = VC_LVALUE;
-		deref->has_op = true;
-		deref->op = OP_STAR;
-		deref->op_spelling = "*";
-		deref->children.push_back(std::move(object.node));
-		object.node = std::move(deref);
-		object.type = pointer->target;
-		object.category = VC_LVALUE;
-	}
-	TypePtr object_class = RemoveTopCv(object.type);
-	if (object_class->kind != TK_CLASS)
-		throw runtime_error(".* left operand is not a class object");
-	int hops = 0;
-	unsigned long long base_offset = 0;
-	EBasePath path = BaseSubobjectPath(object_class->named, pm->named,
-	                                   hops, base_offset);
-	if (path == BP_AMBIGUOUS)
-		throw runtime_error("ambiguous base class subobject");
-	if (path != BP_UNIQUE)
-		throw runtime_error("object class is unrelated to the member "
-		                    "pointer class");
-	if (hops > 0)
-	{
-		SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
-		adjusted->type = MakeNamedType(TK_CLASS, pm->named);
-		adjusted->category = object.category == VC_PRVALUE
-			? VC_XVALUE : object.category;
-		adjusted->base_hops = hops;
-		adjusted->base_offset = base_offset;
-		adjusted->children.push_back(std::move(object.node));
-		object.node = std::move(adjusted);
-	}
-	SemValue value;
-	if (pm->target->kind == TK_FUNCTION)
-	{
-		// The bound value is legal only as a call target; the call
-		// lowers through the pointed-to function type.
-		value.type = pm->target;
-		value.category = VC_PRVALUE;
-		value.node = MakeSemNode(SN_MEMBER_POINTER_ACCESS);
-		value.node->type = pm->target;
-		value.node->category = VC_PRVALUE;
-		value.node->children.push_back(std::move(object.node));
-		value.node->children.push_back(std::move(rhs.node));
-		return value;
-	}
-	// 5.5p5-p6: the data member lvalue carries the union of the
-	// object's and the member's cv-qualification.
-	bool object_const = false;
-	bool object_volatile = false;
-	TopCv(object.type, object_const, object_volatile);
-	value.type = MakeCvQualifiedType(pm->target, object_const,
-	                                 object_volatile);
-	value.category = object.category == VC_PRVALUE ? VC_XVALUE
-	                                               : object.category;
-	value.node = MakeSemNode(SN_MEMBER_POINTER_ACCESS);
-	value.node->type = value.type;
-	value.node->category = value.category;
-	value.node->children.push_back(std::move(object.node));
-	value.node->children.push_back(std::move(rhs.node));
-	return value;
 }
 
 SemValue SemExprAnalyzer::AnalyzeComparison(const AstExpr& expr, SemValue& lhs,

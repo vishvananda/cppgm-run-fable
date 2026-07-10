@@ -20,6 +20,17 @@ runtime_error OutsideBoundary(const char* what)
 
 }  // namespace
 
+// PA25: the demand-synthesis seam for a selected copy/move
+// constructor whose body a keeping context (new-expressions) needs.
+void SemBinder::EnsureSpecialCtorHost(const ClassInfo& cls, int index)
+{
+	const ClassCtor& selected = cls.ctors[index];
+	if ((selected.kind == CK_COPY || selected.kind == CK_MOVE) &&
+	    !selected.definition &&
+	    (selected.implicit || selected.defaulted))
+		EnsureSpecialCtor(cls, index);
+}
+
 // --- constructor member initialization -------------------------------------
 
 // 12.6.2 class-type member: the aggregate braced form, 8.5p10
@@ -517,16 +528,14 @@ SemNodePtr SemBinder::MakeTemporaryDtor(const ClassInfo& cls)
 	return MakeDestructorCall(cls, false, SemNodePtr());
 }
 
-void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
+// Collects the written mem-initializers: field initializers by name,
+// base initializers by direct-base index (pack-expanded entries carry
+// their element scopes). A delegating constructor analyzes in place;
+// the caller then returns without further actions (12.6.2p6).
+bool SemBinder::CollectMemberInits(const DeferredBody& body, SemNode& item,
+                                   MemberInitPlan& plan)
 {
 	const ClassInfo& cls = *body.cls;
-	std::map<string, const AstMemInitializer*> by_field;
-	vector<const AstMemInitializer*> base_inits(cls.direct_bases.size(),
-	                                            (const AstMemInitializer*)0);
-	// PA26: a pack-expanded mem-initializer's element scope (the
-	// mentioned packs re-bound to the element); null for ordinary ones.
-	vector<Scope*> base_init_scopes(cls.direct_bases.size(), (Scope*)0);
-	size_t base_init_count = 0;
 	for (size_t i = 0; i < body.decl->mem_initializers.size(); i++)
 	{
 		const AstMemInitializer& mem = body.decl->mem_initializers[i];
@@ -550,21 +559,21 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 				if (base_index == cls.direct_bases.size())
 					throw runtime_error(
 						"member initializer names no member or base");
-				if (base_inits[base_index])
+				if (plan.base_inits[base_index])
 					throw runtime_error("duplicate base initializer");
-				base_inits[base_index] = &mem;
-				base_init_scopes[base_index] = elements[k].second;
+				plan.base_inits[base_index] = &mem;
+				plan.base_init_scopes[base_index] = elements[k].second;
 			}
-			base_init_count++;
+			plan.base_init_count++;
 			continue;
 		}
 		if (mem.id.IsPlainIdentifier() &&
 		    FindClassField(cls, mem.id.parts[0].identifier))
 		{
 			const string& name = mem.id.parts[0].identifier;
-			if (by_field.count(name))
+			if (plan.by_field.count(name))
 				throw runtime_error("duplicate member initializer " + name);
-			by_field[name] = &mem;
+			plan.by_field[name] = &mem;
 			continue;
 		}
 		TypePtr named = ResolveTypeName(mem.id);
@@ -596,7 +605,7 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 				cls, index, false,
 				AddressOfNode(ThisObjectExpr()),
 				std::move(arg_nodes)));
-			return;
+			return true;
 		}
 		size_t base_index = cls.direct_bases.size();
 		if (named->kind == TK_CLASS)
@@ -608,33 +617,45 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 				}
 		if (base_index < cls.direct_bases.size())
 		{
-			if (base_inits[base_index])
+			if (plan.base_inits[base_index])
 				throw runtime_error("duplicate base initializer");
-			base_inits[base_index] = &mem;
-			base_init_count++;
+			plan.base_inits[base_index] = &mem;
+			plan.base_init_count++;
 			continue;
 		}
 		throw runtime_error("member initializer names no member or base");
 	}
+	return false;
+}
+
+void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
+{
+	const ClassInfo& cls = *body.cls;
+	MemberInitPlan plan;
+	plan.base_inits.assign(cls.direct_bases.size(),
+	                       (const AstMemInitializer*)0);
+	plan.base_init_scopes.assign(cls.direct_bases.size(), (Scope*)0);
+	if (CollectMemberInits(body, item, plan))
+		return;
 	bf_units_written_.clear();
 	vector<SemNodePtr> actions;
 	// 12.6.2p10: direct bases initialize in declaration order, each
 	// through its mem-initializer or by default-initialization.
 	for (size_t b = 0; b < cls.direct_bases.size(); b++)
 	{
-		if (!base_inits[b])
+		if (!plan.base_inits[b])
 		{
 			AppendOneBaseDefaultInit(cls, b, actions, true);
 			continue;
 		}
 		const ClassInfo& base = *cls.direct_bases[b].cls;
 		vector<SemValue> values;
-		const AstInitializer& init = *base_inits[b]->init;
+		const AstInitializer& init = *plan.base_inits[b]->init;
 		// A pack-expanded initializer's arguments analyze under the
 		// element scope (the mentioned packs re-bound to the element).
 		Scope* saved_scope = current_;
-		if (base_init_scopes[b])
-			current_ = base_init_scopes[b];
+		if (plan.base_init_scopes[b])
+			current_ = plan.base_init_scopes[b];
 		try
 		{
 			// The list analyzer expands argument-level `pattern...`
@@ -664,15 +685,15 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 	// member initialization.
 	if (cls.is_polymorphic)
 		actions.push_back(MakeVPointerStore(cls));
-	size_t matched = base_init_count;
+	size_t matched = plan.base_init_count;
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassField& field = cls.fields[i];
 		if (field.name.empty())
 			continue;
 		std::map<string, const AstMemInitializer*>::const_iterator found =
-			by_field.find(field.name);
-		if (found != by_field.end())
+			plan.by_field.find(field.name);
+		if (found != plan.by_field.end())
 		{
 			matched++;
 			AppendMemberInit(cls, field, found->second->init.get(),

@@ -1197,6 +1197,12 @@ void SemBinder::BindQualifiedDeclarator(const DeclSpecifierInfo& specs,
 	{
 		RecordConstantValue(*member, declarator.init.get());
 		member->value_from_def = member->has_value;
+		TypePtr member_bare = RemoveTopCv(member->type);
+		if (!member->has_value && member->type->is_const &&
+		    !member->type->is_volatile &&
+		    member_bare->kind == TK_POINTER &&
+		    member_bare->target->kind == TK_FUNCTION)
+			member->fn_pointer_fold = true;
 	}
 	// The definition emits like a namespace-scope object owned by the
 	// declaring scope. A qualified definition completes an earlier

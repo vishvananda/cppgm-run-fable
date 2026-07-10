@@ -1308,38 +1308,6 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 
 // --- specialization -----------------------------------------------------------
 
-// 13.5p6: a namespace-scope operator function must take at least one
-// class or enumeration operand, so a specialization over builtin
-// operand types only is ill-formed (allocation and literal operators
-// are exempt).
-void SemBinder::CheckOperatorSpecializationOperands(const TemplateInfo& tmpl,
-                                                    const TypePtr& type)
-{
-	if (tmpl.member_of || tmpl.name.compare(0, 9, "operator ") != 0 ||
-	    tmpl.name.compare(0, 10, "operator \"") == 0)
-		return;
-	const string text = tmpl.name.substr(9);
-	if (text == "new" || text == "new[]" || text == "delete" ||
-	    text == "delete[]")
-		return;
-	bool class_or_enum = false;
-	bool dependent = false;
-	for (size_t i = 0; i < type->parameters.size(); i++)
-	{
-		TypePtr param = type->parameters[i];
-		if (IsReferenceType(param))
-			param = param->target;
-		param = RemoveTopCv(param);
-		if (TypeIsDependent(param))
-			dependent = true;
-		if (param->kind == TK_CLASS || param->kind == TK_ENUM)
-			class_or_enum = true;
-	}
-	if (!class_or_enum && !dependent)
-		throw runtime_error("operator function specialization without "
-		                    "a class or enumeration parameter");
-}
-
 FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	TemplateInfo& tmpl, const vector<TemplateArg>& args,
 	const vector<TemplateArg>* slots)
@@ -1451,6 +1419,8 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	return spec;
 }
 
+// 14.8.2.2: deduction against a required function type - explicit
+// template-id arguments bind the leading parameters first (14.8.1).
 const FunctionSpecialization* SemBinder::DeduceFunctionTemplateFromTarget(
 	TemplateInfo& tmpl, const TypePtr& target,
 	const AstNamePart* explicit_part)

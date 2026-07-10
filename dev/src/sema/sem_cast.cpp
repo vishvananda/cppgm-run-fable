@@ -170,6 +170,46 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 	return value;
 }
 
+// PA25/PA26 5.2.7: the pointer dynamic_cast forms - a polymorphic
+// downcast queries the runtime (a failed cast yields null); the void*
+// form yields the most derived object's address. Returns false when
+// the operand shape is not a dynamic pointer query (the generic cast
+// classification below then applies).
+bool SemExprAnalyzer::TryDynamicCastPointer(const TypePtr& to,
+                                            SemValue& value,
+                                            SemValue& result)
+{
+	TypePtr target_class = RemoveTopCv(to->target);
+	TypePtr source = RemoveTopCv(value.type);
+	if (source->kind != TK_POINTER ||
+	    RemoveTopCv(source->target)->kind != TK_CLASS)
+		return false;
+	TypePtr source_class = RemoveTopCv(source->target);
+	bool to_void = IsVoidType(target_class);
+	if (!to_void && target_class->kind != TK_CLASS)
+		return false;
+	host_.RequireCompleteType(source_class->named);
+	const ClassInfo* src_cls = host_.Classes().Find(source_class->named);
+	if (!src_cls || !src_cls->is_polymorphic)
+		return false;
+	if (!to_void)
+	{
+		host_.RequireCompleteType(target_class->named);
+		if (BaseClassDistance(target_class->named,
+		                      source_class->named) <= 0)
+			return false;
+	}
+	SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);
+	node->type = to;
+	node->category = VC_PRVALUE;
+	node->typeid_operand = source_class;
+	node->children.push_back(std::move(value.node));
+	result.type = to;
+	result.category = VC_PRVALUE;
+	result.node = std::move(node);
+	return true;
+}
+
 SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
                                         const AstExpr& operand,
                                         bool has_anno, ETokenType op,
@@ -181,61 +221,13 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 	if (value.function_set && value.overloads.size() > 1)
 		throw OutsideBoundary("cast of an overloaded name");
 	TypePtr to = RemoveTopCv(dest);
-	// PA25 5.2.7: a polymorphic downcast pointer dynamic_cast queries
-	// the runtime; a failed cast yields a null pointer.
+	// PA25/PA26 5.2.7: the dynamic pointer query forms.
 	if (op == KW_DYNAMIC_CAST && to->kind == TK_POINTER &&
 	    !value.function_set)
 	{
-		TypePtr target_class = RemoveTopCv(to->target);
-		TypePtr source = RemoveTopCv(value.type);
-		// PA26 5.2.7p7: dynamic_cast<void*> of a pointer to a
-		// polymorphic class yields the most derived object's address.
-		if (IsVoidType(target_class) && source->kind == TK_POINTER &&
-		    RemoveTopCv(source->target)->kind == TK_CLASS)
-		{
-			TypePtr source_class = RemoveTopCv(source->target);
-			host_.RequireCompleteType(source_class->named);
-			const ClassInfo* src_cls =
-				host_.Classes().Find(source_class->named);
-			if (src_cls && src_cls->is_polymorphic)
-			{
-				SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);
-				node->type = to;
-				node->category = VC_PRVALUE;
-				node->typeid_operand = source_class;
-				node->children.push_back(std::move(value.node));
-				SemValue result;
-				result.type = to;
-				result.category = VC_PRVALUE;
-				result.node = std::move(node);
-				return result;
-			}
-		}
-		if (target_class->kind == TK_CLASS &&
-		    source->kind == TK_POINTER &&
-		    RemoveTopCv(source->target)->kind == TK_CLASS)
-		{
-			TypePtr source_class = RemoveTopCv(source->target);
-			host_.RequireCompleteType(source_class->named);
-			host_.RequireCompleteType(target_class->named);
-			const ClassInfo* src_cls =
-				host_.Classes().Find(source_class->named);
-			int down = BaseClassDistance(target_class->named,
-			                             source_class->named);
-			if (src_cls && src_cls->is_polymorphic && down > 0)
-			{
-				SemNodePtr node = MakeSemNode(SN_DYNAMIC_CAST);
-				node->type = to;
-				node->category = VC_PRVALUE;
-				node->typeid_operand = source_class;
-				node->children.push_back(std::move(value.node));
-				SemValue result;
-				result.type = to;
-				result.category = VC_PRVALUE;
-				result.node = std::move(node);
-				return result;
-			}
-		}
+		SemValue result;
+		if (TryDynamicCastPointer(to, value, result))
+			return result;
 	}
 	if (to->kind != TK_CLASS && !value.function_set &&
 	    RemoveTopCv(value.type)->kind == TK_CLASS)
@@ -297,6 +289,11 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 			IsPointerAfterDecay(value.type) ||
 			// 5.2.10p5: reinterpret_cast of an integral value.
 			(op == KW_REINTERPET_CAST && IsIntegralType(value.type));
+	else if (to->kind == TK_MEMBER_POINTER)
+		// PA26 5.2.9p9: a null pointer constant or a convertible member
+		// pointer casts to a member pointer type.
+		valid = value.null_pointer_literal || IsNullPtrType(value.type) ||
+			RemoveTopCv(value.type)->kind == TK_MEMBER_POINTER;
 	else
 		valid = false;
 	if (!valid)
