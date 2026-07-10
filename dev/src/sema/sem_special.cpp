@@ -26,8 +26,9 @@ bool HasUsableCtor(const ClassInfo& cls, ECtorKind kind)
 // 12.8p11: some base or member of class type cannot be copied.
 bool SubobjectCopyUnavailable(const ClassInfo& cls)
 {
-	if (cls.base && !HasUsableCtor(*cls.base, CK_COPY))
-		return true;
+	for (size_t i = 0; i < cls.direct_bases.size(); i++)
+		if (!HasUsableCtor(*cls.direct_bases[i].cls, CK_COPY))
+			return true;
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassInfo* member = SubobjectClass(cls.fields[i].type);
@@ -40,9 +41,13 @@ bool SubobjectCopyUnavailable(const ClassInfo& cls)
 // 12.8p11: some base or member can be neither moved nor copied.
 bool SubobjectMoveUnavailable(const ClassInfo& cls)
 {
-	if (cls.base && !HasUsableCtor(*cls.base, CK_MOVE) &&
-	    !HasUsableCtor(*cls.base, CK_COPY))
-		return true;
+	for (size_t i = 0; i < cls.direct_bases.size(); i++)
+	{
+		const ClassInfo& base = *cls.direct_bases[i].cls;
+		if (!HasUsableCtor(base, CK_MOVE) &&
+		    !HasUsableCtor(base, CK_COPY))
+			return true;
+	}
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassInfo* member = SubobjectClass(cls.fields[i].type);
@@ -104,9 +109,13 @@ bool AssignBlockedByMembers(const ClassInfo& cls, bool is_move)
 		    !(is_move && HasUsableMoveAssign(*member)))
 			return true;
 	}
-	if (cls.base && !HasUsableCopyAssign(*cls.base) &&
-	    !(is_move && HasUsableMoveAssign(*cls.base)))
-		return true;
+	for (size_t i = 0; i < cls.direct_bases.size(); i++)
+	{
+		const ClassInfo& base = *cls.direct_bases[i].cls;
+		if (!HasUsableCopyAssign(base) &&
+		    !(is_move && HasUsableMoveAssign(base)))
+			return true;
+	}
 	return false;
 }
 
@@ -130,8 +139,9 @@ bool SubobjectConstCopyParam(const ClassInfo& member)
 
 bool SubobjectsConstCopy(const ClassInfo& cls)
 {
-	if (cls.base && !SubobjectConstCopyParam(*cls.base))
-		return false;
+	for (size_t i = 0; i < cls.direct_bases.size(); i++)
+		if (!SubobjectConstCopyParam(*cls.direct_bases[i].cls))
+			return false;
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassInfo* member = SubobjectClass(cls.fields[i].type);

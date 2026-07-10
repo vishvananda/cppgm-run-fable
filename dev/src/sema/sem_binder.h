@@ -40,6 +40,11 @@ public:
 	virtual void CheckMemberAccess(const Scope* owner, EMemberAccess access,
 	                               const string& what,
 	                               const NamedTypeInfo* naming = 0);
+	// One base-specifier edge of the naming class's derivation path
+	// (11.2p1/p4, PA26).
+	void CheckBaseEdgeAccess(const ClassBaseEdge& edge,
+	                         const vector<const ClassInfo*>& contexts,
+	                         const string& what);
 	virtual bool InClassContextOrFriend(const NamedTypeInfo* cls);
 	bool AppendInitializerListObjectInit(SemNode& item,
 	                                     ScopeBinding& binding,
@@ -248,7 +253,8 @@ private:
 	};
 	bool CollectMemberInits(const DeferredBody& body, SemNode& item,
 	                        MemberInitPlan& plan);
-	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);	void AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item);
+	void AnalyzeMemberInits(const DeferredBody& body, SemNode& item);
+	void AnalyzeDtorEpilogue(const ClassInfo& cls, SemNode& item);
 	void AppendMemberInit(const ClassInfo& cls, const ClassField& field,
 	                      const AstInitializer* init,
 	                      vector<SemNodePtr>& out);
