@@ -176,18 +176,26 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		        result.uses[0].kind == ValueUse::USE_RETURN_VALUE) {
 			result_plan = RP_COLLAPSE;
 		}
-		else if(result.needs_frame) {
-			result_plan = RP_FRAME;
-			result_offset = alloc_frame_home(
-				ins.result, return_type, mir_model::FrameBinding::FB_TEMP);
-		}
-		else if(alloc_pool_gpr(ins.result, result_reg)) {
-			result_plan = RP_POOL;
-		}
 		else {
-			result_plan = RP_FRAME;
-			result_offset = alloc_frame_home(
-				ins.result, return_type, mir_model::FrameBinding::FB_TEMP);
+			LowIRType home_type = return_type;
+			if(FrameSizeOf(home_type) < 8 &&
+			   home_type.kind != LOWIR_TYPE_OBJ)
+				home_type.kind = LOWIR_TYPE_I64;
+			if(result.needs_frame) {
+				result_plan = RP_FRAME;
+				result_offset = alloc_frame_home(
+					ins.result, home_type,
+					mir_model::FrameBinding::FB_TEMP);
+			}
+			else if(alloc_pool_gpr(ins.result, result_reg)) {
+				result_plan = RP_POOL;
+			}
+			else {
+				result_plan = RP_FRAME;
+				result_offset = alloc_frame_home(
+					ins.result, home_type,
+					mir_model::FrameBinding::FB_TEMP);
+			}
 		}
 	}
 
@@ -200,6 +208,7 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		ValueLocation & bounce = locations_[arg.name];
 		if(bounce.kind != ValueLocation::VL_ARG_REG)
 			continue;
+		(void)0;
 		int index = pool_scan(false, false);
 		if(index < 0)
 			continue;
@@ -344,17 +353,27 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 				fill.operands.push_back(address);
 			}
 			else {
-				const ValueLocation & location = locations_[arg.name];
+				const ValueLocation & location = resolve_location(arg.name);
 				const ValueInfo & info = values_[arg.name];
 				if(slot.by_address && info.type.kind != LOWIR_TYPE_PTR) {
-					if(location.kind != ValueLocation::VL_FRAME)
-						throw std::runtime_error(
-							"by-address argument without a frame home");
+					long long offset = location.frame_offset;
+					if(location.kind != ValueLocation::VL_FRAME) {
+						// materialize the value into a frame home now
+						offset = alloc_anonymous_spill();
+						mir_model::Instruction & store =
+							emit(mir_model::Instruction::MI_STORE);
+						store.type = SpellType(info.type);
+						store.operands.push_back(frame_operand(offset));
+						store.operands.push_back(
+							MakeReg(location.reg));
+						ValueLocation & spot = locations_[arg.name];
+						spot.kind = ValueLocation::VL_FRAME;
+						spot.frame_offset = offset;
+					}
 					mir_model::Instruction & lea =
 						emit(mir_model::Instruction::MI_LEA);
 					lea.operands.push_back(MakeReg(target));
-					lea.operands.push_back(
-						frame_operand(location.frame_offset));
+					lea.operands.push_back(frame_operand(offset));
 				}
 				else if(location.kind == ValueLocation::VL_SLOT_ADDR) {
 					mir_model::Instruction & lea =
@@ -424,7 +443,7 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 				source = MakeReg(XR_R11);
 			}
 			else {
-				const ValueLocation & location = locations_[arg.name];
+				const ValueLocation & location = resolve_location(arg.name);
 				if(location.kind == ValueLocation::VL_FRAME) {
 					mir_model::Instruction & load =
 						emit(mir_model::Instruction::MI_LOAD);
@@ -830,6 +849,9 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 	bool rhs_literal = rhs.kind == LOWIR_OPERAND_LITERAL;
 	long long cmp_width = FrameSizeOf(cmp.type);
 
+	if(rhs.kind == LOWIR_OPERAND_TEMP &&
+	   locations_[rhs.name].kind == ValueLocation::VL_PENDING_COPY)
+		resolve_location(rhs.name);
 	mir_model::Operand left;
 	bool left_is_memory = false;
 	if(operand_is_pending(lhs)) {
@@ -890,7 +912,7 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 		left = MakeReg(XR_RAX);
 	}
 	else {
-		const ValueLocation & location = locations_[lhs.name];
+		const ValueLocation & location = resolve_location(lhs.name);
 		if(location.kind == ValueLocation::VL_FRAME) {
 			if(rhs_literal && wide) {
 				left = frame_operand(location.frame_offset);
@@ -944,7 +966,7 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 		right = MakeReg(reload_to_pool(rhs, slots_[rhs.name].type));
 	}
 	else if(rhs.kind == LOWIR_OPERAND_TEMP &&
-	        locations_[rhs.name].kind == ValueLocation::VL_FRAME) {
+	        resolve_location(rhs.name).kind == ValueLocation::VL_FRAME) {
 		// spilled temps reload into a pool register at their own width
 		right = MakeReg(reload_to_pool(rhs, values_[rhs.name].type));
 	}
@@ -1013,7 +1035,7 @@ void FunctionLowering::LowerBranch(const LowIRInstruction & ins)
 	}
 	else if(!operand_in_rax(condition)) {
 		const ValueInfo & info = values_[condition.name];
-		const ValueLocation & location = locations_[condition.name];
+		const ValueLocation & location = resolve_location(condition.name);
 		invalidate_rax();
 		if(info.is_param && !arg_homes_clobbered_ &&
 		   location.prefer_home && current_block_ == 0 &&
@@ -1060,7 +1082,7 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 	}
 	else if(!operand_in_rax(selector)) {
 		const ValueInfo & info = values_[selector.name];
-		const ValueLocation & location = locations_[selector.name];
+		const ValueLocation & location = resolve_location(selector.name);
 		invalidate_rax();
 		if(info.is_param && !arg_homes_clobbered_ &&
 		   location.prefer_home && current_block_ == 0 &&
@@ -1091,7 +1113,7 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 			emit_mov(MakeReg(XR_RCX), MakeImm(ParseIntLiteral(value)));
 		}
 		else {
-			const ValueLocation & location = locations_[value.name];
+			const ValueLocation & location = resolve_location(value.name);
 			if(location.kind == ValueLocation::VL_FRAME) {
 				mir_model::Instruction & fill =
 					emit(mir_model::Instruction::MI_LOAD);
@@ -1213,7 +1235,7 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 		fill.operands.push_back(address);
 	}
 	else if(!operand_in_rax(source)) {
-		const ValueLocation & location = locations_[source.name];
+		const ValueLocation & location = resolve_location(source.name);
 		invalidate_rax();
 		if(location.kind == ValueLocation::VL_FRAME) {
 			mir_model::Instruction & fill =

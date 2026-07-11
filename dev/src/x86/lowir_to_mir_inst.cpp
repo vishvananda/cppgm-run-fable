@@ -131,8 +131,32 @@ bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
 	   it->second.needs_frame || it->second.cross_block)
 		return false;
 	ValueUse use = it->second.uses[0];
-	// retimed (branch-sunk) compares keep their textual position here
+	// retimed (branch-sunk) compares record their use at the branch;
+	// stable-storage loads ride along to the branch with the compare
 	if(use.position != position + 1) {
+		if(use.position < (int)linear_.size() &&
+		   linear_[use.position]->opcode == LOWIR_INS_BRANCH) {
+			bool invert = false;
+			const LowIRInstruction * sunk = fused_compare_for_branch(
+				*linear_[use.position], use.position, invert);
+			bool references = false;
+			if(sunk)
+				for(size_t o = 0; o < sunk->operands.size(); o++)
+					if(sunk->operands[o].kind == LOWIR_OPERAND_TEMP &&
+					   sunk->operands[o].name == ins.result)
+						references = true;
+			bool stable = ins.operands[0].kind == LOWIR_OPERAND_SLOT ||
+			              ins.operands[0].kind == LOWIR_OPERAND_GLOBAL;
+			if(references && stable &&
+			   FrameSizeOf(ins.type) == FrameSizeOf(sunk->type) &&
+			   !ins.type.is_float()) {
+				pending_loads_[ins.result] = &ins;
+				int slot = pool_scan(false, false);
+				if(slot >= 0)
+					pool_holder_[slot] = "*pending:" + ins.result;
+				return true;
+			}
+		}
 		if(position + 1 >= (int)linear_.size())
 			return false;
 		const LowIRInstruction & next = *linear_[position + 1];
@@ -158,41 +182,52 @@ bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
 	        (ins.type.kind == LOWIR_TYPE_I64 ||
 	         ins.type.kind == LOWIR_TYPE_PTR))
 		foldable = true;
-	else if(user.opcode == LOWIR_INS_CMP &&
+	else if(user.opcode == LOWIR_INS_CMP && !ins.type.is_float() &&
 	        FrameSizeOf(ins.type) == FrameSizeOf(user.type)) {
+		// the compare must sink into its block's branch; loads may ride
+		// along past intervening instructions only from stable storage
+		int cmp_block_end = (int)linear_.size();
+		for(size_t b = 0; b + 1 < block_first_position_.size(); b++)
+			if(use.position >= block_first_position_[b] &&
+			   use.position < block_first_position_[b + 1])
+				cmp_block_end = block_first_position_[b + 1];
 		bool invert = false;
-		const ValueUse & cmp_use =
-			values_.find(user.result)->second.uses.empty()
-				? use
-				: values_.find(user.result)->second.uses[0];
-		(void)cmp_use;
-		if(use.position + 1 < (int)linear_.size() &&
-		   linear_[use.position + 1]->opcode == LOWIR_INS_BRANCH &&
-		   fused_compare_for_branch(*linear_[use.position + 1],
-		                            use.position + 1, invert) == &user)
-			foldable = true;
+		if(cmp_block_end - 1 < (int)linear_.size() &&
+		   linear_[cmp_block_end - 1]->opcode == LOWIR_INS_BRANCH &&
+		   fused_compare_for_branch(*linear_[cmp_block_end - 1],
+		                            cmp_block_end - 1, invert) == &user) {
+			bool stable = ins.operands[0].kind == LOWIR_OPERAND_SLOT ||
+			              ins.operands[0].kind == LOWIR_OPERAND_GLOBAL;
+			if(stable)
+				foldable = true;
+		}
 	}
 	if(!foldable)
 		return false;
-	pending_load_name_ = ins.result;
-	pending_load_ = &ins;
+	pending_loads_[ins.result] = &ins;
+	// non-return consumers hold a pool slot for the value's would-be home
+	if(use.kind != ValueUse::USE_RETURN_VALUE) {
+		int index = pool_scan(false, false);
+		if(index >= 0)
+			pool_holder_[index] = "*pending:" + ins.result;
+	}
 	return true;
 }
 
 bool FunctionLowering::operand_is_pending(const LowIROperand & operand) const
 {
 	return operand.kind == LOWIR_OPERAND_TEMP &&
-	       !pending_load_name_.empty() &&
-	       operand.name == pending_load_name_;
+	       pending_loads_.count(operand.name) != 0;
 }
 
 const LowIRInstruction * FunctionLowering::take_pending(
 	const LowIROperand & operand)
 {
-	(void)operand;
-	const LowIRInstruction * load = pending_load_;
-	pending_load_ = 0;
-	pending_load_name_.clear();
+	const LowIRInstruction * load = pending_loads_[operand.name];
+	pending_loads_.erase(operand.name);
+	for(int i = 0; i < kPoolSize; i++)
+		if(pool_holder_[i] == "*pending:" + operand.name)
+			pool_holder_[i] = "";
 	return load;
 }
 
@@ -217,7 +252,10 @@ void FunctionLowering::assign_result_from_rax(const std::string & dest,
 		return;
 	}
 	if(info.needs_frame) {
-		long long offset = alloc_frame_home(dest, type,
+		LowIRType home_type = type;
+		if(FrameSizeOf(home_type) < 8 && home_type.kind != LOWIR_TYPE_OBJ)
+			home_type.kind = LOWIR_TYPE_I64;
+		long long offset = alloc_frame_home(dest, home_type,
 		                                    mir_model::FrameBinding::FB_TEMP);
 		mir_model::Instruction & store =
 			emit(mir_model::Instruction::MI_STORE);
@@ -240,10 +278,13 @@ void FunctionLowering::assign_result_from_rax(const std::string & dest,
 			rax_alias_ = dest;
 		return;
 	}
-	long long offset = alloc_frame_home(dest, type,
+	LowIRType tail_type = type;
+	if(FrameSizeOf(tail_type) < 8 && tail_type.kind != LOWIR_TYPE_OBJ)
+		tail_type.kind = LOWIR_TYPE_I64;
+	long long offset = alloc_frame_home(dest, tail_type,
 	                                    mir_model::FrameBinding::FB_TEMP);
 	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
-	store.type = SpellType(type);
+	store.type = SpellType(tail_type);
 	store.operands.push_back(frame_operand(offset));
 	store.operands.push_back(MakeReg(XR_RAX));
 	ValueLocation location;
@@ -274,9 +315,10 @@ mir_model::Operand FunctionLowering::stage_store_value(
 		return MakeReg(XR_RAX);
 	}
 	if(operand_is_pending(operand)) {
-		const LowIRInstruction * load = take_pending(operand);
+		const LowIRInstruction * load = pending_loads_[operand.name];
 		mir_model::Operand address =
 			address_operand(load->operands[0], XR_RCX);
+		take_pending(operand);
 		release_after_use(*load);
 		invalidate_rax();
 		mir_model::Instruction & fill =
@@ -286,7 +328,7 @@ mir_model::Operand FunctionLowering::stage_store_value(
 		fill.operands.push_back(address);
 		return MakeReg(XR_RAX);
 	}
-	const ValueLocation & location = locations_[operand.name];
+	const ValueLocation & location = resolve_location(operand.name);
 	if(location.kind == ValueLocation::VL_GPR ||
 	   location.kind == ValueLocation::VL_ARG_REG)
 		return MakeReg(location.reg);
@@ -313,13 +355,13 @@ mir_model::Operand FunctionLowering::stage_store_value(
 mir_model::Operand FunctionLowering::float_read(const LowIROperand & operand,
                                                 const LowIRType & type)
 {
-	(void)type;
 	if(operand.kind == LOWIR_OPERAND_LITERAL)
-		return MakeFloatImm(operand);
+		return MakeFloatImm(operand, type);
 	if(operand_is_pending(operand)) {
-		const LowIRInstruction * load = take_pending(operand);
+		const LowIRInstruction * load = pending_loads_[operand.name];
 		mir_model::Operand address =
 			address_operand(load->operands[0], XR_RCX);
+		take_pending(operand);
 		release_after_use(*load);
 		return address;
 	}
@@ -360,14 +402,14 @@ void FunctionLowering::LowerConst(const LowIRInstruction & ins)
 				emit(mir_model::Instruction::MI_FMOV);
 			mov.type = SpellType(ins.type);
 			mov.operands.push_back(frame_operand(offset));
-			mov.operands.push_back(MakeFloatImm(ins.operands[0]));
+			mov.operands.push_back(MakeFloatImm(ins.operands[0], ins.type));
 			return;
 		}
 		XmmRegister xmm = alloc_xmm(ins.result);
 		mir_model::Instruction & mov = emit(mir_model::Instruction::MI_FMOV);
 		mov.type = SpellType(ins.type);
 		mov.operands.push_back(MakeXmm(xmm));
-		mov.operands.push_back(MakeFloatImm(ins.operands[0]));
+		mov.operands.push_back(MakeFloatImm(ins.operands[0], ins.type));
 		return;
 	}
 	X64Register reg = alloc_gpr(ins.result);
@@ -407,6 +449,7 @@ void FunctionLowering::LowerCopy(const LowIRInstruction & ins)
 	}
 	X64Register reg = XR_RAX;
 	emit_dest_copy(ins.result, ins.operands[0], ins.type, true, reg);
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerAddr(const LowIRInstruction & ins)
@@ -445,6 +488,7 @@ void FunctionLowering::LowerLoad(const LowIRInstruction & ins)
 		X64Register reg = XR_RAX;
 		emit_dest_copy(ins.result, promoted_slot_value_[source.name],
 		               ins.type, false, reg);
+		commit_dest(ins.result);
 		return;
 	}
 	if(storage_is_tls(source)) {
@@ -510,16 +554,27 @@ void FunctionLowering::LowerStore(const LowIRInstruction & ins)
 		return;   // rewritten away by slot promotion
 	if(storage_is_tls(target)) {
 		int index = pool_scan(true, false);
-		if(index < 0)
-			throw std::runtime_error("no callee-saved staging for tls store");
-		X64Register staged = index == 2 ? XR_RBX
-		                   : (X64Register)(XR_R12 + (index - 3));
-		note_callee_saved(staged);
 		const LowIROperand & source = ins.operands[0];
-		if(source.kind == LOWIR_OPERAND_LITERAL)
-			emit_mov(MakeReg(staged), MakeImm(ParseIntLiteral(source)));
-		else
-			emit_mov(MakeReg(staged), gpr_read(source));
+		X64Register staged;
+		if(index >= 0) {
+			staged = index == 2 ? XR_RBX
+			       : (X64Register)(XR_R12 + (index - 3));
+			note_callee_saved(staged);
+			if(source.kind == LOWIR_OPERAND_LITERAL)
+				emit_mov(MakeReg(staged),
+				         MakeImm(ParseIntLiteral(source)));
+			else
+				emit_mov(MakeReg(staged), gpr_read(source));
+		}
+		else if(source.kind == LOWIR_OPERAND_LITERAL) {
+			invalidate_rax();
+			emit_mov(MakeReg(XR_RAX), MakeImm(ParseIntLiteral(source)));
+			staged = XR_RAX;
+		}
+		else {
+			mir_model::Operand value = stage_store_value(source, ins.type);
+			staged = value.reg;
+		}
 		emit_tls_addr(target.name);
 		mir_model::Instruction & store =
 			emit(mir_model::Instruction::MI_STORE);
@@ -571,7 +626,42 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 	const LowIROperand & base = ins.operands[0];
 	bool identity = ins.operands[1].kind == LOWIR_OPERAND_LITERAL &&
 	                ParseIntLiteral(ins.operands[1]) * element == 0;
+	bool base_callee_saved = false;
+	if(base.kind == LOWIR_OPERAND_TEMP && value_pinned(base.name)) {
+		const ValueLocation & bloc = locations_[base.name];
+		if(bloc.kind == ValueLocation::VL_GPR &&
+		   (bloc.reg == XR_RBX ||
+		    (bloc.reg >= XR_R12 && bloc.reg <= XR_R15)))
+			base_callee_saved = true;
+	}
+	index_dest_lowering_ = true;
+	if(base_callee_saved && !value_dies_here(base.name)) {
+		int index = pool_scan(true, false);
+		if(index >= 0) {
+			static const X64Register pool[kPoolSize] =
+				{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
+			reg = pool[index];
+			pool_holder_[index] = ins.result;
+			note_callee_saved(reg);
+			ValueLocation location;
+			location.kind = ValueLocation::VL_GPR;
+			location.reg = reg;
+			locations_[ins.result] = location;
+			emit_mov(MakeReg(reg),
+			         MakeReg(locations_[base.name].reg));
+			if(!identity) {
+				mir_model::Instruction & lea =
+					emit(mir_model::Instruction::MI_LEA);
+				lea.operands.push_back(MakeReg(reg));
+				lea.operands.push_back(MakeDeref(reg,
+					ParseIntLiteral(ins.operands[1]) * element));
+			}
+			index_dest_lowering_ = false;
+			return;
+		}
+	}
 	emit_dest_copy(ins.result, base, ptr, false, reg);
+	index_dest_lowering_ = false;
 	if(identity && base.kind == LOWIR_OPERAND_TEMP) {
 		ValueLocation & source = locations_[base.name];
 		if(source.kind == ValueLocation::VL_ARG_REG &&
@@ -593,6 +683,7 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 			lea.operands.push_back(MakeReg(reg));
 			lea.operands.push_back(MakeDeref(reg, offset));
 		}
+		commit_dest(ins.result);
 		return;
 	}
 	// Runtime element count: scale in rdx, then add.
@@ -606,6 +697,7 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 	mir_model::Instruction & add = emit(mir_model::Instruction::MI_ADD);
 	add.operands.push_back(MakeReg(reg));
 	add.operands.push_back(MakeReg(XR_RDX));
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerUnary(const LowIRInstruction & ins)
@@ -631,6 +723,7 @@ void FunctionLowering::LowerUnary(const LowIRInstruction & ins)
 	X64Register reg = XR_RAX;
 	if(ins.operation == "decay") {
 		emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+		commit_dest(ins.result);
 		return;
 	}
 	if(ins.operation == "not") {
@@ -647,6 +740,7 @@ void FunctionLowering::LowerUnary(const LowIRInstruction & ins)
 			emit(mir_model::Instruction::MI_MOVZX);
 		widen.operands.push_back(MakeReg(reg));
 		widen.operands.push_back(MakeReg(reg));
+		commit_dest(ins.result);
 		return;
 	}
 	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
@@ -663,6 +757,7 @@ void FunctionLowering::LowerUnary(const LowIRInstruction & ins)
 	op.type = SpellType(ins.type);
 	op.operands.push_back(MakeReg(reg));
 	emit_narrow_normalize(ins.type, reg);
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerBinary(const LowIRInstruction & ins)
@@ -696,6 +791,9 @@ void FunctionLowering::LowerBinary(const LowIRInstruction & ins)
 	bool rhs_is_lhs = rhs.kind == LOWIR_OPERAND_TEMP &&
 	                  ins.operands[0].kind == LOWIR_OPERAND_TEMP &&
 	                  rhs.name == ins.operands[0].name;
+	if(rhs.kind == LOWIR_OPERAND_TEMP && !rhs_is_lhs &&
+	   locations_[rhs.name].kind == ValueLocation::VL_PENDING_COPY)
+		resolve_location(rhs.name);
 	X64Register reg = XR_RAX;
 	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
 	mir_model::Operand source;
@@ -720,8 +818,18 @@ void FunctionLowering::LowerBinary(const LowIRInstruction & ins)
 	}
 	else if(rhs.kind == LOWIR_OPERAND_SLOT ||
 	        locations_[rhs.name].kind == ValueLocation::VL_FRAME) {
-		source = MakeReg(reload_to_pool(rhs, values_.count(rhs.name)
-			? values_[rhs.name].type : ins.type));
+		invalidate_rax();
+		mir_model::Instruction & load =
+			emit(mir_model::Instruction::MI_LOAD);
+		load.type = SpellType(ins.type);
+		load.operands.push_back(MakeReg(XR_RDX));
+		if(rhs.kind == LOWIR_OPERAND_SLOT)
+			load.operands.push_back(
+				frame_operand(slots_[rhs.name].frame_offset));
+		else
+			load.operands.push_back(
+				frame_operand(locations_[rhs.name].frame_offset));
+		source = MakeReg(XR_RDX);
 	}
 	else {
 		source = gpr_read(rhs);
@@ -730,6 +838,7 @@ void FunctionLowering::LowerBinary(const LowIRInstruction & ins)
 	op.operands.push_back(MakeReg(reg));
 	op.operands.push_back(source);
 	emit_narrow_normalize(ins.type, reg);
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerDivision(const LowIRInstruction & ins,
@@ -759,6 +868,7 @@ void FunctionLowering::LowerDivision(const LowIRInstruction & ins,
 	div.operands.push_back(MakeReg(XR_RCX));
 	emit_mov(MakeReg(reg), MakeReg(modulus ? XR_RDX : XR_RAX));
 	emit_narrow_normalize(ins.type, reg);
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerShift(const LowIRInstruction & ins)
@@ -783,6 +893,7 @@ void FunctionLowering::LowerShift(const LowIRInstruction & ins)
 	mir_model::Instruction & shift = emit(opcode);
 	shift.operands.push_back(MakeReg(reg));
 	emit_narrow_normalize(ins.type, reg);
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerCmpValue(const LowIRInstruction & ins)
@@ -795,6 +906,9 @@ void FunctionLowering::LowerCmpValue(const LowIRInstruction & ins)
 	bool rhs_is_lhs = rhs.kind == LOWIR_OPERAND_TEMP &&
 	                  ins.operands[0].kind == LOWIR_OPERAND_TEMP &&
 	                  rhs.name == ins.operands[0].name;
+	if(rhs.kind == LOWIR_OPERAND_TEMP && !rhs_is_lhs &&
+	   locations_[rhs.name].kind == ValueLocation::VL_PENDING_COPY)
+		resolve_location(rhs.name);
 	X64Register reg = XR_RAX;
 	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
 	mir_model::Operand source;
@@ -827,6 +941,7 @@ void FunctionLowering::LowerCmpValue(const LowIRInstruction & ins)
 	mir_model::Instruction & widen = emit(mir_model::Instruction::MI_MOVZX);
 	widen.operands.push_back(MakeReg(reg));
 	widen.operands.push_back(MakeReg(reg));
+	commit_dest(ins.result);
 }
 
 void FunctionLowering::LowerFloatBinary(const LowIRInstruction & ins)
@@ -893,6 +1008,7 @@ void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
 		emit_dest_copy(ins.result, ins.operands[0], dst, false, reg);
 		if(ins.operation == "trunc") {
 			emit_narrow_normalize(dst, reg);
+			commit_dest(ins.result);
 			return;
 		}
 		mir_model::Instruction & widen =
@@ -901,6 +1017,7 @@ void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
 			         : mir_model::Instruction::MI_ZEXT);
 		widen.type = IntWidthSpelling(src);
 		widen.operands.push_back(MakeReg(reg));
+		commit_dest(ins.result);
 		return;
 	}
 	if(ins.operation == "sitofp" || ins.operation == "uitofp") {
@@ -929,7 +1046,28 @@ void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
 			ins.operation == "fptosi" ? mir_model::Instruction::MI_FPTOSI
 			                          : mir_model::Instruction::MI_FPTOUI;
 		mir_model::Operand source = float_read(ins.operands[0], src);
-		X64Register reg = alloc_gpr(ins.result);
+		X64Register reg = XR_RAX;
+		bool param_source = ins.operands[0].kind == LOWIR_OPERAND_TEMP &&
+			values_.count(ins.operands[0].name) &&
+			values_[ins.operands[0].name].is_param;
+		int index = -1;
+		if(param_source && !values_[ins.result].crosses_call)
+			index = pool_scan(false, true);
+		if(index >= 0) {
+			static const X64Register pool[kPoolSize] =
+				{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
+			reg = pool[index];
+			pool_holder_[index] = ins.result;
+			if(index >= 2)
+				note_callee_saved(reg);
+			ValueLocation location;
+			location.kind = ValueLocation::VL_GPR;
+			location.reg = reg;
+			locations_[ins.result] = location;
+		}
+		else {
+			reg = alloc_gpr(ins.result);
+		}
 		mir_model::Instruction & convert = emit(opcode);
 		convert.type = IntWidthSpelling(dst);
 		convert.source_type = SpellType(src);

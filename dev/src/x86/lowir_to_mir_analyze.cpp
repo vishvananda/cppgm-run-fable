@@ -347,6 +347,14 @@ void FunctionLowering::AnalyzeValues()
 		if(!ins.result.empty()) {
 			ValueInfo & info = values_[ins.result];
 			info.type = ins.type;
+			// pointer-producing and truth-producing results carry their
+			// own value type, not the instruction's element type
+			if(ins.opcode == LOWIR_INS_ADDR ||
+			   ins.opcode == LOWIR_INS_INDEX ||
+			   (ins.opcode == LOWIR_INS_UNARY && ins.operation == "decay"))
+				info.type.kind = LOWIR_TYPE_PTR;
+			if(ins.opcode == LOWIR_INS_CMP)
+				info.type.kind = LOWIR_TYPE_I64;
 			info.def_position = (int)p;
 		}
 		RecordInstructionUses(ins, (int)p);
@@ -482,14 +490,23 @@ bool FunctionLowering::ParamUseIsForwardable(const ValueInfo & info,
 	int first_position = 0;
 	while(skip_positions_.count(first_position))
 		first_position++;
+	int entry_end = block_first_position_.size() > 1
+		? block_first_position_[1] : 0;
 	int last_position = first_position;
 	for(size_t u = 0; u < info.uses.size(); u++) {
 		const ValueUse & use = info.uses[u];
+		if(use.position >= entry_end)
+			return false;
 		switch(use.kind) {
+			case ValueUse::USE_BINARY_LHS:
+				if(use.position < (int)linear_.size() &&
+				   (linear_[use.position]->opcode == LOWIR_INS_CMP ||
+				    linear_[use.position]->opcode == LOWIR_INS_BRANCH))
+					return false;   // compares read registers directly
+				break;
 			case ValueUse::USE_STORE_VALUE:
 			case ValueUse::USE_RETURN_VALUE:
 			case ValueUse::USE_COPY_SOURCE:
-			case ValueUse::USE_BINARY_LHS:
 				break;
 			case ValueUse::USE_CALL_ARG:
 				if(!CallArgTargetsHome(use.position, use.arg_index, home))

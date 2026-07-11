@@ -1,6 +1,7 @@
 #include "x86/lowir_to_mir.h"
 
 #include <cstdlib>
+#include <cstdio>
 #include <stdexcept>
 
 // Value, register, and frame machinery for the LowIR -> MIR lowering.
@@ -133,7 +134,10 @@ X64Register FunctionLowering::alloc_gpr(const std::string & name)
 	X64Register reg = XR_RAX;
 	if(alloc_pool_gpr(name, reg))
 		return reg;
-	long long offset = alloc_frame_home(name, values_[name].type,
+	LowIRType home_type = values_[name].type;
+	if(FrameSizeOf(home_type) < 8 && home_type.kind != LOWIR_TYPE_OBJ)
+		home_type.kind = LOWIR_TYPE_I64;
+	long long offset = alloc_frame_home(name, home_type,
 	                                    mir_model::FrameBinding::FB_TEMP);
 	ValueLocation location;
 	location.kind = ValueLocation::VL_FRAME;
@@ -302,12 +306,20 @@ mir_model::Operand MakeDeref(X64Register reg, long long offset)
 	return operand;
 }
 
-mir_model::Operand MakeFloatImm(const LowIROperand & literal)
+mir_model::Operand MakeFloatImm(const LowIROperand & literal,
+                                const LowIRType & type)
 {
 	mir_model::Operand operand;
 	operand.kind = mir_model::Operand::OP_FLOAT_IMM;
 	operand.text = (literal.negated ? "-" : "") + literal.literal;
-	operand.float_imm = strtold(operand.text.c_str(), 0);
+	// parse at the operand's own width: rounding twice through long
+	// double is one ulp off for literals like 623e+100
+	if(type.kind == LOWIR_TYPE_F32)
+		operand.float_imm = strtof(operand.text.c_str(), 0);
+	else if(type.kind == LOWIR_TYPE_F64)
+		operand.float_imm = strtod(operand.text.c_str(), 0);
+	else
+		operand.float_imm = strtold(operand.text.c_str(), 0);
 	return operand;
 }
 
@@ -322,10 +334,68 @@ mir_model::Operand FunctionLowering::frame_operand(long long offset) const
 // Reads an integer-class operand that is already in a register (or is a
 // forwarded parameter). The caller handles literals, frame homes, and
 // pending loads before calling this.
+// Scratch parameter copies are assigned at their first read; the copy
+// instruction itself is hoisted into the entry-block prologue.
+ValueLocation & FunctionLowering::resolve_location(const std::string & name)
+{
+	ValueLocation & location = locations_[name];
+	if(location.kind != ValueLocation::VL_PENDING_COPY)
+		return location;
+	X64Register home = location.reg;
+	int index = pool_scan(false, location.pending_r9_first);
+	if(index < 0)
+		index = pool_scan(false, false);
+	if(index < 0) {
+		// out of registers: fall back to a named frame home
+		long long offset = alloc_frame_home(
+			name, values_[name].type,
+			mir_model::FrameBinding::FB_PARAM_SLOT);
+		mir_model::Instruction store;
+		store.opcode = mir_model::Instruction::MI_STORE;
+		store.type = SpellType(values_[name].type);
+		store.operands.push_back(frame_operand(offset));
+		store.operands.push_back(MakeReg(home));
+		out_.blocks[0].instructions.insert(
+			out_.blocks[0].instructions.begin() + prologue_length_, store);
+		prologue_length_++;
+		location.kind = ValueLocation::VL_FRAME;
+		location.frame_offset = offset;
+		return location;
+	}
+	X64Register reg = kPool[index];
+	pool_holder_[index] = name;
+	if(index >= kCalleeSavedStart)
+		note_callee_saved(reg);
+	mir_model::Instruction copy;
+	copy.opcode = mir_model::Instruction::MI_MOV;
+	copy.operands.push_back(MakeReg(reg));
+	copy.operands.push_back(MakeReg(home));
+	// hoisted copies keep declaration order, except that a copy never
+	// precedes an earlier copy still reading this target register
+	int param_index = values_[name].param_index;
+	size_t slot = 0;
+	while(slot < prologue_entries_.size() &&
+	      prologue_entries_[slot].first < param_index)
+		slot++;
+	for(size_t e = slot; e < prologue_entries_.size(); e++)
+		if(prologue_entries_[e].second == (int)reg)
+			slot = e + 1;
+	size_t base = prologue_length_ - prologue_entries_.size();
+	out_.blocks[0].instructions.insert(
+		out_.blocks[0].instructions.begin() + base + slot, copy);
+	prologue_entries_.insert(prologue_entries_.begin() + slot,
+	                         std::make_pair(param_index, (int)home));
+	prologue_length_++;
+	location.kind = ValueLocation::VL_GPR;
+	location.reg = reg;
+	location.prefer_home = true;
+	return location;
+}
+
 mir_model::Operand FunctionLowering::gpr_read(const LowIROperand & operand)
 {
 	if(operand.kind == LOWIR_OPERAND_TEMP) {
-		const ValueLocation & location = locations_[operand.name];
+		const ValueLocation & location = resolve_location(operand.name);
 		if(location.kind == ValueLocation::VL_GPR ||
 		   location.kind == ValueLocation::VL_ARG_REG)
 			return MakeReg(location.reg);
@@ -346,7 +416,7 @@ mir_model::Operand FunctionLowering::address_operand(
 	}
 	if(operand.kind != LOWIR_OPERAND_TEMP)
 		throw std::runtime_error("literal used as address");
-	const ValueLocation & location = locations_[operand.name];
+	const ValueLocation & location = resolve_location(operand.name);
 	if(location.kind == ValueLocation::VL_SLOT_ADDR) {
 		mir_model::Instruction & lea = emit(mir_model::Instruction::MI_LEA);
 		lea.operands.push_back(MakeReg(staging));
@@ -416,6 +486,19 @@ void FunctionLowering::emit_narrow_normalize(const LowIRType & type,
 	norm.operands.push_back(MakeReg(reg));
 }
 
+// Stores a frame-spilled destination computed in rax back to its home.
+void FunctionLowering::commit_dest(const std::string & dest)
+{
+	if(pending_dest_spill_ == 0)
+		return;
+	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
+	store.type = "i64";
+	store.operands.push_back(frame_operand(pending_dest_spill_));
+	store.operands.push_back(MakeReg(XR_RAX));
+	pending_dest_spill_ = 0;
+	(void)dest;
+}
+
 // The shared `mov dest, lhs` opening of binary/cmp/unary templates.
 // Reuses a dying temp's register in place; otherwise allocates the
 // destination (while the operands are still live) and copies.
@@ -425,8 +508,14 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
                                       bool normalize,
                                       X64Register & out_reg)
 {
-	if(lhs.kind == LOWIR_OPERAND_TEMP) {
-		ValueLocation & location = locations_[lhs.name];
+	bool lhs_pending = lhs.kind == LOWIR_OPERAND_TEMP &&
+		locations_[lhs.name].kind == ValueLocation::VL_PENDING_COPY;
+	bool lhs_forwarded = lhs.kind == LOWIR_OPERAND_TEMP &&
+		(locations_[lhs.name].kind == ValueLocation::VL_ARG_REG ||
+		 (values_.count(lhs.name) && values_[lhs.name].is_param &&
+		  locations_[lhs.name].kind == ValueLocation::VL_FRAME));
+	if(lhs.kind == LOWIR_OPERAND_TEMP && !lhs_pending) {
+		ValueLocation & location = resolve_location(lhs.name);
 		bool class_ok =
 			!values_[dest].crosses_call ||
 			pool_index_of(location.reg) >= kCalleeSavedStart;
@@ -444,14 +533,40 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 			return;
 		}
 	}
-	out_reg = alloc_gpr(dest);
-	if(locations_[dest].kind == ValueLocation::VL_FRAME)
-		throw std::runtime_error("integer register pressure spill at def");
+	if((lhs_forwarded || lhs_pending) && !values_[dest].crosses_call &&
+	   !index_dest_lowering_) {
+		// destinations fed from parameter registers scan from r9
+		int index = pool_scan(false, true);
+		if(index < 0)
+			index = pool_scan(false, false);
+		if(index >= 0) {
+			out_reg = kPool[index];
+			pool_holder_[index] = dest;
+			if(index >= kCalleeSavedStart)
+				note_callee_saved(out_reg);
+			ValueLocation location;
+			location.kind = ValueLocation::VL_GPR;
+			location.reg = out_reg;
+			locations_[dest] = location;
+		}
+		else {
+			out_reg = alloc_gpr(dest);
+		}
+	}
+	else {
+		out_reg = alloc_gpr(dest);
+	}
+	if(locations_[dest].kind == ValueLocation::VL_FRAME) {
+		// compute in rax, store back after the caller's operation
+		invalidate_rax();
+		pending_dest_spill_ = locations_[dest].frame_offset;
+		out_reg = XR_RAX;
+	}
 	if(lhs.kind == LOWIR_OPERAND_LITERAL) {
 		emit_mov(MakeReg(out_reg), MakeImm(ParseIntLiteral(lhs)));
 	}
 	else if(lhs.kind == LOWIR_OPERAND_TEMP) {
-		const ValueLocation & location = locations_[lhs.name];
+		const ValueLocation & location = resolve_location(lhs.name);
 		if(location.kind == ValueLocation::VL_FRAME) {
 			mir_model::Instruction & load =
 				emit(mir_model::Instruction::MI_LOAD);

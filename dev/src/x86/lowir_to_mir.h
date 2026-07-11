@@ -37,7 +37,8 @@ mir_model::Operand MakeImm(long long value);
 mir_model::Operand MakeSymbol(const std::string & name, bool global);
 mir_model::Operand MakeLabel(const std::string & label);
 mir_model::Operand MakeDeref(X64Register reg, long long offset);
-mir_model::Operand MakeFloatImm(const LowIROperand & literal);
+mir_model::Operand MakeFloatImm(const LowIROperand & literal,
+                                const LowIRType & type);
 
 struct ValueUse
 {
@@ -88,6 +89,7 @@ struct ValueLocation
 		VL_XMM,
 		VL_FRAME,       // frame home at frame_offset
 		VL_ARG_REG,     // forwarded parameter still in its incoming register
+		VL_PENDING_COPY,// scratch param copy not yet materialized
 		VL_SLOT_ADDR    // addr-of-slot temp, rematerialized at each use
 	};
 
@@ -98,6 +100,7 @@ struct ValueLocation
 	std::string slot_name;
 	bool also_in_rax = false;   // call/setcc results linger in rax
 	bool prefer_home = false;   // param copy whose home is read while valid
+	bool pending_r9_first = true;   // lazy copy scan class
 };
 
 struct SlotInfo
@@ -180,10 +183,12 @@ private:
 	void emit_narrow_normalize(const LowIRType & type, X64Register reg);
 	X64Register reload_to_pool(const LowIROperand & operand,
 	                           const LowIRType & type);
+	ValueLocation & resolve_location(const std::string & name);
 	void RemoveDeadResultCopies();
 	void emit_dest_copy(const std::string & dest, const LowIROperand & lhs,
 	                    const LowIRType & type, bool normalize,
 	                    X64Register & out_reg);
+	void commit_dest(const std::string & dest);
 
 	// pending single-use loads folded into their consumer
 	bool try_defer_load(const LowIRInstruction & ins, int position);
@@ -263,10 +268,13 @@ private:
 	long long frame_cursor_ = 0;
 	long long residual_bytes_ = 0;
 	int current_position_ = 0;
-	std::string pending_load_name_;       // single-use load deferred to user
-	const LowIRInstruction * pending_load_ = 0;
+	std::map<std::string, const LowIRInstruction *> pending_loads_;
+	bool index_dest_lowering_ = false;
 	bool arg_homes_clobbered_ = false;
 	bool has_dead_source_spill_ = false;
+	long long pending_dest_spill_ = 0;   // frame offset; 0 = none
+	size_t prologue_length_ = 0;
+	std::vector<std::pair<int, int> > prologue_entries_;   // (param, home)
 	size_t current_block_ = 0;
 	mir_model::MirBlock * mir_block_ = 0;
 };
