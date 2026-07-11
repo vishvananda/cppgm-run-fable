@@ -244,8 +244,20 @@ void FunctionLowering::SpillParamHome(const LowIRParam & param,
                                       X64Register home_reg,
                                       const std::string & store_type)
 {
+	// The incoming register spills as a full 8-byte container, so the
+	// home must span at least eight bytes even for narrow parameters.
+	LowIRType home_type = param.type;
+	if(FrameSizeOf(home_type) < 8) {
+		if(home_type.kind == LOWIR_TYPE_OBJ) {
+			home_type.obj_bytes = 8;
+			home_type.obj_align = 8;
+		}
+		else {
+			home_type.kind = LOWIR_TYPE_I64;
+		}
+	}
 	long long home = alloc_frame_home(
-		param.name, param.type, mir_model::FrameBinding::FB_PARAM_SLOT);
+		param.name, home_type, mir_model::FrameBinding::FB_PARAM_SLOT);
 	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
 	store.type = store_type;
 	store.operands.push_back(frame_operand(home));
@@ -589,8 +601,13 @@ void FunctionLowering::Lower()
 		}
 	}
 	// Unwinding re-enters dispatch blocks with only rbp/rsp restored,
-	// so slot state must stay memory-resident in EH functions.
-	if(!eh_mode_)
+	// so slot state must stay memory-resident in EH functions: the
+	// slot types still register, but no slot promotes to registers.
+	if(eh_mode_)
+		for(size_t s = 0; s < function_.slots.size(); s++)
+			slots_[function_.slots[s].name].type =
+				function_.slots[s].type;
+	else
 		PromoteSlots();
 	AnalyzeValues();
 	MarkByAddressArgs();

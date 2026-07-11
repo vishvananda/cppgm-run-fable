@@ -427,8 +427,33 @@ mir_model::Operand FunctionLowering::gpr_read(const LowIROperand & operand)
 		if(location.kind == ValueLocation::VL_GPR ||
 		   location.kind == ValueLocation::VL_ARG_REG)
 			return MakeReg(location.reg);
+		// Spilled and slot-address values reload through the r11/r10
+		// staging pair (alternating, so an instruction may read two
+		// spilled operands without a collision).
+		if(location.kind == ValueLocation::VL_FRAME ||
+		   location.kind == ValueLocation::VL_SLOT_ADDR) {
+			X64Register staging =
+				gpr_read_staging_flip_ ? XR_R10 : XR_R11;
+			gpr_read_staging_flip_ = !gpr_read_staging_flip_;
+			if(location.kind == ValueLocation::VL_SLOT_ADDR) {
+				mir_model::Instruction & lea =
+					emit(mir_model::Instruction::MI_LEA);
+				lea.operands.push_back(MakeReg(staging));
+				lea.operands.push_back(frame_operand(
+					slots_[location.slot_name].frame_offset));
+				return MakeReg(staging);
+			}
+			mir_model::Instruction & load =
+				emit(mir_model::Instruction::MI_LOAD);
+			load.type = "i64";
+			load.operands.push_back(MakeReg(staging));
+			load.operands.push_back(
+				frame_operand(location.frame_offset));
+			return MakeReg(staging);
+		}
 	}
-	throw std::logic_error("gpr_read on unhoused operand");
+	throw std::logic_error("gpr_read on unhoused operand: " +
+	                       operand.name + " in @" + function_.name);
 }
 
 // Memory operand for a load/store address. `staging` receives lea/load

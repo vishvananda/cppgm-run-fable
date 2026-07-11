@@ -299,6 +299,7 @@ private:
 	int ScratchGpr(const Ins & ins) const;
 
 	void EmitFloatInstruction(const Ins & ins);
+	void FldFloatViaScratch(int bits, const Op & op, int slot);
 	void EmitFmov(const Ins & ins);
 	void EmitFneg(const Ins & ins);
 	void EmitFarith(const Ins & ins);
@@ -940,6 +941,19 @@ void FunctionEncoder::EmitFneg(const Ins & ins)
 	StoreXmmTo(bits, dst, 15);
 }
 
+// Loads one f32/f64 source onto the x87 stack, bouncing xmm-resident
+// values through the given scratch slot.
+void FunctionEncoder::FldFloatViaScratch(int bits, const Op & op, int slot)
+{
+	if (op.kind == Op::OP_XMM)
+	{
+		code_.SseRegMem(MovStore(bits), Xmm(op), ScratchSlot(slot, 0));
+		code_.X87Mem(X86_FLD, bits, ScratchSlot(slot, 0));
+		return;
+	}
+	code_.X87Mem(X86_FLD, bits, FloatRm(bits, op));
+}
+
 void FunctionEncoder::EmitFarith(const Ins & ins)
 {
 	int bits = TypeBits(ins.type);
@@ -952,6 +966,24 @@ void FunctionEncoder::EmitFarith(const Ins & ins)
 		FldOperand(80, b);
 		code_.X87Stack(X87Arith(ins.opcode));  // st(1) op= st(0); pop
 		code_.X87Mem(X86_FSTP, 80, MemOperand(dst, 0));
+		return;
+	}
+	// Reference parity: f64 products and quotients round through the
+	// x87 extended intermediate (the checked-in program fixtures encode
+	// that double rounding); sums and differences stay in SSE.
+	if (bits == 64 && (ins.opcode == Ins::MI_FMUL ||
+	                   ins.opcode == Ins::MI_FDIV))
+	{
+		FldFloatViaScratch(64, a, 0);
+		FldFloatViaScratch(64, b, 1);
+		code_.X87Stack(X87Arith(ins.opcode));
+		if (dst.kind == Op::OP_XMM)
+		{
+			code_.X87Mem(X86_FSTP, 64, ScratchSlot(0, 0));
+			code_.SseRegMem(MovLoad(64), Xmm(dst), ScratchSlot(0, 0));
+			return;
+		}
+		code_.X87Mem(X86_FSTP, 64, MemOperand(dst, 0));
 		return;
 	}
 	CopyToXmm15(bits, a);  // staging dodges dst/source aliasing

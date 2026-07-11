@@ -187,6 +187,7 @@ private:
 	std::vector<int> call_positions_;
 	bool touches_float_ = false;
 	bool eh_mode_ = false;   // function contains exception constructs
+	bool gpr_read_staging_flip_ = false;   // r11/r10 spill-read rotation
 
 	// live state
 	std::map<std::string, ValueLocation> locations_;
