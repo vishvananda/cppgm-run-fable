@@ -114,31 +114,31 @@ const VirtualSlot* FindBaseVirtualSlot(const ClassInfo& cls,
 	return 0;
 }
 
-// PA27 boundary: every vtable header in a class's group is written in
-// the complete class's vbase-table order, while its readers - the
+// PA27/PA29: every vtable header in a class's group is written in the
+// complete class's vbase-table order when every base subobject's own
+// table agrees with it (the PA27 reference shapes). Its readers - the
 // dynamic vbase-offset loads (`vptr - 24 - 8k`) and the RTTI
 // virtual-base offset-flags rows - index it with their own static
-// class's table. The reference outputs only define hierarchies where
-// the orders agree, so a polymorphic class whose subobject tables
-// disagree has no defined ABI here; it is rejected instead of
-// miscompiled.
-void CheckVBaseTableAgreement(const ClassInfo& cls, const ClassInfo* sub,
-                              std::set<const ClassInfo*>& seen)
+// class's table, so when some subobject's order disagrees the class is
+// marked and each view's header follows the view class's own table
+// (PA29 lower_vtable.cpp).
+bool VBaseTablesAgree(const ClassInfo& cls, const ClassInfo* sub,
+                      std::set<const ClassInfo*>& seen)
 {
 	if (!seen.insert(sub).second)
-		return;
+		return true;
 	if (sub != &cls)
 		for (size_t i = 0; i < sub->vbases.size(); i++)
 		{
 			const ClassVBase* row =
 				FindClassVBase(cls, sub->vbases[i].cls);
 			if (!row || (size_t)(row - &cls.vbases[0]) != i)
-				throw runtime_error(
-					"virtual-base table order across subobjects is "
-					"outside the PA27 assignment boundary");
+				return false;
 		}
 	for (size_t b = 0; b < sub->direct_bases.size(); b++)
-		CheckVBaseTableAgreement(cls, sub->direct_bases[b].cls, seen);
+		if (!VBaseTablesAgree(cls, sub->direct_bases[b].cls, seen))
+			return false;
+	return true;
 }
 
 }  // namespace
@@ -346,7 +346,8 @@ void SemBinder::FinishClassVirtualFacts(ClassInfo& cls)
 	if (cls.is_polymorphic && !cls.vbases.empty())
 	{
 		std::set<const ClassInfo*> seen;
-		CheckVBaseTableAgreement(cls, &cls, seen);
+		cls.vbase_views_use_own_tables =
+			!VBaseTablesAgree(cls, &cls, seen);
 	}
 }
 

@@ -340,6 +340,10 @@ public:
 	// view inside `cls`'s group.
 	static unsigned long long VTableAddressPoint(const ClassInfo* cls);
 	static unsigned long long ViewAddressPoint(const ClassInfo* cls);
+	// PA29: the address point of one view whose header may follow the
+	// view class's own (shorter) vbase table.
+	static unsigned long long ViewGroupAddressPoint(
+		const ClassInfo& cls, const struct ClassView& view);
 	// The "@name" of the class's VTT; demands the group.
 	string VttRef(const ClassInfo* cls);
 	// The VTT-shape size of a class and the entry index of a direct

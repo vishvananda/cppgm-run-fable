@@ -1095,6 +1095,17 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		(TypeEquals(source, bare) ||
 		 (source->kind == TK_CLASS && bare->kind == TK_CLASS &&
 		  BaseClassDistance(source->named, bare->named) >= 0));
+	if (!binds_directly && node.category != VC_PRVALUE &&
+	    source->kind == TK_CLASS && bare->kind == TK_CLASS &&
+	    source->named && source->named->class_record)
+	{
+		// PA29: a shared virtual-base referee also binds the glvalue
+		// directly; AdjustToBase projects the complete-object offset.
+		unsigned long long complete = 0;
+		if (CompleteObjectOffset(*source->named->class_record,
+		                         bare->named, complete))
+			binds_directly = true;
+	}
 	if (binds_directly)
 	{
 		// A reference-cast class call result has no address of its
@@ -1216,6 +1227,84 @@ string FunctionLowerer::MaterializeClassArg(const SemNode& node,
 	return address;
 }
 
+// PA29: a direct call to one of the lazily declared global-scope
+// float-classification builtins (sem_binder's ResolveBuiltinFunction);
+// no runtime definition exists, so the lowering expands them inline.
+bool FunctionLowerer::IsFloatBuiltinCall(const SemNode& node) const
+{
+	if (node.kind != SN_CALL_EXPRESSION || node.children.size() != 2 ||
+	    node.children[0]->kind != SN_CALLEE)
+		return false;
+	const SemNode& callee = *node.children[0];
+	if (callee.is_method || callee.special != SF_NONE ||
+	    callee.vtable_slot >= 0 || !callee.entity_scope ||
+	    callee.entity_scope->kind != SCOPE_NAMESPACE ||
+	    callee.entity_scope->parent)
+		return false;
+	return callee.entity_name == "__builtin_isnan" ||
+		callee.entity_name == "__builtin_nanl";
+}
+
+// __builtin_nanl: the tag argument evaluates (and is otherwise
+// ignored); the default quiet NaN materializes as a `const f80 nanL`.
+// __builtin_isnan: the operand's x87 storage image classifies in the
+// integer domain - exponent all ones and not an infinity (the explicit
+// integer bit set over an all-zero fraction) - so the query is a bit
+// test, never a call that could recurse into the builtin itself.
+LowerValue FunctionLowerer::LowerFloatBuiltin(const SemNode& node,
+                                              const SemNode& callee)
+{
+	LowerValue result;
+	if (callee.entity_name == "__builtin_nanl")
+	{
+		LowerValueExpr(*node.children[1]);
+		result.type = NodeType(node);
+		result.text = NewTemp();
+		Emit(result.text + " = const f80 nanL");
+		return result;
+	}
+	LowerValue operand = LowerValueExpr(*node.children[1]);
+	string slot = AddMatSlot("fpclass_value", "f80");
+	Emit("store f80 " + operand.text + ", $" + slot);
+	string low = NewTemp();
+	Emit(low + " = load i64 $" + slot);
+	string address = NewTemp();
+	Emit(address + " = addr $" + slot);
+	string high_address = NewTemp();
+	Emit(high_address + " = index i8 " + address + ", 8");
+	string high = NewTemp();
+	Emit(high + " = load u16 " + high_address);
+	// The classification row (the reference presentation): the
+	// exponent field, the 63 explicit-integer-excluded fraction bits,
+	// and their zero/all-ones predicates. isnan reads the all-ones
+	// exponent and the infinity predicates; the zero-exponent compare
+	// belongs to the row.
+	string exponent = NewTemp();
+	Emit(exponent + " = binary and u16 " + high + ", 32767");
+	string fraction = NewTemp();
+	Emit(fraction + " = binary and i64 " + low + ", 9223372036854775807");
+	string exponent_ones = NewTemp();
+	Emit(exponent_ones + " = cmp eq u16 " + exponent + ", 32767");
+	string exponent_zero = NewTemp();
+	Emit(exponent_zero + " = cmp eq u16 " + exponent + ", 0");
+	string fraction_zero = NewTemp();
+	Emit(fraction_zero + " = cmp eq i64 " + fraction + ", 0");
+	string integer_bit = NewTemp();
+	Emit(integer_bit + " = cmp lt i64 " + low + ", 0");
+	string infinite = NewTemp();
+	Emit(infinite + " = binary and i64 " + integer_bit + ", " +
+	     fraction_zero);
+	string not_infinite = NewTemp();
+	Emit(not_infinite + " = cmp eq i64 " + infinite + ", 0");
+	string is_nan = NewTemp();
+	Emit(is_nan + " = binary and i64 " + exponent_ones + ", " +
+	     not_infinite);
+	result.type = BoolType();
+	result.text = NewTemp();
+	Emit(result.text + " = convert trunc u8 i64 " + is_nan);
+	return result;
+}
+
 LowerValue FunctionLowerer::LowerCall(const SemNode& node,
                                       const string& result_address)
 {
@@ -1238,6 +1327,10 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// address identity - no runtime call.
 	if (IsTypeInfoComparison(node))
 		return LowerTypeInfoComparison(node, callee);
+	// PA29: the float-classification builtins expand inline - no
+	// runtime definition exists, and no eh region is needed.
+	if (IsFloatBuiltinCall(node))
+		return LowerFloatBuiltin(node, callee);
 	// A call with armed cleanups runs under an unwind-dispatch region:
 	// live temporaries protect every call, destructible locals only
 	// calls the unwind analysis cannot prove non-throwing. The result

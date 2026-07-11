@@ -219,6 +219,13 @@ private:
 	// the consumer).
 	LowerValue LowerCall(const SemNode& node,
 	                     const string& result_address = "");
+	// PA29 float-classification builtins: a direct call to the
+	// global-scope __builtin_isnan / __builtin_nanl expands inline (an
+	// f80 storage-image bit test / a `const f80 nanL`), so the NaN
+	// query never lowers to a call to itself.
+	bool IsFloatBuiltinCall(const SemNode& node) const;
+	LowerValue LowerFloatBuiltin(const SemNode& node,
+	                             const SemNode& callee);
 	string LowerCallArgument(const SemNode& node, const TypePtr& param);
 	string LowerReferenceArgument(const SemNode& node,
 	                              const TypePtr& referee);

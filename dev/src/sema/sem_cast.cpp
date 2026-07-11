@@ -334,8 +334,10 @@ SemValue SemExprAnalyzer::AnalyzeCastTo(const TypePtr& dest,
 	else if (to->kind == TK_POINTER)
 		valid = value.null_pointer_literal || IsNullPtrType(value.type) ||
 			IsPointerAfterDecay(value.type) ||
-			// 5.2.10p5: reinterpret_cast of an integral value.
-			(op == KW_REINTERPET_CAST && IsIntegralType(value.type));
+			// 5.2.10p5: reinterpret_cast of an integral value (also
+			// through the c-style spelling, 5.4p4).
+			((op == KW_REINTERPET_CAST || op == OP_LPAREN) &&
+			 IsIntegralType(value.type));
 	else if (to->kind == TK_MEMBER_POINTER)
 		// PA26 5.2.9p9: a null pointer constant or a convertible member
 		// pointer casts to a member pointer type.

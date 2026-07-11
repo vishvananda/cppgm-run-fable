@@ -246,6 +246,10 @@ struct ClassInfo
 	// PA27: the virtual-base table (DFS order) and polymorphic views.
 	vector<ClassVBase> vbases;
 	vector<ClassView> views;
+	// PA29: some base subobject's own vbase-table order disagrees with
+	// this (complete) class's table, so each vtable view's header rows
+	// must follow the view class's own table instead of the shared one.
+	bool vbase_views_use_own_tables = false;
 	vector<ClassField> fields;  // declaration order
 	bool is_union;
 	bool is_empty;  // no fields, no non-empty base, no virtual base

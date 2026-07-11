@@ -32,3 +32,4 @@ pa*/tests/*.check.*
 .tmp-bsc*.cpp
 .test_counts
 scratch/
+.claude/

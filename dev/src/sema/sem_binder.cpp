@@ -235,6 +235,23 @@ const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
 	}
 	else if (name == "__builtin_unreachable")
 		type = MakeFunctionType(void_type, params, false);
+	else if (name == "__builtin_isnan")
+	{
+		// PA29: any floating operand arrives through its long double
+		// conversion; the lowering expands the classification inline
+		// (never a runtime call, so it cannot recurse into itself).
+		params.push_back(MakeFundamentalType(FT_LONG_DOUBLE));
+		type = MakeFunctionType(MakeFundamentalType(FT_BOOL), params,
+		                        false);
+	}
+	else if (name == "__builtin_nanl")
+	{
+		// PA29: a default quiet NaN (the tag argument only evaluates);
+		// the lowering materializes the constant inline.
+		params.push_back(const_char_ptr);
+		type = MakeFunctionType(MakeFundamentalType(FT_LONG_DOUBLE),
+		                        params, false);
+	}
 	else
 		return 0;
 	if (const ScopeBinding* existing =

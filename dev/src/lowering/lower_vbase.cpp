@@ -958,7 +958,7 @@ void FunctionLowerer::LowerVPointerStore(const SemNode& node)
 			string table = NewTemp();
 			Emit(table + " = addr " + program_.ViewVTableRef(cls, v));
 			unsigned long long point =
-				LowerProgram::ViewAddressPoint(cls);
+				LowerProgram::ViewGroupAddressPoint(*cls, view);
 			string value = table;
 			if (point)
 			{

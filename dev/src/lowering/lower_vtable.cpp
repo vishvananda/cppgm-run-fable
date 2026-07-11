@@ -371,6 +371,19 @@ unsigned long long LowerProgram::ViewAddressPoint(const ClassInfo* cls)
 	return ClassHasVBases(*cls) ? 8 * (2 + cls->vbases.size()) : 0;
 }
 
+// PA29: a view whose header follows its own class's vbase table has
+// its address point after that (possibly shorter) header.
+unsigned long long LowerProgram::ViewGroupAddressPoint(
+	const ClassInfo& cls, const ClassView& view)
+{
+	if (!ClassHasVBases(cls))
+		return 0;
+	const ClassInfo* header_of =
+		cls.vbase_views_use_own_tables && view.cls ? view.cls : &cls;
+	return 8 * (2 + (ClassHasVBases(*header_of)
+	                     ? header_of->vbases.size() : 0));
+}
+
 void LowerProgram::VTableGroupRef(const ClassInfo* cls)
 {
 	LowVTableInfo& entry = VTableEntry(cls);
@@ -442,6 +455,13 @@ size_t LowerProgram::VttShapeSize(const ClassInfo& cls)
 		if (!cls.direct_bases[b].is_virtual &&
 		    VttQualifies(*cls.direct_bases[b].cls))
 			size += VttShapeSize(*cls.direct_bases[b].cls);
+	// PA29: qualifying virtual direct bases carry construction
+	// sub-blocks after the non-virtual ones (their base entries also
+	// take a construction context from the complete object's ctor).
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+		if (cls.direct_bases[b].is_virtual &&
+		    VttQualifies(*cls.direct_bases[b].cls))
+			size += VttShapeSize(*cls.direct_bases[b].cls);
 	vector<size_t> views;
 	OutermostViews(cls, views);
 	return size + views.size();
@@ -455,6 +475,15 @@ size_t LowerProgram::SubVttIndex(const ClassInfo& derived,
 	{
 		const ClassDirectBase& row = derived.direct_bases[b];
 		if (row.is_virtual || !VttQualifies(*row.cls))
+			continue;
+		if (row.cls == &base)
+			return at;
+		at += VttShapeSize(*row.cls);
+	}
+	for (size_t b = 0; b < derived.direct_bases.size(); b++)
+	{
+		const ClassDirectBase& row = derived.direct_bases[b];
+		if (!row.is_virtual || !VttQualifies(*row.cls))
 			continue;
 		if (row.cls == &base)
 			return at;
@@ -641,8 +670,15 @@ string LowerProgram::RenderVTableDefinition(LowVTableInfo& entry)
 		const ClassView& view = cls.views[v];
 		string name = ViewVTableRef(&cls, v);
 		string view_body;
-		if (ClassHasVBases(cls))
-			view_body = RenderVTableHeader(cls, cls, view.offset,
+		// A view's header rows are indexed by the view class's own
+		// static vbase table (`vptr - 24 - 8k`): when some subobject's
+		// table order disagrees with the complete class's, the view
+		// carries rows in its own class's order (PA29). Agreeing
+		// hierarchies keep the complete-class rows (the PA27 shapes).
+		const ClassInfo& header_of =
+			cls.vbase_views_use_own_tables && view.cls ? *view.cls : cls;
+		if (ClassHasVBases(header_of))
+			view_body = RenderVTableHeader(cls, header_of, view.offset,
 			                               RttiRef(&cls));
 		view_body += RenderVTableSlots(cls, &view, &cls, 0, view.offset);
 		text += "\nglobal " + name +
@@ -721,7 +757,8 @@ string LowerProgram::RenderConstructionGroup(LowVTableInfo& entry)
 	OutermostViews(cls, views);
 	for (size_t v = 0; v < views.size(); v++)
 		items += "  ptr addr " + ViewVTableRef(&cls, views[v]) + " + " +
-			to_string(ViewAddressPoint(&cls)) + "\n";
+			to_string(ViewGroupAddressPoint(cls, cls.views[views[v]])) +
+			"\n";
 	text += "\nglobal @" + entry.vtt_low_name +
 		" [storage=readonly, binding=weak, object=_ZTT" +
 		MangleClassTypeEncoding(cls.entity) +
@@ -743,6 +780,17 @@ void LowerProgram::CollectConstructionBases(
 		out.push_back(std::make_pair(row.cls, offset + row.offset));
 		CollectConstructionBases(*row.cls, offset + row.offset, out);
 	}
+	// PA29: qualifying virtual direct bases sit at their shared
+	// virtual-base position of the enclosing subobject's layout.
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+	{
+		const ClassDirectBase& row = cls.direct_bases[b];
+		if (!row.is_virtual || !VttQualifies(*row.cls))
+			continue;
+		unsigned long long at = offset + VBasePositionIn(cls, row.cls);
+		out.push_back(std::make_pair(row.cls, at));
+		CollectConstructionBases(*row.cls, at, out);
+	}
 }
 
 // VTT entries of one class's sub-blocks in shape order: each base's
@@ -759,6 +807,28 @@ void LowerProgram::AppendVttEntries(
 		if (row.is_virtual || !VttQualifies(*row.cls))
 			continue;
 		unsigned long long at = offset + row.offset;
+		map<std::pair<const ClassInfo*, unsigned long long>,
+		    vector<string>>::const_iterator found =
+			names.find(std::make_pair(row.cls, at));
+		if (found == names.end())
+			throw runtime_error("construction table block missing");
+		const vector<string>& group = found->second;
+		unsigned long long point = VTableAddressPoint(row.cls);
+		items += "  ptr addr @" + group[0] + " + " + to_string(point) +
+			"\n";
+		AppendVttEntries(*row.cls, at, names, items);
+		for (size_t v = 1; v < group.size(); v++)
+			items += "  ptr addr @" + group[v] + " + " +
+				to_string(point) + "\n";
+	}
+	// PA29: the qualifying virtual direct bases' sub-blocks follow the
+	// non-virtual ones (matching SubVttIndex).
+	for (size_t b = 0; b < cls.direct_bases.size(); b++)
+	{
+		const ClassDirectBase& row = cls.direct_bases[b];
+		if (!row.is_virtual || !VttQualifies(*row.cls))
+			continue;
+		unsigned long long at = offset + VBasePositionIn(cls, row.cls);
 		map<std::pair<const ClassInfo*, unsigned long long>,
 		    vector<string>>::const_iterator found =
 			names.find(std::make_pair(row.cls, at));

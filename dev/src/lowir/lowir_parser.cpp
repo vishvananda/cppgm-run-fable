@@ -38,6 +38,28 @@ ELowIRLiteralClass classify_number(const string & spelling)
 	return LOWIR_LITERAL_INT;
 }
 
+// The NaN spellings ride identifier tokens ("nan" plus an ordinary
+// float-literal width suffix); both backends read them with strtold.
+bool classify_nan_word(const string & spelling, ELowIRLiteralClass & out)
+{
+	if(spelling == "nan")
+	{
+		out = LOWIR_LITERAL_F64;
+		return true;
+	}
+	if(spelling == "nanf" || spelling == "nanF")
+	{
+		out = LOWIR_LITERAL_F32;
+		return true;
+	}
+	if(spelling == "nanL" || spelling == "nanl")
+	{
+		out = LOWIR_LITERAL_F80;
+		return true;
+	}
+	return false;
+}
+
 struct Parser
 {
 	const vector<LowIRToken> & tokens;
@@ -136,16 +158,29 @@ struct Parser
 			operand.literal_class = LOWIR_LITERAL_NULLPTR;
 			return operand;
 		}
+		if(at(LOWIR_TOK_IDENTIFIER) &&
+		   classify_nan_word(peek().text, operand.literal_class))
+		{
+			operand.literal = advance().text;
+			return operand;
+		}
 		operand.literal = expect(LOWIR_TOK_NUMBER, "literal");
 		operand.literal_class = classify_number(operand.literal);
 		return operand;
+	}
+
+	bool at_nan_word() const
+	{
+		ELowIRLiteralClass ignored;
+		return peek().kind == LOWIR_TOK_IDENTIFIER &&
+		       classify_nan_word(peek().text, ignored);
 	}
 
 	bool at_value_start() const
 	{
 		return at(LOWIR_TOK_TEMP_NAME) || at(LOWIR_TOK_SLOT_NAME) ||
 		       at(LOWIR_TOK_GLOBAL_NAME) || at(LOWIR_TOK_NUMBER) ||
-		       at_punct("-") || at_word("nullptr");
+		       at_punct("-") || at_word("nullptr") || at_nan_word();
 	}
 
 	LowIROperand parse_value()
@@ -166,7 +201,8 @@ struct Parser
 			operand.kind = LOWIR_OPERAND_GLOBAL;
 			operand.name = advance().text;
 		}
-		else if(at(LOWIR_TOK_NUMBER) || at_punct("-") || at_word("nullptr"))
+		else if(at(LOWIR_TOK_NUMBER) || at_punct("-") ||
+		        at_word("nullptr") || at_nan_word())
 			return parse_literal_operand();
 		else
 			fail("expected value operand");
