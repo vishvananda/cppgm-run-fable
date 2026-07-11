@@ -11,16 +11,6 @@ namespace lowir_to_mir {
 
 namespace {
 
-const X64Register kArgRegs[6] =
-	{ XR_RDI, XR_RSI, XR_RDX, XR_RCX, XR_R8, XR_R9 };
-
-X64Register pool_reg_at(int index)
-{
-	static const X64Register pool[FunctionLowering::kPoolSize] =
-		{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
-	return pool[index];
-}
-
 // A forwarded parameter normally leaves an 8-byte residue in the frame
 // (its unreclaimed home). The trivial promotion shape — the value flows
 // through a promoted-slot copy and pure loads straight into the return —
@@ -65,56 +55,7 @@ bool param_pass_annotated(const LowIRParam & param)
 	       param.metadata.find("pass") != "direct";
 }
 
-bool param_expects_address(const LowIRParam & param)
-{
-	if(param.type.kind != LOWIR_TYPE_PTR)
-		return false;
-	std::string pass = param.metadata.find("pass");
-	return pass == "indirect_result" || pass == "by_address" ||
-	       pass == "reference";
-}
-
-std::string container_spelling(long long bytes)
-{
-	if(bytes <= 1) return "i8";
-	if(bytes <= 2) return "i16";
-	if(bytes <= 4) return "i32";
-	return "i64";
-}
-
 }  // namespace
-
-// Marks temps whose address must be materialized for a by-address call
-// argument; they get frame homes at definition.
-static void MarkByAddressArgs(const std::vector<const LowIRInstruction *> & linear,
-                              const ProgramFacts & facts,
-                              std::map<std::string, ValueInfo> & values)
-{
-	for(size_t p = 0; p < linear.size(); p++) {
-		const LowIRInstruction & ins = *linear[p];
-		if(ins.opcode != LOWIR_INS_CALL)
-			continue;
-		const std::vector<LowIRParam> * params = 0;
-		if(!ins.callee_is_temp && facts.info->is_function(ins.callee))
-			params = &facts.info->functions.find(ins.callee)->second->params;
-		else if(ins.signature.present)
-			params = &ins.signature.params;
-		if(!params)
-			continue;
-		for(size_t a = 0; a < ins.operands.size() && a < params->size(); a++) {
-			const LowIROperand & arg = ins.operands[a];
-			if(arg.kind != LOWIR_OPERAND_TEMP)
-				continue;
-			if(!param_expects_address((*params)[a]))
-				continue;
-			std::map<std::string, ValueInfo>::iterator it =
-				values.find(arg.name);
-			if(it != values.end() &&
-			   it->second.type.kind != LOWIR_TYPE_PTR)
-				it->second.needs_frame = true;
-		}
-	}
-}
 
 // Non-GPR parameters (xmm, stack-passed, f80) copy into named param-slot
 // homes at entry; returns false when the parameter is GPR-class.
@@ -165,17 +106,22 @@ bool FunctionLowering::PlanWideParam(const LowIRParam & param,
 		spill.operands.push_back(frame_operand(stack_offset));
 	}
 	else {
+		// copy the full padded container (one chunk for scalars and small
+		// objects, several for by-value memory-class objects)
 		invalidate_rax();
-		mir_model::Instruction & load =
-			emit(mir_model::Instruction::MI_LOAD);
-		load.type = "i64";
-		load.operands.push_back(MakeReg(XR_RAX));
-		load.operands.push_back(frame_operand(stack_offset));
-		mir_model::Instruction & store =
-			emit(mir_model::Instruction::MI_STORE);
-		store.type = "i64";
-		store.operands.push_back(frame_operand(home));
-		store.operands.push_back(MakeReg(XR_RAX));
+		long long copy_bytes = big_obj ? FrameSizeOf(param.type) : 8;
+		for(long long off = 0; off < copy_bytes; off += 8) {
+			mir_model::Instruction & load =
+				emit(mir_model::Instruction::MI_LOAD);
+			load.type = "i64";
+			load.operands.push_back(MakeReg(XR_RAX));
+			load.operands.push_back(frame_operand(stack_offset + off));
+			mir_model::Instruction & store =
+				emit(mir_model::Instruction::MI_STORE);
+			store.type = "i64";
+			store.operands.push_back(frame_operand(home + off));
+			store.operands.push_back(MakeReg(XR_RAX));
+		}
 	}
 	ValueLocation location;
 	location.kind = ValueLocation::VL_FRAME;
@@ -204,7 +150,7 @@ void FunctionLowering::PlanParams()
 		binding.location = mir_model::ParamBinding::PL_REG;
 		binding.reg = home_reg;
 		if(param.type.kind == LOWIR_TYPE_OBJ)
-			binding.type = container_spelling(param.type.obj_bytes);
+			binding.type = ContainerSpelling(param.type.obj_bytes);
 		out_.params.push_back(binding);
 		gpr++;
 		PlanGprParam(param, (int)p, home_reg, copies, crossing);
@@ -214,15 +160,18 @@ void FunctionLowering::PlanParams()
 	for(size_t c = crossing.size(); c-- > 0; ) {
 		const LowIRParam & param = function_.params[crossing[c]];
 		int index = pool_scan(true, false);
-		if(index < 0)
+		if(index < 0) {
+			// no callee-saved register left: keep a named frame home
+			SpillParamHome(param, out_.params[crossing[c]].reg,
+			               SpellType(param.type));
 			continue;
+		}
 		pool_holder_[index] = param.name;
-		note_callee_saved(pool_reg_at(index));
 		ValueLocation location;
 		location.kind = ValueLocation::VL_GPR;
-		location.reg = pool_reg_at(index);
+		location.reg = kPool[index];
 		locations_[param.name] = location;
-		copies.push_back(std::make_pair(crossing[c], pool_reg_at(index)));
+		copies.push_back(std::make_pair(crossing[c], kPool[index]));
 	}
 	std::sort(copies.begin(), copies.end());
 	EmitGprParamCopies(copies);
@@ -306,7 +255,7 @@ void FunctionLowering::PlanGprParam(
 	ValueInfo & info = values_[param.name];
 	if(param.type.kind == LOWIR_TYPE_OBJ) {
 		SpillParamHome(param, home_reg,
-		               container_spelling(param.type.obj_bytes));
+		               ContainerSpelling(param.type.obj_bytes));
 		return;
 	}
 	if(info.uses.empty() && info.raw_references == 0) {
@@ -373,13 +322,11 @@ void FunctionLowering::PlanGprParam(
 		return;
 	}
 	pool_holder_[index] = param.name;
-	if(index >= 2)
-		note_callee_saved(pool_reg_at(index));
 	ValueLocation location;
 	location.kind = ValueLocation::VL_GPR;
-	location.reg = pool_reg_at(index);
+	location.reg = kPool[index];
 	locations_[param.name] = location;
-	copies.push_back(std::make_pair(param_position, pool_reg_at(index)));
+	copies.push_back(std::make_pair(param_position, kPool[index]));
 }
 
 // Entry copies in parameter order, deferring any copy whose target
@@ -601,7 +548,7 @@ void FunctionLowering::Lower()
 	Linearize();
 	PromoteSlots();
 	AnalyzeValues();
-	MarkByAddressArgs(linear_, facts_, values_);
+	MarkByAddressArgs();
 	out_.blocks.resize(function_.blocks.size());
 	for(size_t b = 0; b < function_.blocks.size(); b++)
 		out_.blocks[b].label = function_.blocks[b].label;
@@ -704,8 +651,9 @@ mir_model::GlobalDefinition ConvertGlobal(const LowIRGlobal & global)
 			out.addr_addend = global.addr_addend;
 			break;
 		default:
-			out.init_kind = mir_model::GlobalDefinition::GI_ZERO;
-			break;
+			// declaration-only globals never reach here (the caller
+			// filters on is_definition)
+			throw std::logic_error("unsupported global initializer form");
 	}
 	return out;
 }

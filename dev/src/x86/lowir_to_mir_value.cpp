@@ -10,21 +10,56 @@
 
 namespace lowir_to_mir {
 
-namespace {
-
-const X64Register kPool[FunctionLowering::kPoolSize] =
+const X64Register kArgRegs[6] =
+	{ XR_RDI, XR_RSI, XR_RDX, XR_RCX, XR_R8, XR_R9 };
+const X64Register kPool[kPoolSize] =
 	{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
 const int kCalleeSavedStart = 2;
 
+namespace {
+
 int pool_index_of(X64Register reg)
 {
-	for(int i = 0; i < FunctionLowering::kPoolSize; i++)
+	for(int i = 0; i < kPoolSize; i++)
 		if(kPool[i] == reg)
 			return i;
 	return -1;
 }
 
 }  // namespace
+
+std::string ContainerSpelling(long long bytes)
+{
+	if(bytes <= 1) return "i8";
+	if(bytes <= 2) return "i16";
+	if(bytes <= 4) return "i32";
+	return "i64";
+}
+
+bool FitsImm32(long long value)
+{
+	return value >= -2147483648LL && value <= 2147483647LL;
+}
+
+// Pointer parameters annotated to receive an address rather than a value
+// (lowered object arguments, references, indirect results).
+bool ParamPassWantsAddress(const LowIRParam & param)
+{
+	if(param.type.kind != LOWIR_TYPE_PTR)
+		return false;
+	std::string pass = param.metadata.find("pass");
+	return pass == "indirect_result" || pass == "by_address" ||
+	       pass == "reference";
+}
+
+int ValueInfo::last_use() const
+{
+	int last = def_position;
+	for(size_t i = 0; i < uses.size(); i++)
+		if(uses[i].position > last)
+			last = uses[i].position;
+	return last;
+}
 
 long long ParseIntLiteral(const LowIROperand & operand)
 {
@@ -100,14 +135,6 @@ int FunctionLowering::pool_scan(bool callee_saved_only,
 	return -1;
 }
 
-void FunctionLowering::note_callee_saved(X64Register reg)
-{
-	for(size_t i = 0; i < preserve_.size(); i++)
-		if(preserve_[i] == reg)
-			return;
-	preserve_.push_back(reg);
-}
-
 // Allocates a pool register for a fresh value; values whose live range
 // crosses a call only take callee-saved registers. Returns false when the
 // pool is exhausted (the caller falls back to a frame home).
@@ -119,8 +146,6 @@ bool FunctionLowering::alloc_pool_gpr(const std::string & name,
 	if(index < 0)
 		return false;
 	pool_holder_[index] = name;
-	if(index >= kCalleeSavedStart)
-		note_callee_saved(kPool[index]);
 	ValueLocation location;
 	location.kind = ValueLocation::VL_GPR;
 	location.reg = kPool[index];
@@ -364,8 +389,6 @@ ValueLocation & FunctionLowering::resolve_location(const std::string & name)
 	}
 	X64Register reg = kPool[index];
 	pool_holder_[index] = name;
-	if(index >= kCalleeSavedStart)
-		note_callee_saved(reg);
 	mir_model::Instruction copy;
 	copy.opcode = mir_model::Instruction::MI_MOV;
 	copy.operands.push_back(MakeReg(reg));
@@ -448,8 +471,6 @@ X64Register FunctionLowering::reload_to_pool(const LowIROperand & operand,
 	X64Register reg = XR_RDX;
 	if(index >= 0) {
 		reg = kPool[index];
-		if(index >= kCalleeSavedStart)
-			note_callee_saved(reg);
 	}
 	long long offset;
 	if(operand.kind == LOWIR_OPERAND_SLOT)
@@ -542,8 +563,6 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 		if(index >= 0) {
 			out_reg = kPool[index];
 			pool_holder_[index] = dest;
-			if(index >= kCalleeSavedStart)
-				note_callee_saved(out_reg);
 			ValueLocation location;
 			location.kind = ValueLocation::VL_GPR;
 			location.reg = out_reg;

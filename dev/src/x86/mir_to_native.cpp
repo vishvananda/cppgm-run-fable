@@ -49,8 +49,12 @@ int TypeBits(const std::string & type)
 		return 32;
 	if (type == "f80")
 		return 80;
-	// i64/u64/ptr/f64 and the empty default are all 64-bit wide.
-	return 64;
+	// i64/u64/ptr/f64 and the untyped default are 64-bit wide; anything
+	// else is a producer bug and must not degrade silently.
+	if (type == "i64" || type == "u64" || type == "ptr" || type == "f64" ||
+	    type.empty())
+		return 64;
+	throw logic_error("unknown machine IR type spelling: " + type);
 }
 
 int Reg(const Op & op)
@@ -546,7 +550,8 @@ void FunctionEncoder::EmitPrologue()
 	code_.MovRegReg(64, X86_RBP, X86_RSP);
 	if (fn_->stack_size != 0)
 		code_.AluRegImm(X86_SUB_RI, 64, X86_RSP,
-		                static_cast<unsigned long long>(fn_->stack_size));
+		                CheckedImm32(
+		                    static_cast<long long>(fn_->stack_size)));
 	for (std::size_t i = 0; i < fn_->callee_saved_regs.size(); i++)
 		code_.MovMemReg(64, SavedRegSlot(i),
 		                static_cast<int>(fn_->callee_saved_regs[i]));
@@ -698,8 +703,7 @@ void FunctionEncoder::EmitCompare(const Ins & ins, bool is_test)
 			code_.Alu(is_test ? X86_TEST : X86_CMP, width, Reg(a), Reg(b));
 		else if (b.kind == Op::OP_IMM)
 			code_.AluRegImm(is_test ? X86_TEST_RI : X86_CMP_RI, width,
-			                Reg(a),
-			                static_cast<unsigned long long>(b.imm));
+			                Reg(a), CheckedImm32(b.imm));
 		else  // test is symmetric; only one r/m form exists
 			code_.AluRegMem(is_test ? X86_TEST : X86_CMP, width, Reg(a),
 			                MemOperand(b, 0));
@@ -712,8 +716,7 @@ void FunctionEncoder::EmitCompare(const Ins & ins, bool is_test)
 			                Reg(b), MemOperand(a, 0));
 		else
 			code_.AluMemImm(is_test ? X86_TEST_RI : X86_CMP_RI, width,
-			                MemOperand(a, 0),
-			                static_cast<unsigned long long>(b.imm));
+			                MemOperand(a, 0), CheckedImm32(b.imm));
 		return;
 	}
 	EmitCompareImmLhs(ins, width, is_test);
@@ -737,7 +740,7 @@ void FunctionEncoder::EmitCompareImmLhs(const Ins & ins, int width,
 		code_.Alu(is_test ? X86_TEST : X86_CMP, width, scratch, Reg(b));
 	else if (b.kind == Op::OP_IMM)
 		code_.AluRegImm(is_test ? X86_TEST_RI : X86_CMP_RI, width, scratch,
-		                static_cast<unsigned long long>(b.imm));
+		                CheckedImm32(b.imm));
 	else
 	{
 		// The push moved rsp: rsp-based operands sit 8 bytes deeper.

@@ -1,5 +1,6 @@
 #include "x86/lowir_to_mir.h"
 
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 
@@ -57,26 +58,57 @@ void FunctionLowering::Linearize()
 	block_first_position_.push_back((int)linear_.size());
 }
 
-namespace {
-
-bool storage_is_tls_probe(const LowIROperand & operand,
-                          const ProgramFacts & facts)
+// Storage accesses that lower through the TLS wrapper call, so operands
+// live *into* them must be call-safe.
+bool StorageIsTls(const LowIROperand & operand, const ProgramFacts & facts)
 {
 	return operand.kind == LOWIR_OPERAND_GLOBAL &&
 	       facts.tls_wrapper_of_global.count(operand.name) != 0;
 }
 
-bool instruction_embeds_call_probe(const LowIRInstruction & ins,
-                                   const ProgramFacts & facts)
+bool InstructionEmbedsCall(const LowIRInstruction & ins,
+                           const ProgramFacts & facts)
 {
 	if(ins.opcode == LOWIR_INS_LOAD || ins.opcode == LOWIR_INS_STORE ||
 	   ins.opcode == LOWIR_INS_ADDR) {
 		for(size_t o = 0; o < ins.operands.size(); o++)
-			if(storage_is_tls_probe(ins.operands[o], facts))
+			if(StorageIsTls(ins.operands[o], facts))
 				return true;
 	}
 	return false;
 }
+
+// The declared parameter list a call site is staged against (null for
+// calls with neither a known callee nor an explicit signature).
+const std::vector<LowIRParam> * FindCalleeParams(const LowIRInstruction & call,
+                                                 const ProgramFacts & facts)
+{
+	if(!call.callee_is_temp && facts.info->is_function(call.callee))
+		return &facts.info->functions.find(call.callee)->second->params;
+	if(call.signature.present)
+		return &call.signature.params;
+	return 0;
+}
+
+// block_first_position_ is sorted and ends with a linear_.size() sentinel.
+int FunctionLowering::enclosing_block_begin(int position) const
+{
+	std::vector<int>::const_iterator after = std::upper_bound(
+		block_first_position_.begin(), block_first_position_.end(),
+		position);
+	return after == block_first_position_.begin() ? 0 : *(after - 1);
+}
+
+int FunctionLowering::enclosing_block_end(int position) const
+{
+	std::vector<int>::const_iterator after = std::upper_bound(
+		block_first_position_.begin(), block_first_position_.end(),
+		position);
+	return after == block_first_position_.end()
+		? (int)linear_.size() : *after;
+}
+
+namespace {
 
 bool block_is_reentered(const LowIRFunction & function)
 {
@@ -115,61 +147,70 @@ void FunctionLowering::PromoteSlots()
 	if(function_.blocks.empty() || block_is_reentered(function_))
 		return;
 
-	int entry_end = block_first_position_[1];
-	for(std::map<std::string, SlotInfo>::iterator it = slots_.begin();
-	    it != slots_.end(); ++it) {
-		const std::string & name = it->first;
+	// One linear pass: a per-slot access summary, plus a prefix count of
+	// call-like instructions for the store-to-load range check.
+	struct SlotScan
+	{
 		int store_position = -1;
 		int store_count = 0;
-		int first_load = (int)linear_.size();
+		int first_load = -1;
 		int last_load = -1;
 		bool blocked = false;
-		for(size_t p = 0; p < linear_.size() && !blocked; p++) {
-			const LowIRInstruction & ins = *linear_[p];
-			if(ins.opcode == LOWIR_INS_ADDR &&
-			   ins.operands[0].kind == LOWIR_OPERAND_SLOT &&
-			   ins.operands[0].name == name)
-				blocked = true;
-			else if(ins.opcode == LOWIR_INS_STORE &&
-			        ins.operands[1].kind == LOWIR_OPERAND_SLOT &&
-			        ins.operands[1].name == name) {
-				store_position = (int)p;
-				store_count++;
-				if(!same_type(ins.type, it->second.type))
-					blocked = true;
-			}
-			else if(ins.opcode == LOWIR_INS_LOAD &&
-			        ins.operands[0].kind == LOWIR_OPERAND_SLOT &&
-			        ins.operands[0].name == name) {
-				if((int)p < first_load)
-					first_load = (int)p;
-				if((int)p > last_load)
-					last_load = (int)p;
-				if(!same_type(ins.type, it->second.type))
-					blocked = true;
-			}
-			else if(ins.opcode != LOWIR_INS_LOAD &&
-			        ins.opcode != LOWIR_INS_STORE) {
-				for(size_t o = 0; o < ins.operands.size(); o++)
-					if(ins.operands[o].kind == LOWIR_OPERAND_SLOT &&
-					   ins.operands[o].name == name)
-						blocked = true;
-			}
+	};
+	std::map<std::string, SlotScan> scans;
+	std::vector<int> calls_before(linear_.size() + 1, 0);
+	for(size_t p = 0; p < linear_.size(); p++) {
+		const LowIRInstruction & ins = *linear_[p];
+		calls_before[p + 1] = calls_before[p] +
+			(ins.opcode == LOWIR_INS_CALL ||
+			 InstructionEmbedsCall(ins, facts_) ? 1 : 0);
+		if(ins.opcode == LOWIR_INS_ADDR &&
+		   ins.operands[0].kind == LOWIR_OPERAND_SLOT)
+			scans[ins.operands[0].name].blocked = true;
+		else if(ins.opcode == LOWIR_INS_STORE &&
+		        ins.operands[1].kind == LOWIR_OPERAND_SLOT) {
+			SlotScan & scan = scans[ins.operands[1].name];
+			scan.store_position = (int)p;
+			scan.store_count++;
+			if(!same_type(ins.type, slots_[ins.operands[1].name].type))
+				scan.blocked = true;
 		}
-		if(blocked || store_count != 1 || store_position >= entry_end ||
-		   store_position > first_load ||
-		   FrameSizeOf(it->second.type) != 8)
+		else if(ins.opcode == LOWIR_INS_LOAD &&
+		        ins.operands[0].kind == LOWIR_OPERAND_SLOT) {
+			SlotScan & scan = scans[ins.operands[0].name];
+			if(scan.first_load < 0)
+				scan.first_load = (int)p;
+			scan.last_load = (int)p;
+			if(!same_type(ins.type, slots_[ins.operands[0].name].type))
+				scan.blocked = true;
+		}
+		else if(ins.opcode != LOWIR_INS_LOAD &&
+		        ins.opcode != LOWIR_INS_STORE) {
+			for(size_t o = 0; o < ins.operands.size(); o++)
+				if(ins.operands[o].kind == LOWIR_OPERAND_SLOT)
+					scans[ins.operands[o].name].blocked = true;
+		}
+	}
+
+	int entry_end = block_first_position_[1];
+	for(std::map<std::string, SlotScan>::iterator it = scans.begin();
+	    it != scans.end(); ++it) {
+		const SlotScan & scan = it->second;
+		SlotInfo & slot = slots_[it->first];
+		if(scan.blocked || scan.store_count != 1 ||
+		   scan.store_position >= entry_end ||
+		   (scan.first_load >= 0 &&
+		    scan.store_position > scan.first_load) ||
+		   FrameSizeOf(slot.type) != 8)
 			continue;
-		bool call_between = false;
-		for(int p = store_position + 1; p <= last_load; p++)
-			if(linear_[p]->opcode == LOWIR_INS_CALL ||
-			   instruction_embeds_call_probe(*linear_[p], facts_))
-				call_between = true;
-		if(call_between)
+		if(scan.last_load >= 0 &&
+		   calls_before[scan.last_load + 1] -
+		       calls_before[scan.store_position + 1] > 0)
 			continue;
-		it->second.promoted = true;
-		promoted_slot_value_[name] = linear_[store_position]->operands[0];
-		skip_positions_.insert(store_position);
+		slot.promoted = true;
+		promoted_slot_value_[it->first] =
+			linear_[scan.store_position]->operands[0];
+		skip_positions_.insert(scan.store_position);
 	}
 	AliasObjectParamSlots();
 }
@@ -181,6 +222,14 @@ void FunctionLowering::AliasObjectParamSlots()
 {
 	if(function_.blocks.empty() || block_is_reentered(function_))
 		return;
+	// textual temp-operand reference counts, computed once up front
+	std::map<std::string, int> temp_references;
+	for(size_t q = 0; q < linear_.size(); q++) {
+		const LowIRInstruction & ins = *linear_[q];
+		for(size_t o = 0; o < ins.operands.size(); o++)
+			if(ins.operands[o].kind == LOWIR_OPERAND_TEMP)
+				temp_references[ins.operands[o].name]++;
+	}
 	int entry_end = block_first_position_[1];
 	for(int p = 0; p < entry_end; p++) {
 		const LowIRInstruction & copy = *linear_[p];
@@ -209,15 +258,7 @@ void FunctionLowering::AliasObjectParamSlots()
 		   slots_[slot_name].promoted)
 			continue;
 		// the parameter must have no other reads
-		int param_uses = 0;
-		for(size_t q = 0; q < linear_.size(); q++) {
-			const LowIRInstruction & ins = *linear_[q];
-			for(size_t o = 0; o < ins.operands.size(); o++)
-				if(ins.operands[o].kind == LOWIR_OPERAND_TEMP &&
-				   ins.operands[o].name == param->name)
-					param_uses++;
-		}
-		if(param_uses != 1)
+		if(temp_references[param->name] != 1)
 			continue;
 		slots_[slot_name].alias_param = param->name;
 		skip_positions_.insert(p);
@@ -303,30 +344,6 @@ void FunctionLowering::RecordInstructionUses(const LowIRInstruction & ins,
 	}
 }
 
-namespace {
-
-// Instruction kinds whose lowering contains an embedded call (TLS access
-// through a wrapper), so operands live *into* them must be call-safe.
-bool storage_is_tls(const LowIROperand & operand, const ProgramFacts & facts)
-{
-	return operand.kind == LOWIR_OPERAND_GLOBAL &&
-	       facts.tls_wrapper_of_global.count(operand.name) != 0;
-}
-
-bool instruction_embeds_call(const LowIRInstruction & ins,
-                             const ProgramFacts & facts)
-{
-	if(ins.opcode == LOWIR_INS_LOAD || ins.opcode == LOWIR_INS_STORE ||
-	   ins.opcode == LOWIR_INS_ADDR) {
-		for(size_t o = 0; o < ins.operands.size(); o++)
-			if(storage_is_tls(ins.operands[o], facts))
-				return true;
-	}
-	return false;
-}
-
-}  // namespace
-
 void FunctionLowering::AnalyzeValues()
 {
 	for(size_t p = 0; p < function_.params.size(); p++) {
@@ -359,7 +376,7 @@ void FunctionLowering::AnalyzeValues()
 		}
 		RecordInstructionUses(ins, (int)p);
 		if(ins.opcode == LOWIR_INS_CALL ||
-		   instruction_embeds_call(ins, facts_))
+		   InstructionEmbedsCall(ins, facts_))
 			call_positions_.push_back((int)p);
 		if(ins.type.is_float() || ins.type2.is_float() ||
 		   ins.opcode == LOWIR_INS_CONVERT)
@@ -409,32 +426,35 @@ void FunctionLowering::RetimeSinkingCompares()
 
 void FunctionLowering::MarkCallCrossings()
 {
+	// call_positions_ is in program order; the embedded flag is computed
+	// once per call, not per (value, call) pair
+	std::vector<bool> embedded(call_positions_.size(), false);
+	for(size_t c = 0; c < call_positions_.size(); c++)
+		embedded[c] = InstructionEmbedsCall(*linear_[call_positions_[c]],
+		                                    facts_);
 	for(std::map<std::string, ValueInfo>::iterator it = values_.begin();
 	    it != values_.end(); ++it) {
 		ValueInfo & info = it->second;
 		int last = info.last_use();
-		for(size_t c = 0; c < call_positions_.size(); c++) {
-			int call = call_positions_[c];
-			bool embedded = call < (int)linear_.size() &&
-			                instruction_embeds_call(*linear_[call], facts_);
-			if(call > info.def_position &&
-			   (call < last || (embedded && call <= last)))
-				info.crosses_call = true;
+		// a call strictly inside (def, last) crosses; a call *at* the last
+		// use crosses only when it is embedded in that instruction
+		std::vector<int>::const_iterator call = std::upper_bound(
+			call_positions_.begin(), call_positions_.end(),
+			info.def_position);
+		if(call != call_positions_.end() &&
+		   (*call < last ||
+		    (*call == last && embedded[call - call_positions_.begin()])))
+			info.crosses_call = true;
+		int def_begin = -1, def_end = -1;
+		if(info.def_position >= 0) {
+			def_begin = enclosing_block_begin(info.def_position);
+			def_end = enclosing_block_end(info.def_position);
 		}
-		int def_block = -1;
-		for(size_t b = 0; b + 1 < block_first_position_.size(); b++)
-			if(info.def_position >= block_first_position_[b] &&
-			   info.def_position < block_first_position_[b + 1])
-				def_block = (int)b;
 		for(size_t u = 0; u < info.uses.size(); u++) {
 			int position = info.uses[u].position;
-			if(def_block >= 0 &&
-			   (position < block_first_position_[def_block] ||
-			    position >= block_first_position_[def_block + 1]))
+			if(def_begin >= 0 &&
+			   (position < def_begin || position >= def_end))
 				info.cross_block = true;
-			if(info.is_param)
-				info.cross_block = info.cross_block ||
-				                   position >= block_first_position_[1];
 		}
 		if(info.is_param)
 			info.cross_block = true;
@@ -449,33 +469,15 @@ void FunctionLowering::MarkCallCrossings()
 bool FunctionLowering::CallArgTargetsHome(int position, int arg_index,
                                           X64Register home) const
 {
-	static const X64Register arg_regs[6] =
-		{ XR_RDI, XR_RSI, XR_RDX, XR_RCX, XR_R8, XR_R9 };
 	const LowIRInstruction & call = *linear_[position];
-	const std::vector<LowIRParam> * params = 0;
-	if(!call.callee_is_temp && facts_.info->is_function(call.callee))
-		params = &facts_.info->functions.find(call.callee)->second->params;
-	else if(call.signature.present)
-		params = &call.signature.params;
+	const std::vector<LowIRParam> * params = FindCalleeParams(call, facts_);
 	if(!params)
 		return false;
-	int gpr = 0;
-	for(int a = 0; a <= arg_index && a < (int)call.operands.size(); a++) {
-		LowIRType type;
-		type.kind = LOWIR_TYPE_I64;
-		if(a < (int)params->size())
-			type = (*params)[a].type;
-		bool is_xmm = type.kind == LOWIR_TYPE_F32 ||
-		              type.kind == LOWIR_TYPE_F64;
-		bool by_stack = type.kind == LOWIR_TYPE_F80 ||
-		                (type.kind == LOWIR_TYPE_OBJ && type.obj_bytes > 8);
-		if(is_xmm || by_stack)
-			continue;
-		if(a == arg_index)
-			return gpr < 6 && arg_regs[gpr] == home;
-		gpr++;
-	}
-	return false;
+	std::vector<ArgSlot> slots = ClassifyCallArgs(*params, call, values_);
+	if(arg_index < 0 || arg_index >= (int)slots.size())
+		return false;
+	return slots[arg_index].kind == ArgSlot::AS_GPR &&
+	       kArgRegs[slots[arg_index].ordinal] == home;
 }
 
 bool FunctionLowering::ParamUseIsForwardable(const ValueInfo & info,
@@ -542,10 +544,38 @@ bool FunctionLowering::ParamUseIsForwardable(const ValueInfo & info,
 			default:
 				break;
 		}
-		if(instruction_embeds_call(between, facts_))
+		if(InstructionEmbedsCall(between, facts_))
 			return false;
 	}
 	return true;
+}
+
+// Marks temps whose address must be materialized for a by-address call
+// argument; they get frame homes at definition.
+void FunctionLowering::MarkByAddressArgs()
+{
+	for(size_t p = 0; p < linear_.size(); p++) {
+		const LowIRInstruction & ins = *linear_[p];
+		if(ins.opcode != LOWIR_INS_CALL)
+			continue;
+		const std::vector<LowIRParam> * params =
+			FindCalleeParams(ins, facts_);
+		if(!params)
+			continue;
+		for(size_t a = 0; a < ins.operands.size() && a < params->size();
+		    a++) {
+			const LowIROperand & arg = ins.operands[a];
+			if(arg.kind != LOWIR_OPERAND_TEMP)
+				continue;
+			if(!ParamPassWantsAddress((*params)[a]))
+				continue;
+			std::map<std::string, ValueInfo>::iterator it =
+				values_.find(arg.name);
+			if(it != values_.end() &&
+			   it->second.type.kind != LOWIR_TYPE_PTR)
+				it->second.needs_frame = true;
+		}
+	}
 }
 
 }  // namespace lowir_to_mir

@@ -8,41 +8,12 @@
 
 namespace lowir_to_mir {
 
-namespace {
-
-const X64Register kArgRegs[6] =
-	{ XR_RDI, XR_RSI, XR_RDX, XR_RCX, XR_R8, XR_R9 };
-
-struct ArgSlot
-{
-	enum Kind { AS_GPR, AS_XMM, AS_STACK } kind = AS_GPR;
-	int ordinal = 0;
-	long long stack_offset = 0;
-	LowIRType param_type;
-	bool by_address = false;
-};
-
-std::string ContainerSpelling(long long bytes)
-{
-	if(bytes <= 1) return "i8";
-	if(bytes <= 2) return "i16";
-	if(bytes <= 4) return "i32";
-	return "i64";
-}
-
-bool param_wants_address(const LowIRParam & param)
-{
-	if(param.type.kind != LOWIR_TYPE_PTR)
-		return false;
-	std::string pass = param.metadata.find("pass");
-	return pass == "indirect_result" || pass == "by_address" ||
-	       pass == "reference";
-}
-
 // Splits call arguments into GPR / XMM / stack slots in argument order.
-std::vector<ArgSlot> classify_args(const std::vector<LowIRParam> & params,
-                                   const LowIRInstruction & ins,
-                                   const std::map<std::string, ValueInfo> & values)
+// This is the single owner of the caller-side argument classification;
+// CallArgTargetsHome consumes the same slots when it decides forwarding.
+std::vector<ArgSlot> ClassifyCallArgs(
+	const std::vector<LowIRParam> & params, const LowIRInstruction & ins,
+	const std::map<std::string, ValueInfo> & values)
 {
 	std::vector<ArgSlot> slots;
 	int gpr = 0, xmm = 0;
@@ -51,7 +22,7 @@ std::vector<ArgSlot> classify_args(const std::vector<LowIRParam> & params,
 		ArgSlot slot;
 		if(a < params.size()) {
 			slot.param_type = params[a].type;
-			slot.by_address = param_wants_address(params[a]);
+			slot.by_address = ParamPassWantsAddress(params[a]);
 		}
 		else {
 			// variadic tail: classify by the argument's own value
@@ -86,12 +57,14 @@ std::vector<ArgSlot> classify_args(const std::vector<LowIRParam> & params,
 		else if(type.kind == LOWIR_TYPE_F80) {
 			slot.kind = ArgSlot::AS_STACK;
 			slot.stack_offset = stack;
-			stack += 16;
+			slot.stack_bytes = 16;
+			stack += slot.stack_bytes;
 		}
 		else if(type.kind == LOWIR_TYPE_OBJ && type.obj_bytes > 8) {
 			slot.kind = ArgSlot::AS_STACK;
 			slot.stack_offset = stack;
-			stack += (type.obj_bytes + 7) / 8 * 8;
+			slot.stack_bytes = (type.obj_bytes + 7) / 8 * 8;
+			stack += slot.stack_bytes;
 		}
 		else if(gpr < 6) {
 			slot.kind = ArgSlot::AS_GPR;
@@ -100,30 +73,22 @@ std::vector<ArgSlot> classify_args(const std::vector<LowIRParam> & params,
 		else {
 			slot.kind = ArgSlot::AS_STACK;
 			slot.stack_offset = stack;
-			stack += 8;
+			stack += slot.stack_bytes;
 		}
 		slots.push_back(slot);
 	}
-	// remember total stack bytes in a trailing sentinel-free way
-	if(!slots.empty())
-		slots[0].stack_offset = slots[0].kind == ArgSlot::AS_STACK
-			? slots[0].stack_offset : slots[0].stack_offset;
 	return slots;
 }
+
+namespace {
 
 long long stack_bytes_of(const std::vector<ArgSlot> & slots)
 {
 	long long total = 0;
 	for(size_t i = 0; i < slots.size(); i++)
-		if(slots[i].kind == ArgSlot::AS_STACK) {
-			long long size = slots[i].param_type.kind == LOWIR_TYPE_F80 ? 16
-				: slots[i].param_type.kind == LOWIR_TYPE_OBJ &&
-				  slots[i].param_type.obj_bytes > 8
-					? (slots[i].param_type.obj_bytes + 7) / 8 * 8
-					: 8;
-			if(slots[i].stack_offset + size > total)
-				total = slots[i].stack_offset + size;
-		}
+		if(slots[i].kind == ArgSlot::AS_STACK &&
+		   slots[i].stack_offset + slots[i].stack_bytes > total)
+			total = slots[i].stack_offset + slots[i].stack_bytes;
 	return (total + 15) / 16 * 16;
 }
 
@@ -148,7 +113,7 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	else {
 		throw std::runtime_error("call to unknown callee @" + ins.callee);
 	}
-	std::vector<ArgSlot> slots = classify_args(*params, ins, values_);
+	std::vector<ArgSlot> slots = ClassifyCallArgs(*params, ins, values_);
 	long long stack_adjust = stack_bytes_of(slots);
 	int gpr_count = 0;
 	for(size_t i = 0; i < slots.size(); i++)
@@ -208,15 +173,20 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		ValueLocation & bounce = locations_[arg.name];
 		if(bounce.kind != ValueLocation::VL_ARG_REG)
 			continue;
-		(void)0;
 		int index = pool_scan(false, false);
-		if(index < 0)
+		if(index < 0) {
+			// no scratch register free: park the value in the frame
+			long long offset = alloc_anonymous_spill();
+			mir_model::Instruction & spill =
+				emit(mir_model::Instruction::MI_STORE);
+			spill.type = "i64";
+			spill.operands.push_back(frame_operand(offset));
+			spill.operands.push_back(MakeReg(bounce.reg));
+			bounce.kind = ValueLocation::VL_FRAME;
+			bounce.frame_offset = offset;
 			continue;
-		static const X64Register pool[FunctionLowering::kPoolSize] =
-			{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
-		X64Register scratch = pool[index];
-		if(index >= 2)
-			note_callee_saved(scratch);
+		}
+		X64Register scratch = kPool[index];
 		emit_mov(MakeReg(scratch), MakeReg(bounce.reg));
 		pool_holder_[index] = arg.name;
 		bounce.kind = ValueLocation::VL_GPR;
@@ -247,6 +217,49 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		location.kind = ValueLocation::VL_FRAME;
 		location.frame_offset = offset;
 		locations_[arg.name] = location;
+	}
+
+	// Argument sources living in the low xmm registers that the staging
+	// itself writes spill to anonymous frame slots first. A source is safe
+	// when its register is its own slot (that write is skipped) or when
+	// every read of it happens before its register is overwritten.
+	int xmm_count = 0;
+	for(size_t i = 0; i < slots.size(); i++)
+		if(slots[i].kind == ArgSlot::AS_XMM)
+			xmm_count++;
+	for(size_t a = 0; a < ins.operands.size(); a++) {
+		const LowIROperand & arg = ins.operands[a];
+		if(arg.kind != LOWIR_OPERAND_TEMP)
+			continue;
+		ValueLocation & location = locations_[arg.name];
+		if(location.kind != ValueLocation::VL_XMM ||
+		   (int)location.xmm >= xmm_count)
+			continue;
+		bool in_place = false, read_after_write = false;
+		for(size_t b = 0; b < ins.operands.size(); b++) {
+			if(ins.operands[b].kind != LOWIR_OPERAND_TEMP ||
+			   ins.operands[b].name != arg.name)
+				continue;
+			if(slots[b].kind == ArgSlot::AS_XMM &&
+			   slots[b].ordinal == (int)location.xmm)
+				in_place = true;
+			else if(slots[b].kind != ArgSlot::AS_XMM ||
+			        slots[b].ordinal > (int)location.xmm)
+				read_after_write = true;
+		}
+		if(in_place || !read_after_write)
+			continue;
+		const LowIRType & value_type = values_[arg.name].type;
+		long long offset = alloc_anonymous_spill();
+		mir_model::Instruction & spill =
+			emit(mir_model::Instruction::MI_FMOV);
+		spill.type = SpellType(value_type);
+		spill.operands.push_back(frame_operand(offset));
+		spill.operands.push_back(MakeXmm(location.xmm));
+		release_value(arg.name);
+		ValueLocation & spot = locations_[arg.name];
+		spot.kind = ValueLocation::VL_FRAME;
+		spot.frame_offset = offset;
 	}
 
 	if(stack_adjust > 0) {
@@ -427,6 +440,37 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			mov.operands.push_back(MakeDeref(XR_RSP, slot.stack_offset));
 			mov.operands.push_back(source);
 		}
+		else if(slot.param_type.kind == LOWIR_TYPE_OBJ &&
+		        slot.param_type.obj_bytes > 8) {
+			// by-value memory-class object: copy the padded container into
+			// the reserved stack region in 8-byte chunks through r11
+			mir_model::Operand base;
+			if(arg.kind == LOWIR_OPERAND_SLOT)
+				base = frame_operand(slots_[arg.name].frame_offset);
+			else if(arg.kind == LOWIR_OPERAND_TEMP &&
+			        resolve_location(arg.name).kind ==
+			            ValueLocation::VL_FRAME)
+				base = frame_operand(
+					locations_[arg.name].frame_offset);
+			else
+				throw std::runtime_error(
+					"unsupported by-value object argument");
+			for(long long off = 0; off < slot.stack_bytes; off += 8) {
+				mir_model::Operand chunk = base;
+				chunk.offset += off;
+				mir_model::Instruction & load =
+					emit(mir_model::Instruction::MI_LOAD);
+				load.type = "i64";
+				load.operands.push_back(MakeReg(XR_R11));
+				load.operands.push_back(chunk);
+				mir_model::Instruction & store =
+					emit(mir_model::Instruction::MI_STORE);
+				store.type = "i64";
+				store.operands.push_back(
+					MakeDeref(XR_RSP, slot.stack_offset + off));
+				store.operands.push_back(MakeReg(XR_R11));
+			}
+		}
 		else {
 			// integer-class stack argument staged through r11
 			mir_model::Operand source;
@@ -440,6 +484,19 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 				lea.operands.push_back(MakeReg(XR_R11));
 				lea.operands.push_back(
 					frame_operand(slots_[arg.name].frame_offset));
+				source = MakeReg(XR_R11);
+			}
+			else if(operand_is_pending(arg)) {
+				// a deferred single-use load lands directly in r11
+				const LowIRInstruction * load = take_pending(arg);
+				mir_model::Operand address =
+					address_operand(load->operands[0], XR_R11);
+				release_after_use(*load);
+				mir_model::Instruction & fill =
+					emit(mir_model::Instruction::MI_LOAD);
+				fill.type = SpellType(load->type);
+				fill.operands.push_back(MakeReg(XR_R11));
+				fill.operands.push_back(address);
 				source = MakeReg(XR_R11);
 			}
 			else {
@@ -937,8 +994,7 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 	mir_model::Operand right;
 	if(rhs_literal) {
 		long long value = ParseIntLiteral(rhs);
-		bool inline_ok = wide && value >= -2147483647LL - 1 &&
-		                 value <= 2147483647LL;
+		bool inline_ok = wide && FitsImm32(value);
 		if(inline_ok) {
 			right = MakeImm(value);
 		}

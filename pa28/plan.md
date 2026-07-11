@@ -236,3 +236,82 @@ parameters. Spill homes for narrow scalars round to 8 bytes.
    after each layout change.
 5. Full `make test-report-through-pa28` before commit; PA13-PA27 must
    stay green (shared parser/validator changes are additive only).
+
+## Architecture Review
+
+The implemented pipeline matches the plan: the PA13 front half parses
+and validates unchanged (plus the opt-in `require_entry=false` for
+helper-only inputs), `LowerLowIRProgramToMir` produces the one
+`MirProgram` that both `mir_serialize.cpp` and `mir_to_native.cpp`
+consume, and the encoder emits x86-64 through the extended PA9
+`x86_encoding`/`elf_program` layers. Dead-copy cleanup and frame
+finalization happen inside lowering, so the dump can never disagree
+with the binary. The CLI keeps only argument handling; there is no
+CY86 anywhere in the path.
+
+Module ownership after the audit:
+
+- `lowir_to_mir_model.h` — the lowering data model: value facts
+  (`ValueInfo`/`ValueUse`), locations, slot/program facts, the shared
+  LowIR predicates (`StorageIsTls`, `InstructionEmbedsCall`,
+  `FindCalleeParams`, `ParamPassWantsAddress`, `ContainerSpelling`,
+  `FitsImm32`), call-argument classification (`ArgSlot`,
+  `ClassifyCallArgs`), and the register-discipline constants
+  (`kArgRegs`, `kPool`, `kCalleeSavedStart`) each with exactly one
+  definition.
+- `lowir_to_mir_analyze.cpp` — pre-lowering passes only: linearize,
+  slot promotion/aliasing, use recording, compare retiming,
+  call-crossing marks, by-address argument marking, forwardability.
+  All passes are linear or O(n log n) (per-slot summaries plus a
+  call-position prefix count; binary searches over the sorted call
+  and block-position tables).
+- `lowir_to_mir_value.cpp` — the location/pool/frame state machine and
+  operand materialization, including the lazy parameter-copy
+  materialization in `resolve_location`.
+- `lowir_to_mir_program.cpp` — function scaffolding (parameter ABI
+  planning, entry copies, frame finalization, dispatch) and program
+  assembly (globals, startup).
+- `lowir_to_mir_inst.cpp` / `lowir_to_mir_flow.cpp` — instruction
+  templates, and calls/atomics/control-flow respectively.
+
+The single load-bearing invariant is the caller-side argument
+classification: staging (`LowerCall`), forwarding analysis
+(`CallArgTargetsHome`), and stack-region sizing all consume
+`ClassifyCallArgs`, so an argument cannot be classified differently in
+two places. Call-boundary safety is handled uniformly: sources in
+r8/r9 (pool registers that double as arg registers) spill to
+anonymous frame slots, sources in low xmm registers spill unless
+staged in place, forwarded params bounce or park in the frame, and
+call-crossing params take callee-saved registers with a named
+frame-home fallback when the five callee-saved registers run out.
+
+## Final Architecture Review
+
+Audit-driven changes that finalize the architecture (details in
+pa28/audit.md):
+
+- Four silent-miscompile paths beyond the fixture corpus were fixed:
+  the sixth call-crossing parameter, deferred loads feeding stack
+  arguments, XMM staging without parallel-move handling, and by-value
+  `obj>8` stack arguments (both caller and callee sides).
+- Every unsupported form now fails loudly: float unaries other than
+  `neg`, unknown global-init forms, unknown MIR type spellings, and
+  out-of-range compare/prologue immediates all throw instead of
+  degrading.
+- Duplicate ownership was eliminated (argument classification, pool
+  and arg-register tables, pass-mode/TLS/container predicates,
+  callee-param lookup) and dead state removed (`preserve_`,
+  `note_callee_saved`, the never-written `"*hole:"` sentinel).
+  `FinishFrame` remains the single owner of the preserve set,
+  computed from the final post-cleanup body.
+- The quadratic analysis passes were made linear/logarithmic without
+  changing any pinned MIR output.
+
+Boundary posture for the next stages (PA29/PA31): LowIR text remains
+the only input channel; every backend fact lives either in
+`LowIRInstruction` typed fields (e.g. `atomic_order`) or in the typed
+`MirProgram` (e.g. `tls_wrappers`, global-init addends, frame
+metadata). The MIR dump is a pure serialization of that program, and
+the encoder consumes it without re-deriving lowering decisions, so a
+later optimization pass can be inserted between lowering and encoding
+without touching either side.

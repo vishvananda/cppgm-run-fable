@@ -24,11 +24,6 @@ std::string IntWidthSpelling(const LowIRType & type)
 	}
 }
 
-bool FitsImm32(long long value)
-{
-	return value >= -2147483647LL - 1 && value <= 2147483647LL;
-}
-
 }  // namespace
 
 bool FunctionLowering::type_is_signed(const LowIRType & type) const
@@ -60,8 +55,7 @@ X86Condition FunctionLowering::integer_condition(const std::string & pred,
 
 bool FunctionLowering::storage_is_tls(const LowIROperand & operand) const
 {
-	return operand.kind == LOWIR_OPERAND_GLOBAL &&
-	       facts_.tls_wrapper_of_global.count(operand.name) != 0;
+	return StorageIsTls(operand, facts_);
 }
 
 void FunctionLowering::emit_tls_addr(const std::string & global_name)
@@ -85,11 +79,7 @@ const LowIRInstruction * FunctionLowering::fused_compare_for_branch(
 	invert = false;
 	if(branch.operands[0].kind != LOWIR_OPERAND_TEMP || position < 1)
 		return 0;
-	int block_begin = 0;
-	for(size_t b = 0; b + 1 < block_first_position_.size(); b++)
-		if(position >= block_first_position_[b] &&
-		   position < block_first_position_[b + 1])
-			block_begin = block_first_position_[b];
+	int block_begin = enclosing_block_begin(position);
 	for(int p = position - 1; p >= block_begin; p--) {
 		const LowIRInstruction & prior = *linear_[p];
 		if(prior.result != branch.operands[0].name)
@@ -186,11 +176,7 @@ bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
 	        FrameSizeOf(ins.type) == FrameSizeOf(user.type)) {
 		// the compare must sink into its block's branch; loads may ride
 		// along past intervening instructions only from stable storage
-		int cmp_block_end = (int)linear_.size();
-		for(size_t b = 0; b + 1 < block_first_position_.size(); b++)
-			if(use.position >= block_first_position_[b] &&
-			   use.position < block_first_position_[b + 1])
-				cmp_block_end = block_first_position_[b + 1];
+		int cmp_block_end = enclosing_block_end(use.position);
 		bool invert = false;
 		if(cmp_block_end - 1 < (int)linear_.size() &&
 		   linear_[cmp_block_end - 1]->opcode == LOWIR_INS_BRANCH &&
@@ -557,9 +543,7 @@ void FunctionLowering::LowerStore(const LowIRInstruction & ins)
 		const LowIROperand & source = ins.operands[0];
 		X64Register staged;
 		if(index >= 0) {
-			staged = index == 2 ? XR_RBX
-			       : (X64Register)(XR_R12 + (index - 3));
-			note_callee_saved(staged);
+			staged = kPool[index];
 			if(source.kind == LOWIR_OPERAND_LITERAL)
 				emit_mov(MakeReg(staged),
 				         MakeImm(ParseIntLiteral(source)));
@@ -638,11 +622,8 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 	if(base_callee_saved && !value_dies_here(base.name)) {
 		int index = pool_scan(true, false);
 		if(index >= 0) {
-			static const X64Register pool[kPoolSize] =
-				{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
-			reg = pool[index];
+			reg = kPool[index];
 			pool_holder_[index] = ins.result;
-			note_callee_saved(reg);
 			ValueLocation location;
 			location.kind = ValueLocation::VL_GPR;
 			location.reg = reg;
@@ -669,9 +650,6 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 		       values_[ins.result].last_use()) {
 			source.kind = ValueLocation::VL_GPR;
 			source.reg = reg;
-			for(int i = 0; i < kPoolSize; i++)
-				if(pool_holder_[i] == "*hole:" + base.name)
-					pool_holder_[i] = "";
 		}
 	}
 	const LowIROperand & count = ins.operands[1];
@@ -703,6 +681,9 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 void FunctionLowering::LowerUnary(const LowIRInstruction & ins)
 {
 	if(ins.type.is_float()) {
+		if(ins.operation != "neg")
+			throw std::runtime_error("unknown float unary operation: " +
+			                         ins.operation);
 		mir_model::Operand source = float_read(ins.operands[0], ins.type);
 		if(ins.type.is_f80() || values_[ins.result].crosses_call) {
 			long long offset = f80_result_home(ins.result);
@@ -1054,12 +1035,8 @@ void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
 		if(param_source && !values_[ins.result].crosses_call)
 			index = pool_scan(false, true);
 		if(index >= 0) {
-			static const X64Register pool[kPoolSize] =
-				{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
-			reg = pool[index];
+			reg = kPool[index];
 			pool_holder_[index] = ins.result;
-			if(index >= 2)
-				note_callee_saved(reg);
 			ValueLocation location;
 			location.kind = ValueLocation::VL_GPR;
 			location.reg = reg;
