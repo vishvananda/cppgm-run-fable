@@ -302,6 +302,8 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 	{
 	case SN_LITERAL:
 		return LowerLiteralValue(node);
+	case SN_STATEMENT_EXPRESSION:
+		return LowerStatementExpression(node, true);
 	case SN_ID_EXPRESSION:
 		return LowerIdValue(node);
 	case SN_CALL_EXPRESSION:
@@ -1090,6 +1092,22 @@ string FunctionLowerer::LowerReferenceArgument(const SemNode& node,
 		}
 		return address;
 	}
+	if (node.kind == SN_STATEMENT_EXPRESSION)
+	{
+		// PA29 GNU statement expression: the leading statements run,
+		// then the trailing value binds the reference.
+		const SemNode* tail = StatementExpressionTail(node);
+		if (!tail)
+			throw std::runtime_error(
+				"void statement expression bound to a reference");
+		const SemNode& compound = *node.children.back();
+		PushCleanupScope();
+		for (size_t i = 0; i + 1 < compound.children.size(); i++)
+			LowerStatement(*compound.children[i]);
+		string address = LowerReferenceArgument(*tail, referee);
+		PopCleanupScope(true);
+		return address;
+	}
 	TypePtr source = RemoveTopCv(StripRef(node.type));
 	bool binds_directly = node.category != VC_PRVALUE &&
 		(TypeEquals(source, bare) ||
@@ -1471,6 +1489,46 @@ string FunctionLowerer::LowerCalleeText(const SemNode& callee,
 
 // --- effects ---------------------------------------------------------------
 
+// PA29 GNU statement expression: the leading statements run in their
+// own cleanup scope; the trailing expression statement (when present)
+// yields the expression's value.
+const SemNode* FunctionLowerer::StatementExpressionTail(const SemNode& node)
+{
+	if (node.children.empty())
+		return 0;
+	const SemNode& compound = *node.children.back();
+	if (compound.children.empty())
+		return 0;
+	const SemNode* last = compound.children.back().get();
+	if (last->kind != SN_EXPRESSION_STATEMENT || last->children.empty())
+		return 0;
+	return last->children[0].get();
+}
+
+LowerValue FunctionLowerer::LowerStatementExpression(const SemNode& node,
+                                                     bool as_value)
+{
+	LowerValue value;
+	value.type = NodeType(node);
+	if (node.children.empty())
+		return value;
+	const SemNode& compound = *node.children.back();
+	const SemNode* tail = StatementExpressionTail(node);
+	PushCleanupScope();
+	size_t count = compound.children.size();
+	for (size_t i = 0; i + (tail ? 1 : 0) < count; i++)
+		LowerStatement(*compound.children[i]);
+	if (tail)
+	{
+		if (as_value)
+			value = LowerValueExpr(*tail);
+		else
+			LowerEffect(*tail);
+	}
+	PopCleanupScope(true);
+	return value;
+}
+
 void FunctionLowerer::LowerEffect(const SemNode& node)
 {
 	switch (node.kind)
@@ -1501,6 +1559,9 @@ void FunctionLowerer::LowerEffect(const SemNode& node)
 	case SN_DYNAMIC_CAST:
 		// A discarded cast still runs its runtime query.
 		LowerDynamicCast(node);
+		return;
+	case SN_STATEMENT_EXPRESSION:
+		LowerStatementExpression(node, false);
 		return;
 	case SN_THROW:
 		LowerThrow(node);

@@ -294,6 +294,11 @@ void PrintExpr(const AstExpr& expr, ostream& out, int depth)
 		for (size_t i = 0; i < expr.operands.size(); i++)
 			PrintExpr(*expr.operands[i], out, depth + 1);
 		break;
+	case EK_STATEMENT_EXPR:
+		Line(out, depth, "statement-expression");
+		if (expr.stmt_body)
+			PrintStmt(*expr.stmt_body, out, depth + 1);
+		break;
 	case EK_KEYWORD_LITERAL:
 		Line(out, depth, "keyword-literal " + TokenAnno(expr.op, expr.literal));
 		break;

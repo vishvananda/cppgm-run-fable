@@ -174,6 +174,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeDelete(expr);
 	case EK_LAMBDA:
 		return host_.AnalyzeLambda(expr);
+	case EK_STATEMENT_EXPR:
+		return host_.AnalyzeStatementExpression(expr);
 	default:
 		throw OutsideBoundary("expression form");
 	}

@@ -214,6 +214,12 @@ private:
 	void BranchOnValue(const SemNode& node, const string& true_label,
 	                   const string& false_label);
 	void LowerEffect(const SemNode& node);
+	// PA29 GNU statement expressions (lower_expr.cpp): the trailing
+	// expression statement's node ("" value when absent) and the
+	// value/effect lowering over the bound compound statement.
+	const SemNode* StatementExpressionTail(const SemNode& node);
+	LowerValue LowerStatementExpression(const SemNode& node,
+	                                    bool as_value);
 	// `result_address` carries the caller-owned destination of an
 	// indirect class-valued call ("" lets class results materialize at
 	// the consumer).

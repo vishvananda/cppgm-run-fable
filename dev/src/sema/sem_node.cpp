@@ -56,6 +56,7 @@ const char* NodeKeyword(ESemNodeKind kind)
 	case SN_COMPOUND_STATEMENT: return "compound-statement";
 	case SN_SIMPLE_DECLARATION: return "simple-declaration";
 	case SN_EXPRESSION_STATEMENT: return "expression-statement";
+	case SN_STATEMENT_EXPRESSION: return "statement-expression";
 	case SN_RETURN_STATEMENT: return "return-statement";
 	case SN_IF_STATEMENT: return "if-statement";
 	case SN_THEN: return "then";

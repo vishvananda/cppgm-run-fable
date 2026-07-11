@@ -65,6 +65,7 @@ public:
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
 	                                          vector<SemValue> args);
 	virtual SemValue AnalyzeLambda(const AstExpr& expr);  // PA24
+	virtual SemValue AnalyzeStatementExpression(const AstExpr& expr);
 	virtual bool TryCaptureUse(const ScopeBinding& binding, SemValue& out);
 	virtual SemNodePtr ThisValueNode();
 	virtual bool CapturelessClosureFunction(const NamedTypeInfo* cls,

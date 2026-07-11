@@ -791,6 +791,19 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 		{
 			State state = Save();
 			Advance();
+			// GNU statement expression: ( compound-statement ).
+			if (AtSimple(OP_LBRACE))
+			{
+				AstStmtPtr body = ParseCompoundStatement();
+				if (body && MatchSimple(OP_RPAREN))
+				{
+					AstExprPtr node = MakeExpr(EK_STATEMENT_EXPR);
+					node->stmt_body = move(body);
+					return node;
+				}
+				Restore(state);
+				return AstExprPtr();
+			}
 			AstExprPtr inner = ParseExpression();
 			if (!inner || !MatchSimple(OP_RPAREN))
 			{
