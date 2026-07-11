@@ -94,7 +94,7 @@ bool check_symbol_metadata_item(const string & key, const string & value)
 			fail("unknown binding value: " + value);
 		return true;
 	}
-	if(key == "keep_alias" || key == "prefer_local")
+	if(key == "keep_alias" || key == "prefer_local" || key == "object_root")
 	{
 		if(!value_in(value, kYesNo))
 			fail("bad " + key + " value: " + value);
@@ -102,7 +102,9 @@ bool check_symbol_metadata_item(const string & key, const string & value)
 	}
 	if(key == "object")
 	{
-		if(value.empty() || value[0] == '@')
+		// PA29: `object=@low` marks a weak entity that merges across
+		// translation units by its own (deterministic) low name.
+		if(value.empty() || value == "@")
 			fail("bad object symbol value: " + value);
 		return true;
 	}

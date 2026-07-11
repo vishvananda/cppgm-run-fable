@@ -179,6 +179,7 @@ struct LowIRInstruction
 	long atomic_order = 5;    // atomic memory order (__ATOMIC_* value)
 	long atomic_failure_order = 5;
 	vector<string> eh_types;  // eh_catch/eh_filter type symbols
+	long eh_selector = 0;     // eh_catch/eh_catch_all handler selector
 
 	bool is_terminator() const
 	{

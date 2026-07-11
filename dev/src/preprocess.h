@@ -48,8 +48,18 @@ public:
 	Preprocessor(IPPTokenStream& output,
 	             const vector<pair<string, string>>& object_macros);
 
+	// PA29: user include search directories (-I), tried after the
+	// including file's directory and before the working directory.
+	void AddIncludeDir(const string& dir);
+
 	// Runs phases 1-4 over the source file named on the command line.
 	void ProcessSourceFile(const string& path);
+
+	// PA29: runs phases 1-4 over in-memory source text (the built-in
+	// runtime library translation unit). `presumed_name` is the
+	// __FILE__ spelling; it contributes no directory to include search.
+	void ProcessSourceText(const string& presumed_name,
+	                       const string& bytes);
 
 	// IBuiltinTokenSource: __FILE__/__LINE__ values for an invocation
 	// through `head`, from its position stamp and its file instance's
@@ -108,6 +118,7 @@ private:
 	MacroTable table_;
 	MacroExpander expander_;
 	IPPTokenStream& output_;
+	vector<string> include_dirs_;
 	vector<FileInstance> files_;
 	vector<CondGroup> conds_;
 	set<PreprocFileId> pragma_onced_;

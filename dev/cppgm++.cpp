@@ -21,6 +21,11 @@
 #include "sema/scope.h"
 #include "sema/sem_binder.h"
 #include "sema/sem_node.h"
+#include "toolchain/compile_unit.h"
+#include "toolchain/elf_reader.h"
+#include "toolchain/link_executable.h"
+#include "toolchain/object_module.h"
+#include "toolchain/runtime_library.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -56,9 +61,16 @@ enum class DriverMode
 struct DriverInvocation
 {
   DriverMode mode;
+  string outfile;
+  bool explicit_outfile;
+  string target;
+  vector<string> include_dirs;
+  vector<string> lib_dirs;
+  vector<string> libs;
+  vector<string> inputs;
 
   DriverInvocation()
-      : mode(DriverMode::Link)
+      : mode(DriverMode::Link), explicit_outfile(false)
   {
   }
 };
@@ -267,18 +279,41 @@ bool consume_preprocess_option(const vector<string> & args, size_t & i)
   return false;
 }
 
-bool consume_search_option(const vector<string> & args, size_t & i)
+// Joined-or-separate option value collection: `-I dir` and `-Idir`.
+bool collect_joined_or_separate_option(const vector<string> & args,
+                                       size_t & i,
+                                       const string & option,
+                                       const string & expected,
+                                       vector<string> & values)
 {
-  if(consume_joined_or_separate_option(args, i, "-I", "path")) {
+  if(args[i] == option) {
+    consume_required_option_argument(args, i, option, expected);
+    values.push_back(args[i]);
+    return true;
+  }
+  if(starts_with(args[i], option) && args[i].size() > option.size()) {
+    values.push_back(args[i].substr(option.size()));
+    return true;
+  }
+  return false;
+}
+
+bool consume_search_option(const vector<string> & args, size_t & i,
+                           DriverInvocation & invocation)
+{
+  if(collect_joined_or_separate_option(args, i, "-I", "path",
+                                       invocation.include_dirs)) {
     return true;
   }
   if(consume_joined_or_separate_option(args, i, "-isystem", "path")) {
     return true;
   }
-  if(consume_joined_or_separate_option(args, i, "-L", "path")) {
+  if(collect_joined_or_separate_option(args, i, "-L", "path",
+                                       invocation.lib_dirs)) {
     return true;
   }
-  if(consume_joined_or_separate_option(args, i, "-l", "library name")) {
+  if(collect_joined_or_separate_option(args, i, "-l", "library name",
+                                       invocation.libs)) {
     return true;
   }
   return false;
@@ -301,7 +336,8 @@ bool consume_dependency_option(const vector<string> & args, size_t & i)
   return false;
 }
 
-bool consume_toolchain_option(const vector<string> & args, size_t & i)
+bool consume_toolchain_option(const vector<string> & args, size_t & i,
+                              DriverInvocation & invocation)
 {
   if(is_debug_info_flag(args[i])) {
     return true;
@@ -311,12 +347,14 @@ bool consume_toolchain_option(const vector<string> & args, size_t & i)
   }
   if(args[i] == "--target") {
     consume_required_option_argument(args, i, "--target", "target");
+    invocation.target = args[i];
     return true;
   }
   if(starts_with(args[i], "--target=")) {
     if(args[i].size() == string("--target=").size()) {
       throw missing_option_argument("--target", "target");
     }
+    invocation.target = args[i].substr(string("--target=").size());
     return true;
   }
   if(args[i] == "-std") {
@@ -353,8 +391,6 @@ DriverInvocation parse_driver_invocation(const vector<string> & args)
 
   bool compile_only = false;
   bool preprocess_only = false;
-  bool explicit_outfile = false;
-  vector<string> inputs;
 
   for(size_t i = 0; i < args.size(); ++i) {
     if(is_query_driver_flag(args[i])) {
@@ -370,29 +406,31 @@ DriverInvocation parse_driver_invocation(const vector<string> & args)
     }
     if(args[i] == "-o") {
       consume_required_option_argument(args, i, "-o", "output file");
-      explicit_outfile = true;
+      invocation.outfile = args[i];
+      invocation.explicit_outfile = true;
       continue;
     }
     if(consume_preprocess_option(args, i) ||
-       consume_search_option(args, i) ||
+       consume_search_option(args, i, invocation) ||
        consume_dependency_option(args, i) ||
-       consume_toolchain_option(args, i) ||
+       consume_toolchain_option(args, i, invocation) ||
        is_benign_driver_flag(args[i])) {
       continue;
     }
     if(starts_with(args[i], "-")) {
       throw logic_error("unsupported driver option: " + args[i]);
     }
-    inputs.push_back(args[i]);
+    invocation.inputs.push_back(args[i]);
   }
 
   if(compile_only && preprocess_only) {
     throw logic_error("cannot combine -c and -E");
   }
-  if(inputs.empty()) {
+  if(invocation.inputs.empty()) {
     throw logic_error("invalid usage");
   }
-  if((compile_only || preprocess_only) && explicit_outfile && inputs.size() != 1) {
+  if((compile_only || preprocess_only) && invocation.explicit_outfile &&
+     invocation.inputs.size() != 1) {
     throw logic_error("cannot specify -o when generating multiple output files");
   }
 
@@ -401,6 +439,120 @@ DriverInvocation parse_driver_invocation(const vector<string> & args)
       compile_only ? DriverMode::Compile :
       DriverMode::Link;
   return invocation;
+}
+
+// -c output default: the source stem with the .obj suffix, beside the
+// working directory (matching the one-file contract).
+string default_object_outfile(const string & srcfile)
+{
+  size_t slash = srcfile.rfind('/');
+  string base = slash == string::npos ? srcfile : srcfile.substr(slash + 1);
+  size_t dot = base.rfind('.');
+  if(dot != string::npos && dot != 0) {
+    base = base.substr(0, dot);
+  }
+  return base + ".obj";
+}
+
+toolchain::CompileOptions make_compile_options(
+    const DriverInvocation & invocation)
+{
+  toolchain::CompileOptions options;
+  options.include_dirs = invocation.include_dirs;
+  options.target = toolchain::NormalizeTargetName(invocation.target);
+  return options;
+}
+
+int run_compile_mode(const DriverInvocation & invocation)
+{
+  if(invocation.inputs.size() != 1) {
+    throw logic_error("compile mode takes exactly one source file");
+  }
+  const toolchain::CompileOptions options = make_compile_options(invocation);
+  toolchain::ObjectModule module =
+      toolchain::CompileSourceFileToModule(invocation.inputs[0], options);
+  const string outfile = invocation.explicit_outfile
+      ? invocation.outfile
+      : default_object_outfile(invocation.inputs[0]);
+  toolchain::WriteObjectModuleFile(outfile, module);
+  return EXIT_SUCCESS;
+}
+
+// Object-like link inputs are classified by content: cppgm compiler
+// objects and host ELF relocatables are both accepted.
+toolchain::ObjectModule load_object_input(const string & path,
+                                          const string & target)
+{
+  const string bytes = toolchain::ReadFileBytes(path);
+  if(toolchain::IsCppgmObjectBytes(bytes)) {
+    return toolchain::ParseObjectModuleBytes(bytes, path);
+  }
+  if(toolchain::IsElfObjectBytes(bytes)) {
+    return toolchain::ParseElfObjectBytes(bytes, path, target);
+  }
+  throw logic_error("unrecognized object file format: " + path);
+}
+
+string find_library_object(const DriverInvocation & invocation,
+                           const string & name)
+{
+  static const char * const suffixes[] = {".o", ".obj"};
+  for(size_t d = 0; d < invocation.lib_dirs.size(); ++d) {
+    string dir = invocation.lib_dirs[d];
+    if(!dir.empty() && dir[dir.size() - 1] != '/') {
+      dir += '/';
+    }
+    for(size_t s = 0; s < 2; ++s) {
+      const string candidate = dir + "lib" + name + suffixes[s];
+      ifstream probe(candidate.c_str(), ios::in | ios::binary);
+      if(probe) {
+        return candidate;
+      }
+    }
+  }
+  throw logic_error("cannot find library: -l" + name);
+}
+
+int run_link_mode(const DriverInvocation & invocation)
+{
+  const toolchain::CompileOptions options = make_compile_options(invocation);
+  vector<toolchain::LinkInput> linked;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    toolchain::LinkInput input;
+    input.name = invocation.inputs[i];
+    if(toolchain::HasObjectFileName(invocation.inputs[i])) {
+      input.module = load_object_input(invocation.inputs[i],
+                                       options.target);
+    }
+    else {
+      input.module = toolchain::CompileSourceFileToModule(
+          invocation.inputs[i], options);
+    }
+    linked.push_back(input);
+  }
+  for(size_t i = 0; i < invocation.libs.size(); ++i) {
+    toolchain::LinkInput input;
+    input.name = find_library_object(invocation, invocation.libs[i]);
+    input.module = load_object_input(input.name, options.target);
+    linked.push_back(input);
+  }
+
+  // Runtime names (EH entry points, RTTI anchors, operator new) come
+  // from the built-in runtime library, compiled through the same
+  // pipeline when the link still needs definitions.
+  if(!toolchain::UnresolvedExternals(linked).empty()) {
+    toolchain::LinkInput runtime;
+    runtime.name = toolchain::RuntimeLibraryName();
+    runtime.module = toolchain::CompileSourceTextToModule(
+        toolchain::RuntimeLibraryName(), toolchain::RuntimeLibrarySource(),
+        options);
+    linked.push_back(runtime);
+  }
+
+  const string outfile =
+      invocation.explicit_outfile ? invocation.outfile : string("a.out");
+  toolchain::LinkExecutable(linked, outfile, options.target);
+  return EXIT_SUCCESS;
 }
 
 int run_unimplemented_mode(const char * feature,
@@ -642,9 +794,9 @@ int run_driver_mode(const vector<string> & args)
   case DriverMode::Preprocess:
     return run_unimplemented_mode("hosted preprocess driver mode (-E)", "PA34");
   case DriverMode::Compile:
-    return run_unimplemented_mode("compile driver mode (-c)", "PA29");
+    return run_compile_mode(invocation);
   case DriverMode::Link:
-    return run_unimplemented_mode("link driver mode", "PA29");
+    return run_link_mode(invocation);
   }
   throw logic_error("unreachable driver mode");
 }

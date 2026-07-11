@@ -179,8 +179,10 @@ bool LowerProgram::BranchSpellsFnPointerAddress(const Scope* scope,
 	bool fold = false;
 	do
 	{
-		// Another unit could store through an extern declaration.
-		if (units_.size() != 1)
+		// Another unit could store through an extern declaration. In
+		// separate compilation the other units are never visible, so
+		// the whole-program premise fails outright (PA29).
+		if (separate_compilation_ || units_.size() != 1)
 			break;
 		map<string, size_t>::iterator found = global_index_.find(key);
 		if (found == global_index_.end())

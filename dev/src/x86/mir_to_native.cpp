@@ -223,15 +223,16 @@ struct PoolEntry
 };
 
 // Program-wide names and the literal pool. Labels are dense image
-// label ids: functions and globals first, pool constants as they are
+// label ids: functions and globals first, pool constants (and, for
+// relocatable modules, referenced external symbols) as they are
 // discovered during function encoding.
 class ProgramEnv
 {
 public:
-	explicit ProgramEnv(const mir_model::MirProgram & program);
+	ProgramEnv(const mir_model::MirProgram & program, bool allow_external);
 
 	const mir_model::MirProgram & program() const { return program_; }
-	int SymbolLabel(const std::string & name) const;
+	int SymbolLabel(const std::string & name);
 	bool HasFunction(const std::string & name) const;
 	const std::string & TlsBackingGlobal(const std::string & wrapper) const;
 
@@ -244,36 +245,54 @@ public:
 
 	int label_count() const { return next_label_; }
 	const std::vector<PoolEntry> & pool() const { return pool_; }
+	const std::vector<std::string> & label_names() const
+	{
+		return label_names_;
+	}
 
 private:
 	const mir_model::MirProgram & program_;
+	bool allow_external_;
 	std::map<std::string, int> symbol_labels_;
 	std::set<std::string> function_names_;
 	std::map<std::string, int> pool_labels_;
 	std::vector<PoolEntry> pool_;
+	std::vector<std::string> label_names_;  // label id -> name ("" pool)
 	int next_label_;
 };
 
-ProgramEnv::ProgramEnv(const mir_model::MirProgram & program)
-	: program_(program), next_label_(0)
+ProgramEnv::ProgramEnv(const mir_model::MirProgram & program,
+                       bool allow_external)
+	: program_(program), allow_external_(allow_external), next_label_(0)
 {
 	for (std::size_t i = 0; i < program.functions.size(); i++)
 	{
 		symbol_labels_[program.functions[i].name] = next_label_++;
+		label_names_.push_back(program.functions[i].name);
 		function_names_.insert(program.functions[i].name);
 	}
 	for (std::size_t i = 0; i < program.globals.size(); i++)
+	{
 		symbol_labels_[program.globals[i].name] = next_label_++;
+		label_names_.push_back(program.globals[i].name);
+	}
 }
 
-int ProgramEnv::SymbolLabel(const std::string & name) const
+int ProgramEnv::SymbolLabel(const std::string & name)
 {
 	std::map<std::string, int>::const_iterator it =
 		symbol_labels_.find(name);
-	if (it == symbol_labels_.end())
+	if (it != symbol_labels_.end())
+		return it->second;
+	if (!allow_external_)
 		throw runtime_error("machine IR references unknown symbol: " +
 		                    name);
-	return it->second;
+	// Relocatable-module encoding: an unknown name is an external
+	// reference the linker resolves; it claims a label with no item.
+	int label = next_label_++;
+	symbol_labels_[name] = label;
+	label_names_.push_back(name);
+	return label;
 }
 
 bool ProgramEnv::HasFunction(const std::string & name) const
@@ -317,6 +336,7 @@ int ProgramEnv::ByteConstantLabel(const std::string & key,
 	entry.bytes.assign(data, data + size);
 	entry.align = align;
 	entry.label = next_label_++;
+	label_names_.push_back("");
 	pool_.push_back(entry);
 	pool_labels_[key] = entry.label;
 	return entry.label;
@@ -324,7 +344,7 @@ int ProgramEnv::ByteConstantLabel(const std::string & key,
 
 // Global data encoding.
 
-void AppendAddrPatch(ImageItem & item, const ProgramEnv & env,
+void AppendAddrPatch(ImageItem & item, ProgramEnv & env,
                      const std::string & symbol, long long addend)
 {
 	X86Patch patch;
@@ -337,7 +357,7 @@ void AppendAddrPatch(ImageItem & item, const ProgramEnv & env,
 	item.bytes.insert(item.bytes.end(), 8, 0);
 }
 
-void EncodeScalarGlobal(const ProgramEnv & env, const Global & global,
+void EncodeScalarGlobal(ProgramEnv & env, const Global & global,
                         ImageItem & item)
 {
 	std::size_t size = ScalarSize(global.type);
@@ -364,7 +384,7 @@ void EncodeScalarGlobal(const ProgramEnv & env, const Global & global,
 	throw logic_error("unknown global init kind");
 }
 
-void EncodeDataGlobal(const ProgramEnv & env, const Global & global,
+void EncodeDataGlobal(ProgramEnv & env, const Global & global,
                       ImageItem & item)
 {
 	std::size_t max_align = 8;
@@ -400,7 +420,7 @@ void EncodeDataGlobal(const ProgramEnv & env, const Global & global,
 	item.align = max_align;
 }
 
-void EncodeGlobal(const ProgramEnv & env, const Global & global,
+void EncodeGlobal(ProgramEnv & env, const Global & global,
                   ImageItem & item)
 {
 	if (global.storage_kind == Global::GS_SCALAR)
@@ -838,6 +858,7 @@ void FunctionEncoder::EmitInstruction(const Ins & ins)
 			env_.SymbolLabel(ins.operands[0].text), 0));
 		return;
 	case Ins::MI_CALL_INDIRECT: code_.CallReg(Reg(ins.operands[0])); return;
+	case Ins::MI_JMP_INDIRECT: code_.JmpReg(Reg(ins.operands[0])); return;
 	case Ins::MI_RET:
 		EmitEpilogue();
 		code_.Ret();
@@ -1326,7 +1347,7 @@ void FunctionEncoder::EmitFloatInstruction(const Ins & ins)
 void WriteMirProgramExecutable(const mir_model::MirProgram & program,
                                const std::string & path)
 {
-	ProgramEnv env(program);
+	ProgramEnv env(program, false);
 	std::vector<ImageItem> items;
 
 	// Item 0 (the default entry) is the startup sled; encoding the
@@ -1372,4 +1393,49 @@ void WriteMirProgramExecutable(const mir_model::MirProgram & program,
 	for (std::size_t i = 0; i < env.pool().size(); i++)
 		image.BindLabel(env.pool()[i].label, pool_base + i);
 	image.WriteExecutable(path);
+}
+
+NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
+{
+	ProgramEnv env(program, true);
+	NativeModule module;
+
+	// No startup sled: a relocatable module has no entry item; the
+	// linker synthesizes the program startup. Encoding the functions
+	// fills the constant pool and discovers external references.
+	for (std::size_t i = 0; i < program.functions.size(); i++)
+	{
+		ImageItem item;
+		FunctionEncoder encoder(env, &program.functions[i]);
+		encoder.EncodeFunction(item);
+		module.items.push_back(item);
+	}
+	std::size_t global_base = module.items.size();
+	for (std::size_t i = 0; i < program.globals.size(); i++)
+	{
+		ImageItem item;
+		EncodeGlobal(env, program.globals[i], item);
+		module.items.push_back(item);
+	}
+	std::size_t pool_base = module.items.size();
+	for (std::size_t i = 0; i < env.pool().size(); i++)
+	{
+		ImageItem item;
+		item.align = env.pool()[i].align;
+		item.bytes = env.pool()[i].bytes;
+		module.items.push_back(item);
+	}
+
+	module.label_names = env.label_names();
+	module.label_items.assign(env.label_count(), -1);
+	for (std::size_t i = 0; i < program.functions.size(); i++)
+		module.label_items[env.SymbolLabel(program.functions[i].name)] =
+			static_cast<int>(i);
+	for (std::size_t i = 0; i < program.globals.size(); i++)
+		module.label_items[env.SymbolLabel(program.globals[i].name)] =
+			static_cast<int>(global_base + i);
+	for (std::size_t i = 0; i < env.pool().size(); i++)
+		module.label_items[env.pool()[i].label] =
+			static_cast<int>(pool_base + i);
+	return module;
 }

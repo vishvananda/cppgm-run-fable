@@ -191,6 +191,11 @@ void Preprocessor::DefineObjectMacro(const string& name,
 	table_.Define(TokenizeSpelling(name + " " + spelling));
 }
 
+void Preprocessor::AddIncludeDir(const string& dir)
+{
+	include_dirs_.push_back(dir);
+}
+
 void Preprocessor::ProcessSourceFile(const string& path)
 {
 	std::ifstream in(path.c_str(), std::ios::binary);
@@ -198,12 +203,18 @@ void Preprocessor::ProcessSourceFile(const string& path)
 		throw runtime_error("cannot open source file: " + path);
 	std::ostringstream buffer;
 	buffer << in.rdbuf();
+	ProcessSourceText(path, buffer.str());
+}
+
+void Preprocessor::ProcessSourceText(const string& presumed_name,
+                                     const string& bytes)
+{
 	int file_index = (int)files_.size();
 	FileInstance instance;
-	instance.presumed_name = path;
+	instance.presumed_name = presumed_name;
 	instance.line_offset = 0;
 	files_.push_back(instance);
-	ProcessFileTokens(TokenizeSource(buffer.str(), file_index), file_index);
+	ProcessFileTokens(TokenizeSource(bytes, file_index), file_index);
 	output_.emit_eof();
 }
 
@@ -508,6 +519,19 @@ void Preprocessor::HandleInclude(const vector<PPToken>& args)
 		if (GetPreprocFileId(pathrel, fileid))
 		{
 			chosen = pathrel;
+			found = true;
+		}
+	}
+	// PA29: -I directories search between the including file's
+	// directory and the working-directory fallback.
+	for (size_t i = 0; !found && i < include_dirs_.size(); i++)
+	{
+		string dir = include_dirs_[i];
+		if (!dir.empty() && dir[dir.size() - 1] != '/')
+			dir += '/';
+		if (GetPreprocFileId(dir + nextf, fileid))
+		{
+			chosen = dir + nextf;
 			found = true;
 		}
 	}

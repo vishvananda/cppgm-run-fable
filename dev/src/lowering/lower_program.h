@@ -200,6 +200,11 @@ class LowerProgram
 public:
 	LowerProgram();
 
+	// PA29: this program is one separately-compiled translation unit;
+	// whole-program-only folds must stay off because sibling units are
+	// not visible at compile time.
+	void SetSeparateCompilation() { separate_compilation_ = true; }
+
 	// Registers one bound translation unit's namespace-scope items.
 	void AddUnit(const SemUnit& unit);
 
@@ -466,6 +471,7 @@ private:
 	map<string, size_t> string_index_;    // element|bytes -> index
 	set<string> symbols_;                 // taken top-level names
 	bool has_main_;
+	bool separate_compilation_ = false;
 	// The added units, for whole-program scans (branch-fold analysis).
 	vector<const SemUnit*> units_;
 	// PA25 5.2.8: each unit's sema-recognized std::type_info entity.

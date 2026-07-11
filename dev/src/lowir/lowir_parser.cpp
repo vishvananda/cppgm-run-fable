@@ -438,9 +438,16 @@ LowIRInstruction Parser::parse_rvalue(const string & result)
 	}
 	else if(accept_word("call"))
 		parse_call(ins, false);
-	else if(accept_word("exception") || accept_word("exception_selector"))
+	else if(accept_word("exception"))
 	{
 		ins.opcode = LOWIR_INS_EXCEPTION;
+		ins.operation = "exception";
+		ins.type = parse_type();
+	}
+	else if(accept_word("exception_selector"))
+	{
+		ins.opcode = LOWIR_INS_EXCEPTION;
+		ins.operation = "exception_selector";
 		ins.type = parse_type();
 	}
 	else
@@ -517,9 +524,12 @@ LowIRInstruction Parser::parse_statement_instruction()
 	else if(accept_word("eh_catch"))
 	{
 		// Handler-classification markers carry no PA13 code of their own.
+		// PA25 emission appends the handler's selector id (", N").
 		ins.opcode = LOWIR_INS_EH_MARKER;
 		ins.operation = "eh_catch";
 		ins.eh_types.push_back(expect(LOWIR_TOK_GLOBAL_NAME, "type symbol"));
+		if(accept_punct(","))
+			ins.eh_selector = parse_integer_literal();
 	}
 	else if(accept_word("eh_filter"))
 	{
@@ -536,6 +546,8 @@ LowIRInstruction Parser::parse_statement_instruction()
 	{
 		ins.opcode = LOWIR_INS_EH_MARKER;
 		ins.operation = "eh_catch_all";
+		if(accept_punct(","))
+			ins.eh_selector = parse_integer_literal();
 	}
 	else if(accept_word("eh_end"))
 		ins.opcode = LOWIR_INS_EH_END;
