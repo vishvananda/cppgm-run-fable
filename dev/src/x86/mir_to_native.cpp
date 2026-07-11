@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "x86/elf_program.h"
+#include "x86/mir_native_data.h"
 
 using std::logic_error;
 using std::runtime_error;
@@ -38,24 +39,13 @@ typedef mir_model::MirGlobalDefinition Global;
 const long double kTwoTo63 = 9223372036854775808.0L;
 const long double kTwoTo64 = 18446744073709551616.0L;
 
-// MIR type spelling -> operand width in bits (f80 -> 80).
-int TypeBits(const std::string & type)
-{
-	if (type == "i1" || type == "i8" || type == "u8")
-		return 8;
-	if (type == "i16" || type == "u16")
-		return 16;
-	if (type == "i32" || type == "u32" || type == "f32")
-		return 32;
-	if (type == "f80")
-		return 80;
-	// i64/u64/ptr/f64 and the untyped default are 64-bit wide; anything
-	// else is a producer bug and must not degrade silently.
-	if (type == "i64" || type == "u64" || type == "ptr" || type == "f64" ||
-	    type.empty())
-		return 64;
-	throw logic_error("unknown machine IR type spelling: " + type);
-}
+// MIR width/data helpers are shared with the global-data encoder.
+using mir_native::AppendFloatBits;
+using mir_native::EncodeGlobal;
+using mir_native::AppendLittleEndian;
+using mir_native::ParseFloatLiteral;
+using mir_native::ScalarSize;
+using mir_native::TypeBits;
 
 int Reg(const Op & op)
 {
@@ -144,76 +134,6 @@ EX86Mnemonic X87Arith(Ins::Opcode op)
 	}
 }
 
-void AppendLittleEndian(std::vector<unsigned char> & out,
-                        unsigned long long value, std::size_t size)
-{
-	for (std::size_t i = 0; i < size; i++)
-		out.push_back(static_cast<unsigned char>(value >> (8 * i)));
-}
-
-// Storage bytes of a value in the named float format: f32/f64 use
-// their IEEE image, f80 the ten x87 bytes padded to sixteen.
-void AppendFloatBits(std::vector<unsigned char> & out,
-                     const std::string & type, long double value)
-{
-	unsigned char raw[16];
-	std::memset(raw, 0, sizeof(raw));
-	if (type == "f32")
-	{
-		float narrow = static_cast<float>(value);
-		std::memcpy(raw, &narrow, 4);
-		out.insert(out.end(), raw, raw + 4);
-	}
-	else if (type == "f64")
-	{
-		double narrow = static_cast<double>(value);
-		std::memcpy(raw, &narrow, 8);
-		out.insert(out.end(), raw, raw + 8);
-	}
-	else
-	{
-		std::memcpy(raw, &value, 10);
-		out.insert(out.end(), raw, raw + 16);
-	}
-}
-
-// Parse at the type's own width: rounding text through long double
-// first can double-round (623e+100 lands one f64 ulp off strtod).
-long double ParseFloatLiteral(const std::string & type,
-                              const std::string & text,
-                              long double fallback)
-{
-	if (text.empty())
-		return fallback;
-	if (type == "f32")
-		return strtof(text.c_str(), 0);
-	if (type == "f64")
-		return strtod(text.c_str(), 0);
-	return strtold(text.c_str(), 0);
-}
-
-std::size_t ScalarSize(const std::string & type)
-{
-	if (type == "f80")
-		return 16;
-	return static_cast<std::size_t>(TypeBits(type)) / 8;
-}
-
-std::size_t DataItemAlign(const Global::DataItem & item)
-{
-	switch (item.kind)
-	{
-	case Global::DataItem::ITEM_INTEGER:
-	case Global::DataItem::ITEM_FLOAT:
-		return ScalarSize(item.type);
-	case Global::DataItem::ITEM_ADDR:
-		return 8;
-	case Global::DataItem::ITEM_ZERO:
-		return 1;
-	}
-	throw logic_error("unknown global data item kind");
-}
-
 // One pooled data constant (float literals, sign masks).
 struct PoolEntry
 {
@@ -226,13 +146,13 @@ struct PoolEntry
 // label ids: functions and globals first, pool constants (and, for
 // relocatable modules, referenced external symbols) as they are
 // discovered during function encoding.
-class ProgramEnv
+class ProgramEnv : public mir_native::ISymbolLabels
 {
 public:
 	ProgramEnv(const mir_model::MirProgram & program, bool allow_external);
 
 	const mir_model::MirProgram & program() const { return program_; }
-	int SymbolLabel(const std::string & name);
+	int SymbolLabel(const std::string & name);  // ISymbolLabels
 	bool HasFunction(const std::string & name) const;
 	const std::string & TlsBackingGlobal(const std::string & wrapper) const;
 
@@ -340,93 +260,6 @@ int ProgramEnv::ByteConstantLabel(const std::string & key,
 	pool_.push_back(entry);
 	pool_labels_[key] = entry.label;
 	return entry.label;
-}
-
-// Global data encoding.
-
-void AppendAddrPatch(ImageItem & item, ProgramEnv & env,
-                     const std::string & symbol, long long addend)
-{
-	X86Patch patch;
-	patch.offset = item.bytes.size();
-	patch.size = 8;
-	patch.kind = X86_PATCH_ABS;
-	patch.imm = X86Imm::Label(env.SymbolLabel(symbol),
-	                          static_cast<unsigned long long>(addend));
-	item.patches.push_back(patch);
-	item.bytes.insert(item.bytes.end(), 8, 0);
-}
-
-void EncodeScalarGlobal(ProgramEnv & env, const Global & global,
-                        ImageItem & item)
-{
-	std::size_t size = ScalarSize(global.type);
-	item.align = size;
-	switch (global.init_kind)
-	{
-	case Global::GI_ZERO:
-		item.bytes.assign(size, 0);
-		return;
-	case Global::GI_INTEGER:
-		AppendLittleEndian(
-			item.bytes,
-			static_cast<unsigned long long>(global.int_value), size);
-		return;
-	case Global::GI_FLOAT:
-		AppendFloatBits(item.bytes, global.type,
-		                ParseFloatLiteral(global.type, global.literal_text,
-		                                  global.float_value));
-		return;
-	case Global::GI_ADDR:
-		AppendAddrPatch(item, env, global.symbol, global.addr_addend);
-		return;
-	}
-	throw logic_error("unknown global init kind");
-}
-
-void EncodeDataGlobal(ProgramEnv & env, const Global & global,
-                      ImageItem & item)
-{
-	std::size_t max_align = 8;
-	for (std::size_t i = 0; i < global.data_items.size(); i++)
-	{
-		const Global::DataItem & data = global.data_items[i];
-		std::size_t align = DataItemAlign(data);
-		if (align > max_align)
-			max_align = align;
-		while (item.bytes.size() % align != 0)
-			item.bytes.push_back(0);
-		switch (data.kind)
-		{
-		case Global::DataItem::ITEM_INTEGER:
-			AppendLittleEndian(
-				item.bytes,
-				static_cast<unsigned long long>(data.int_value),
-				ScalarSize(data.type));
-			break;
-		case Global::DataItem::ITEM_FLOAT:
-			AppendFloatBits(item.bytes, data.type,
-			                ParseFloatLiteral(data.type, data.literal_text,
-			                                  data.float_value));
-			break;
-		case Global::DataItem::ITEM_ADDR:
-			AppendAddrPatch(item, env, data.symbol, data.addr_addend);
-			break;
-		case Global::DataItem::ITEM_ZERO:
-			item.bytes.insert(item.bytes.end(), data.zero_bytes, 0);
-			break;
-		}
-	}
-	item.align = max_align;
-}
-
-void EncodeGlobal(ProgramEnv & env, const Global & global,
-                  ImageItem & item)
-{
-	if (global.storage_kind == Global::GS_SCALAR)
-		EncodeScalarGlobal(env, global, item);
-	else
-		EncodeDataGlobal(env, global, item);
 }
 
 // Encodes one function (or the startup sled) into an image item.
