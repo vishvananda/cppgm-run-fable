@@ -13,7 +13,20 @@ ELowIRLiteralClass classify_number(const string & spelling)
 {
 	if(spelling.size() >= 2 && spelling[0] == '0' &&
 	   (spelling[1] == 'x' || spelling[1] == 'X'))
+	{
+		// hexadecimal floats carry a binary exponent: 0x1.8p3 / 0x1p-2
+		for(size_t i = 2; i < spelling.size(); ++i)
+			if(spelling[i] == 'p' || spelling[i] == 'P')
+			{
+				char last = spelling[spelling.size() - 1];
+				if(last == 'f' || last == 'F')
+					return LOWIR_LITERAL_F32;
+				if(last == 'L')
+					return LOWIR_LITERAL_F80;
+				return LOWIR_LITERAL_F64;
+			}
 		return LOWIR_LITERAL_INT;
+	}
 	char last = spelling[spelling.size() - 1];
 	if(last == 'f' || last == 'F')
 		return LOWIR_LITERAL_F32;

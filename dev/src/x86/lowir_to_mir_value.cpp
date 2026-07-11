@@ -467,7 +467,17 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 				frame_operand(slots_[location.slot_name].frame_offset));
 		}
 		else {
-			emit_mov(MakeReg(out_reg), MakeReg(location.reg));
+			X64Register source = location.reg;
+			const ValueInfo & info = values_[lhs.name];
+			if(info.is_param && location.prefer_home &&
+			   current_block_ == 0 && !arg_homes_clobbered_) {
+				for(size_t pb = 0; pb < out_.params.size(); pb++)
+					if(out_.params[pb].name == lhs.name &&
+					   out_.params[pb].location ==
+					       mir_model::ParamBinding::PL_REG)
+						source = out_.params[pb].reg;
+			}
+			emit_mov(MakeReg(out_reg), MakeReg(source));
 		}
 	}
 	else if(lhs.kind == LOWIR_OPERAND_GLOBAL) {

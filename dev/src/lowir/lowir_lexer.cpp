@@ -158,7 +158,9 @@ struct Lexer
 			      (text[pos] == '+' || text[pos] == '-') &&
 			      !digits.empty() &&
 			      (digits[digits.size() - 1] == 'e' ||
-			       digits[digits.size() - 1] == 'E') &&
+			       digits[digits.size() - 1] == 'E' ||
+			       digits[digits.size() - 1] == 'p' ||
+			       digits[digits.size() - 1] == 'P') &&
 			      pos + 1 < text.size() &&
 			      isdigit((unsigned char)text[pos + 1]))
 			{

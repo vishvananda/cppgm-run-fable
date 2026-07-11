@@ -59,6 +59,25 @@ void FunctionLowering::Linearize()
 
 namespace {
 
+bool storage_is_tls_probe(const LowIROperand & operand,
+                          const ProgramFacts & facts)
+{
+	return operand.kind == LOWIR_OPERAND_GLOBAL &&
+	       facts.tls_wrapper_of_global.count(operand.name) != 0;
+}
+
+bool instruction_embeds_call_probe(const LowIRInstruction & ins,
+                                   const ProgramFacts & facts)
+{
+	if(ins.opcode == LOWIR_INS_LOAD || ins.opcode == LOWIR_INS_STORE ||
+	   ins.opcode == LOWIR_INS_ADDR) {
+		for(size_t o = 0; o < ins.operands.size(); o++)
+			if(storage_is_tls_probe(ins.operands[o], facts))
+				return true;
+	}
+	return false;
+}
+
 bool block_is_reentered(const LowIRFunction & function)
 {
 	if(function.blocks.empty())
@@ -103,6 +122,7 @@ void FunctionLowering::PromoteSlots()
 		int store_position = -1;
 		int store_count = 0;
 		int first_load = (int)linear_.size();
+		int last_load = -1;
 		bool blocked = false;
 		for(size_t p = 0; p < linear_.size() && !blocked; p++) {
 			const LowIRInstruction & ins = *linear_[p];
@@ -123,6 +143,8 @@ void FunctionLowering::PromoteSlots()
 			        ins.operands[0].name == name) {
 				if((int)p < first_load)
 					first_load = (int)p;
+				if((int)p > last_load)
+					last_load = (int)p;
 				if(!same_type(ins.type, it->second.type))
 					blocked = true;
 			}
@@ -135,7 +157,15 @@ void FunctionLowering::PromoteSlots()
 			}
 		}
 		if(blocked || store_count != 1 || store_position >= entry_end ||
-		   store_position > first_load)
+		   store_position > first_load ||
+		   FrameSizeOf(it->second.type) != 8)
+			continue;
+		bool call_between = false;
+		for(int p = store_position + 1; p <= last_load; p++)
+			if(linear_[p]->opcode == LOWIR_INS_CALL ||
+			   instruction_embeds_call_probe(*linear_[p], facts_))
+				call_between = true;
+		if(call_between)
 			continue;
 		it->second.promoted = true;
 		promoted_slot_value_[name] = linear_[store_position]->operands[0];
@@ -307,9 +337,13 @@ void FunctionLowering::AnalyzeValues()
 		info.def_position = -1;
 	}
 	for(size_t p = 0; p < linear_.size(); p++) {
+		const LowIRInstruction & ins = *linear_[p];
+		for(size_t o = 0; o < ins.operands.size(); o++)
+			if(ins.operands[o].kind == LOWIR_OPERAND_TEMP &&
+			   values_.count(ins.operands[o].name))
+				values_[ins.operands[o].name].raw_references++;
 		if(skip_positions_.count((int)p))
 			continue;
-		const LowIRInstruction & ins = *linear_[p];
 		if(!ins.result.empty()) {
 			ValueInfo & info = values_[ins.result];
 			info.type = ins.type;
@@ -328,7 +362,41 @@ void FunctionLowering::AnalyzeValues()
 			   ins.operands[o].literal_class != LOWIR_LITERAL_NULLPTR)
 				touches_float_ = true;
 	}
+	RetimeSinkingCompares();
 	MarkCallCrossings();
+}
+
+// A compare whose single consumer is the branch terminating its own block
+// lowers at the branch; its operands stay live until then.
+void FunctionLowering::RetimeSinkingCompares()
+{
+	for(size_t b = 0; b + 1 < block_first_position_.size(); b++) {
+		int begin = block_first_position_[b];
+		int end = block_first_position_[b + 1];
+		if(end <= begin)
+			continue;
+		const LowIRInstruction & last = *linear_[end - 1];
+		if(last.opcode != LOWIR_INS_BRANCH ||
+		   last.operands[0].kind != LOWIR_OPERAND_TEMP)
+			continue;
+		for(int p = begin; p < end - 1; p++) {
+			const LowIRInstruction & ins = *linear_[p];
+			if(ins.opcode != LOWIR_INS_CMP ||
+			   ins.result != last.operands[0].name)
+				continue;
+			ValueInfo & info = values_[ins.result];
+			if(info.uses.size() != 1)
+				continue;
+			for(size_t o = 0; o < ins.operands.size(); o++) {
+				if(ins.operands[o].kind != LOWIR_OPERAND_TEMP)
+					continue;
+				ValueInfo & operand = values_[ins.operands[o].name];
+				for(size_t u = 0; u < operand.uses.size(); u++)
+					if(operand.uses[u].position == p)
+						operand.uses[u].position = end - 1;
+			}
+		}
+	}
 }
 
 void FunctionLowering::MarkCallCrossings()
@@ -368,35 +436,79 @@ void FunctionLowering::MarkCallCrossings()
 // Read-only single uses at the very first lowered instruction can keep
 // reading the incoming argument register; everything else gets copied out
 // at entry. Parameters homed in the pool registers (r8/r9) always copy.
+// Would staging argument `arg_index` of the call at `position` read this
+// home register in place (the argument lands in its own incoming slot)?
+bool FunctionLowering::CallArgTargetsHome(int position, int arg_index,
+                                          X64Register home) const
+{
+	static const X64Register arg_regs[6] =
+		{ XR_RDI, XR_RSI, XR_RDX, XR_RCX, XR_R8, XR_R9 };
+	const LowIRInstruction & call = *linear_[position];
+	const std::vector<LowIRParam> * params = 0;
+	if(!call.callee_is_temp && facts_.info->is_function(call.callee))
+		params = &facts_.info->functions.find(call.callee)->second->params;
+	else if(call.signature.present)
+		params = &call.signature.params;
+	if(!params)
+		return false;
+	int gpr = 0;
+	for(int a = 0; a <= arg_index && a < (int)call.operands.size(); a++) {
+		LowIRType type;
+		type.kind = LOWIR_TYPE_I64;
+		if(a < (int)params->size())
+			type = (*params)[a].type;
+		bool is_xmm = type.kind == LOWIR_TYPE_F32 ||
+		              type.kind == LOWIR_TYPE_F64;
+		bool by_stack = type.kind == LOWIR_TYPE_F80 ||
+		                (type.kind == LOWIR_TYPE_OBJ && type.obj_bytes > 8);
+		if(is_xmm || by_stack)
+			continue;
+		if(a == arg_index)
+			return gpr < 6 && arg_regs[gpr] == home;
+		gpr++;
+	}
+	return false;
+}
+
 bool FunctionLowering::ParamUseIsForwardable(const ValueInfo & info,
                                              X64Register home) const
 {
 	if(info.uses.empty())
 		return true;   // dead parameter: reserve the slot, emit nothing
-	if(info.uses.size() != 1 || info.crosses_call)
+	if(info.crosses_call)
 		return false;
 	if(home == XR_R8 || home == XR_R9)
 		return false;   // the incoming register is itself a pool register
-	const ValueUse & use = info.uses[0];
-	switch(use.kind) {
-		case ValueUse::USE_STORE_VALUE:
-		case ValueUse::USE_RETURN_VALUE:
-		case ValueUse::USE_COPY_SOURCE:
-		case ValueUse::USE_BINARY_LHS:
-			break;
-		default:
-			return false;
-	}
 	int first_position = 0;
 	while(skip_positions_.count(first_position))
 		first_position++;
+	int last_position = first_position;
+	for(size_t u = 0; u < info.uses.size(); u++) {
+		const ValueUse & use = info.uses[u];
+		switch(use.kind) {
+			case ValueUse::USE_STORE_VALUE:
+			case ValueUse::USE_RETURN_VALUE:
+			case ValueUse::USE_COPY_SOURCE:
+			case ValueUse::USE_BINARY_LHS:
+				break;
+			case ValueUse::USE_CALL_ARG:
+				if(!CallArgTargetsHome(use.position, use.arg_index, home))
+					return false;
+				break;
+			default:
+				return false;
+		}
+		if(use.position > last_position)
+			last_position = use.position;
+	}
 	// rdx/rcx double as staging registers: only an immediate first use
 	// reads them in place
-	if((home == XR_RDX || home == XR_RCX) && use.position != first_position)
+	if((home == XR_RDX || home == XR_RCX) &&
+	   last_position != first_position)
 		return false;
 	// rdi/rsi survive until the use unless an intervening instruction
 	// can clobber the argument registers
-	for(int p = first_position; p < use.position; p++) {
+	for(int p = first_position; p < last_position; p++) {
 		if(skip_positions_.count(p))
 			continue;
 		const LowIRInstruction & between = *linear_[p];

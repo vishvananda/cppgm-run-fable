@@ -59,6 +59,12 @@ bool forward_residue_reclaimed(
 	return false;
 }
 
+bool param_pass_annotated(const LowIRParam & param)
+{
+	return !param.metadata.find("pass").empty() &&
+	       param.metadata.find("pass") != "direct";
+}
+
 bool param_expects_address(const LowIRParam & param)
 {
 	if(param.type.kind != LOWIR_TYPE_PTR)
@@ -213,6 +219,24 @@ void FunctionLowering::PlanParams()
 			locations_[param.name] = location;
 			continue;
 		}
+		if(info.uses.empty() && info.raw_references == 0) {
+			// parameters the source never mentions still get their
+			// entry spill into a named home
+			has_dead_source_spill_ = true;
+			long long home = alloc_frame_home(
+				param.name, param.type,
+				mir_model::FrameBinding::FB_PARAM_SLOT);
+			mir_model::Instruction & store =
+				emit(mir_model::Instruction::MI_STORE);
+			store.type = SpellType(param.type);
+			store.operands.push_back(frame_operand(home));
+			store.operands.push_back(MakeReg(home_reg));
+			ValueLocation location;
+			location.kind = ValueLocation::VL_FRAME;
+			location.frame_offset = home;
+			locations_[param.name] = location;
+			continue;
+		}
 		if(ParamUseIsForwardable(info, home_reg)) {
 			int index = pool_scan(false, false);
 			if(index >= 0)
@@ -221,34 +245,52 @@ void FunctionLowering::PlanParams()
 			location.kind = ValueLocation::VL_ARG_REG;
 			location.reg = home_reg;
 			locations_[param.name] = location;
-			if(!forward_residue_reclaimed(values_, linear_, param.name))
+			bool call_arg_use = false;
+			for(size_t u = 0; u < info.uses.size(); u++)
+				if(info.uses[u].kind == ValueUse::USE_CALL_ARG)
+					call_arg_use = true;
+			if(!call_arg_use && !param_pass_annotated(param) &&
+			   !forward_residue_reclaimed(values_, linear_, param.name))
 				residual_bytes_ += 8;
 			continue;
 		}
 		bool late_operand_use = false;
-		if(info.uses.size() == 1 &&
-		   info.uses[0].kind == ValueUse::USE_OTHER) {
-			int first_position = 0;
-			while(skip_positions_.count(first_position))
-				first_position++;
+		bool address_use = false;
+		int first_position = 0;
+		while(skip_positions_.count(first_position))
+			first_position++;
+		for(size_t u = 0; u < info.uses.size(); u++) {
+			if(info.uses[u].kind != ValueUse::USE_OTHER)
+				continue;
 			const LowIRInstruction & user =
-				*linear_[info.uses[0].position];
-			if(info.uses[0].position != first_position &&
-			   (user.opcode == LOWIR_INS_BINARY ||
-			    user.opcode == LOWIR_INS_CMP))
+				*linear_[info.uses[u].position];
+			if((user.opcode == LOWIR_INS_BINARY ||
+			    user.opcode == LOWIR_INS_CMP) &&
+			   info.uses[u].position != first_position &&
+			   info.uses.size() == 1)
 				late_operand_use = true;
+			if(user.opcode == LOWIR_INS_LOAD ||
+			   user.opcode == LOWIR_INS_STORE ||
+			   user.opcode == LOWIR_INS_COPYOBJ ||
+			   user.opcode == LOWIR_INS_ZEROINIT ||
+			   user.opcode == LOWIR_INS_ATOMIC_LOAD ||
+			   user.opcode == LOWIR_INS_ATOMIC_STORE ||
+			   user.opcode == LOWIR_INS_ATOMIC_EXCHANGE ||
+			   user.opcode == LOWIR_INS_ATOMIC_COMPARE_EXCHANGE ||
+			   user.opcode == LOWIR_INS_ATOMIC_ADD_FETCH)
+				address_use = true;
 		}
-		bool callee_saved = info.crosses_call || info.uses.size() >= 2 ||
-		                    late_operand_use;
-		int index = pool_scan(callee_saved, false);
+		bool callee_saved = info.crosses_call || late_operand_use ||
+		                    (address_use && info.uses.size() >= 2);
+		int index = pool_scan(callee_saved, !callee_saved && !address_use);
 		if(index < 0) {
-			// no pool register: fall back to a named frame home
+			// unplaceable parameters keep a named frame home at entry
 			long long home = alloc_frame_home(
 				param.name, param.type,
 				mir_model::FrameBinding::FB_PARAM_SLOT);
 			mir_model::Instruction & store =
 				emit(mir_model::Instruction::MI_STORE);
-			store.type = "i64";
+			store.type = SpellType(param.type);
 			store.operands.push_back(frame_operand(home));
 			store.operands.push_back(MakeReg(home_reg));
 			ValueLocation location;
@@ -263,8 +305,17 @@ void FunctionLowering::PlanParams()
 		ValueLocation location;
 		location.kind = ValueLocation::VL_GPR;
 		location.reg = pool_reg_at(index);
+		location.prefer_home = !callee_saved && !address_use;
 		locations_[param.name] = location;
 		copies.push_back(std::make_pair((int)p, pool_reg_at(index)));
+		bool rhs_only = info.uses.size() == 1 &&
+		                info.uses[0].kind == ValueUse::USE_OTHER &&
+		                (linear_[info.uses[0].position]->opcode ==
+		                     LOWIR_INS_BINARY ||
+		                 linear_[info.uses[0].position]->opcode ==
+		                     LOWIR_INS_CMP);
+		if(!callee_saved && !rhs_only && !param_pass_annotated(param))
+			residual_bytes_ += 8;
 	}
 	EmitGprParamCopies(copies);
 }
@@ -368,6 +419,8 @@ void FunctionLowering::FinishFrame()
 		if(used.count(order[i]))
 			ordered.push_back(order[i]);
 	out_.callee_saved_regs = ordered;
+	if(has_dead_source_spill_ && residual_bytes_ == 0)
+		residual_bytes_ = 8;
 	long long scratch = touches_float_ ? 48 : 0;
 	long long content = 8 * (long long)ordered.size() + frame_cursor_ +
 	                    residual_bytes_;
@@ -378,6 +431,7 @@ void FunctionLowering::FinishFrame()
 
 void FunctionLowering::LowerBlock(size_t block_index)
 {
+	current_block_ = block_index;
 	mir_block_ = &out_.blocks[block_index];
 	int begin = block_first_position_[block_index];
 	int end = block_first_position_[block_index + 1];
@@ -393,28 +447,28 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
 {
 	current_position_ = position;
 
-	// Compares (and logical nots) consumed by an adjacent branch lower as
-	// part of the branch; their own position emits nothing.
+	// Compares (and logical nots) consumed by their block's branch lower
+	// as part of the branch; their own position emits nothing.
 	if(!ins.result.empty() &&
 	   (ins.opcode == LOWIR_INS_CMP ||
 	    (ins.opcode == LOWIR_INS_UNARY && ins.operation == "not"))) {
 		const ValueInfo & info = values_[ins.result];
 		if(info.uses.size() == 1 &&
-		   info.uses[0].position == position + 1 &&
 		   info.uses[0].position < (int)linear_.size()) {
-			const LowIRInstruction & user = *linear_[position + 1];
+			const LowIRInstruction & user = *linear_[info.uses[0].position];
 			bool skip = false;
 			bool invert = false;
 			if(user.opcode == LOWIR_INS_BRANCH) {
 				if(ins.opcode == LOWIR_INS_UNARY)
-					skip = true;
+					skip = info.uses[0].position == position + 1;
 				else
-					skip = fused_compare_for_branch(user, position + 1,
-					                                invert) == &ins;
+					skip = fused_compare_for_branch(
+						user, info.uses[0].position, invert) == &ins;
 			}
 			else if(ins.opcode == LOWIR_INS_CMP &&
 			        user.opcode == LOWIR_INS_UNARY &&
 			        user.operation == "not" &&
+			        info.uses[0].position == position + 1 &&
 			        position + 2 < (int)linear_.size() &&
 			        linear_[position + 2]->opcode == LOWIR_INS_BRANCH) {
 				skip = fused_compare_for_branch(*linear_[position + 2],
@@ -428,6 +482,20 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
 		}
 	}
 
+	switch(ins.opcode) {
+		case LOWIR_INS_CALL:
+		case LOWIR_INS_COPYOBJ:
+		case LOWIR_INS_ZEROINIT:
+		case LOWIR_INS_ATOMIC_LOAD:
+		case LOWIR_INS_ATOMIC_STORE:
+		case LOWIR_INS_ATOMIC_EXCHANGE:
+		case LOWIR_INS_ATOMIC_COMPARE_EXCHANGE:
+		case LOWIR_INS_ATOMIC_ADD_FETCH:
+			arg_homes_clobbered_ = true;
+			break;
+		default:
+			break;
+	}
 	switch(ins.opcode) {
 		case LOWIR_INS_CONST: LowerConst(ins); break;
 		case LOWIR_INS_COPY: LowerCopy(ins); break;

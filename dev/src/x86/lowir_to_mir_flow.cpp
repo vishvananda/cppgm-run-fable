@@ -191,6 +191,29 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		}
 	}
 
+	// Forwarded parameters still riding their incoming argument register
+	// bounce through a free scratch register before the staging writes.
+	for(size_t a = 0; a < ins.operands.size(); a++) {
+		const LowIROperand & arg = ins.operands[a];
+		if(arg.kind != LOWIR_OPERAND_TEMP)
+			continue;
+		ValueLocation & bounce = locations_[arg.name];
+		if(bounce.kind != ValueLocation::VL_ARG_REG)
+			continue;
+		int index = pool_scan(false, false);
+		if(index < 0)
+			continue;
+		static const X64Register pool[FunctionLowering::kPoolSize] =
+			{ XR_R8, XR_R9, XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
+		X64Register scratch = pool[index];
+		if(index >= 2)
+			note_callee_saved(scratch);
+		emit_mov(MakeReg(scratch), MakeReg(bounce.reg));
+		pool_holder_[index] = arg.name;
+		bounce.kind = ValueLocation::VL_GPR;
+		bounce.reg = scratch;
+	}
+
 	// Argument sources living in the pool registers that double as the
 	// fifth and sixth argument registers spill to anonymous frame slots.
 	for(size_t a = 0; a < ins.operands.size(); a++) {
@@ -269,9 +292,14 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		}
 	}
 
+	for(int phase = 0; phase < 3; phase++)
 	for(size_t a = 0; a < ins.operands.size(); a++) {
 		const ArgSlot & slot = slots[a];
 		const LowIROperand & arg = ins.operands[a];
+		int slot_phase = slot.kind == ArgSlot::AS_GPR ? 0
+			: slot.kind == ArgSlot::AS_XMM ? 1 : 2;
+		if(slot_phase != phase)
+			continue;
 		if(slot.kind == ArgSlot::AS_GPR) {
 			X64Register target = kArgRegs[slot.ordinal];
 			if(arg.kind == LOWIR_OPERAND_LITERAL) {
@@ -470,9 +498,16 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	if(return_type.kind == LOWIR_TYPE_OBJ) {
 		// A single adjacent copyobj consumer reads the value straight from
 		// rax; otherwise the object value lands in its own frame home.
-		if(result.uses.size() == 1 &&
-		   result.uses[0].position == current_position_ + 1 &&
-		   linear_[result.uses[0].position]->opcode == LOWIR_INS_COPYOBJ) {
+		bool foldable_copy = result.uses.size() == 1 &&
+			result.uses[0].position > current_position_ &&
+			result.uses[0].position < (int)linear_.size() &&
+			linear_[result.uses[0].position]->opcode == LOWIR_INS_COPYOBJ;
+		for(int q = current_position_ + 1;
+		    foldable_copy && q < result.uses[0].position; q++)
+			if(linear_[q]->opcode != LOWIR_INS_ADDR &&
+			   linear_[q]->opcode != LOWIR_INS_CONST)
+				foldable_copy = false;
+		if(foldable_copy) {
 			ValueLocation location;
 			location.kind = ValueLocation::VL_NONE;
 			location.also_in_rax = true;
@@ -793,6 +828,7 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 	            cmp.type.kind == LOWIR_TYPE_I64 ||
 	            cmp.type.kind == LOWIR_TYPE_PTR;
 	bool rhs_literal = rhs.kind == LOWIR_OPERAND_LITERAL;
+	long long cmp_width = FrameSizeOf(cmp.type);
 
 	mir_model::Operand left;
 	bool left_is_memory = false;
@@ -821,9 +857,13 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 		left = MakeReg(XR_RAX);
 	}
 	else if(lhs.kind == LOWIR_OPERAND_SLOT) {
-		if(rhs_literal && wide) {
+		if(rhs_literal &&
+		   FrameSizeOf(slots_[lhs.name].type) == cmp_width) {
 			left = frame_operand(slots_[lhs.name].frame_offset);
 			left_is_memory = true;
+		}
+		else if(FrameSizeOf(slots_[lhs.name].type) != cmp_width) {
+			left = MakeReg(reload_to_pool(lhs, slots_[lhs.name].type));
 		}
 		else {
 			invalidate_rax();
@@ -836,7 +876,8 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 			left = MakeReg(XR_RAX);
 		}
 	}
-	else if(operand_in_rax(lhs)) {
+	else if(operand_in_rax(lhs) &&
+	        locations_[lhs.name].kind != ValueLocation::VL_GPR) {
 		left = MakeReg(XR_RAX);
 	}
 	else if(lhs.kind == LOWIR_OPERAND_TEMP &&
@@ -895,8 +936,12 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 		right = address_operand(load->operands[0], XR_RDX);
 		release_after_use(*load);
 	}
-	else if(rhs.kind == LOWIR_OPERAND_SLOT && !left_is_memory) {
+	else if(rhs.kind == LOWIR_OPERAND_SLOT && !left_is_memory &&
+	        FrameSizeOf(slots_[rhs.name].type) == cmp_width) {
 		right = frame_operand(slots_[rhs.name].frame_offset);
+	}
+	else if(rhs.kind == LOWIR_OPERAND_SLOT) {
+		right = MakeReg(reload_to_pool(rhs, slots_[rhs.name].type));
 	}
 	else if(rhs.kind == LOWIR_OPERAND_TEMP &&
 	        locations_[rhs.name].kind == ValueLocation::VL_FRAME) {
@@ -967,9 +1012,22 @@ void FunctionLowering::LowerBranch(const LowIRInstruction & ins)
 		emit_mov(MakeReg(XR_RAX), MakeImm(ParseIntLiteral(condition)));
 	}
 	else if(!operand_in_rax(condition)) {
+		const ValueInfo & info = values_[condition.name];
 		const ValueLocation & location = locations_[condition.name];
 		invalidate_rax();
-		if(location.kind == ValueLocation::VL_FRAME) {
+		if(info.is_param && !arg_homes_clobbered_ &&
+		   location.prefer_home && current_block_ == 0 &&
+		   location.kind == ValueLocation::VL_GPR) {
+			// the incoming argument register still holds the value
+			X64Register home = location.reg;
+			for(size_t pb = 0; pb < out_.params.size(); pb++)
+				if(out_.params[pb].name == condition.name &&
+				   out_.params[pb].location ==
+				       mir_model::ParamBinding::PL_REG)
+					home = out_.params[pb].reg;
+			emit_mov(MakeReg(XR_RAX), MakeReg(home));
+		}
+		else if(location.kind == ValueLocation::VL_FRAME) {
 			mir_model::Instruction & fill =
 				emit(mir_model::Instruction::MI_LOAD);
 			fill.type = SpellType(type);
@@ -1001,9 +1059,22 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 		emit_mov(MakeReg(XR_RAX), MakeImm(ParseIntLiteral(selector)));
 	}
 	else if(!operand_in_rax(selector)) {
+		const ValueInfo & info = values_[selector.name];
 		const ValueLocation & location = locations_[selector.name];
 		invalidate_rax();
-		if(location.kind == ValueLocation::VL_FRAME) {
+		if(info.is_param && !arg_homes_clobbered_ &&
+		   location.prefer_home && current_block_ == 0 &&
+		   location.kind == ValueLocation::VL_GPR) {
+			// the incoming argument register still holds the value
+			X64Register home = location.reg;
+			for(size_t pb = 0; pb < out_.params.size(); pb++)
+				if(out_.params[pb].name == selector.name &&
+				   out_.params[pb].location ==
+				       mir_model::ParamBinding::PL_REG)
+					home = out_.params[pb].reg;
+			emit_mov(MakeReg(XR_RAX), MakeReg(home));
+		}
+		else if(location.kind == ValueLocation::VL_FRAME) {
 			mir_model::Instruction & fill =
 				emit(mir_model::Instruction::MI_LOAD);
 			fill.type = SpellType(type);
@@ -1072,7 +1143,24 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 		return;
 	}
 	if(ins.type.kind == LOWIR_TYPE_F32 || ins.type.kind == LOWIR_TYPE_F64) {
-		mir_model::Operand value = float_read(source, ins.type);
+		LowIRType value_type = ins.type;
+		if(source.kind == LOWIR_OPERAND_TEMP &&
+		   values_.count(source.name) &&
+		   values_[source.name].type.is_float())
+			value_type = values_[source.name].type;
+		mir_model::Operand value = float_read(source, value_type);
+		if(value_type.kind != ins.type.kind) {
+			bool widen = FrameSizeOf(ins.type) > FrameSizeOf(value_type);
+			mir_model::Instruction & convert =
+				emit(widen ? mir_model::Instruction::MI_FPEXT
+				           : mir_model::Instruction::MI_FPTRUNC);
+			convert.type = SpellType(ins.type);
+			convert.source_type = SpellType(value_type);
+			convert.operands.push_back(MakeXmm(XMM_0));
+			convert.operands.push_back(value);
+			emit(mir_model::Instruction::MI_RET);
+			return;
+		}
 		mir_model::Instruction & mov =
 			emit(mir_model::Instruction::MI_FMOV);
 		mov.type = SpellType(ins.type);

@@ -75,34 +75,47 @@ void FunctionLowering::emit_tls_addr(const std::string & global_name)
 
 // -- pending single-use loads -----------------------------------------
 
+// Finds the compare that lowers as part of this branch: the block-local
+// single-use compare defining the branch condition (any distance — the
+// compare sinks to the branch), or the compare under one adjacent
+// logical not.
 const LowIRInstruction * FunctionLowering::fused_compare_for_branch(
 	const LowIRInstruction & branch, int position, bool & invert) const
 {
 	invert = false;
 	if(branch.operands[0].kind != LOWIR_OPERAND_TEMP || position < 1)
 		return 0;
-	const LowIRInstruction & prior = *linear_[position - 1];
-	if(prior.result != branch.operands[0].name)
-		return 0;
-	std::map<std::string, ValueInfo>::const_iterator it =
-		values_.find(prior.result);
-	if(it == values_.end() || it->second.uses.size() != 1)
-		return 0;
-	if(prior.opcode == LOWIR_INS_CMP)
-		return &prior;
-	if(prior.opcode == LOWIR_INS_UNARY && prior.operation == "not" &&
-	   prior.operands[0].kind == LOWIR_OPERAND_TEMP && position >= 2) {
-		const LowIRInstruction & inner = *linear_[position - 2];
-		if(inner.opcode == LOWIR_INS_CMP &&
-		   inner.result == prior.operands[0].name) {
-			std::map<std::string, ValueInfo>::const_iterator inner_it =
-				values_.find(inner.result);
-			if(inner_it != values_.end() &&
-			   inner_it->second.uses.size() == 1) {
-				invert = true;
-				return &inner;
+	int block_begin = 0;
+	for(size_t b = 0; b + 1 < block_first_position_.size(); b++)
+		if(position >= block_first_position_[b] &&
+		   position < block_first_position_[b + 1])
+			block_begin = block_first_position_[b];
+	for(int p = position - 1; p >= block_begin; p--) {
+		const LowIRInstruction & prior = *linear_[p];
+		if(prior.result != branch.operands[0].name)
+			continue;
+		std::map<std::string, ValueInfo>::const_iterator it =
+			values_.find(prior.result);
+		if(it == values_.end() || it->second.uses.size() != 1)
+			return 0;
+		if(prior.opcode == LOWIR_INS_CMP)
+			return &prior;
+		if(prior.opcode == LOWIR_INS_UNARY && prior.operation == "not" &&
+		   prior.operands[0].kind == LOWIR_OPERAND_TEMP && p >= 1 &&
+		   p == position - 1) {
+			const LowIRInstruction & inner = *linear_[p - 1];
+			if(inner.opcode == LOWIR_INS_CMP &&
+			   inner.result == prior.operands[0].name) {
+				std::map<std::string, ValueInfo>::const_iterator inner_it =
+					values_.find(inner.result);
+				if(inner_it != values_.end() &&
+				   inner_it->second.uses.size() == 1) {
+					invert = true;
+					return &inner;
+				}
 			}
 		}
+		return 0;
 	}
 	return 0;
 }
@@ -117,9 +130,21 @@ bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
 	if(it == values_.end() || it->second.uses.size() != 1 ||
 	   it->second.needs_frame || it->second.cross_block)
 		return false;
-	const ValueUse & use = it->second.uses[0];
-	if(use.position != position + 1)
-		return false;
+	ValueUse use = it->second.uses[0];
+	// retimed (branch-sunk) compares keep their textual position here
+	if(use.position != position + 1) {
+		if(position + 1 >= (int)linear_.size())
+			return false;
+		const LowIRInstruction & next = *linear_[position + 1];
+		bool referenced = false;
+		for(size_t o = 0; o < next.operands.size(); o++)
+			if(next.operands[o].kind == LOWIR_OPERAND_TEMP &&
+			   next.operands[o].name == ins.result)
+				referenced = true;
+		if(!referenced)
+			return false;
+		use.position = position + 1;
+	}
 	const LowIRInstruction & user = *linear_[use.position];
 	bool foldable = false;
 	if(use.kind == ValueUse::USE_STORE_VALUE &&
@@ -129,9 +154,12 @@ bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
 	        (ins.type.kind == LOWIR_TYPE_I64 ||
 	         ins.type.kind == LOWIR_TYPE_PTR))
 		foldable = true;
-	else if(use.kind == ValueUse::USE_CALL_ARG)
+	else if(use.kind == ValueUse::USE_CALL_ARG &&
+	        (ins.type.kind == LOWIR_TYPE_I64 ||
+	         ins.type.kind == LOWIR_TYPE_PTR))
 		foldable = true;
-	else if(user.opcode == LOWIR_INS_CMP) {
+	else if(user.opcode == LOWIR_INS_CMP &&
+	        FrameSizeOf(ins.type) == FrameSizeOf(user.type)) {
 		bool invert = false;
 		const ValueUse & cmp_use =
 			values_.find(user.result)->second.uses.empty()
@@ -144,12 +172,6 @@ bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
 		                            use.position + 1, invert) == &user)
 			foldable = true;
 	}
-	else if(ins.type.is_float() &&
-	        (user.opcode == LOWIR_INS_BINARY ||
-	         user.opcode == LOWIR_INS_CMP ||
-	         user.opcode == LOWIR_INS_CONVERT ||
-	         user.opcode == LOWIR_INS_RETURN))
-		foldable = true;
 	if(!foldable)
 		return false;
 	pending_load_name_ = ins.result;
@@ -507,22 +529,30 @@ void FunctionLowering::LowerStore(const LowIRInstruction & ins)
 		return;
 	}
 	if(ins.type.is_float()) {
-		mir_model::Operand value = float_read(ins.operands[0], ins.type);
+		LowIRType value_type = ins.type;
+		if(ins.operands[0].kind == LOWIR_OPERAND_TEMP &&
+		   values_.count(ins.operands[0].name) &&
+		   values_[ins.operands[0].name].type.is_float())
+			value_type = values_[ins.operands[0].name].type;
+		mir_model::Operand value = float_read(ins.operands[0], value_type);
 		mir_model::Operand address = address_operand(target, XR_RCX);
+		if(value_type.kind != ins.type.kind &&
+		   ins.operands[0].kind == LOWIR_OPERAND_TEMP) {
+			bool widen = FrameSizeOf(ins.type) > FrameSizeOf(value_type);
+			mir_model::Instruction & convert =
+				emit(widen ? mir_model::Instruction::MI_FPEXT
+				           : mir_model::Instruction::MI_FPTRUNC);
+			convert.type = SpellType(ins.type);
+			convert.source_type = SpellType(value_type);
+			convert.operands.push_back(address);
+			convert.operands.push_back(value);
+			return;
+		}
 		mir_model::Instruction & mov = emit(mir_model::Instruction::MI_FMOV);
 		mov.type = SpellType(ins.type);
 		mov.operands.push_back(address);
 		mov.operands.push_back(value);
 		return;
-	}
-	// Literal stores through register-resident pointers leave the
-	// reference's 8-byte constant-home residue in the frame.
-	if(ins.operands[0].kind == LOWIR_OPERAND_LITERAL &&
-	   target.kind == LOWIR_OPERAND_TEMP) {
-		ValueLocation::Kind where = locations_[target.name].kind;
-		if(where == ValueLocation::VL_GPR ||
-		   where == ValueLocation::VL_ARG_REG)
-			residual_bytes_ += 8;
 	}
 	mir_model::Operand value = stage_store_value(ins.operands[0], ins.type);
 	mir_model::Operand address = address_operand(target, XR_RCX);
@@ -538,7 +568,22 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 	X64Register reg = XR_RAX;
 	LowIRType ptr;
 	ptr.kind = LOWIR_TYPE_PTR;
-	emit_dest_copy(ins.result, ins.operands[0], ptr, false, reg);
+	const LowIROperand & base = ins.operands[0];
+	bool identity = ins.operands[1].kind == LOWIR_OPERAND_LITERAL &&
+	                ParseIntLiteral(ins.operands[1]) * element == 0;
+	emit_dest_copy(ins.result, base, ptr, false, reg);
+	if(identity && base.kind == LOWIR_OPERAND_TEMP) {
+		ValueLocation & source = locations_[base.name];
+		if(source.kind == ValueLocation::VL_ARG_REG &&
+		   values_[base.name].last_use() <=
+		       values_[ins.result].last_use()) {
+			source.kind = ValueLocation::VL_GPR;
+			source.reg = reg;
+			for(int i = 0; i < kPoolSize; i++)
+				if(pool_holder_[i] == "*hole:" + base.name)
+					pool_holder_[i] = "";
+		}
+	}
 	const LowIROperand & count = ins.operands[1];
 	if(count.kind == LOWIR_OPERAND_LITERAL) {
 		long long offset = ParseIntLiteral(count) * element;
@@ -662,7 +707,10 @@ void FunctionLowering::LowerBinary(const LowIRInstruction & ins)
 	}
 	else if(rhs.kind == LOWIR_OPERAND_LITERAL) {
 		long long value = ParseIntLiteral(rhs);
-		if(FitsImm32(value)) {
+		bool bitwise = opcode == mir_model::Instruction::MI_AND ||
+		               opcode == mir_model::Instruction::MI_OR ||
+		               opcode == mir_model::Instruction::MI_XOR;
+		if(FitsImm32(value) && !bitwise) {
 			source = MakeImm(value);
 		}
 		else {

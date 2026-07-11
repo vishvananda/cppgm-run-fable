@@ -61,6 +61,7 @@ struct ValueInfo
 	LowIRType type;
 	bool is_param = false;
 	int param_index = -1;
+	int raw_references = 0;   // textual operand occurrences before rewrites
 	int def_position = -1;
 	std::vector<ValueUse> uses;
 	bool cross_block = false;
@@ -96,6 +97,7 @@ struct ValueLocation
 	long long frame_offset = 0;
 	std::string slot_name;
 	bool also_in_rax = false;   // call/setcc results linger in rax
+	bool prefer_home = false;   // param copy whose home is read while valid
 };
 
 struct SlotInfo
@@ -137,6 +139,9 @@ private:
 	void AliasObjectParamSlots();
 	bool ParamUseIsForwardable(const ValueInfo & info,
 	                           X64Register home) const;
+	bool CallArgTargetsHome(int position, int arg_index,
+	                        X64Register home) const;
+	void RetimeSinkingCompares();
 
 	// -- parameter and program scaffolding (lowir_to_mir_program.cpp)
 	void PlanParams();
@@ -260,6 +265,9 @@ private:
 	int current_position_ = 0;
 	std::string pending_load_name_;       // single-use load deferred to user
 	const LowIRInstruction * pending_load_ = 0;
+	bool arg_homes_clobbered_ = false;
+	bool has_dead_source_spill_ = false;
+	size_t current_block_ = 0;
 	mir_model::MirBlock * mir_block_ = 0;
 };
 
