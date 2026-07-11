@@ -451,11 +451,23 @@ void FunctionLowering::LowerAddr(const LowIRInstruction & ins)
 	if(storage_is_tls(target)) {
 		emit_tls_addr(target.name);
 		X64Register reg = alloc_gpr(ins.result);
+		if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
+			invalidate_rax();
+			emit_mov(MakeReg(XR_RAX), MakeReg(XR_R11));
+			commit_frame_result(ins.result);
+			return;
+		}
 		emit_mov(MakeReg(reg), MakeReg(XR_R11));
 		return;
 	}
 	X64Register reg = alloc_gpr(ins.result);
 	bool is_global = !facts_.info->is_function(target.name);
+	if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
+		invalidate_rax();
+		emit_mov(MakeReg(XR_RAX), MakeSymbol(target.name, is_global));
+		commit_frame_result(ins.result);
+		return;
+	}
 	emit_mov(MakeReg(reg), MakeSymbol(target.name, is_global));
 }
 
@@ -1045,11 +1057,19 @@ void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
 		else {
 			reg = alloc_gpr(ins.result);
 		}
+		bool frame_result =
+			locations_[ins.result].kind == ValueLocation::VL_FRAME;
+		if(frame_result) {
+			invalidate_rax();
+			reg = XR_RAX;
+		}
 		mir_model::Instruction & convert = emit(opcode);
 		convert.type = IntWidthSpelling(dst);
 		convert.source_type = SpellType(src);
 		convert.operands.push_back(MakeReg(reg));
 		convert.operands.push_back(source);
+		if(frame_result)
+			commit_frame_result(ins.result);
 		return;
 	}
 	if(ins.operation == "fpext" || ins.operation == "fptrunc") {

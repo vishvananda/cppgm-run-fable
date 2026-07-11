@@ -141,6 +141,11 @@ int FunctionLowering::pool_scan(bool callee_saved_only,
 bool FunctionLowering::alloc_pool_gpr(const std::string & name,
                                       X64Register & out_reg)
 {
+	// EH mode: values never own pool registers - unwinding into a
+	// dispatch block leaves them holding another frame's state, so
+	// every value keeps a frame home instead.
+	if(eh_mode_)
+		return false;
 	const ValueInfo & info = values_[name];
 	int index = pool_scan(info.crosses_call, false);
 	if(index < 0)
@@ -508,6 +513,14 @@ void FunctionLowering::emit_narrow_normalize(const LowIRType & type,
 }
 
 // Stores a frame-spilled destination computed in rax back to its home.
+void FunctionLowering::commit_frame_result(const std::string & dest)
+{
+	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
+	store.type = "i64";
+	store.operands.push_back(frame_operand(locations_[dest].frame_offset));
+	store.operands.push_back(MakeReg(XR_RAX));
+}
+
 void FunctionLowering::commit_dest(const std::string & dest)
 {
 	if(pending_dest_spill_ == 0)
@@ -555,7 +568,7 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 		}
 	}
 	if((lhs_forwarded || lhs_pending) && !values_[dest].crosses_call &&
-	   !index_dest_lowering_) {
+	   !index_dest_lowering_ && !eh_mode_) {
 		// destinations fed from parameter registers scan from r9
 		int index = pool_scan(false, true);
 		if(index < 0)
@@ -605,10 +618,14 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 			const ValueInfo & info = values_[lhs.name];
 			if(info.is_param && location.prefer_home &&
 			   current_block_ == 0 && !arg_homes_clobbered_) {
+				// rdx/rcx double as staging registers, so only the
+				// rdi/rsi argument homes are trustworthy this late.
 				for(size_t pb = 0; pb < out_.params.size(); pb++)
 					if(out_.params[pb].name == lhs.name &&
 					   out_.params[pb].location ==
-					       mir_model::ParamBinding::PL_REG)
+					       mir_model::ParamBinding::PL_REG &&
+					   (out_.params[pb].reg == XR_RDI ||
+					    out_.params[pb].reg == XR_RSI))
 						source = out_.params[pb].reg;
 			}
 			emit_mov(MakeReg(out_reg), MakeReg(source));

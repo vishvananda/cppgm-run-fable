@@ -1,5 +1,6 @@
 #include "x86/lowir_to_mir.h"
 
+#include <sstream>
 #include <stdexcept>
 
 // Calls, bulk memory, atomics, and control flow for the LowIR -> MIR
@@ -1306,6 +1307,90 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 	}
 	mir_model::Instruction & ret = emit(mir_model::Instruction::MI_RET);
 	ret.operands.push_back(MakeReg(XR_RAX));
+}
+
+// -- exception regions ---------------------------------------------------
+//
+// eh_try/eh_cleanup install a 32-byte frame-resident handler record
+// {prev, dispatch address, rbp, rsp} at the head of the global chain;
+// eh_end pops the head. __cppgm_unwind_raise (synthesized at link)
+// jumps to the innermost record's dispatch block without popping - the
+// emitted dispatch blocks pop the still-installed regions themselves
+// with explicit eh_end markers before joining the catch path.
+
+void FunctionLowering::LowerEhPush(const LowIRInstruction & ins,
+                                   int position)
+{
+	LowIRType record_type;
+	record_type.kind = LOWIR_TYPE_OBJ;
+	record_type.obj_bytes = 32;
+	record_type.obj_align = 8;
+	std::ostringstream name;
+	name << "__eh_record_" << position;
+	long long offset = alloc_frame_home(
+		name.str(), record_type, mir_model::FrameBinding::FB_TEMP);
+	mir_model::Instruction & push =
+		emit(mir_model::Instruction::MI_EH_PUSH);
+	push.operands.push_back(frame_operand(offset));
+	push.operands.push_back(MakeLabel(ins.block_targets[0]));
+}
+
+void FunctionLowering::LowerEhPop()
+{
+	emit(mir_model::Instruction::MI_EH_POP);
+}
+
+// eh_catch/eh_catch_all markers classify the in-flight exception: the
+// first matching marker claims the selector and the adjusted pointer
+// (both runtime globals). Cleanup/filter markers emit no code.
+void FunctionLowering::LowerEhMarker(const LowIRInstruction & ins)
+{
+	if(ins.operation != "eh_catch" && ins.operation != "eh_catch_all")
+		return;
+	invalidate_rax();
+	arg_homes_clobbered_ = true;
+	if(ins.operation == "eh_catch")
+		emit_mov(MakeReg(XR_RDI), MakeSymbol(ins.eh_types[0], true));
+	else
+		emit_mov(MakeReg(XR_RDI), MakeImm(0));
+	emit_mov(MakeReg(XR_RSI), MakeImm(ins.eh_selector));
+	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
+	call.operands.push_back(MakeSymbol("__cppgm_eh_match", false));
+}
+
+void FunctionLowering::LowerException(const LowIRInstruction & ins)
+{
+	invalidate_rax();
+	emit(ins.operation == "exception_selector"
+	         ? mir_model::Instruction::MI_LOAD_EXCEPTION_SELECTOR
+	         : mir_model::Instruction::MI_LOAD_EXCEPTION);
+	assign_result_from_rax(ins.result, ins.type, false);
+}
+
+// The PA13 plain-throw form: publish the payload as the current
+// exception and enter the unwinder.
+void FunctionLowering::LowerThrow(const LowIRInstruction & ins)
+{
+	invalidate_rax();
+	arg_homes_clobbered_ = true;
+	mir_model::Operand value = gpr_read(ins.operands[0]);
+	emit_mov(MakeReg(XR_RAX), value);
+	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
+	store.type = "i64";
+	store.operands.push_back(MakeSymbol("__cppgm_eh_exception", true));
+	store.operands.push_back(MakeReg(XR_RAX));
+	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
+	call.operands.push_back(MakeSymbol("__cppgm_unwind_raise", false));
+	call.call_returns_noreturn = true;
+}
+
+void FunctionLowering::LowerResume()
+{
+	invalidate_rax();
+	arg_homes_clobbered_ = true;
+	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
+	call.operands.push_back(MakeSymbol("__cppgm_unwind_raise", false));
+	call.call_returns_noreturn = true;
 }
 
 }  // namespace lowir_to_mir

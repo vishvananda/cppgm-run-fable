@@ -518,8 +518,18 @@ LowIRInstruction Parser::parse_statement_instruction()
 	}
 	else if(accept_word("eh_cleanup"))
 	{
-		ins.opcode = LOWIR_INS_EH_CLEANUP;
-		ins.block_targets.push_back(expect(LOWIR_TOK_BLOCK_NAME, "block"));
+		// With a dispatch block this installs a cleanup region; bare
+		// (inside a dispatch block) it is a classification marker.
+		if(at(LOWIR_TOK_BLOCK_NAME))
+		{
+			ins.opcode = LOWIR_INS_EH_CLEANUP;
+			ins.block_targets.push_back(advance().text);
+		}
+		else
+		{
+			ins.opcode = LOWIR_INS_EH_MARKER;
+			ins.operation = "eh_cleanup";
+		}
 	}
 	else if(accept_word("eh_catch"))
 	{

@@ -153,6 +153,15 @@ void FunctionLowering::PlanParams()
 			binding.type = ContainerSpelling(param.type.obj_bytes);
 		out_.params.push_back(binding);
 		gpr++;
+		if(eh_mode_) {
+			// EH functions keep every parameter in its frame home:
+			// a register home would not survive unwinding back into
+			// this frame.
+			SpillParamHome(param, home_reg,
+			               param.type.is_obj()
+			                   ? "i64" : SpellType(param.type));
+			continue;
+		}
 		PlanGprParam(param, (int)p, home_reg, copies, crossing);
 	}
 	// call-crossing parameters take callee-saved registers in reverse
@@ -442,6 +451,13 @@ void FunctionLowering::LowerBlock(size_t block_index)
 {
 	current_block_ = block_index;
 	mir_block_ = &out_.blocks[block_index];
+	// EH functions treat every block entry as a potential unwind
+	// landing: nothing cached in rax (or lingering call staging) may
+	// carry across the boundary.
+	if(eh_mode_) {
+		invalidate_rax();
+		arg_homes_clobbered_ = true;
+	}
 	int begin = block_first_position_[block_index];
 	int end = block_first_position_[block_index + 1];
 	for(int p = begin; p < end; p++) {
@@ -535,6 +551,17 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
 		case LOWIR_INS_BRANCH: LowerBranch(ins); break;
 		case LOWIR_INS_SWITCH: LowerSwitch(ins); break;
 		case LOWIR_INS_RETURN: LowerReturn(ins); break;
+		case LOWIR_INS_EH_TRY: LowerEhPush(ins, position); break;
+		case LOWIR_INS_EH_CLEANUP:
+			if(ins.block_targets.empty())
+				break;   // dispatch-block cleanup marker: no code
+			LowerEhPush(ins, position);
+			break;
+		case LOWIR_INS_EH_END: LowerEhPop(); break;
+		case LOWIR_INS_EH_MARKER: LowerEhMarker(ins); break;
+		case LOWIR_INS_EXCEPTION: LowerException(ins); break;
+		case LOWIR_INS_THROW: LowerThrow(ins); break;
+		case LOWIR_INS_RESUME: LowerResume(); break;
 		default:
 			throw std::runtime_error(
 				"PA28 does not lower exception constructs");
@@ -546,7 +573,25 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
 void FunctionLowering::Lower()
 {
 	Linearize();
-	PromoteSlots();
+	for(size_t p = 0; p < linear_.size() && !eh_mode_; p++) {
+		switch(linear_[p]->opcode) {
+			case LOWIR_INS_EH_TRY:
+			case LOWIR_INS_EH_CLEANUP:
+			case LOWIR_INS_EH_END:
+			case LOWIR_INS_EH_MARKER:
+			case LOWIR_INS_EXCEPTION:
+			case LOWIR_INS_THROW:
+			case LOWIR_INS_RESUME:
+				eh_mode_ = true;
+				break;
+			default:
+				break;
+		}
+	}
+	// Unwinding re-enters dispatch blocks with only rbp/rsp restored,
+	// so slot state must stay memory-resident in EH functions.
+	if(!eh_mode_)
+		PromoteSlots();
 	AnalyzeValues();
 	MarkByAddressArgs();
 	out_.blocks.resize(function_.blocks.size());

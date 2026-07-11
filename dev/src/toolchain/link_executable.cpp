@@ -132,8 +132,10 @@ mir_model::MirFunction BuildStartFunction(const vector<string> & inits,
 
 // The unwind entry: pop the innermost handler record {prev, dispatch,
 // rbp, rsp}, reset the handler selector, restore the recorded frame,
-// and jump into the dispatch block. With no installed handler the
-// exception is unhandled and the program exits with status 134.
+// and jump into the record's dispatch block. Dispatch blocks pop any
+// further same-frame regions themselves with frame-bounded eh_end
+// markers. With no installed handler the exception is unhandled and
+// the program exits with status 134.
 mir_model::MirFunction BuildUnwindRaiseFunction()
 {
 	mir_model::MirFunction raise;
@@ -168,7 +170,7 @@ mir_model::MirFunction BuildUnwindRaiseFunction()
 	reset.operands.push_back(MakeRegOp(XR_RCX));
 	entry.instructions.push_back(reset);
 
-	// top = record.prev
+	// top = record.prev (the landed record leaves the chain)
 	Ins prev = MakeIns(Ins::MI_LOAD);
 	prev.type = "i64";
 	prev.operands.push_back(MakeRegOp(XR_RDX));

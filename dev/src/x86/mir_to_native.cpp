@@ -457,6 +457,9 @@ private:
 	void EmitCompareImmLhs(const Ins & ins, int width, bool is_test);
 	void EmitBranch(const Ins & ins);
 	void EmitTlsAddr(const Ins & ins);
+	void EmitEhPush(const Ins & ins);
+	void EmitEhPop();
+	X86Mem RuntimeGlobalMem(const char * name);
 	void Finish(ImageItem & item);
 	X86Mem SavedRegSlot(std::size_t index) const;
 	X86Mem MemOperand(const Op & op, long long extra);
@@ -492,6 +495,9 @@ private:
 	X86CodeBuffer code_;
 	std::map<std::string, std::size_t> block_offsets_;
 	std::vector<BlockFixup> fixups_;
+	// EH dispatch addresses: (patch index, block) pairs whose imm64
+	// addend receives the block's final intra-item offset in Finish.
+	std::vector<std::pair<std::size_t, std::string> > address_fixups_;
 };
 
 FunctionEncoder::FunctionEncoder(ProgramEnv & env,
@@ -531,7 +537,16 @@ void FunctionEncoder::Finish(ImageItem & item)
 {
 	item.is_code = true;
 	item.bytes = code_.bytes();
-	const std::vector<X86Patch> & patches = code_.patches();
+	std::vector<X86Patch> patches = code_.patches();
+	for (std::size_t i = 0; i < address_fixups_.size(); i++)
+	{
+		std::map<std::string, std::size_t>::const_iterator it =
+			block_offsets_.find(address_fixups_[i].second);
+		if (it == block_offsets_.end())
+			throw runtime_error("machine IR EH dispatch to unknown block: " +
+			                    address_fixups_[i].second);
+		patches[address_fixups_[i].first].imm.addend += it->second;
+	}
 	for (std::size_t i = 0; i < patches.size(); i++)
 	{
 		// Label-less PCREL fields are the intra-function jumps we
@@ -800,6 +815,57 @@ void FunctionEncoder::EmitTlsAddr(const Ins & ins)
 		env_.SymbolLabel(env_.TlsBackingGlobal(wrapper)), 0));
 }
 
+X86Mem FunctionEncoder::RuntimeGlobalMem(const char * name)
+{
+	return X86Mem::Absolute(X86Imm::Label(env_.SymbolLabel(name), 0));
+}
+
+// Installs a handler record {prev, dispatch, rbp, rsp} at the head of
+// the __cppgm_eh_top chain. The dispatch address is this function's
+// own entry plus the block offset (back-filled in Finish); r10/r11 are
+// staging registers the register discipline never assigns to values.
+void FunctionEncoder::EmitEhPush(const Ins & ins)
+{
+	X86Mem record = MemOperand(ins.operands[0], 0);
+	code_.MovRegMem(64, X86_R10, RuntimeGlobalMem("__cppgm_eh_top"));
+	code_.MovMemReg(64, MemOperand(ins.operands[0], 0), X86_R10);
+	code_.MovRegImm(X86_R11,
+	                X86Imm::Label(env_.SymbolLabel(fn_->name), 0));
+	address_fixups_.push_back(std::make_pair(code_.patches().size() - 1,
+	                                         ins.operands[1].text));
+	code_.MovMemReg(64, MemOperand(ins.operands[0], 8), X86_R11);
+	code_.MovMemReg(64, MemOperand(ins.operands[0], 16), X86_RBP);
+	code_.MovRegReg(64, X86_R11, X86_RSP);
+	code_.MovMemReg(64, MemOperand(ins.operands[0], 24), X86_R11);
+	code_.Lea(X86_R10, record);
+	code_.MovMemReg(64, RuntimeGlobalMem("__cppgm_eh_top"), X86_R10);
+}
+
+// eh_end pops the chain head only when it belongs to this frame
+// (rsp <= record < rbp): dispatch blocks may run more eh_end markers
+// than regions remain, and the extras must not consume an ancestor
+// frame's records. Built back-to-front so each jcc rel8 is exact.
+void FunctionEncoder::EmitEhPop()
+{
+	X86CodeBuffer pop;
+	pop.MovRegMem(64, X86_R10, X86Mem(X86_R10, 0));
+	pop.MovMemReg(64, RuntimeGlobalMem("__cppgm_eh_top"), X86_R10);
+
+	X86CodeBuffer upper;
+	upper.Alu(X86_CMP, 64, X86_R10, X86_RBP);
+	upper.JccRel8(X86_CC_AE, static_cast<int>(pop.bytes().size()));
+
+	X86CodeBuffer lower;
+	lower.Alu(X86_CMP, 64, X86_R10, X86_RSP);
+	lower.JccRel8(X86_CC_B, static_cast<int>(upper.bytes().size() +
+	                                         pop.bytes().size()));
+
+	code_.MovRegMem(64, X86_R10, RuntimeGlobalMem("__cppgm_eh_top"));
+	code_.AppendBuffer(lower);
+	code_.AppendBuffer(upper);
+	code_.AppendBuffer(pop);
+}
+
 void FunctionEncoder::EmitInstruction(const Ins & ins)
 {
 	switch (ins.opcode)
@@ -859,6 +925,16 @@ void FunctionEncoder::EmitInstruction(const Ins & ins)
 		return;
 	case Ins::MI_CALL_INDIRECT: code_.CallReg(Reg(ins.operands[0])); return;
 	case Ins::MI_JMP_INDIRECT: code_.JmpReg(Reg(ins.operands[0])); return;
+	case Ins::MI_EH_PUSH: EmitEhPush(ins); return;
+	case Ins::MI_EH_POP: EmitEhPop(); return;
+	case Ins::MI_LOAD_EXCEPTION:
+		code_.MovRegMem(64, X86_RAX,
+		                RuntimeGlobalMem("__cppgm_eh_exception"));
+		return;
+	case Ins::MI_LOAD_EXCEPTION_SELECTOR:
+		code_.MovRegMem(32, X86_RAX,
+		                RuntimeGlobalMem("__cppgm_eh_selector"));
+		return;
 	case Ins::MI_RET:
 		EmitEpilogue();
 		code_.Ret();

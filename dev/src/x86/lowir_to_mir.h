@@ -101,6 +101,10 @@ private:
 	                    const LowIRType & type, bool normalize,
 	                    X64Register & out_reg);
 	void commit_dest(const std::string & dest);
+	// Stores rax into `dest`'s already-allocated frame home (results
+	// computed through the rax staging path when the destination has
+	// no register).
+	void commit_frame_result(const std::string & dest);
 
 	// pending single-use loads folded into their consumer
 	bool try_defer_load(const LowIRInstruction & ins, int position);
@@ -124,6 +128,18 @@ private:
 	void LowerConvert(const LowIRInstruction & ins);
 	void LowerFloatBinary(const LowIRInstruction & ins);
 	void LowerFloatCmpValue(const LowIRInstruction & ins);
+
+	// -- exception regions (lowir_to_mir_flow.cpp). Functions with EH
+	// ops compile in a conservative mode (eh_mode_): values keep frame
+	// homes and never ride pool registers across instructions, because
+	// the unwinder restores only rbp/rsp when it enters a dispatch
+	// block, so register state from before the throw is unreliable.
+	void LowerEhPush(const LowIRInstruction & ins, int position);
+	void LowerEhPop();
+	void LowerEhMarker(const LowIRInstruction & ins);
+	void LowerException(const LowIRInstruction & ins);
+	void LowerThrow(const LowIRInstruction & ins);
+	void LowerResume();
 
 	// -- calls, control flow, atomics (lowir_to_mir_flow.cpp)
 	void LowerCall(const LowIRInstruction & ins);
@@ -170,6 +186,7 @@ private:
 	std::set<int> skip_positions_;        // promoted slot stores
 	std::vector<int> call_positions_;
 	bool touches_float_ = false;
+	bool eh_mode_ = false;   // function contains exception constructs
 
 	// live state
 	std::map<std::string, ValueLocation> locations_;
