@@ -194,7 +194,6 @@ void FunctionLowering::PlanParams()
 	std::vector<int> crossing;
 	for(size_t p = 0; p < function_.params.size(); p++) {
 		const LowIRParam & param = function_.params[p];
-		ValueInfo & info = values_[param.name];
 		mir_model::ParamBinding binding;
 		binding.name = param.name;
 		binding.type = SpellType(param.type);
@@ -208,151 +207,7 @@ void FunctionLowering::PlanParams()
 			binding.type = container_spelling(param.type.obj_bytes);
 		out_.params.push_back(binding);
 		gpr++;
-		if(param.type.kind == LOWIR_TYPE_OBJ) {
-			long long home = alloc_frame_home(
-				param.name, param.type,
-				mir_model::FrameBinding::FB_PARAM_SLOT);
-			mir_model::Instruction & store =
-				emit(mir_model::Instruction::MI_STORE);
-			store.type = container_spelling(param.type.obj_bytes);
-			store.operands.push_back(frame_operand(home));
-			store.operands.push_back(MakeReg(home_reg));
-			ValueLocation location;
-			location.kind = ValueLocation::VL_FRAME;
-			location.frame_offset = home;
-			locations_[param.name] = location;
-			continue;
-		}
-		if(info.uses.empty() && info.raw_references == 0) {
-			// parameters the source never mentions still get their
-			// entry spill into a named home
-			has_dead_source_spill_ = true;
-			long long home = alloc_frame_home(
-				param.name, param.type,
-				mir_model::FrameBinding::FB_PARAM_SLOT);
-			mir_model::Instruction & store =
-				emit(mir_model::Instruction::MI_STORE);
-			store.type = SpellType(param.type);
-			store.operands.push_back(frame_operand(home));
-			store.operands.push_back(MakeReg(home_reg));
-			ValueLocation location;
-			location.kind = ValueLocation::VL_FRAME;
-			location.frame_offset = home;
-			locations_[param.name] = location;
-			continue;
-		}
-		if(ParamUseIsForwardable(info, home_reg)) {
-			ValueLocation location;
-			location.kind = ValueLocation::VL_ARG_REG;
-			location.reg = home_reg;
-			locations_[param.name] = location;
-			bool call_arg_use = false;
-			for(size_t u = 0; u < info.uses.size(); u++)
-				if(info.uses[u].kind == ValueUse::USE_CALL_ARG)
-					call_arg_use = true;
-			if(!call_arg_use && !param_pass_annotated(param) &&
-			   !forward_residue_reclaimed(values_, linear_, param.name))
-				residual_bytes_ += 8;
-			continue;
-		}
-		bool late_operand_use = false;
-		bool address_use = false;
-		int first_position = 0;
-		while(skip_positions_.count(first_position))
-			first_position++;
-		for(size_t u = 0; u < info.uses.size(); u++) {
-			if(info.uses[u].kind != ValueUse::USE_OTHER)
-				continue;
-			const LowIRInstruction & user =
-				*linear_[info.uses[u].position];
-			if((user.opcode == LOWIR_INS_BINARY ||
-			    user.opcode == LOWIR_INS_CMP) &&
-			   info.uses[u].position != first_position &&
-			   info.uses.size() == 1)
-				late_operand_use = true;
-			if(user.opcode == LOWIR_INS_LOAD ||
-			   user.opcode == LOWIR_INS_STORE ||
-			   user.opcode == LOWIR_INS_COPYOBJ ||
-			   user.opcode == LOWIR_INS_ZEROINIT ||
-			   user.opcode == LOWIR_INS_ATOMIC_LOAD ||
-			   user.opcode == LOWIR_INS_ATOMIC_STORE ||
-			   user.opcode == LOWIR_INS_ATOMIC_EXCHANGE ||
-			   user.opcode == LOWIR_INS_ATOMIC_COMPARE_EXCHANGE ||
-			   user.opcode == LOWIR_INS_ATOMIC_ADD_FETCH)
-				address_use = true;
-		}
-		bool callee_saved = info.crosses_call || late_operand_use ||
-		                    (address_use && info.uses.size() >= 2);
-		bool residue_exempt = false;
-		if(info.uses.size() == 1) {
-			const ValueUse & only = info.uses[0];
-			const LowIRInstruction & user = *linear_[only.position];
-			if(only.kind == ValueUse::USE_RETURN_VALUE)
-				residue_exempt = true;
-			if(user.opcode == LOWIR_INS_BINARY &&
-			   only.kind == ValueUse::USE_OTHER)
-				residue_exempt = true;
-			if(user.opcode == LOWIR_INS_CMP)
-				residue_exempt = true;
-			if(user.opcode == LOWIR_INS_BRANCH)
-				residue_exempt = true;
-		}
-		if(!callee_saved && !residue_exempt &&
-		   !param_pass_annotated(param))
-			residual_bytes_ += 8;
-		bool pool_home = home_reg == XR_R8 || home_reg == XR_R9;
-		if(info.crosses_call && !late_operand_use) {
-			crossing.push_back((int)p);
-			continue;
-		}
-		if(!callee_saved && !pool_home) {
-			// scratch copies take their register at first read; address
-			// bases and compare operands scan from r8, the rest from r9
-			ValueLocation location;
-			location.kind = ValueLocation::VL_PENDING_COPY;
-			location.reg = home_reg;
-			location.pending_r9_first = true;
-			if(info.uses.size() == 1) {
-				const LowIRInstruction & user =
-					*linear_[info.uses[0].position];
-				bool rhs_kind = info.uses[0].kind == ValueUse::USE_OTHER &&
-					(user.opcode == LOWIR_INS_BINARY ||
-					 user.opcode == LOWIR_INS_CMP);
-				if(address_use && !rhs_kind)
-					location.pending_r9_first = false;
-				if(info.uses[0].kind == ValueUse::USE_BINARY_LHS &&
-				   (user.opcode == LOWIR_INS_CMP ||
-				    user.opcode == LOWIR_INS_BRANCH))
-					location.pending_r9_first = false;
-			}
-			locations_[param.name] = location;
-			continue;
-		}
-		int index = pool_scan(callee_saved, false);
-		if(index < 0) {
-			// unplaceable parameters keep a named frame home at entry
-			long long home = alloc_frame_home(
-				param.name, param.type,
-				mir_model::FrameBinding::FB_PARAM_SLOT);
-			mir_model::Instruction & store =
-				emit(mir_model::Instruction::MI_STORE);
-			store.type = SpellType(param.type);
-			store.operands.push_back(frame_operand(home));
-			store.operands.push_back(MakeReg(home_reg));
-			ValueLocation location;
-			location.kind = ValueLocation::VL_FRAME;
-			location.frame_offset = home;
-			locations_[param.name] = location;
-			continue;
-		}
-		pool_holder_[index] = param.name;
-		if(index >= 2)
-			note_callee_saved(pool_reg_at(index));
-		ValueLocation location;
-		location.kind = ValueLocation::VL_GPR;
-		location.reg = pool_reg_at(index);
-		locations_[param.name] = location;
-		copies.push_back(std::make_pair((int)p, pool_reg_at(index)));
+		PlanGprParam(param, (int)p, home_reg, copies, crossing);
 	}
 	// call-crossing parameters take callee-saved registers in reverse
 	// declaration order
@@ -379,6 +234,152 @@ void FunctionLowering::PlanParams()
 		prologue_entries_.push_back(std::make_pair(
 			copies[c].first, (int)binding.reg));
 	}
+}
+
+// Classifies a register parameter's uses: late compare/binary operands
+// take callee-saved registers; address-style uses scan from r8; single
+// compare/branch/binary-operand/return uses leave no frame residue.
+void FunctionLowering::ClassifyGprParam(const ValueInfo & info,
+                                        bool & late_operand_use,
+                                        bool & address_use,
+                                        bool & residue_exempt) const
+{
+	int first_position = 0;
+	while(skip_positions_.count(first_position))
+		first_position++;
+	for(size_t u = 0; u < info.uses.size(); u++) {
+		if(info.uses[u].kind != ValueUse::USE_OTHER)
+			continue;
+		const LowIRInstruction & user = *linear_[info.uses[u].position];
+		if((user.opcode == LOWIR_INS_BINARY ||
+		    user.opcode == LOWIR_INS_CMP) &&
+		   info.uses[u].position != first_position &&
+		   info.uses.size() == 1)
+			late_operand_use = true;
+		if(user.opcode == LOWIR_INS_LOAD ||
+		   user.opcode == LOWIR_INS_STORE ||
+		   user.opcode == LOWIR_INS_COPYOBJ ||
+		   user.opcode == LOWIR_INS_ZEROINIT ||
+		   user.opcode == LOWIR_INS_ATOMIC_LOAD ||
+		   user.opcode == LOWIR_INS_ATOMIC_STORE ||
+		   user.opcode == LOWIR_INS_ATOMIC_EXCHANGE ||
+		   user.opcode == LOWIR_INS_ATOMIC_COMPARE_EXCHANGE ||
+		   user.opcode == LOWIR_INS_ATOMIC_ADD_FETCH)
+			address_use = true;
+	}
+	if(info.uses.size() == 1) {
+		const ValueUse & only = info.uses[0];
+		const LowIRInstruction & user = *linear_[only.position];
+		if(only.kind == ValueUse::USE_RETURN_VALUE)
+			residue_exempt = true;
+		if(user.opcode == LOWIR_INS_BINARY &&
+		   only.kind == ValueUse::USE_OTHER)
+			residue_exempt = true;
+		if(user.opcode == LOWIR_INS_CMP ||
+		   user.opcode == LOWIR_INS_BRANCH)
+			residue_exempt = true;
+	}
+}
+
+// Copies an incoming register parameter into a named frame home at entry.
+void FunctionLowering::SpillParamHome(const LowIRParam & param,
+                                      X64Register home_reg,
+                                      const std::string & store_type)
+{
+	long long home = alloc_frame_home(
+		param.name, param.type, mir_model::FrameBinding::FB_PARAM_SLOT);
+	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
+	store.type = store_type;
+	store.operands.push_back(frame_operand(home));
+	store.operands.push_back(MakeReg(home_reg));
+	ValueLocation location;
+	location.kind = ValueLocation::VL_FRAME;
+	location.frame_offset = home;
+	locations_[param.name] = location;
+}
+
+void FunctionLowering::PlanGprParam(
+	const LowIRParam & param, int param_position, X64Register home_reg,
+	std::vector<std::pair<int, X64Register> > & copies,
+	std::vector<int> & crossing)
+{
+	ValueInfo & info = values_[param.name];
+	if(param.type.kind == LOWIR_TYPE_OBJ) {
+		SpillParamHome(param, home_reg,
+		               container_spelling(param.type.obj_bytes));
+		return;
+	}
+	if(info.uses.empty() && info.raw_references == 0) {
+		// parameters the source never mentions still get their entry
+		// spill into a named home
+		has_dead_source_spill_ = true;
+		SpillParamHome(param, home_reg, SpellType(param.type));
+		return;
+	}
+	if(ParamUseIsForwardable(info, home_reg)) {
+		ValueLocation location;
+		location.kind = ValueLocation::VL_ARG_REG;
+		location.reg = home_reg;
+		locations_[param.name] = location;
+		bool call_arg_use = false;
+		for(size_t u = 0; u < info.uses.size(); u++)
+			if(info.uses[u].kind == ValueUse::USE_CALL_ARG)
+				call_arg_use = true;
+		if(!call_arg_use && !param_pass_annotated(param) &&
+		   !forward_residue_reclaimed(values_, linear_, param.name))
+			residual_bytes_ += 8;
+		return;
+	}
+	bool late_operand_use = false;
+	bool address_use = false;
+	bool residue_exempt = false;
+	ClassifyGprParam(info, late_operand_use, address_use, residue_exempt);
+	bool callee_saved = info.crosses_call || late_operand_use ||
+	                    (address_use && info.uses.size() >= 2);
+	if(!callee_saved && !residue_exempt && !param_pass_annotated(param))
+		residual_bytes_ += 8;
+	bool pool_home = home_reg == XR_R8 || home_reg == XR_R9;
+	if(info.crosses_call && !late_operand_use) {
+		crossing.push_back(param_position);
+		return;
+	}
+	if(!callee_saved && !pool_home) {
+		// scratch copies take their register at first read; address
+		// bases and compare operands scan from r8, the rest from r9
+		ValueLocation location;
+		location.kind = ValueLocation::VL_PENDING_COPY;
+		location.reg = home_reg;
+		location.pending_r9_first = true;
+		if(info.uses.size() == 1) {
+			const LowIRInstruction & user =
+				*linear_[info.uses[0].position];
+			bool rhs_kind = info.uses[0].kind == ValueUse::USE_OTHER &&
+				(user.opcode == LOWIR_INS_BINARY ||
+				 user.opcode == LOWIR_INS_CMP);
+			if(address_use && !rhs_kind)
+				location.pending_r9_first = false;
+			if(info.uses[0].kind == ValueUse::USE_BINARY_LHS &&
+			   (user.opcode == LOWIR_INS_CMP ||
+			    user.opcode == LOWIR_INS_BRANCH))
+				location.pending_r9_first = false;
+		}
+		locations_[param.name] = location;
+		return;
+	}
+	int index = pool_scan(callee_saved, false);
+	if(index < 0) {
+		// unplaceable parameters keep a named frame home at entry
+		SpillParamHome(param, home_reg, SpellType(param.type));
+		return;
+	}
+	pool_holder_[index] = param.name;
+	if(index >= 2)
+		note_callee_saved(pool_reg_at(index));
+	ValueLocation location;
+	location.kind = ValueLocation::VL_GPR;
+	location.reg = pool_reg_at(index);
+	locations_[param.name] = location;
+	copies.push_back(std::make_pair(param_position, pool_reg_at(index)));
 }
 
 // Entry copies in parameter order, deferring any copy whose target

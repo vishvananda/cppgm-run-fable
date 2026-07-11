@@ -151,6 +151,14 @@ private:
 	bool PlanWideParam(const LowIRParam & param,
 	                   mir_model::ParamBinding & binding,
 	                   int & xmm, int gpr, long long & stack_offset);
+	void PlanGprParam(const LowIRParam & param, int param_position,
+	                  X64Register home_reg,
+	                  std::vector<std::pair<int, X64Register> > & copies,
+	                  std::vector<int> & crossing);
+	void ClassifyGprParam(const ValueInfo & info, bool & late_operand_use,
+	                      bool & address_use, bool & residue_exempt) const;
+	void SpillParamHome(const LowIRParam & param, X64Register home_reg,
+	                    const std::string & store_type);
 	void EmitGprParamCopies(
 		const std::vector<std::pair<int, X64Register> > & copies);
 	void FinishFrame();
