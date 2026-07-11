@@ -107,14 +107,18 @@ Rules:
   `sete rbx` chains). Params never die (pinned to end of function), so
   results derived from params always copy first (`mov r12, rbx; lea
   r12, [r12+8]`).
-- Params are pre-assigned pool slots in declaration order at entry:
-  multi-use params take the callee-saved pool; single-use params take
-  the scratch-first pool and reserve their slot even when the copy is
-  later forwarded away (this is what leaves r8 unused in functions
-  whose first param is forwarded). Forwarding (reading the incoming
-  arg register directly, no copy) applies to single-use params whose
-  use is mov-like: store-value, return-value, copy source, binary-LHS
-  dest-copy. Memory bases/addresses and binary-RHS uses force a copy.
+- Parameter copies: forwarding (reading the incoming arg register
+  directly, no copy) applies to entry-block mov-like uses (store-value,
+  return-value, copy source, binary-LHS dest-copy, self-target call
+  args) with no intervening call-like hazard; fused compare operands
+  never forward. Non-forwarded copies are class-scanned: address bases
+  and compare operands from r8, everything else from r9; late
+  binary/cmp operands and multi-use address bases take callee-saved
+  registers; call-crossing params take callee-saved registers assigned
+  in reverse declaration order. Scratch copies materialize lazily at
+  their first read and hoist into a declaration-ordered entry prologue
+  with conflict deferral; reads in the entry block prefer the still-
+  valid incoming register.
 - Pool exhaustion at a definition point spills the value to an
   anonymous 8-byte frame slot (call results get named `temp %t` frame
   entries; pre-call conflict spills are anonymous).
@@ -142,10 +146,15 @@ Rules:
   shl|shr|sar dest, cl`. Narrow results re-normalize.
 - cmp as value: `mov dest, lhs(or in-place); cmp.<ty> dest, rhs;
   set<cc> dest; movzx dest, dest`.
-- compare-fed branch (single use feeding `branch`): fuse to
-  `cmp.<ty> a, b; j<cc> ^then; jmp ^else` per the direct-branch goals;
-  branch on plain bool: `mov rax, src; cmp.i64 rax, 0; jne ^then;
-  jmp ^else`.
+- compare-fed branch (single use feeding its block's `branch`, at any
+  distance): the compare sinks to the branch, extending its operands'
+  lifetimes; stable-storage (slot/global) loads ride along. Fused
+  shape `cmp.<ty> a, b; j<cc> ^then; jmp ^else`; large literals stage
+  through rax/rdx; slot operands fold to memory only at matching
+  width. Branch on plain bool: `mov rax, src; cmp.<ty> rax, 0;
+  jne ^then; jmp ^else`, with logical nots folded by inverting the
+  condition. Float compares emit `fcmp` (flags as-if operands
+  reversed) plus a parity jump for unordered.
 - switch: stage input in `rax`, each case `mov rcx, case; cmp.i64 rax,
   rcx; je ^case`, then `jmp ^default`.
 - calls: args staged in ABI order (`rdi, rsi, rdx, rcx, r8, r9` /
@@ -187,10 +196,13 @@ bytes + anonymous spill bytes) + scratch_bytes`, where scratch_bytes is
 down from rbp in declaration order (size rounded per type: scalars 8,
 f80 16, obj<NxA> to its padded container). `preserve` lists the
 callee-saved registers the final body actually uses, in pool order.
-Some promoted param/slot cases retain residual anonymous space (helper
-functions in the fixtures show align16(param-residue) beyond the rule
-above); the exact retention rule is pinned by iterating the strict
-suite and will be documented in code where implemented.
+Residual anonymous space is corpus-pinned: +8 per forwarded or
+dead-with-references parameter (unless the value chain is reclaimed
+through a promoted-slot copy into the return, has a call-arg use, or
+the parameter carries a non-direct pass mode), +8 per scratch-copied
+parameter except single compare/branch/binary-operand/return uses,
+and one 8-byte granule for functions spilling source-unreferenced
+parameters. Spill homes for narrow scalars round to 8 bytes.
 
 ## Native encoding
 
