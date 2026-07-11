@@ -176,6 +176,8 @@ struct LowIRInstruction
 	                                       // block_targets[1..]
 	long span_bytes = 0;      // copyobj/zeroinit byte count
 	long span_align = 0;      // copyobj/zeroinit alignment
+	long atomic_order = 5;    // atomic memory order (__ATOMIC_* value)
+	long atomic_failure_order = 5;
 	vector<string> eh_types;  // eh_catch/eh_filter type symbols
 
 	bool is_terminator() const

@@ -29,7 +29,7 @@ struct ModRMForm
 {
 	ModRMForm()
 		: opcode8(-1), opcode(0), reg_field(0), reg_is_ext(false),
-		  width(0), rm_op_width(0)
+		  width(0), rm_op_width(0), prefix(0)
 	{}
 
 	int opcode8;
@@ -38,6 +38,7 @@ struct ModRMForm
 	bool reg_is_ext;
 	int width;
 	int rm_op_width;  // width of the r/m operand for byte-REX checks
+	int prefix;       // lock or SSE mandatory prefix, before 66/REX
 };
 
 void EmitModRM(const ModRMForm& form, const X86Instruction& instr,
@@ -46,6 +47,8 @@ void EmitModRM(const ModRMForm& form, const X86Instruction& instr,
 	vector<unsigned char>& out = code.bytes;
 	int opcode = (form.width == 8 && form.opcode8 >= 0) ? form.opcode8
 	                                                    : form.opcode;
+	if (form.prefix)
+		out.push_back(static_cast<unsigned char>(form.prefix));
 	if (form.width == 16)
 		out.push_back(0x66);
 
@@ -130,6 +133,7 @@ bool UnaryExtension(EX86Mnemonic m, int& opcode8, int& opcode, int& ext)
 	switch (m)
 	{
 	case X86_NOT:  opcode8 = 0xF6; opcode = 0xF7; ext = 2; return true;
+	case X86_NEG:  opcode8 = 0xF6; opcode = 0xF7; ext = 3; return true;
 	case X86_MUL:  opcode8 = 0xF6; opcode = 0xF7; ext = 4; return true;
 	case X86_IMUL: opcode8 = 0xF6; opcode = 0xF7; ext = 5; return true;
 	case X86_DIV:  opcode8 = 0xF6; opcode = 0xF7; ext = 6; return true;
@@ -170,8 +174,118 @@ bool X87MemForm(EX86Mnemonic m, int width, int& opcode, int& ext)
 		opcode = 0xDC;
 		ext = 4;
 		return width == 64;
+	case X86_FNSTCW:
+		opcode = 0xD9;
+		ext = 7;
+		return true;
+	case X86_FLDCW:
+		opcode = 0xD9;
+		ext = 5;
+		return true;
 	default:
 		return false;
+	}
+}
+
+// Two-opcode (8-bit / wider) ModRM forms added for the machine-IR
+// backend; the lock forms carry an F0 prefix.
+bool PairedModRMForm(EX86Mnemonic m, ModRMForm& form)
+{
+	switch (m)
+	{
+	case X86_CMP_MR: form.opcode8 = 0x38; form.opcode = 0x39; return true;
+	case X86_XCHG_MR: form.opcode8 = 0x86; form.opcode = 0x87; return true;
+	case X86_XADD_LOCK:
+		form.prefix = 0xF0;
+		form.opcode8 = 0x0FC0;
+		form.opcode = 0x0FC1;
+		return true;
+	case X86_CMPXCHG_LOCK:
+		form.prefix = 0xF0;
+		form.opcode8 = 0x0FB0;
+		form.opcode = 0x0FB1;
+		return true;
+	case X86_IMUL_RR: form.opcode = 0x0FAF; return true;
+	case X86_LEA: form.opcode = 0x8D; return true;
+	default: return false;
+	}
+}
+
+// SSE scalar forms: mandatory prefix plus 0F-page opcode. Width 64
+// marks the forms whose GPR operand takes REX.W; xmm ids never need
+// the byte-register REX check.
+bool SseForm(EX86Mnemonic m, ModRMForm& form)
+{
+	switch (m)
+	{
+	case X86_MOVSS_RM: form.prefix = 0xF3; form.opcode = 0x0F10; break;
+	case X86_MOVSS_MR: form.prefix = 0xF3; form.opcode = 0x0F11; break;
+	case X86_MOVSD_RM: form.prefix = 0xF2; form.opcode = 0x0F10; break;
+	case X86_MOVSD_MR: form.prefix = 0xF2; form.opcode = 0x0F11; break;
+	case X86_ADDSS: form.prefix = 0xF3; form.opcode = 0x0F58; break;
+	case X86_ADDSD: form.prefix = 0xF2; form.opcode = 0x0F58; break;
+	case X86_SUBSS: form.prefix = 0xF3; form.opcode = 0x0F5C; break;
+	case X86_SUBSD: form.prefix = 0xF2; form.opcode = 0x0F5C; break;
+	case X86_MULSS: form.prefix = 0xF3; form.opcode = 0x0F59; break;
+	case X86_MULSD: form.prefix = 0xF2; form.opcode = 0x0F59; break;
+	case X86_DIVSS: form.prefix = 0xF3; form.opcode = 0x0F5E; break;
+	case X86_DIVSD: form.prefix = 0xF2; form.opcode = 0x0F5E; break;
+	case X86_UCOMISS: form.opcode = 0x0F2E; break;
+	case X86_UCOMISD: form.prefix = 0x66; form.opcode = 0x0F2E; break;
+	case X86_CVTSI2SS:
+		form.prefix = 0xF3; form.opcode = 0x0F2A; form.width = 64; break;
+	case X86_CVTSI2SD:
+		form.prefix = 0xF2; form.opcode = 0x0F2A; form.width = 64; break;
+	case X86_CVTTSS2SI:
+		form.prefix = 0xF3; form.opcode = 0x0F2C; form.width = 64; break;
+	case X86_CVTTSD2SI:
+		form.prefix = 0xF2; form.opcode = 0x0F2C; form.width = 64; break;
+	case X86_CVTSS2SD: form.prefix = 0xF3; form.opcode = 0x0F5A; break;
+	case X86_CVTSD2SS: form.prefix = 0xF2; form.opcode = 0x0F5A; break;
+	case X86_MOVQ_XR:
+		form.prefix = 0x66; form.opcode = 0x0F6E; form.width = 64; break;
+	case X86_MOVQ_RX:
+		form.prefix = 0x66; form.opcode = 0x0F7E; form.width = 64; break;
+	case X86_XORPS: form.opcode = 0x0F57; break;
+	default: return false;
+	}
+	form.rm_op_width = 0;
+	return true;
+}
+
+// r/m-with-extension opcodes carrying a trailing immediate.
+bool RmImmForm(EX86Mnemonic m, int width, ModRMForm& form, int& imm_size)
+{
+	imm_size = width == 8 ? 1 : width == 16 ? 2 : 4;
+	form.opcode8 = 0x80;
+	form.opcode = 0x81;
+	form.reg_is_ext = true;
+	switch (m)
+	{
+	case X86_ADD_RI: form.reg_field = 0; return true;
+	case X86_OR_RI: form.reg_field = 1; return true;
+	case X86_AND_RI: form.reg_field = 4; return true;
+	case X86_SUB_RI: form.reg_field = 5; return true;
+	case X86_XOR_RI: form.reg_field = 6; return true;
+	case X86_CMP_RI: form.reg_field = 7; return true;
+	case X86_TEST_RI:
+		form.opcode8 = 0xF6;
+		form.opcode = 0xF7;
+		form.reg_field = 0;
+		return true;
+	case X86_ROR_I:
+		form.opcode8 = 0xC0;
+		form.opcode = 0xC1;
+		form.reg_field = 1;
+		imm_size = 1;
+		return true;
+	case X86_BTC_I:
+		form.opcode8 = -1;
+		form.opcode = 0x0FBA;
+		form.reg_field = 7;
+		imm_size = 1;
+		return true;
+	default: return false;
 	}
 }
 
@@ -188,6 +302,14 @@ bool FixedBytes(const X86Instruction& instr, vector<unsigned char>& out)
 	case X86_FDIVP: out.push_back(0xDE); out.push_back(0xF9); return true;
 	case X86_FCOMIP: out.push_back(0xDF); out.push_back(0xF1); return true;
 	case X86_FSTP_ST0: out.push_back(0xDD); out.push_back(0xD8); return true;
+	case X86_FCHS: out.push_back(0xD9); out.push_back(0xE0); return true;
+	case X86_MFENCE:
+		out.push_back(0x0F);
+		out.push_back(0xAE);
+		out.push_back(0xF0);
+		return true;
+	case X86_REP_MOVSB: out.push_back(0xF3); out.push_back(0xA4); return true;
+	case X86_REP_STOSB: out.push_back(0xF3); out.push_back(0xAA); return true;
 	case X86_SEXT_ACC:
 		// cbw / cwd / cdq / cqo for the 8/16/32/64-bit dividend.
 		if (instr.width == 8)
@@ -203,6 +325,33 @@ bool FixedBytes(const X86Instruction& instr, vector<unsigned char>& out)
 				out.push_back(0x48);
 			out.push_back(0x99);
 		}
+		return true;
+	default:
+		return false;
+	}
+}
+
+// bswap/push/pop encode the register in the opcode byte itself.
+bool OpcodeRegForm(const X86Instruction& instr, vector<unsigned char>& out)
+{
+	int reg = instr.reg;
+	switch (instr.mnemonic)
+	{
+	case X86_BSWAP:
+	{
+		int rex = (instr.width == 64 ? 8 : 0) | ((reg & 8) ? 1 : 0);
+		if (rex)
+			out.push_back(static_cast<unsigned char>(0x40 | rex));
+		out.push_back(0x0F);
+		out.push_back(static_cast<unsigned char>(0xC8 | (reg & 7)));
+		return true;
+	}
+	case X86_PUSH_R:
+	case X86_POP_R:
+		if (reg & 8)
+			out.push_back(0x41);
+		out.push_back(static_cast<unsigned char>(
+			(instr.mnemonic == X86_PUSH_R ? 0x50 : 0x58) | (reg & 7)));
 		return true;
 	default:
 		return false;
@@ -259,6 +408,10 @@ X86MachineCode EncodeModRMInstruction(const X86Instruction& instr)
 		break;
 	default:
 		if (AluRegRmOpcodes(instr.mnemonic, form.opcode8, form.opcode))
+			break;
+		if (PairedModRMForm(instr.mnemonic, form))
+			break;
+		if (SseForm(instr.mnemonic, form))
 			break;
 		if (UnaryExtension(instr.mnemonic, form.opcode8, form.opcode, ext))
 		{
@@ -355,9 +508,34 @@ X86MachineCode EncodeX86Instruction(const X86Instruction& instr)
 		code.bytes.push_back(static_cast<unsigned char>(instr.rel));
 		return code;
 	default:
+	{
+		if (OpcodeRegForm(instr, code.bytes))
+			return code;
+		ModRMForm form;
+		int imm_size = 0;
+		form.width = instr.width;
+		form.rm_op_width = instr.width;
+		if (RmImmForm(instr.mnemonic, instr.width, form, imm_size))
+		{
+			EmitModRM(form, instr, code);
+			PutLittleEndian(code.bytes, instr.imm.addend, imm_size);
+			return code;
+		}
+		if (instr.mnemonic == X86_IMUL_RRI)
+		{
+			form = ModRMForm();  // a failed RmImmForm probe writes it
+			form.width = instr.width;
+			form.rm_op_width = instr.width;
+			form.opcode = 0x69;
+			form.reg_field = instr.reg;
+			EmitModRM(form, instr, code);
+			PutLittleEndian(code.bytes, instr.imm.addend, 4);
+			return code;
+		}
 		if (FixedBytes(instr, code.bytes))
 			return code;
 		return EncodeModRMInstruction(instr);
+	}
 	}
 }
 
@@ -606,5 +784,167 @@ void X86CodeBuffer::X87Stack(EX86Mnemonic op)
 {
 	X86Instruction instr;
 	instr.mnemonic = op;
+	Append(instr);
+}
+
+void X86CodeBuffer::AluRegImm(EX86Mnemonic op, int width, int reg,
+                              unsigned long long imm)
+{
+	X86Instruction instr;
+	instr.mnemonic = op;
+	instr.width = width;
+	instr.rm_reg = reg;
+	instr.imm = X86Imm::Constant(imm);
+	Append(instr);
+}
+
+void X86CodeBuffer::AluMemImm(EX86Mnemonic op, int width, const X86Mem& mem,
+                              unsigned long long imm)
+{
+	X86Instruction instr;
+	instr.mnemonic = op;
+	instr.width = width;
+	instr.rm_is_mem = true;
+	instr.mem = mem;
+	instr.imm = X86Imm::Constant(imm);
+	Append(instr);
+}
+
+// Covers both operand orders: the mnemonic fixes the direction (cmp
+// vs cmp_mr, xchg/xadd/cmpxchg are all "r/m, r").
+void X86CodeBuffer::AluRegMem(EX86Mnemonic op, int width, int reg,
+                              const X86Mem& mem)
+{
+	X86Instruction instr;
+	instr.mnemonic = op;
+	instr.width = width;
+	instr.reg = reg;
+	instr.rm_is_mem = true;
+	instr.mem = mem;
+	Append(instr);
+}
+
+void X86CodeBuffer::MovzxMem(int src_width, int reg, const X86Mem& mem)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_MOVZX;
+	instr.width = src_width;
+	instr.reg = reg;
+	instr.rm_is_mem = true;
+	instr.mem = mem;
+	Append(instr);
+}
+
+void X86CodeBuffer::Lea(int reg, const X86Mem& mem)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_LEA;
+	instr.width = 64;
+	instr.reg = reg;
+	instr.rm_is_mem = true;
+	instr.mem = mem;
+	Append(instr);
+}
+
+void X86CodeBuffer::ImulRegReg(int dst, int src)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_IMUL_RR;
+	instr.width = 64;
+	instr.reg = dst;
+	instr.rm_reg = src;
+	Append(instr);
+}
+
+void X86CodeBuffer::ImulRegImm(int reg, unsigned long long imm)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_IMUL_RRI;
+	instr.width = 64;
+	instr.reg = reg;
+	instr.rm_reg = reg;
+	instr.imm = X86Imm::Constant(imm);
+	Append(instr);
+}
+
+void X86CodeBuffer::NegReg(int width, int reg)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_NEG;
+	instr.width = width;
+	instr.rm_reg = reg;
+	Append(instr);
+}
+
+void X86CodeBuffer::Bswap(int width, int reg)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_BSWAP;
+	instr.width = width;
+	instr.reg = reg;
+	Append(instr);
+}
+
+void X86CodeBuffer::RorRegImm(int width, int reg, int count)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_ROR_I;
+	instr.width = width;
+	instr.rm_reg = reg;
+	instr.imm = X86Imm::Constant(static_cast<unsigned long long>(count));
+	Append(instr);
+}
+
+void X86CodeBuffer::BtcRegImm(int reg, int bit)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_BTC_I;
+	instr.width = 64;
+	instr.rm_reg = reg;
+	instr.imm = X86Imm::Constant(static_cast<unsigned long long>(bit));
+	Append(instr);
+}
+
+void X86CodeBuffer::Push(int reg)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_PUSH_R;
+	instr.reg = reg;
+	Append(instr);
+}
+
+void X86CodeBuffer::Pop(int reg)
+{
+	X86Instruction instr;
+	instr.mnemonic = X86_POP_R;
+	instr.reg = reg;
+	Append(instr);
+}
+
+void X86CodeBuffer::Fixed(EX86Mnemonic op)
+{
+	X86Instruction instr;
+	instr.mnemonic = op;
+	Append(instr);
+}
+
+void X86CodeBuffer::SseRegReg(EX86Mnemonic op, int reg, int rm_reg)
+{
+	X86Instruction instr;
+	instr.mnemonic = op;
+	instr.width = 0;
+	instr.reg = reg;
+	instr.rm_reg = rm_reg;
+	Append(instr);
+}
+
+void X86CodeBuffer::SseRegMem(EX86Mnemonic op, int reg, const X86Mem& mem)
+{
+	X86Instruction instr;
+	instr.mnemonic = op;
+	instr.width = 0;
+	instr.reg = reg;
+	instr.rm_is_mem = true;
+	instr.mem = mem;
 	Append(instr);
 }

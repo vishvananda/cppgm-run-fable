@@ -21,4 +21,7 @@ struct LowIRProgramInfo
 // Checks the PA13 structural contract (see pa13/plan.md for the rule
 // list) and resolves entry/init/fini hooks. Throws std::runtime_error on
 // any violation; the driver reports EXIT_FAILURE.
-LowIRProgramInfo ValidateLowIRProgram(const LowIRProgram & program);
+// PA28 helper-only MIR dumps pass require_entry=false and omit the
+// startup section instead of failing entry resolution.
+LowIRProgramInfo ValidateLowIRProgram(const LowIRProgram & program,
+                                      bool require_entry = true);

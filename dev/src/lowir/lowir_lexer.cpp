@@ -151,7 +151,23 @@ struct Lexer
 		if(c == '!')
 			return lex_debug_location();
 		if(isdigit((unsigned char)c))
-			return make(LOWIR_TOK_NUMBER, take_while(is_number_char));
+		{
+			string digits = take_while(is_number_char);
+			// signed exponents: "623e+100" scans as one number
+			while((pos < text.size()) &&
+			      (text[pos] == '+' || text[pos] == '-') &&
+			      !digits.empty() &&
+			      (digits[digits.size() - 1] == 'e' ||
+			       digits[digits.size() - 1] == 'E') &&
+			      pos + 1 < text.size() &&
+			      isdigit((unsigned char)text[pos + 1]))
+			{
+				digits += text[pos];
+				++pos;
+				digits += take_while(is_number_char);
+			}
+			return make(LOWIR_TOK_NUMBER, digits);
+		}
 		if(isalpha((unsigned char)c) || c == '_')
 			return lex_identifier();
 		if(c == '-' && peek(1) == '>')

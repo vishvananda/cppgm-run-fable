@@ -166,7 +166,62 @@ enum EX86Mnemonic
 	X86_FMULP,
 	X86_FDIVP,
 	X86_FCOMIP,    // compare st(0) with st(1); pop
-	X86_FSTP_ST0   // pop the x87 stack
+	X86_FSTP_ST0,  // pop the x87 stack
+
+	// PA28 machine-IR forms.
+	X86_ADD_RI,    // ALU r/m(w), imm (imm8/16/32 by width; 64 sign-extends)
+	X86_OR_RI,
+	X86_AND_RI,
+	X86_SUB_RI,
+	X86_XOR_RI,
+	X86_CMP_RI,
+	X86_TEST_RI,   // test r/m(w), imm
+	X86_CMP_MR,    // cmp r/m(w), r(w)
+	X86_IMUL_RR,   // imul r(w), r/m(w)
+	X86_IMUL_RRI,  // imul r64, r/m64, imm32
+	X86_NEG,       // neg r/m(w)
+	X86_LEA,       // lea r64, [mem]
+	X86_BSWAP,     // bswap r(w: 32/64)
+	X86_ROR_I,     // ror r/m(w), imm8 (count in imm.addend)
+	X86_BTC_I,     // btc r/m64, imm8 (bit in imm.addend)
+	X86_PUSH_R,    // push r64
+	X86_POP_R,     // pop r64
+	X86_XCHG_MR,   // xchg r/m(w), r(w) (implicitly locked with mem)
+	X86_XADD_LOCK, // lock xadd r/m(w), r(w)
+	X86_CMPXCHG_LOCK, // lock cmpxchg r/m(w), r(w)
+	X86_MFENCE,
+	X86_REP_MOVSB, // rep movsb (rcx bytes rsi -> rdi)
+	X86_REP_STOSB, // rep stosb (rcx copies of al -> rdi)
+
+	// SSE scalar forms; the reg field holds an xmm id except where a
+	// GPR is named. Wide (REX.W) forms carry width 64.
+	X86_MOVSS_RM,  // movss xmm, xmm/m32
+	X86_MOVSS_MR,  // movss m32, xmm
+	X86_MOVSD_RM,
+	X86_MOVSD_MR,
+	X86_ADDSS,
+	X86_ADDSD,
+	X86_SUBSS,
+	X86_SUBSD,
+	X86_MULSS,
+	X86_MULSD,
+	X86_DIVSS,
+	X86_DIVSD,
+	X86_UCOMISS,   // ucomiss xmm, xmm/m32
+	X86_UCOMISD,
+	X86_CVTSI2SS,  // cvtsi2ss xmm, r/m64
+	X86_CVTSI2SD,
+	X86_CVTTSS2SI, // cvttss2si r64, xmm/m32
+	X86_CVTTSD2SI,
+	X86_CVTSS2SD,
+	X86_CVTSD2SS,
+	X86_MOVQ_XR,   // movq xmm, r64
+	X86_MOVQ_RX,   // movq r64, xmm
+	X86_XORPS,     // xorps xmm, xmm/m128 (mem must be 16-aligned)
+
+	X86_FCHS,      // negate st(0)
+	X86_FNSTCW,    // fnstcw m16
+	X86_FLDCW      // fldcw m16
 };
 
 struct X86Instruction
@@ -234,6 +289,26 @@ public:
 	void Syscall();
 	void X87Mem(EX86Mnemonic op, int width, const X86Mem& mem);
 	void X87Stack(EX86Mnemonic op);
+
+	// PA28 additions.
+	void AluRegImm(EX86Mnemonic op, int width, int reg,
+	               unsigned long long imm);
+	void AluMemImm(EX86Mnemonic op, int width, const X86Mem& mem,
+	               unsigned long long imm);
+	void AluRegMem(EX86Mnemonic op, int width, int reg, const X86Mem& mem);
+	void MovzxMem(int src_width, int reg, const X86Mem& mem);
+	void Lea(int reg, const X86Mem& mem);
+	void ImulRegReg(int dst, int src);
+	void ImulRegImm(int reg, unsigned long long imm);
+	void NegReg(int width, int reg);
+	void Bswap(int width, int reg);
+	void RorRegImm(int width, int reg, int count);
+	void BtcRegImm(int reg, int bit);
+	void Push(int reg);
+	void Pop(int reg);
+	void Fixed(EX86Mnemonic op);
+	void SseRegReg(EX86Mnemonic op, int reg, int rm_reg);
+	void SseRegMem(EX86Mnemonic op, int reg, const X86Mem& mem);
 
 private:
 	vector<unsigned char> bytes_;

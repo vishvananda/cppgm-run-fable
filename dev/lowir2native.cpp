@@ -1,9 +1,20 @@
-// Student-facing scaffold for the PA28 `lowir2native` binary.
+// PA28 `lowir2native`: LowIR in, machine IR dump and native Linux
+// executable out. The LowIR source files are concatenated in command-line
+// order, parsed and validated with the PA13 front half, lowered once into
+// the typed machine IR, and that single MIR program feeds both the
+// deterministic dump and the ELF encoder.
 
 #include "exceptions.h"
+#include "lowir/lowir_parser.h"
+#include "lowir/lowir_validate.h"
+#include "mir_model.h"
 #include "tool_help_text.h"
+#include "x86/lowir_to_mir.h"
+#include "x86/mir_to_native.h"
 
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -141,6 +152,20 @@ LowIR2NativeInvocation parse_lowir2native_invocation(const vector<string> & args
   return invocation;
 }
 
+string read_source_file(const string & path)
+{
+  ifstream in(path.c_str(), ios::in | ios::binary);
+  if(!in) {
+    throw runtime_error("unable to read input file: " + path);
+  }
+  ostringstream text;
+  text << in.rdbuf();
+  if(!in.good() && !in.eof()) {
+    throw runtime_error("unable to read input file: " + path);
+  }
+  return text.str();
+}
+
 int run_lowir2native_mode(const vector<string> & args)
 {
   if(has_batch_stdin_arg(args)) {
@@ -154,9 +179,28 @@ int run_lowir2native_mode(const vector<string> & args)
 
   const LowIR2NativeInvocation invocation =
       parse_lowir2native_invocation(args);
-  (void)invocation;
 
-  throw NotImplementedException();
+  string source;
+  for(size_t i = 0; i < invocation.srcfiles.size(); ++i) {
+    source += read_source_file(invocation.srcfiles[i]);
+    source += "\n";
+  }
+
+  const string target =
+      invocation.output_target.empty() ? "linux" : invocation.output_target;
+  LowIRProgram program = ParseLowIRProgram(source);
+  LowIRProgramInfo info = ValidateLowIRProgram(program, false);
+  mir_model::MirProgram machine_ir =
+      LowerLowIRProgramToMir(program, info, target);
+
+  if(!invocation.machine_ir_file.empty()) {
+    mir_model::write_mir_program_file(invocation.machine_ir_file,
+                                      machine_ir);
+  }
+  if(!invocation.outfile.empty()) {
+    WriteMirProgramExecutable(machine_ir, invocation.outfile);
+  }
+  return EXIT_SUCCESS;
 }
 
 }  // namespace

@@ -1,0 +1,912 @@
+#include "x86/lowir_to_mir.h"
+
+#include <stdexcept>
+
+// Data-instruction templates for the LowIR -> MIR lowering: constants,
+// copies, memory access, integer/float arithmetic, comparisons-as-values,
+// and conversions. Shapes follow the pa28 strict fixtures exactly.
+
+namespace lowir_to_mir {
+
+namespace {
+
+std::string IntWidthSpelling(const LowIRType & type)
+{
+	switch(type.kind) {
+		case LOWIR_TYPE_I1: return "i1";
+		case LOWIR_TYPE_I8:
+		case LOWIR_TYPE_U8: return "i8";
+		case LOWIR_TYPE_I16:
+		case LOWIR_TYPE_U16: return "i16";
+		case LOWIR_TYPE_I32:
+		case LOWIR_TYPE_U32: return "i32";
+		default: return "i64";
+	}
+}
+
+bool FitsImm32(long long value)
+{
+	return value >= -2147483647LL - 1 && value <= 2147483647LL;
+}
+
+}  // namespace
+
+bool FunctionLowering::type_is_signed(const LowIRType & type) const
+{
+	switch(type.kind) {
+		case LOWIR_TYPE_I8:
+		case LOWIR_TYPE_I16:
+		case LOWIR_TYPE_I32:
+		case LOWIR_TYPE_I64: return true;
+		default: return false;
+	}
+}
+
+X86Condition FunctionLowering::integer_condition(const std::string & pred,
+                                                 bool sign) const
+{
+	if(pred == "eq") return XC_E;
+	if(pred == "ne") return XC_NE;
+	if(pred == "lt") return sign ? XC_L : XC_B;
+	if(pred == "le") return sign ? XC_LE : XC_BE;
+	if(pred == "gt") return sign ? XC_G : XC_A;
+	if(pred == "ge") return sign ? XC_GE : XC_AE;
+	if(pred == "ult") return XC_B;
+	if(pred == "ule") return XC_BE;
+	if(pred == "ugt") return XC_A;
+	if(pred == "uge") return XC_AE;
+	throw std::runtime_error("unknown comparison predicate: " + pred);
+}
+
+bool FunctionLowering::storage_is_tls(const LowIROperand & operand) const
+{
+	return operand.kind == LOWIR_OPERAND_GLOBAL &&
+	       facts_.tls_wrapper_of_global.count(operand.name) != 0;
+}
+
+void FunctionLowering::emit_tls_addr(const std::string & global_name)
+{
+	std::map<std::string, std::string>::const_iterator it =
+		facts_.tls_wrapper_of_global.find(global_name);
+	mir_model::Instruction & tls = emit(mir_model::Instruction::MI_TLS_ADDR);
+	tls.operands.push_back(MakeReg(XR_R11));
+	tls.operands.push_back(MakeSymbol(it->second, false));
+}
+
+// -- pending single-use loads -----------------------------------------
+
+const LowIRInstruction * FunctionLowering::fused_compare_for_branch(
+	const LowIRInstruction & branch, int position, bool & invert) const
+{
+	invert = false;
+	if(branch.operands[0].kind != LOWIR_OPERAND_TEMP || position < 1)
+		return 0;
+	const LowIRInstruction & prior = *linear_[position - 1];
+	if(prior.result != branch.operands[0].name)
+		return 0;
+	std::map<std::string, ValueInfo>::const_iterator it =
+		values_.find(prior.result);
+	if(it == values_.end() || it->second.uses.size() != 1)
+		return 0;
+	if(prior.opcode == LOWIR_INS_CMP)
+		return &prior;
+	if(prior.opcode == LOWIR_INS_UNARY && prior.operation == "not" &&
+	   prior.operands[0].kind == LOWIR_OPERAND_TEMP && position >= 2) {
+		const LowIRInstruction & inner = *linear_[position - 2];
+		if(inner.opcode == LOWIR_INS_CMP &&
+		   inner.result == prior.operands[0].name) {
+			std::map<std::string, ValueInfo>::const_iterator inner_it =
+				values_.find(inner.result);
+			if(inner_it != values_.end() &&
+			   inner_it->second.uses.size() == 1) {
+				invert = true;
+				return &inner;
+			}
+		}
+	}
+	return 0;
+}
+
+// A load may sink into the next instruction when its single consumer can
+// read memory (or the rax staging path) directly.
+bool FunctionLowering::try_defer_load(const LowIRInstruction & ins,
+                                      int position)
+{
+	std::map<std::string, ValueInfo>::const_iterator it =
+		values_.find(ins.result);
+	if(it == values_.end() || it->second.uses.size() != 1 ||
+	   it->second.needs_frame || it->second.cross_block)
+		return false;
+	const ValueUse & use = it->second.uses[0];
+	if(use.position != position + 1)
+		return false;
+	const LowIRInstruction & user = *linear_[use.position];
+	bool foldable = false;
+	if(use.kind == ValueUse::USE_STORE_VALUE &&
+	   user.opcode == LOWIR_INS_STORE)
+		foldable = true;
+	else if(use.kind == ValueUse::USE_RETURN_VALUE &&
+	        (ins.type.kind == LOWIR_TYPE_I64 ||
+	         ins.type.kind == LOWIR_TYPE_PTR))
+		foldable = true;
+	else if(use.kind == ValueUse::USE_CALL_ARG)
+		foldable = true;
+	else if(user.opcode == LOWIR_INS_CMP) {
+		bool invert = false;
+		const ValueUse & cmp_use =
+			values_.find(user.result)->second.uses.empty()
+				? use
+				: values_.find(user.result)->second.uses[0];
+		(void)cmp_use;
+		if(use.position + 1 < (int)linear_.size() &&
+		   linear_[use.position + 1]->opcode == LOWIR_INS_BRANCH &&
+		   fused_compare_for_branch(*linear_[use.position + 1],
+		                            use.position + 1, invert) == &user)
+			foldable = true;
+	}
+	else if(ins.type.is_float() &&
+	        (user.opcode == LOWIR_INS_BINARY ||
+	         user.opcode == LOWIR_INS_CMP ||
+	         user.opcode == LOWIR_INS_CONVERT ||
+	         user.opcode == LOWIR_INS_RETURN))
+		foldable = true;
+	if(!foldable)
+		return false;
+	pending_load_name_ = ins.result;
+	pending_load_ = &ins;
+	return true;
+}
+
+bool FunctionLowering::operand_is_pending(const LowIROperand & operand) const
+{
+	return operand.kind == LOWIR_OPERAND_TEMP &&
+	       !pending_load_name_.empty() &&
+	       operand.name == pending_load_name_;
+}
+
+const LowIRInstruction * FunctionLowering::take_pending(
+	const LowIROperand & operand)
+{
+	(void)operand;
+	const LowIRInstruction * load = pending_load_;
+	pending_load_ = 0;
+	pending_load_name_.clear();
+	return load;
+}
+
+// -- shared result placement ------------------------------------------
+
+void FunctionLowering::assign_result_from_rax(const std::string & dest,
+                                              const LowIRType & type,
+                                              bool normalize)
+{
+	invalidate_rax();
+	ValueInfo & info = values_[dest];
+	if(info.uses.empty())
+		return;
+	if(info.uses.size() == 1 && !info.needs_frame &&
+	   info.uses[0].position == current_position_ + 1 &&
+	   info.uses[0].kind == ValueUse::USE_RETURN_VALUE && !normalize) {
+		ValueLocation location;
+		location.kind = ValueLocation::VL_NONE;
+		location.also_in_rax = true;
+		locations_[dest] = location;
+		rax_alias_ = dest;
+		return;
+	}
+	if(info.needs_frame) {
+		long long offset = alloc_frame_home(dest, type,
+		                                    mir_model::FrameBinding::FB_TEMP);
+		mir_model::Instruction & store =
+			emit(mir_model::Instruction::MI_STORE);
+		store.type = SpellType(type);
+		store.operands.push_back(frame_operand(offset));
+		store.operands.push_back(MakeReg(XR_RAX));
+		ValueLocation location;
+		location.kind = ValueLocation::VL_FRAME;
+		location.frame_offset = offset;
+		locations_[dest] = location;
+		return;
+	}
+	X64Register reg = XR_RAX;
+	if(alloc_pool_gpr(dest, reg)) {
+		emit_mov(MakeReg(reg), MakeReg(XR_RAX));
+		if(normalize)
+			emit_narrow_normalize(type, reg);
+		locations_[dest].also_in_rax = !normalize;
+		if(!normalize)
+			rax_alias_ = dest;
+		return;
+	}
+	long long offset = alloc_frame_home(dest, type,
+	                                    mir_model::FrameBinding::FB_TEMP);
+	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
+	store.type = SpellType(type);
+	store.operands.push_back(frame_operand(offset));
+	store.operands.push_back(MakeReg(XR_RAX));
+	ValueLocation location;
+	location.kind = ValueLocation::VL_FRAME;
+	location.frame_offset = offset;
+	locations_[dest] = location;
+}
+
+mir_model::Operand FunctionLowering::stage_store_value(
+	const LowIROperand & operand, const LowIRType & type)
+{
+	if(operand.kind == LOWIR_OPERAND_LITERAL) {
+		emit_mov(MakeReg(XR_RAX), MakeImm(ParseIntLiteral(operand)));
+		return MakeReg(XR_RAX);
+	}
+	if(operand.kind == LOWIR_OPERAND_GLOBAL) {
+		emit_mov(MakeReg(XR_RAX), MakeSymbol(operand.name, true));
+		return MakeReg(XR_RAX);
+	}
+	if(operand.kind == LOWIR_OPERAND_SLOT) {
+		invalidate_rax();
+		mir_model::Instruction & fill =
+			emit(mir_model::Instruction::MI_LOAD);
+		fill.type = SpellType(type);
+		fill.operands.push_back(MakeReg(XR_RAX));
+		fill.operands.push_back(
+			frame_operand(slots_[operand.name].frame_offset));
+		return MakeReg(XR_RAX);
+	}
+	if(operand_is_pending(operand)) {
+		const LowIRInstruction * load = take_pending(operand);
+		mir_model::Operand address =
+			address_operand(load->operands[0], XR_RCX);
+		release_after_use(*load);
+		invalidate_rax();
+		mir_model::Instruction & fill =
+			emit(mir_model::Instruction::MI_LOAD);
+		fill.type = SpellType(load->type);
+		fill.operands.push_back(MakeReg(XR_RAX));
+		fill.operands.push_back(address);
+		return MakeReg(XR_RAX);
+	}
+	const ValueLocation & location = locations_[operand.name];
+	if(location.kind == ValueLocation::VL_GPR ||
+	   location.kind == ValueLocation::VL_ARG_REG)
+		return MakeReg(location.reg);
+	if(location.kind == ValueLocation::VL_FRAME) {
+		invalidate_rax();
+		mir_model::Instruction & fill =
+			emit(mir_model::Instruction::MI_LOAD);
+		fill.type = SpellType(type);
+		fill.operands.push_back(MakeReg(XR_RAX));
+		fill.operands.push_back(frame_operand(location.frame_offset));
+		return MakeReg(XR_RAX);
+	}
+	if(location.kind == ValueLocation::VL_SLOT_ADDR) {
+		invalidate_rax();
+		mir_model::Instruction & lea = emit(mir_model::Instruction::MI_LEA);
+		lea.operands.push_back(MakeReg(XR_RAX));
+		lea.operands.push_back(
+			frame_operand(slots_[location.slot_name].frame_offset));
+		return MakeReg(XR_RAX);
+	}
+	throw std::logic_error("store value without a location");
+}
+
+mir_model::Operand FunctionLowering::float_read(const LowIROperand & operand,
+                                                const LowIRType & type)
+{
+	(void)type;
+	if(operand.kind == LOWIR_OPERAND_LITERAL)
+		return MakeFloatImm(operand);
+	if(operand_is_pending(operand)) {
+		const LowIRInstruction * load = take_pending(operand);
+		mir_model::Operand address =
+			address_operand(load->operands[0], XR_RCX);
+		release_after_use(*load);
+		return address;
+	}
+	if(operand.kind == LOWIR_OPERAND_TEMP) {
+		const ValueLocation & location = locations_[operand.name];
+		if(location.kind == ValueLocation::VL_XMM)
+			return MakeXmm(location.xmm);
+		if(location.kind == ValueLocation::VL_FRAME)
+			return frame_operand(location.frame_offset);
+	}
+	throw std::runtime_error("unsupported floating operand");
+}
+
+long long FunctionLowering::f80_result_home(const std::string & dest)
+{
+	LowIRType f80;
+	f80.kind = LOWIR_TYPE_F80;
+	long long offset = alloc_frame_home(dest, f80,
+	                                    mir_model::FrameBinding::FB_TEMP);
+	ValueLocation location;
+	location.kind = ValueLocation::VL_FRAME;
+	location.frame_offset = offset;
+	locations_[dest] = location;
+	return offset;
+}
+
+// -- instruction templates --------------------------------------------
+
+void FunctionLowering::LowerConst(const LowIRInstruction & ins)
+{
+	if(ins.type.is_float()) {
+		if(ins.type.is_f80() || values_[ins.result].crosses_call) {
+			long long offset = f80_result_home(ins.result);
+			if(!ins.type.is_f80()) {
+				locations_[ins.result].kind = ValueLocation::VL_FRAME;
+			}
+			mir_model::Instruction & mov =
+				emit(mir_model::Instruction::MI_FMOV);
+			mov.type = SpellType(ins.type);
+			mov.operands.push_back(frame_operand(offset));
+			mov.operands.push_back(MakeFloatImm(ins.operands[0]));
+			return;
+		}
+		XmmRegister xmm = alloc_xmm(ins.result);
+		mir_model::Instruction & mov = emit(mir_model::Instruction::MI_FMOV);
+		mov.type = SpellType(ins.type);
+		mov.operands.push_back(MakeXmm(xmm));
+		mov.operands.push_back(MakeFloatImm(ins.operands[0]));
+		return;
+	}
+	X64Register reg = alloc_gpr(ins.result);
+	if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
+		emit_mov(MakeReg(XR_RAX), MakeImm(ParseIntLiteral(ins.operands[0])));
+		mir_model::Instruction & store =
+			emit(mir_model::Instruction::MI_STORE);
+		store.type = SpellType(ins.type);
+		store.operands.push_back(
+			frame_operand(locations_[ins.result].frame_offset));
+		store.operands.push_back(MakeReg(XR_RAX));
+		return;
+	}
+	emit_mov(MakeReg(reg), MakeImm(ParseIntLiteral(ins.operands[0])));
+	emit_narrow_normalize(ins.type, reg);
+}
+
+void FunctionLowering::LowerCopy(const LowIRInstruction & ins)
+{
+	if(ins.type.is_float()) {
+		mir_model::Operand source = float_read(ins.operands[0], ins.type);
+		if(ins.type.is_f80() || values_[ins.result].crosses_call) {
+			long long offset = f80_result_home(ins.result);
+			mir_model::Instruction & mov =
+				emit(mir_model::Instruction::MI_FMOV);
+			mov.type = SpellType(ins.type);
+			mov.operands.push_back(frame_operand(offset));
+			mov.operands.push_back(source);
+			return;
+		}
+		XmmRegister xmm = alloc_xmm(ins.result);
+		mir_model::Instruction & mov = emit(mir_model::Instruction::MI_FMOV);
+		mov.type = SpellType(ins.type);
+		mov.operands.push_back(MakeXmm(xmm));
+		mov.operands.push_back(source);
+		return;
+	}
+	X64Register reg = XR_RAX;
+	emit_dest_copy(ins.result, ins.operands[0], ins.type, true, reg);
+}
+
+void FunctionLowering::LowerAddr(const LowIRInstruction & ins)
+{
+	const LowIROperand & target = ins.operands[0];
+	if(target.kind == LOWIR_OPERAND_SLOT) {
+		ValueLocation location;
+		location.kind = ValueLocation::VL_SLOT_ADDR;
+		location.slot_name = target.name;
+		locations_[ins.result] = location;
+		return;
+	}
+	if(storage_is_tls(target)) {
+		emit_tls_addr(target.name);
+		X64Register reg = alloc_gpr(ins.result);
+		emit_mov(MakeReg(reg), MakeReg(XR_R11));
+		return;
+	}
+	X64Register reg = alloc_gpr(ins.result);
+	bool is_global = !facts_.info->is_function(target.name);
+	emit_mov(MakeReg(reg), MakeSymbol(target.name, is_global));
+}
+
+void FunctionLowering::LowerLoad(const LowIRInstruction & ins)
+{
+	const LowIROperand & source = ins.operands[0];
+	if(source.kind == LOWIR_OPERAND_SLOT && slots_[source.name].promoted) {
+		if(ins.type.is_float()) {
+			LowIRInstruction copy = ins;
+			copy.opcode = LOWIR_INS_COPY;
+			copy.operands.clear();
+			copy.operands.push_back(promoted_slot_value_[source.name]);
+			LowerCopy(copy);
+			return;
+		}
+		X64Register reg = XR_RAX;
+		emit_dest_copy(ins.result, promoted_slot_value_[source.name],
+		               ins.type, false, reg);
+		return;
+	}
+	if(storage_is_tls(source)) {
+		emit_tls_addr(source.name);
+		X64Register reg = alloc_gpr(ins.result);
+		mir_model::Instruction & load =
+			emit(mir_model::Instruction::MI_LOAD);
+		load.type = SpellType(ins.type);
+		load.operands.push_back(MakeReg(reg));
+		load.operands.push_back(MakeDeref(XR_R11, 0));
+		emit_narrow_normalize(ins.type, reg);
+		return;
+	}
+	if(try_defer_load(ins, current_position_))
+		return;
+	if(ins.type.is_float()) {
+		mir_model::Operand address = address_operand(source, XR_RCX);
+		if(ins.type.is_f80() || values_[ins.result].crosses_call) {
+			long long offset = f80_result_home(ins.result);
+			mir_model::Instruction & mov =
+				emit(mir_model::Instruction::MI_FMOV);
+			mov.type = SpellType(ins.type);
+			mov.operands.push_back(frame_operand(offset));
+			mov.operands.push_back(address);
+			return;
+		}
+		XmmRegister xmm = alloc_xmm(ins.result);
+		mir_model::Instruction & mov = emit(mir_model::Instruction::MI_FMOV);
+		mov.type = SpellType(ins.type);
+		mov.operands.push_back(MakeXmm(xmm));
+		mov.operands.push_back(address);
+		return;
+	}
+	mir_model::Operand address = address_operand(source, XR_RCX);
+	X64Register reg = alloc_gpr(ins.result);
+	if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
+		invalidate_rax();
+		mir_model::Instruction & load =
+			emit(mir_model::Instruction::MI_LOAD);
+		load.type = SpellType(ins.type);
+		load.operands.push_back(MakeReg(XR_RAX));
+		load.operands.push_back(address);
+		emit_narrow_normalize(ins.type, XR_RAX);
+		mir_model::Instruction & store =
+			emit(mir_model::Instruction::MI_STORE);
+		store.type = "i64";
+		store.operands.push_back(
+			frame_operand(locations_[ins.result].frame_offset));
+		store.operands.push_back(MakeReg(XR_RAX));
+		return;
+	}
+	mir_model::Instruction & load = emit(mir_model::Instruction::MI_LOAD);
+	load.type = SpellType(ins.type);
+	load.operands.push_back(MakeReg(reg));
+	load.operands.push_back(address);
+	emit_narrow_normalize(ins.type, reg);
+}
+
+void FunctionLowering::LowerStore(const LowIRInstruction & ins)
+{
+	const LowIROperand & target = ins.operands[1];
+	if(target.kind == LOWIR_OPERAND_SLOT && slots_[target.name].promoted)
+		return;   // rewritten away by slot promotion
+	if(storage_is_tls(target)) {
+		int index = pool_scan(true, false);
+		if(index < 0)
+			throw std::runtime_error("no callee-saved staging for tls store");
+		X64Register staged = index == 2 ? XR_RBX
+		                   : (X64Register)(XR_R12 + (index - 3));
+		note_callee_saved(staged);
+		const LowIROperand & source = ins.operands[0];
+		if(source.kind == LOWIR_OPERAND_LITERAL)
+			emit_mov(MakeReg(staged), MakeImm(ParseIntLiteral(source)));
+		else
+			emit_mov(MakeReg(staged), gpr_read(source));
+		emit_tls_addr(target.name);
+		mir_model::Instruction & store =
+			emit(mir_model::Instruction::MI_STORE);
+		store.type = SpellType(ins.type);
+		store.operands.push_back(MakeDeref(XR_R11, 0));
+		store.operands.push_back(MakeReg(staged));
+		return;
+	}
+	if(ins.type.is_float()) {
+		mir_model::Operand value = float_read(ins.operands[0], ins.type);
+		mir_model::Operand address = address_operand(target, XR_RCX);
+		mir_model::Instruction & mov = emit(mir_model::Instruction::MI_FMOV);
+		mov.type = SpellType(ins.type);
+		mov.operands.push_back(address);
+		mov.operands.push_back(value);
+		return;
+	}
+	// Literal stores through register-resident pointers leave the
+	// reference's 8-byte constant-home residue in the frame.
+	if(ins.operands[0].kind == LOWIR_OPERAND_LITERAL &&
+	   target.kind == LOWIR_OPERAND_TEMP) {
+		ValueLocation::Kind where = locations_[target.name].kind;
+		if(where == ValueLocation::VL_GPR ||
+		   where == ValueLocation::VL_ARG_REG)
+			residual_bytes_ += 8;
+	}
+	mir_model::Operand value = stage_store_value(ins.operands[0], ins.type);
+	mir_model::Operand address = address_operand(target, XR_RCX);
+	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
+	store.type = SpellType(ins.type);
+	store.operands.push_back(address);
+	store.operands.push_back(value);
+}
+
+void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
+{
+	long long element = ins.type.element_bytes();
+	X64Register reg = XR_RAX;
+	LowIRType ptr;
+	ptr.kind = LOWIR_TYPE_PTR;
+	emit_dest_copy(ins.result, ins.operands[0], ptr, false, reg);
+	const LowIROperand & count = ins.operands[1];
+	if(count.kind == LOWIR_OPERAND_LITERAL) {
+		long long offset = ParseIntLiteral(count) * element;
+		if(offset != 0) {
+			mir_model::Instruction & lea =
+				emit(mir_model::Instruction::MI_LEA);
+			lea.operands.push_back(MakeReg(reg));
+			lea.operands.push_back(MakeDeref(reg, offset));
+		}
+		return;
+	}
+	// Runtime element count: scale in rdx, then add.
+	emit_mov(MakeReg(XR_RDX), gpr_read(count));
+	if(element != 1) {
+		mir_model::Instruction & mul =
+			emit(mir_model::Instruction::MI_IMUL);
+		mul.operands.push_back(MakeReg(XR_RDX));
+		mul.operands.push_back(MakeImm(element));
+	}
+	mir_model::Instruction & add = emit(mir_model::Instruction::MI_ADD);
+	add.operands.push_back(MakeReg(reg));
+	add.operands.push_back(MakeReg(XR_RDX));
+}
+
+void FunctionLowering::LowerUnary(const LowIRInstruction & ins)
+{
+	if(ins.type.is_float()) {
+		mir_model::Operand source = float_read(ins.operands[0], ins.type);
+		if(ins.type.is_f80() || values_[ins.result].crosses_call) {
+			long long offset = f80_result_home(ins.result);
+			mir_model::Instruction & neg =
+				emit(mir_model::Instruction::MI_FNEG);
+			neg.type = SpellType(ins.type);
+			neg.operands.push_back(frame_operand(offset));
+			neg.operands.push_back(source);
+			return;
+		}
+		XmmRegister xmm = alloc_xmm(ins.result);
+		mir_model::Instruction & neg = emit(mir_model::Instruction::MI_FNEG);
+		neg.type = SpellType(ins.type);
+		neg.operands.push_back(MakeXmm(xmm));
+		neg.operands.push_back(source);
+		return;
+	}
+	X64Register reg = XR_RAX;
+	if(ins.operation == "decay") {
+		emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+		return;
+	}
+	if(ins.operation == "not") {
+		emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+		mir_model::Instruction & cmp = emit(mir_model::Instruction::MI_CMP);
+		cmp.type = SpellType(ins.type);
+		cmp.operands.push_back(MakeReg(reg));
+		cmp.operands.push_back(MakeImm(0));
+		mir_model::Instruction & set =
+			emit(mir_model::Instruction::MI_SETCC);
+		set.condition = XC_E;
+		set.operands.push_back(MakeReg(reg));
+		mir_model::Instruction & widen =
+			emit(mir_model::Instruction::MI_MOVZX);
+		widen.operands.push_back(MakeReg(reg));
+		widen.operands.push_back(MakeReg(reg));
+		return;
+	}
+	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+	mir_model::Instruction::Opcode opcode;
+	if(ins.operation == "neg")
+		opcode = mir_model::Instruction::MI_NEG;
+	else if(ins.operation == "bitnot")
+		opcode = mir_model::Instruction::MI_NOT;
+	else if(ins.operation == "bswap")
+		opcode = mir_model::Instruction::MI_BSWAP;
+	else
+		throw std::runtime_error("unknown unary operation: " + ins.operation);
+	mir_model::Instruction & op = emit(opcode);
+	op.type = SpellType(ins.type);
+	op.operands.push_back(MakeReg(reg));
+	emit_narrow_normalize(ins.type, reg);
+}
+
+void FunctionLowering::LowerBinary(const LowIRInstruction & ins)
+{
+	if(ins.type.is_float()) {
+		LowerFloatBinary(ins);
+		return;
+	}
+	if(ins.operation == "div" || ins.operation == "udiv" ||
+	   ins.operation == "mod" || ins.operation == "umod") {
+		LowerDivision(ins, ins.operation == "mod" ||
+		                   ins.operation == "umod");
+		return;
+	}
+	if(ins.operation == "shl" || ins.operation == "shr" ||
+	   ins.operation == "ushr") {
+		LowerShift(ins);
+		return;
+	}
+	mir_model::Instruction::Opcode opcode;
+	if(ins.operation == "add") opcode = mir_model::Instruction::MI_ADD;
+	else if(ins.operation == "sub") opcode = mir_model::Instruction::MI_SUB;
+	else if(ins.operation == "mul") opcode = mir_model::Instruction::MI_IMUL;
+	else if(ins.operation == "and") opcode = mir_model::Instruction::MI_AND;
+	else if(ins.operation == "or") opcode = mir_model::Instruction::MI_OR;
+	else if(ins.operation == "xor") opcode = mir_model::Instruction::MI_XOR;
+	else
+		throw std::runtime_error("unknown binary operation: " +
+		                         ins.operation);
+	const LowIROperand & rhs = ins.operands[1];
+	bool rhs_is_lhs = rhs.kind == LOWIR_OPERAND_TEMP &&
+	                  ins.operands[0].kind == LOWIR_OPERAND_TEMP &&
+	                  rhs.name == ins.operands[0].name;
+	X64Register reg = XR_RAX;
+	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+	mir_model::Operand source;
+	if(rhs_is_lhs) {
+		const ValueLocation & location = locations_[rhs.name];
+		source = (location.kind == ValueLocation::VL_GPR ||
+		          location.kind == ValueLocation::VL_ARG_REG)
+			? MakeReg(location.reg) : MakeReg(reg);
+	}
+	else if(rhs.kind == LOWIR_OPERAND_LITERAL) {
+		long long value = ParseIntLiteral(rhs);
+		if(FitsImm32(value)) {
+			source = MakeImm(value);
+		}
+		else {
+			emit_mov(MakeReg(XR_RDX), MakeImm(value));
+			source = MakeReg(XR_RDX);
+		}
+	}
+	else if(rhs.kind == LOWIR_OPERAND_SLOT ||
+	        locations_[rhs.name].kind == ValueLocation::VL_FRAME) {
+		source = MakeReg(reload_to_pool(rhs, values_.count(rhs.name)
+			? values_[rhs.name].type : ins.type));
+	}
+	else {
+		source = gpr_read(rhs);
+	}
+	mir_model::Instruction & op = emit(opcode);
+	op.operands.push_back(MakeReg(reg));
+	op.operands.push_back(source);
+	emit_narrow_normalize(ins.type, reg);
+}
+
+void FunctionLowering::LowerDivision(const LowIRInstruction & ins,
+                                     bool modulus)
+{
+	X64Register reg = XR_RAX;
+	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+	const LowIROperand & rhs = ins.operands[1];
+	if(rhs.kind == LOWIR_OPERAND_LITERAL) {
+		emit_mov(MakeReg(XR_RDX), MakeImm(ParseIntLiteral(rhs)));
+		emit_mov(MakeReg(XR_RCX), MakeReg(XR_RDX));
+	}
+	else {
+		emit_mov(MakeReg(XR_RCX), gpr_read(rhs));
+	}
+	emit_mov(MakeReg(XR_RAX), MakeReg(reg));
+	bool sign = ins.operation == "div" || ins.operation == "mod";
+	if(sign) {
+		emit(mir_model::Instruction::MI_CQO);
+	}
+	else {
+		emit_mov(MakeReg(XR_RDX), MakeImm(0));
+	}
+	mir_model::Instruction & div =
+		emit(sign ? mir_model::Instruction::MI_IDIV
+		          : mir_model::Instruction::MI_DIV);
+	div.operands.push_back(MakeReg(XR_RCX));
+	emit_mov(MakeReg(reg), MakeReg(modulus ? XR_RDX : XR_RAX));
+	emit_narrow_normalize(ins.type, reg);
+}
+
+void FunctionLowering::LowerShift(const LowIRInstruction & ins)
+{
+	X64Register reg = XR_RAX;
+	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+	const LowIROperand & rhs = ins.operands[1];
+	if(rhs.kind == LOWIR_OPERAND_LITERAL) {
+		emit_mov(MakeReg(XR_RDX), MakeImm(ParseIntLiteral(rhs)));
+		emit_mov(MakeReg(XR_RCX), MakeReg(XR_RDX));
+	}
+	else {
+		emit_mov(MakeReg(XR_RCX), gpr_read(rhs));
+	}
+	mir_model::Instruction::Opcode opcode;
+	if(ins.operation == "shl")
+		opcode = mir_model::Instruction::MI_SHL_CL;
+	else if(ins.operation == "ushr" || !type_is_signed(ins.type))
+		opcode = mir_model::Instruction::MI_SHR_CL;
+	else
+		opcode = mir_model::Instruction::MI_SAR_CL;
+	mir_model::Instruction & shift = emit(opcode);
+	shift.operands.push_back(MakeReg(reg));
+	emit_narrow_normalize(ins.type, reg);
+}
+
+void FunctionLowering::LowerCmpValue(const LowIRInstruction & ins)
+{
+	if(ins.type.is_float()) {
+		LowerFloatCmpValue(ins);
+		return;
+	}
+	const LowIROperand & rhs = ins.operands[1];
+	bool rhs_is_lhs = rhs.kind == LOWIR_OPERAND_TEMP &&
+	                  ins.operands[0].kind == LOWIR_OPERAND_TEMP &&
+	                  rhs.name == ins.operands[0].name;
+	X64Register reg = XR_RAX;
+	emit_dest_copy(ins.result, ins.operands[0], ins.type, false, reg);
+	mir_model::Operand source;
+	if(rhs_is_lhs) {
+		const ValueLocation & location = locations_[rhs.name];
+		source = (location.kind == ValueLocation::VL_GPR ||
+		          location.kind == ValueLocation::VL_ARG_REG)
+			? MakeReg(location.reg) : MakeReg(reg);
+	}
+	else if(rhs.kind == LOWIR_OPERAND_LITERAL) {
+		emit_mov(MakeReg(XR_RDX), MakeImm(ParseIntLiteral(rhs)));
+		source = MakeReg(XR_RDX);
+	}
+	else if(rhs.kind == LOWIR_OPERAND_SLOT ||
+	        locations_[rhs.name].kind == ValueLocation::VL_FRAME) {
+		source = MakeReg(reload_to_pool(rhs, values_.count(rhs.name)
+			? values_[rhs.name].type : ins.type));
+	}
+	else {
+		source = gpr_read(rhs);
+	}
+	mir_model::Instruction & cmp = emit(mir_model::Instruction::MI_CMP);
+	cmp.type = SpellType(ins.type);
+	cmp.operands.push_back(MakeReg(reg));
+	cmp.operands.push_back(source);
+	mir_model::Instruction & set = emit(mir_model::Instruction::MI_SETCC);
+	set.condition = integer_condition(ins.operation,
+	                                  type_is_signed(ins.type));
+	set.operands.push_back(MakeReg(reg));
+	mir_model::Instruction & widen = emit(mir_model::Instruction::MI_MOVZX);
+	widen.operands.push_back(MakeReg(reg));
+	widen.operands.push_back(MakeReg(reg));
+}
+
+void FunctionLowering::LowerFloatBinary(const LowIRInstruction & ins)
+{
+	mir_model::Instruction::Opcode opcode;
+	if(ins.operation == "add") opcode = mir_model::Instruction::MI_FADD;
+	else if(ins.operation == "sub") opcode = mir_model::Instruction::MI_FSUB;
+	else if(ins.operation == "mul") opcode = mir_model::Instruction::MI_FMUL;
+	else if(ins.operation == "div") opcode = mir_model::Instruction::MI_FDIV;
+	else
+		throw std::runtime_error("unknown floating binary operation: " +
+		                         ins.operation);
+	mir_model::Operand a = float_read(ins.operands[0], ins.type);
+	mir_model::Operand b = float_read(ins.operands[1], ins.type);
+	mir_model::Operand dest;
+	if(ins.type.is_f80() || values_[ins.result].crosses_call ||
+	   values_[ins.result].needs_frame)
+		dest = frame_operand(f80_result_home(ins.result));
+	else
+		dest = MakeXmm(alloc_xmm(ins.result));
+	mir_model::Instruction & op = emit(opcode);
+	op.type = SpellType(ins.type);
+	op.operands.push_back(dest);
+	op.operands.push_back(a);
+	op.operands.push_back(b);
+}
+
+void FunctionLowering::LowerFloatCmpValue(const LowIRInstruction & ins)
+{
+	mir_model::Instruction::Opcode opcode;
+	if(ins.operation == "eq") opcode = mir_model::Instruction::MI_FEQ;
+	else if(ins.operation == "ne") opcode = mir_model::Instruction::MI_FNE;
+	else if(ins.operation == "lt" || ins.operation == "ult")
+		opcode = mir_model::Instruction::MI_FLT;
+	else if(ins.operation == "le" || ins.operation == "ule")
+		opcode = mir_model::Instruction::MI_FLE;
+	else if(ins.operation == "gt" || ins.operation == "ugt")
+		opcode = mir_model::Instruction::MI_FGT;
+	else if(ins.operation == "ge" || ins.operation == "uge")
+		opcode = mir_model::Instruction::MI_FGE;
+	else
+		throw std::runtime_error("unknown floating comparison: " +
+		                         ins.operation);
+	mir_model::Operand a = float_read(ins.operands[0], ins.type);
+	mir_model::Operand b = float_read(ins.operands[1], ins.type);
+	invalidate_rax();
+	mir_model::Instruction & cmp = emit(opcode);
+	cmp.type = SpellType(ins.type);
+	cmp.operands.push_back(MakeReg(XR_RAX));
+	cmp.operands.push_back(a);
+	cmp.operands.push_back(b);
+	LowIRType result_type;
+	result_type.kind = LOWIR_TYPE_I64;
+	assign_result_from_rax(ins.result, result_type, false);
+}
+
+void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
+{
+	const LowIRType & dst = ins.type;
+	const LowIRType & src = ins.type2;
+	if(ins.operation == "sext" || ins.operation == "zext" ||
+	   ins.operation == "trunc") {
+		X64Register reg = XR_RAX;
+		emit_dest_copy(ins.result, ins.operands[0], dst, false, reg);
+		if(ins.operation == "trunc") {
+			emit_narrow_normalize(dst, reg);
+			return;
+		}
+		mir_model::Instruction & widen =
+			emit(ins.operation == "sext"
+			         ? mir_model::Instruction::MI_SEXT
+			         : mir_model::Instruction::MI_ZEXT);
+		widen.type = IntWidthSpelling(src);
+		widen.operands.push_back(MakeReg(reg));
+		return;
+	}
+	if(ins.operation == "sitofp" || ins.operation == "uitofp") {
+		mir_model::Instruction::Opcode opcode =
+			ins.operation == "sitofp" ? mir_model::Instruction::MI_SITOFP
+			                          : mir_model::Instruction::MI_UITOFP;
+		mir_model::Operand source;
+		if(ins.operands[0].kind == LOWIR_OPERAND_LITERAL)
+			source = MakeImm(ParseIntLiteral(ins.operands[0]));
+		else
+			source = gpr_read(ins.operands[0]);
+		mir_model::Operand dest;
+		if(dst.is_f80() || values_[ins.result].crosses_call)
+			dest = frame_operand(f80_result_home(ins.result));
+		else
+			dest = MakeXmm(alloc_xmm(ins.result));
+		mir_model::Instruction & convert = emit(opcode);
+		convert.type = SpellType(dst);
+		convert.source_type = IntWidthSpelling(src);
+		convert.operands.push_back(dest);
+		convert.operands.push_back(source);
+		return;
+	}
+	if(ins.operation == "fptosi" || ins.operation == "fptoui") {
+		mir_model::Instruction::Opcode opcode =
+			ins.operation == "fptosi" ? mir_model::Instruction::MI_FPTOSI
+			                          : mir_model::Instruction::MI_FPTOUI;
+		mir_model::Operand source = float_read(ins.operands[0], src);
+		X64Register reg = alloc_gpr(ins.result);
+		mir_model::Instruction & convert = emit(opcode);
+		convert.type = IntWidthSpelling(dst);
+		convert.source_type = SpellType(src);
+		convert.operands.push_back(MakeReg(reg));
+		convert.operands.push_back(source);
+		return;
+	}
+	if(ins.operation == "fpext" || ins.operation == "fptrunc") {
+		mir_model::Instruction::Opcode opcode =
+			ins.operation == "fpext" ? mir_model::Instruction::MI_FPEXT
+			                         : mir_model::Instruction::MI_FPTRUNC;
+		mir_model::Operand source = float_read(ins.operands[0], src);
+		mir_model::Operand dest;
+		if(dst.is_f80() || values_[ins.result].crosses_call)
+			dest = frame_operand(f80_result_home(ins.result));
+		else
+			dest = MakeXmm(alloc_xmm(ins.result));
+		mir_model::Instruction & convert = emit(opcode);
+		convert.type = SpellType(dst);
+		convert.source_type = SpellType(src);
+		convert.operands.push_back(dest);
+		convert.operands.push_back(source);
+		return;
+	}
+	throw std::runtime_error("unknown conversion: " + ins.operation);
+}
+
+}  // namespace lowir_to_mir

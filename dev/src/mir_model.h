@@ -204,10 +204,14 @@ struct Instruction
   } opcode = MI_MOV;
 
   std::string type;
+  std::string source_type;  // conversion source width (op.SRC.DST dumps)
   X86Condition condition = XC_E;
   std::size_t byte_count = 0;
   std::size_t byte_alignment = 1;
   bool call_unwind_no = false;
+  // dead-copy elimination hint: a pool-register copy of a call-style
+  // result (removed when the target register is never mentioned again)
+  bool result_copy_hint = false;
   bool call_returns_noreturn = false;
   bool call_variadic = false;
   bool has_source_position = false;
@@ -293,6 +297,9 @@ struct Program
   std::vector<Function> functions;
   std::vector<ObjectAlias> object_aliases;
   std::vector<ir_model::ExportedSymbol> exported_symbols;
+  // Declared thread-local wrapper symbol -> backing global. tls_addr
+  // sites name the wrapper; native emission resolves the storage.
+  std::map<std::string, std::string> tls_wrappers;
 };
 
 using MirGlobalDefinition = GlobalDefinition;

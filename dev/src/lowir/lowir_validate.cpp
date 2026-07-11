@@ -173,11 +173,13 @@ void check_signature_boundary(const LowIRCallSignature & signature)
 struct Validator
 {
 	const LowIRProgram & program;
+	bool require_entry;
 	LowIRProgramInfo info;
 	map<string, int> role_owners;
 	map<string, string> tls_wrappers;  // target global -> wrapper
 
-	explicit Validator(const LowIRProgram & p) : program(p) {}
+	explicit Validator(const LowIRProgram & p, bool require_entry_hook)
+		: program(p), require_entry(require_entry_hook) {}
 
 	void check_symbols()
 	{
@@ -580,7 +582,7 @@ struct Validator
 		info.entry_function = find_hook("entry", "main");
 		info.init_function = find_hook("init", "__cppgm_init");
 		info.fini_function = find_hook("fini", "__cppgm_fini");
-		if(info.entry_function.empty())
+		if(require_entry && info.entry_function.empty())
 			fail("program has no entry function");
 	}
 
@@ -599,8 +601,9 @@ struct Validator
 
 }  // namespace
 
-LowIRProgramInfo ValidateLowIRProgram(const LowIRProgram & program)
+LowIRProgramInfo ValidateLowIRProgram(const LowIRProgram & program,
+                                      bool require_entry)
 {
-	Validator validator(program);
+	Validator validator(program, require_entry);
 	return validator.run();
 }

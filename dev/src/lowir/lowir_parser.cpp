@@ -176,11 +176,14 @@ struct Parser
 	{
 		string span = expect(LOWIR_TOK_NUMBER, "byte/alignment span");
 		size_t split = span.find('x');
-		if(split == string::npos || split == 0 || split + 1 == span.size())
+		if(split == 0 || split + 1 == span.size())
 			fail("expected <bytes>x<align> span: " + span);
 		char * end = nullptr;
-		const string bytes_text = span.substr(0, split);
-		const string align_text = span.substr(split + 1);
+		// A bare byte count means default (byte) alignment.
+		const string bytes_text =
+			split == string::npos ? span : span.substr(0, split);
+		const string align_text =
+			split == string::npos ? string("1") : span.substr(split + 1);
 		ins.span_bytes = strtol(bytes_text.c_str(), &end, 10);
 		if(*end != '\0')
 			fail("malformed span bytes: " + span);
@@ -340,7 +343,7 @@ LowIRInstruction Parser::parse_rvalue(const string & result)
 		ins.type = parse_type();
 		ins.operands.push_back(parse_value());
 		expect_punct(",");
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 	}
 	else if(accept_word("atomic_exchange"))
 	{
@@ -350,7 +353,7 @@ LowIRInstruction Parser::parse_rvalue(const string & result)
 		expect_punct(",");
 		ins.operands.push_back(parse_value());
 		expect_punct(",");
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 	}
 	else if(accept_word("atomic_compare_exchange"))
 	{
@@ -363,9 +366,9 @@ LowIRInstruction Parser::parse_rvalue(const string & result)
 			ins.operands.push_back(parse_value());
 		}
 		expect_punct(",");
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 		expect_punct(",");
-		parse_integer_literal();
+		ins.atomic_failure_order = parse_integer_literal();
 	}
 	else if(accept_word("atomic_add_fetch"))
 	{
@@ -375,7 +378,7 @@ LowIRInstruction Parser::parse_rvalue(const string & result)
 		expect_punct(",");
 		ins.operands.push_back(parse_value());
 		expect_punct(",");
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 	}
 	else if(accept_word("index"))
 	{
@@ -460,17 +463,17 @@ LowIRInstruction Parser::parse_statement_instruction()
 		expect_punct(",");
 		ins.operands.push_back(parse_value());
 		expect_punct(",");
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 	}
 	else if(accept_word("atomic_thread_fence"))
 	{
 		ins.opcode = LOWIR_INS_ATOMIC_THREAD_FENCE;
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 	}
 	else if(accept_word("atomic_signal_fence"))
 	{
 		ins.opcode = LOWIR_INS_ATOMIC_SIGNAL_FENCE;
-		parse_integer_literal();
+		ins.atomic_order = parse_integer_literal();
 	}
 	else if(accept_word("call"))
 		parse_call(ins, true);
