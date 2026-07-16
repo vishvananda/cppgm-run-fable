@@ -32,7 +32,10 @@ LowerValue FunctionLowerer::LowerMemberPointerConstant(const SemNode& node)
 	value.type = RemoveTopCv(node.type);
 	if (value.type->target->kind == TK_FUNCTION)
 	{
-		string fn = program_.MemberFunctionRef(member);
+		// PA29: virtual members carry a dispatch thunk in the pair.
+		string fn = program_.MemberPointerThunkRef(member);
+		if (fn.empty())
+			fn = program_.MemberFunctionRef(member);
 		string address = NewTemp();
 		Emit(address + " = addr " + fn);
 		string bits = NewTemp();

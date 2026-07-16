@@ -141,6 +141,21 @@ private:
 	void LowerThrow(const LowIRInstruction & ins);
 	void LowerResume();
 
+	// -- PA29 128-bit integers (lowir_to_mir_wide.cpp): frame-resident
+	// pairs staged through rax:rdx.
+	bool LowerWideInstruction(const LowIRInstruction & ins);
+	long long WideHome(const std::string & name);
+	void WideReadPair(const LowIROperand & op, X64Register lo,
+	                  X64Register hi);
+	void WideStorePair(long long home, X64Register lo, X64Register hi);
+	void LowerWideBinary(const LowIRInstruction & ins);
+	void LowerWideShift(const LowIRInstruction & ins);
+	void LowerWideMul(const LowIRInstruction & ins);
+	void LowerWideCmp(const LowIRInstruction & ins);
+	void LowerWideConvert(const LowIRInstruction & ins);
+	void LowerWideLoad(const LowIRInstruction & ins);
+	void LowerWideStore(const LowIRInstruction & ins);
+
 	// -- calls, control flow, atomics (lowir_to_mir_flow.cpp)
 	void LowerCall(const LowIRInstruction & ins);
 	void LowerCopyObj(const LowIRInstruction & ins);
@@ -188,6 +203,9 @@ private:
 	bool touches_float_ = false;
 	bool eh_mode_ = false;   // function contains exception constructs
 	bool gpr_read_staging_flip_ = false;   // r11/r10 spill-read rotation
+	// PA29: known-constant i128 temps (shift counts arrive as widened
+	// literals).
+	std::map<std::string, long long> wide_consts_;
 
 	// live state
 	std::map<std::string, ValueLocation> locations_;

@@ -89,12 +89,15 @@ const LowIRInstruction * FunctionLowering::fused_compare_for_branch(
 		if(it == values_.end() || it->second.uses.size() != 1)
 			return 0;
 		if(prior.opcode == LOWIR_INS_CMP)
-			return &prior;
+			// PA29: 128-bit compares lower through the pair path and
+			// never fuse into the branch.
+			return prior.type.kind == LOWIR_TYPE_I128 ? 0 : &prior;
 		if(prior.opcode == LOWIR_INS_UNARY && prior.operation == "not" &&
 		   prior.operands[0].kind == LOWIR_OPERAND_TEMP && p >= 1 &&
 		   p == position - 1) {
 			const LowIRInstruction & inner = *linear_[p - 1];
 			if(inner.opcode == LOWIR_INS_CMP &&
+			   inner.type.kind != LOWIR_TYPE_I128 &&
 			   inner.result == prior.operands[0].name) {
 				std::map<std::string, ValueInfo>::const_iterator inner_it =
 					values_.find(inner.result);

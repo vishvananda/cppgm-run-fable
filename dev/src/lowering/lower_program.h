@@ -235,6 +235,10 @@ public:
 	// The alias lines of the emitted definitions (lower_vbase.cpp owns
 	// the PA27 base-entry suppression).
 	void AppendAliasSection(vector<string>& section);
+	// PA29 5.5: the "@name" of the internal forwarding thunk a pointer
+	// to a virtual member function carries (dispatches through the
+	// object's vpointer); "" for non-virtual members.
+	string MemberPointerThunkRef(const SemNode& member);
 	// The registered definition behind a method callee (null when
 	// none): the conversion-elision check reads its body shape.
 	const SemNode* MemberDefinitionFor(const SemNode& callee);
@@ -506,6 +510,8 @@ private:
 	map<std::pair<const ClassInfo*, size_t>, string> view_names_;
 	map<std::pair<string, long long>, string> thunk_names_;
 	vector<string> thunk_texts_;
+	// PA29: virtual member-pointer forwarding thunks by (class, slot).
+	map<std::pair<const ClassInfo*, size_t>, string> pm_thunk_names_;
 	map<const ClassInfo*, string> rtti_names_;   // rendered RTTI records
 	vector<string> poly_declare_globals_;  // external abi/vtable declares
 	vector<string> poly_globals_;          // RTTI + typeinfo-name texts

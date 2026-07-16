@@ -41,7 +41,11 @@ enum EFundamentalType
 	FT_VOID,
 
 	// 3.9.1.10
-	FT_NULLPTR_T
+	FT_NULLPTR_T,
+
+	// 3.9.1.2/3.9.1.3 extended integer types (__int128_t/__uint128_t)
+	FT_INT128,
+	FT_UINT128
 };
 
 // Vocabulary of `simple` tokens: keywords and operators/punctuation per

@@ -67,6 +67,7 @@ bool FunctionLowering::PlanWideParam(const LowIRParam & param,
 	bool is_xmm = param.type.kind == LOWIR_TYPE_F32 ||
 	              param.type.kind == LOWIR_TYPE_F64;
 	bool is_f80 = param.type.kind == LOWIR_TYPE_F80;
+	bool is_wide = param.type.kind == LOWIR_TYPE_I128;
 	bool big_obj = param.type.kind == LOWIR_TYPE_OBJ &&
 	               param.type.obj_bytes > 8;
 	if(is_xmm && xmm < 8) {
@@ -88,7 +89,7 @@ bool FunctionLowering::PlanWideParam(const LowIRParam & param,
 		xmm++;
 		return true;
 	}
-	if(!(is_f80 || big_obj || (is_xmm && xmm >= 8) || gpr >= 6))
+	if(!(is_f80 || is_wide || big_obj || (is_xmm && xmm >= 8) || gpr >= 6))
 		return false;
 	binding.location = mir_model::ParamBinding::PL_STACK;
 	binding.stack_offset = stack_offset;
@@ -109,7 +110,8 @@ bool FunctionLowering::PlanWideParam(const LowIRParam & param,
 		// copy the full padded container (one chunk for scalars and small
 		// objects, several for by-value memory-class objects)
 		invalidate_rax();
-		long long copy_bytes = big_obj ? FrameSizeOf(param.type) : 8;
+		long long copy_bytes =
+			big_obj || is_wide ? FrameSizeOf(param.type) : 8;
 		for(long long off = 0; off < copy_bytes; off += 8) {
 			mir_model::Instruction & load =
 				emit(mir_model::Instruction::MI_LOAD);
@@ -483,6 +485,14 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
                                         int position)
 {
 	current_position_ = position;
+
+	// PA29: 128-bit forms lower through the frame-resident pair path.
+	if (LowerWideInstruction(ins))
+	{
+		if (ins.result.empty() || !pending_loads_.count(ins.result))
+			release_after_use(ins);
+		return;
+	}
 
 	// Compares (and logical nots) consumed by their block's branch lower
 	// as part of the branch; their own position emits nothing.

@@ -84,6 +84,7 @@ long long FrameSizeOf(const LowIRType & type)
 		case LOWIR_TYPE_I32:
 		case LOWIR_TYPE_U32: return 4;
 		case LOWIR_TYPE_F80: return 16;
+		case LOWIR_TYPE_I128: return 16;
 		case LOWIR_TYPE_OBJ: {
 			long long size = 1;
 			while(size < type.obj_bytes && size < 8)

@@ -623,6 +623,9 @@ int IntegerRank(EFundamentalType type)
 	case FT_LONG_INT:
 	case FT_UNSIGNED_LONG_INT:
 		return 2;
+	case FT_INT128:
+	case FT_UINT128:
+		return 4;
 	default:
 		return 3;
 	}
@@ -640,6 +643,7 @@ EFundamentalType UnsignedCounterpart(EFundamentalType type)
 	{
 	case FT_INT: return FT_UNSIGNED_INT;
 	case FT_LONG_INT: return FT_UNSIGNED_LONG_INT;
+	case FT_INT128: return FT_UINT128;
 	default: return FT_UNSIGNED_LONG_LONG_INT;
 	}
 }
@@ -675,8 +679,12 @@ TypePtr UsualArithmeticConversions(const TypePtr& a_in, const TypePtr& b_in)
 		return MakeFundamentalType(us);
 	// On LP64 a higher-ranked signed type represents the whole unsigned
 	// range only when it is wider: long/long long over unsigned int
-	// stay signed; long long over unsigned long goes unsigned (5p9).
-	if (IntegerRank(us) == 1)
+	// stay signed (and __int128 over any 64-bit unsigned type); long
+	// long over unsigned long goes unsigned (5p9). Rank widths here are
+	// 1 -> 4 bytes, 2/3 -> 8 bytes, 4 -> 16 bytes.
+	int us_width = IntegerRank(us) == 1 ? 4 : 8;
+	int ss_width = IntegerRank(ss) == 4 ? 16 : IntegerRank(ss) == 1 ? 4 : 8;
+	if (ss_width > us_width)
 		return MakeFundamentalType(ss);
 	return MakeFundamentalType(UnsignedCounterpart(ss));
 }

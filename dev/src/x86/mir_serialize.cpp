@@ -149,8 +149,11 @@ void write_instruction(std::ostream & out, const Instruction & ins)
     case Instruction::MI_LOCK_CMPXCHG:
       return write_operands(out, ins, "lock_cmpxchg." + ty);
     case Instruction::MI_ADD: return write_operands(out, ins, "add");
+    case Instruction::MI_ADC: return write_operands(out, ins, "adc");
     case Instruction::MI_SUB: return write_operands(out, ins, "sub");
+    case Instruction::MI_SBB: return write_operands(out, ins, "sbb");
     case Instruction::MI_IMUL: return write_operands(out, ins, "imul");
+    case Instruction::MI_MUL: return write_operands(out, ins, "mul");
     case Instruction::MI_AND: return write_operands(out, ins, "and");
     case Instruction::MI_OR: return write_operands(out, ins, "or");
     case Instruction::MI_XOR: return write_operands(out, ins, "xor");

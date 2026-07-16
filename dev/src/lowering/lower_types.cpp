@@ -51,6 +51,9 @@ string FundamentalSpelling(EFundamentalType type)
 	// forms carry the signedness.
 	case FT_UNSIGNED_LONG_INT:
 	case FT_UNSIGNED_LONG_LONG_INT: return "i64";
+	// Likewise one i128 spelling for both 128-bit types.
+	case FT_INT128:
+	case FT_UINT128: return "i128";
 	case FT_FLOAT: return "f32";
 	case FT_DOUBLE: return "f64";
 	case FT_LONG_DOUBLE: return "f80";

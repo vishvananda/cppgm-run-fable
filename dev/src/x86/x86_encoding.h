@@ -127,7 +127,9 @@ enum EX86Mnemonic
 	X86_MOV_RM,    // mov r(w), [mem]
 	X86_MOV_MR,    // mov [mem], r(w)
 	X86_ADD,       // add r(w), r(w)
+	X86_ADC,
 	X86_SUB,
+	X86_SBB,
 	X86_AND,
 	X86_OR,
 	X86_XOR,
@@ -170,6 +172,8 @@ enum EX86Mnemonic
 
 	// PA28 machine-IR forms.
 	X86_ADD_RI,    // ALU r/m(w), imm (imm8/16/32 by width; 64 sign-extends)
+	X86_ADC_RI,
+	X86_SBB_RI,
 	X86_OR_RI,
 	X86_AND_RI,
 	X86_SUB_RI,

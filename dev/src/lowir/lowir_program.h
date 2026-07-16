@@ -25,6 +25,7 @@ enum ELowIRTypeKind
 	LOWIR_TYPE_I32,
 	LOWIR_TYPE_U32,
 	LOWIR_TYPE_I64,
+	LOWIR_TYPE_I128,
 	LOWIR_TYPE_F32,
 	LOWIR_TYPE_F64,
 	LOWIR_TYPE_F80,
@@ -44,7 +45,7 @@ struct LowIRType
 
 	bool is_integer() const
 	{
-		return kind >= LOWIR_TYPE_I1 && kind <= LOWIR_TYPE_I64;
+		return kind >= LOWIR_TYPE_I1 && kind <= LOWIR_TYPE_I128;
 	}
 
 	bool is_float() const

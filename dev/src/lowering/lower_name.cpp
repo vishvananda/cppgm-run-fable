@@ -145,6 +145,8 @@ const char* BuiltinCode(EFundamentalType type)
 	case FT_DOUBLE: return "d";
 	case FT_LONG_DOUBLE: return "e";
 	case FT_NULLPTR_T: return "Dn";
+	case FT_INT128: return "n";
+	case FT_UINT128: return "o";
 	}
 	throw OutsideBoundary("mangled fundamental type");
 }

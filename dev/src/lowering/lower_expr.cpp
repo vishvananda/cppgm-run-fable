@@ -544,6 +544,134 @@ string FunctionLowerer::PointerStep(const string& base,
 	return result;
 }
 
+// A 128-bit division or remainder has no direct machine shape; the
+// value expands in place to a restoring shift-subtract loop over the
+// magnitude (with a branch-free sign fixup for the signed forms), so
+// separately compiled units need no support library.
+string FunctionLowerer::LowerWideDivMod(const string& op_name,
+                                        const TypePtr& type,
+                                        const string& lhs,
+                                        const string& rhs)
+{
+	(void)type;
+	bool is_signed = op_name == "div" || op_name == "mod";
+	bool want_mod = op_name == "mod" || op_name == "umod";
+	string n = lhs;
+	string d = rhs;
+	string sign_n;
+	string sign_d;
+	if (is_signed)
+	{
+		// abs(x) = (x ^ (x >> 127)) - (x >> 127), branch-free.
+		sign_n = NewTemp();
+		Emit(sign_n + " = binary shr i128 " + lhs + ", 127");
+		string xn = NewTemp();
+		Emit(xn + " = binary xor i128 " + lhs + ", " + sign_n);
+		n = NewTemp();
+		Emit(n + " = binary sub i128 " + xn + ", " + sign_n);
+		sign_d = NewTemp();
+		Emit(sign_d + " = binary shr i128 " + rhs + ", 127");
+		string xd = NewTemp();
+		Emit(xd + " = binary xor i128 " + rhs + ", " + sign_d);
+		d = NewTemp();
+		Emit(d + " = binary sub i128 " + xd + ", " + sign_d);
+	}
+	string n_slot = AddMatSlot("wdivn", "i128");
+	string q_slot = AddMatSlot("wdivq", "i128");
+	string r_slot = AddMatSlot("wdivr", "i128");
+	string i_slot = AddMatSlot("wdivi", "i64");
+	Emit("store i128 " + n + ", $" + n_slot);
+	Emit("store i128 0, $" + q_slot);
+	Emit("store i128 0, $" + r_slot);
+	Emit("store i64 128, $" + i_slot);
+	string head = NewLabel("wdiv_head");
+	string body = NewLabel("wdiv_body");
+	string done = NewLabel("wdiv_done");
+	ReferenceLabel(head);
+	Terminate("jump ^" + head);
+	OpenBlock(head);
+	string count = NewTemp();
+	Emit(count + " = load i64 $" + i_slot);
+	string finished = NewTemp();
+	Emit(finished + " = cmp eq i64 " + count + ", 0");
+	ReferenceLabel(done);
+	ReferenceLabel(body);
+	Terminate("branch " + finished + ", ^" + done + ", ^" + body);
+	OpenBlock(body);
+	// One restoring step: (r:n) shifts left one bit, and the divisor
+	// subtracts from r under an all-ones mask when it fits.
+	string r0 = NewTemp();
+	Emit(r0 + " = load i128 $" + r_slot);
+	string r1 = NewTemp();
+	Emit(r1 + " = binary shl i128 " + r0 + ", 1");
+	string n0 = NewTemp();
+	Emit(n0 + " = load i128 $" + n_slot);
+	string top = NewTemp();
+	Emit(top + " = binary ushr i128 " + n0 + ", 127");
+	string r2 = NewTemp();
+	Emit(r2 + " = binary or i128 " + r1 + ", " + top);
+	string n1 = NewTemp();
+	Emit(n1 + " = binary shl i128 " + n0 + ", 1");
+	Emit("store i128 " + n1 + ", $" + n_slot);
+	string q0 = NewTemp();
+	Emit(q0 + " = load i128 $" + q_slot);
+	string q1 = NewTemp();
+	Emit(q1 + " = binary shl i128 " + q0 + ", 1");
+	string fits = NewTemp();
+	Emit(fits + " = cmp uge i128 " + r2 + ", " + d);
+	string fits_wide = NewTemp();
+	Emit(fits_wide + " = convert zext i128 i64 " + fits);
+	string mask = NewTemp();
+	Emit(mask + " = binary sub i128 0, " + fits_wide);
+	string d_masked = NewTemp();
+	Emit(d_masked + " = binary and i128 " + d + ", " + mask);
+	string r3 = NewTemp();
+	Emit(r3 + " = binary sub i128 " + r2 + ", " + d_masked);
+	Emit("store i128 " + r3 + ", $" + r_slot);
+	string q2 = NewTemp();
+	Emit(q2 + " = binary or i128 " + q1 + ", " + fits_wide);
+	Emit("store i128 " + q2 + ", $" + q_slot);
+	string next = NewTemp();
+	Emit(next + " = binary sub i64 " + count + ", 1");
+	Emit("store i64 " + next + ", $" + i_slot);
+	ReferenceLabel(head);
+	Terminate("jump ^" + head);
+	OpenBlock(done);
+	string magnitude = NewTemp();
+	Emit(magnitude + " = load i128 $" + (want_mod ? r_slot : q_slot));
+	if (!is_signed)
+		return magnitude;
+	// 5.6: the quotient truncates toward zero (its sign is the xor of
+	// the operand signs); the remainder takes the dividend's sign.
+	string sign = sign_n;
+	if (!want_mod)
+	{
+		sign = NewTemp();
+		Emit(sign + " = binary xor i128 " + sign_n + ", " + sign_d);
+	}
+	string flipped = NewTemp();
+	Emit(flipped + " = binary xor i128 " + magnitude + ", " + sign);
+	string result = NewTemp();
+	Emit(result + " = binary sub i128 " + flipped + ", " + sign);
+	return result;
+}
+
+string FunctionLowerer::EmitBinaryValue(const string& op_name,
+                                        const TypePtr& type,
+                                        const string& lhs,
+                                        const string& rhs)
+{
+	if ((op_name == "div" || op_name == "udiv" || op_name == "mod" ||
+	     op_name == "umod") &&
+	    type->kind == TK_FUNDAMENTAL &&
+	    IsIntegralFundamental(type->fundamental) && TypeSize(type) == 16)
+		return LowerWideDivMod(op_name, type, lhs, rhs);
+	string result = NewTemp();
+	Emit(result + " = binary " + op_name + " " + LowerValueType(type) +
+	     " " + lhs + ", " + rhs);
+	return result;
+}
+
 LowerValue FunctionLowerer::LowerBinary(const SemNode& node)
 {
 	const SemNode& lhs = *node.children[0];
@@ -595,10 +723,8 @@ LowerValue FunctionLowerer::LowerBinary(const SemNode& node)
 	LowerValue b = LowerValueExpr(rhs);
 	a = ConvertValue(a, value.type, LCC_OPERAND);
 	b = ConvertValue(b, value.type, LCC_OPERAND);
-	value.text = NewTemp();
-	Emit(value.text + " = binary " + BinaryOpName(node.op, value.type) +
-	     " " + LowerValueType(value.type) + " " + a.text + ", " +
-	     b.text);
+	value.text = EmitBinaryValue(BinaryOpName(node.op, value.type),
+	                             value.type, a.text, b.text);
 	return value;
 }
 
@@ -764,13 +890,12 @@ LowerValue FunctionLowerer::LowerIncDec(const SemNode& node, bool prefix)
 	}
 	else
 	{
-		new_value = NewTemp();
 		string one = LowerFloatType(type)
 			? (type->fundamental == FT_FLOAT ? "1.0f"
 			   : type->fundamental == FT_LONG_DOUBLE ? "1.0L" : "1.0")
 			: string("1");
-		Emit(new_value + " = binary " + BinaryOpName(node.op, type) +
-		     " " + type_text + " " + old_value + ", " + one);
+		new_value = EmitBinaryValue(BinaryOpName(node.op, type), type,
+		                            old_value, one);
 	}
 	// A postfix form over a reference-returning call lvalue recomputes
 	// its store address after the value (the canonical reference
@@ -862,10 +987,8 @@ LowerValue FunctionLowerer::LowerCompoundAssignment(
 	LowerValue count = LowerValueExpr(rhs);
 	old_lv = ConvertValue(old_lv, common, LCC_OPERAND);
 	count = ConvertValue(count, common, LCC_OPERAND);
-	string computed = NewTemp();
-	Emit(computed + " = binary " + BinaryOpName(node.op, common) + " " +
-	     LowerValueType(common) + " " + old_lv.text + ", " +
-	     count.text);
+	string computed = EmitBinaryValue(BinaryOpName(node.op, common),
+	                                  common, old_lv.text, count.text);
 	LowerValue back;
 	back.text = computed;
 	back.type = common;

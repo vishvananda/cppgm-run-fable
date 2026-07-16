@@ -30,7 +30,9 @@ const std::map<EFundamentalType, string>& FundamentalTypeNames()
 		{FT_DOUBLE, "double"},
 		{FT_LONG_DOUBLE, "long double"},
 		{FT_VOID, "void"},
-		{FT_NULLPTR_T, "nullptr_t"}
+		{FT_NULLPTR_T, "nullptr_t"},
+		{FT_INT128, "__int128"},
+		{FT_UINT128, "unsigned __int128"}
 	};
 	return names;
 }

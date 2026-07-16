@@ -23,6 +23,7 @@ std::string SpellType(const LowIRType & type)
 		case LOWIR_TYPE_I32: return "i32";
 		case LOWIR_TYPE_U32: return "u32";
 		case LOWIR_TYPE_I64: return "i64";
+		case LOWIR_TYPE_I128: return "i128";
 		case LOWIR_TYPE_F32: return "f32";
 		case LOWIR_TYPE_F64: return "f64";
 		case LOWIR_TYPE_F80: return "f80";

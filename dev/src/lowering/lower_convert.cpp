@@ -62,6 +62,11 @@ LowerValue FunctionLowerer::ConvertToBool(LowerValue value,
 		Emit(as_bool + " = copy u8 " + temp);
 		temp = as_bool;
 	}
+	else if (source->kind == TK_FUNDAMENTAL && TypeSize(source) == 16 &&
+	         IsIntegralFundamental(source->fundamental))
+		// 128-bit values test at their own width; a 64-bit view would
+		// drop the high half.
+		Emit(temp + " = cmp ne i128 " + value.text + ", 0");
 	else
 		Emit(temp + " = cmp ne i64 " + value.text + ", 0");
 	value.text = temp;
@@ -86,7 +91,13 @@ LowerValue FunctionLowerer::ConvertIntegralImmediate(LowerValue value,
 	bool widening = LowerValueWidth(source) < LowerValueWidth(target);
 	bool sign_change = IsSignedIntegralFundamental(source_fund) !=
 		IsSignedIntegralFundamental(target_fund);
-	if (widening && sign_change && source_fund != FT_BOOL)
+	// 128-bit destinations always keep the spelled widening (except
+	// bool sources, whose 0/1 value folds exactly): a folded literal
+	// cannot represent the high 64 bits, so the runtime zext/sext
+	// carries the semantics.
+	bool wide_target = widening && LowerValueWidth(target) == 16;
+	if ((sign_change || wide_target) && widening &&
+	    source_fund != FT_BOOL)
 	{
 		string temp = NewTemp();
 		Emit(temp + " = convert " + LowerConvertOp(source, target) +

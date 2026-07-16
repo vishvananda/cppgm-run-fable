@@ -28,6 +28,8 @@ bool IsIntegralFundamental(EFundamentalType type)
 	case FT_CHAR16_T:
 	case FT_CHAR32_T:
 	case FT_BOOL:
+	case FT_INT128:
+	case FT_UINT128:
 		return true;
 	default:
 		return false;
@@ -43,6 +45,7 @@ bool IsSignedIntegralFundamental(EFundamentalType type)
 	case FT_INT:
 	case FT_LONG_INT:
 	case FT_LONG_LONG_INT:
+	case FT_INT128:
 	case FT_CHAR:     // signed on the x86-64 ABI
 	case FT_WCHAR_T:  // int on the x86-64 ABI
 		return true;
@@ -500,6 +503,8 @@ static unsigned long long FundamentalSize(EFundamentalType type)
 	case FT_NULLPTR_T:
 		return 8;
 	case FT_LONG_DOUBLE:
+	case FT_INT128:
+	case FT_UINT128:
 		return 16;
 	case FT_VOID:
 		break;

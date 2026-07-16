@@ -115,6 +115,8 @@ int TypeBits(const std::string & type)
 		return 32;
 	if (type == "f80")
 		return 80;
+	if (type == "i128")
+		return 128;
 	// i64/u64/ptr/f64 and the untyped default are 64-bit wide; anything
 	// else is a producer bug and must not degrade silently.
 	if (type == "i64" || type == "u64" || type == "ptr" || type == "f64" ||
@@ -133,8 +135,14 @@ std::size_t ScalarSize(const std::string & type)
 void AppendLittleEndian(std::vector<unsigned char> & out,
                         unsigned long long value, std::size_t size)
 {
+	// Sizes past the 64-bit carrier (i128 scalars) sign-extend the
+	// stored 64-bit value.
+	unsigned char extension =
+		(value >> 63) != 0 ? static_cast<unsigned char>(0xff) : 0;
 	for (std::size_t i = 0; i < size; i++)
-		out.push_back(static_cast<unsigned char>(value >> (8 * i)));
+		out.push_back(i < 8
+			? static_cast<unsigned char>(value >> (8 * i))
+			: extension);
 }
 
 void AppendFloatBits(std::vector<unsigned char> & out,

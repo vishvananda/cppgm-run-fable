@@ -14,6 +14,7 @@ long LowIRType::integer_bits() const
 	case LOWIR_TYPE_I16: case LOWIR_TYPE_U16: return 16;
 	case LOWIR_TYPE_I32: case LOWIR_TYPE_U32: return 32;
 	case LOWIR_TYPE_I64: return 64;
+	case LOWIR_TYPE_I128: return 128;
 	default: return 0;
 	}
 }
@@ -32,6 +33,8 @@ long LowIRType::operand_bits() const
 		return 64;
 	case LOWIR_TYPE_F80:
 		return 80;
+	case LOWIR_TYPE_I128:
+		return 128;
 	default:
 		return 0;
 	}
@@ -51,7 +54,7 @@ long LowIRType::home_bytes() const
 {
 	if(kind == LOWIR_TYPE_VOID)
 		return 0;
-	if(kind == LOWIR_TYPE_F80)
+	if(kind == LOWIR_TYPE_F80 || kind == LOWIR_TYPE_I128)
 		return 16;
 	if(kind == LOWIR_TYPE_OBJ)
 		return (obj_bytes + 7) / 8 * 8;
@@ -86,6 +89,7 @@ LowIRType ParseLowIRType(const string & spelling)
 	else if(spelling == "i32") type.kind = LOWIR_TYPE_I32;
 	else if(spelling == "u32") type.kind = LOWIR_TYPE_U32;
 	else if(spelling == "i64") type.kind = LOWIR_TYPE_I64;
+	else if(spelling == "i128") type.kind = LOWIR_TYPE_I128;
 	else if(spelling == "f32") type.kind = LOWIR_TYPE_F32;
 	else if(spelling == "f64") type.kind = LOWIR_TYPE_F64;
 	else if(spelling == "f80") type.kind = LOWIR_TYPE_F80;

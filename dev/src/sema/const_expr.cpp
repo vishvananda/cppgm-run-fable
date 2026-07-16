@@ -33,9 +33,20 @@ int WidthBits(EFundamentalType type)
 	case FT_WCHAR_T:
 	case FT_CHAR32_T:
 		return 32;
+	case FT_INT128:
+	case FT_UINT128:
+		return 128;
 	default:
 		return 64;
 	}
+}
+
+// The evaluator computes in 64-bit representations; 128-bit operations
+// stay outside the constant subset (they lower to runtime code).
+void RequireEvaluableWidth(EFundamentalType type)
+{
+	if (WidthBits(type) > 64)
+		throw OutsideSubset("128-bit constant arithmetic");
 }
 
 // Truncates to the type's width and re-extends to the 64-bit storage
@@ -88,6 +99,9 @@ int PromotedRank(EFundamentalType type)
 	case FT_LONG_INT:
 	case FT_UNSIGNED_LONG_INT:
 		return 2;
+	case FT_INT128:
+	case FT_UINT128:
+		return 4;
 	default:
 		return 3;  // long long int / unsigned long long int
 	}
@@ -96,13 +110,15 @@ int PromotedRank(EFundamentalType type)
 EFundamentalType UnsignedOfRank(int rank)
 {
 	return rank == 1 ? FT_UNSIGNED_INT :
-		rank == 2 ? FT_UNSIGNED_LONG_INT : FT_UNSIGNED_LONG_LONG_INT;
+		rank == 2 ? FT_UNSIGNED_LONG_INT :
+		rank == 4 ? FT_UINT128 : FT_UNSIGNED_LONG_LONG_INT;
 }
 
 EFundamentalType SignedOfRank(int rank)
 {
 	return rank == 1 ? FT_INT :
-		rank == 2 ? FT_LONG_INT : FT_LONG_LONG_INT;
+		rank == 2 ? FT_LONG_INT :
+		rank == 4 ? FT_INT128 : FT_LONG_LONG_INT;
 }
 
 // 5p9 usual arithmetic conversions on promoted integral operands.
@@ -162,11 +178,13 @@ ConstValue EvaluateUnary(const AstExpr& expr, IConstExprContext& context)
 	case OP_MINUS:
 	{
 		ConstValue promoted = Promote(operand);
+		RequireEvaluableWidth(promoted.type);
 		return Normalize(promoted.type, 0 - promoted.bits);
 	}
 	case OP_COMPL:
 	{
 		ConstValue promoted = Promote(operand);
+		RequireEvaluableWidth(promoted.type);
 		return Normalize(promoted.type, ~promoted.bits);
 	}
 	case OP_LNOT:
@@ -181,6 +199,7 @@ ConstValue EvaluateShift(ETokenType op, const ConstValue& lhs,
 {
 	ConstValue value = Promote(lhs);
 	ConstValue amount = Promote(rhs);
+	RequireEvaluableWidth(value.type);
 	long long count = (long long)amount.bits;
 	if (IsSignedIntegralFundamental(amount.type) && count < 0)
 		throw runtime_error("negative shift count");
@@ -201,6 +220,7 @@ ConstValue EvaluateArithmetic(ETokenType op, const ConstValue& lhs,
 {
 	EFundamentalType common =
 		CommonType(Promote(lhs).type, Promote(rhs).type);
+	RequireEvaluableWidth(common);
 	unsigned long long a = Normalize(common, lhs.bits).bits;
 	unsigned long long b = Normalize(common, rhs.bits).bits;
 	bool is_signed = IsSignedIntegralFundamental(common);
@@ -553,8 +573,10 @@ ConstValue ConstIntUnary(ETokenType op, const ConstValue& operand)
 	case OP_PLUS:
 		return promoted;
 	case OP_MINUS:
+		RequireEvaluableWidth(promoted.type);
 		return Normalize(promoted.type, 0 - promoted.bits);
 	case OP_COMPL:
+		RequireEvaluableWidth(promoted.type);
 		return Normalize(promoted.type, ~promoted.bits);
 	case OP_LNOT:
 		return MakeBool(!ConstValueIsNonZero(operand));

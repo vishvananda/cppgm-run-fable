@@ -119,6 +119,8 @@ bool AluRegRmOpcodes(EX86Mnemonic m, int& opcode8, int& opcode)
 	switch (m)
 	{
 	case X86_ADD: opcode8 = 0x02; opcode = 0x03; return true;
+	case X86_ADC: opcode8 = 0x12; opcode = 0x13; return true;
+	case X86_SBB: opcode8 = 0x1A; opcode = 0x1B; return true;
 	case X86_OR:  opcode8 = 0x0A; opcode = 0x0B; return true;
 	case X86_AND: opcode8 = 0x22; opcode = 0x23; return true;
 	case X86_SUB: opcode8 = 0x2A; opcode = 0x2B; return true;
@@ -263,6 +265,8 @@ bool RmImmForm(EX86Mnemonic m, int width, ModRMForm& form, int& imm_size)
 	switch (m)
 	{
 	case X86_ADD_RI: form.reg_field = 0; return true;
+	case X86_ADC_RI: form.reg_field = 2; return true;
+	case X86_SBB_RI: form.reg_field = 3; return true;
 	case X86_OR_RI: form.reg_field = 1; return true;
 	case X86_AND_RI: form.reg_field = 4; return true;
 	case X86_SUB_RI: form.reg_field = 5; return true;

@@ -502,6 +502,94 @@ size_t LowerProgram::OwnViewVttIndex(const ClassInfo& cls, size_t ordinal)
 // A this-adjusting vtable entry thunk toward `target`. The LowIR name
 // derives from the target's; the object name is the Itanium _ZThn
 // spelling (dropped for internal targets).
+// PA29 5.5: a pointer to a virtual member function dispatches on the
+// dynamic type, so the pair carries an internal forwarding thunk (the
+// reference's <fn>__member_pointer_thunk shape) instead of the static
+// code address. Returns "" for non-virtual members.
+string LowerProgram::MemberPointerThunkRef(const SemNode& member)
+{
+	const NamedTypeInfo* owner = member.entity_scope
+		? member.entity_scope->entity : 0;
+	const ClassInfo* record = owner ? owner->class_record : 0;
+	if (!record || !record->is_polymorphic)
+		return "";
+	int slot = FindVirtualSlotIndex(*record, member.entity_name,
+	                                member.type);
+	// The member reference usually carries the this-adjusted type;
+	// match the slot's adjusted signature directly then.
+	for (size_t i = 0; slot < 0 && i < record->vslots.size(); i++)
+	{
+		const VirtualSlot& vs = record->vslots[i];
+		if (vs.kind != VS_METHOD || vs.name != member.entity_name ||
+		    !vs.type || !member.type ||
+		    vs.type->parameters.size() != member.type->parameters.size())
+			continue;
+		bool same = true;
+		for (size_t p = 1; p < vs.type->parameters.size(); p++)
+			if (!TypeEquals(vs.type->parameters[p],
+			                member.type->parameters[p]))
+				same = false;
+		if (same)
+			slot = (int)i;
+	}
+	if (slot < 0)
+		return "";
+	std::pair<const ClassInfo*, size_t> key(record, (size_t)slot);
+	map<std::pair<const ClassInfo*, size_t>, string>::iterator found =
+		pm_thunk_names_.find(key);
+	if (found != pm_thunk_names_.end())
+		return "@" + found->second;
+	LowFunctionInfo& target = CalleeEntryInfo(member);
+	string name =
+		UniqueSymbol(target.low_name + "__member_pointer_thunk");
+	pm_thunk_names_[key] = name;
+
+	const TypePtr& fn_type = member.type;
+	string ret = fn_type->target && !IsVoidType(fn_type->target)
+		? LowerValueType(fn_type->target) : "void";
+	string params = "%this : ptr";
+	string signature = "%arg0 : ptr";
+	string arguments = "%this";
+	for (size_t i = 0; i < fn_type->parameters.size(); i++)
+	{
+		string spelled = LowerValueType(fn_type->parameters[i]);
+		string arg = "%p" + to_string(i);
+		params += ", " + arg + " : " + spelled;
+		signature += ", %arg" + to_string(i + 1) + " : " + spelled;
+		arguments += ", " + arg;
+	}
+	string body;
+	body += "  block ^entry:\n";
+	body += "    %t1 = load ptr %this\n";
+	string slot_address = "%t1";
+	int temp = 2;
+	if (slot != 0)
+	{
+		body += "    %t2 = index i8 %t1, " + to_string(8 * slot) +
+			"\n";
+		slot_address = "%t2";
+		temp = 3;
+	}
+	string fn = "%t" + to_string(temp++);
+	body += "    " + fn + " = load ptr " + slot_address + "\n";
+	if (ret == "void")
+	{
+		body += "    call void " + fn + "(" + arguments + ") as (" +
+			signature + ") -> void\n    return void\n";
+	}
+	else
+	{
+		string result = "%t" + to_string(temp);
+		body += "    " + result + " = call " + ret + " " + fn + "(" +
+			arguments + ") as (" + signature + ") -> " + ret +
+			"\n    return " + ret + " " + result + "\n";
+	}
+	thunk_texts_.push_back(
+		"function @" + name + "(" + params + ") -> " + ret +
+		" [binding=internal] {\n" + body + "}");
+	return "@" + name;
+}
+
 string LowerProgram::VTableThunkRef(LowFunctionInfo& target,
                                     long long adjust,
                                     const TypePtr& adjusted)

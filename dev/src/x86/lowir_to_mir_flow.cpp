@@ -55,7 +55,8 @@ std::vector<ArgSlot> ClassifyCallArgs(
 				stack += 8;
 			}
 		}
-		else if(type.kind == LOWIR_TYPE_F80) {
+		else if(type.kind == LOWIR_TYPE_F80 ||
+		        type.kind == LOWIR_TYPE_I128) {
 			slot.kind = ArgSlot::AS_STACK;
 			slot.stack_offset = stack;
 			slot.stack_bytes = 16;
@@ -131,6 +132,7 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	   return_type.kind != LOWIR_TYPE_F32 &&
 	   return_type.kind != LOWIR_TYPE_F64 &&
 	   return_type.kind != LOWIR_TYPE_F80 &&
+	   return_type.kind != LOWIR_TYPE_I128 &&
 	   return_type.kind != LOWIR_TYPE_OBJ &&
 	   !return_type.is_void()) {
 		const ValueInfo & result = values_[ins.result];
@@ -441,8 +443,9 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			mov.operands.push_back(MakeDeref(XR_RSP, slot.stack_offset));
 			mov.operands.push_back(source);
 		}
-		else if(slot.param_type.kind == LOWIR_TYPE_OBJ &&
-		        slot.param_type.obj_bytes > 8) {
+		else if((slot.param_type.kind == LOWIR_TYPE_OBJ &&
+		         slot.param_type.obj_bytes > 8) ||
+		        slot.param_type.kind == LOWIR_TYPE_I128) {
 			// by-value memory-class object: copy the padded container into
 			// the reserved stack region in 8-byte chunks through r11
 			mir_model::Operand base;
@@ -552,6 +555,11 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			emit(mir_model::Instruction::MI_FSTP);
 		fstp.type = "f80";
 		fstp.operands.push_back(frame_operand(offset));
+		return;
+	}
+	if(return_type.kind == LOWIR_TYPE_I128) {
+		// PA29: the pair lands in rax:rdx and parks in the home
+		WideStorePair(f80_result_home(ins.result), XR_RAX, XR_RDX);
 		return;
 	}
 	if(return_type.kind == LOWIR_TYPE_F32 ||

@@ -532,6 +532,8 @@ void FunctionEncoder::EmitBinary(const Ins & ins)
 	{
 	case Ins::MI_ADD: reg_op = X86_ADD; imm_op = X86_ADD_RI; break;
 	case Ins::MI_SUB: reg_op = X86_SUB; imm_op = X86_SUB_RI; break;
+	case Ins::MI_ADC: reg_op = X86_ADC; imm_op = X86_ADC_RI; break;
+	case Ins::MI_SBB: reg_op = X86_SBB; imm_op = X86_SBB_RI; break;
 	case Ins::MI_AND: reg_op = X86_AND; imm_op = X86_AND_RI; break;
 	case Ins::MI_OR: reg_op = X86_OR; imm_op = X86_OR_RI; break;
 	case Ins::MI_XOR: reg_op = X86_XOR; imm_op = X86_XOR_RI; break;
@@ -721,11 +723,16 @@ void FunctionEncoder::EmitInstruction(const Ins & ins)
 	case Ins::MI_ZEXT:
 	case Ins::MI_MOVZX: EmitExtend(ins); return;
 	case Ins::MI_ADD:
+	case Ins::MI_ADC:
 	case Ins::MI_SUB:
+	case Ins::MI_SBB:
 	case Ins::MI_AND:
 	case Ins::MI_OR:
 	case Ins::MI_XOR:
 	case Ins::MI_IMUL: EmitBinary(ins); return;
+	case Ins::MI_MUL:
+		code_.MulDiv(X86_MUL, 64, Reg(ins.operands[0]));
+		return;
 	case Ins::MI_NEG: code_.NegReg(64, Reg(ins.operands[0])); return;
 	case Ins::MI_NOT: code_.NotReg(64, Reg(ins.operands[0])); return;
 	case Ins::MI_BSWAP: EmitBswap(ins); return;

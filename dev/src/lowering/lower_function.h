@@ -192,6 +192,12 @@ private:
 	                        const string& false_label);
 
 	// --- expressions (lower_expr.cpp) ---
+	// One spelled binary value operation; 128-bit division and
+	// remainder expand to an inline shift-subtract loop.
+	string EmitBinaryValue(const string& op_name, const TypePtr& type,
+	                       const string& lhs, const string& rhs);
+	string LowerWideDivMod(const string& op_name, const TypePtr& type,
+	                       const string& lhs, const string& rhs);
 	LowerValue LowerValueExpr(const SemNode& node);
 	TypePtr CalleeFnType(const SemNode& callee);
 	string LowerValueAs(const SemNode& node, const TypePtr& dest,
