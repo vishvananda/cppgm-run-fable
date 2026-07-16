@@ -1389,7 +1389,6 @@ void FunctionLowering::LowerThrow(const LowIRInstruction & ins)
 	store.operands.push_back(MakeReg(XR_RAX));
 	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
 	call.operands.push_back(MakeSymbol("__cppgm_unwind_raise", false));
-	call.call_returns_noreturn = true;
 }
 
 void FunctionLowering::LowerResume()
@@ -1398,7 +1397,6 @@ void FunctionLowering::LowerResume()
 	arg_homes_clobbered_ = true;
 	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
 	call.operands.push_back(MakeSymbol("__cppgm_unwind_raise", false));
-	call.call_returns_noreturn = true;
 }
 
 }  // namespace lowir_to_mir

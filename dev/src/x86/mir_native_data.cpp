@@ -71,6 +71,12 @@ void EncodeDataGlobal(ISymbolLabels & labels, const Global & global,
                       ImageItem & item)
 {
 	std::size_t max_align = 8;
+	// Every data item appends at most 16 bytes plus alignment padding;
+	// zero rows carry their own count.
+	std::size_t reserve = 0;
+	for (std::size_t i = 0; i < global.data_items.size(); i++)
+		reserve += 32 + global.data_items[i].zero_bytes;
+	item.bytes.reserve(reserve);
 	for (std::size_t i = 0; i < global.data_items.size(); i++)
 	{
 		const Global::DataItem & data = global.data_items[i];

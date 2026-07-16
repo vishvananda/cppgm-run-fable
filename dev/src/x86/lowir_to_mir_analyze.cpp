@@ -376,7 +376,13 @@ void FunctionLowering::AnalyzeValues()
 			info.def_position = (int)p;
 		}
 		RecordInstructionUses(ins, (int)p);
+		// EH markers, plain throws, and resumes lower to runtime calls
+		// (__cppgm_eh_match / __cppgm_unwind_raise), so values crossing
+		// them need call-surviving homes like any other call.
 		if(ins.opcode == LOWIR_INS_CALL ||
+		   ins.opcode == LOWIR_INS_EH_MARKER ||
+		   ins.opcode == LOWIR_INS_THROW ||
+		   ins.opcode == LOWIR_INS_RESUME ||
 		   InstructionEmbedsCall(ins, facts_))
 			call_positions_.push_back((int)p);
 		if(ins.type.is_float() || ins.type2.is_float() ||

@@ -383,9 +383,10 @@ void FunctionEncoder::Finish(ImageItem & item)
 	}
 	for (std::size_t i = 0; i < patches.size(); i++)
 	{
-		// Label-less PCREL fields are the intra-function jumps we
-		// resolve here; keep them away from the layout pass.
-		if (patches[i].kind == X86_PATCH_PCREL && !patches[i].imm.has_label)
+		// Label-less fields are fully resolved while encoding (the
+		// intra-function jumps here, immediate constants at emission);
+		// only symbol-relative patches reach the layout pass.
+		if (!patches[i].imm.has_label)
 			continue;
 		item.patches.push_back(patches[i]);
 	}

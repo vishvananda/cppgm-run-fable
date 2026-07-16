@@ -451,6 +451,9 @@ X86MachineCode EncodeX86Instruction(const X86Instruction& instr)
 		code.has_patch = true;
 		code.patch.offset = code.bytes.size();
 		code.patch.size = 8;
+		// A labeled imm64 is an absolute address (symbol + offset),
+		// not a truncated data constant.
+		code.patch.kind = X86_PATCH_ABS;
 		code.patch.imm = instr.imm;
 		PutLittleEndian(code.bytes, instr.imm.addend, 8);
 		return code;

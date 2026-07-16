@@ -196,8 +196,6 @@ struct Instruction
     MI_EH_POP,
     MI_LOAD_EXCEPTION,
     MI_LOAD_EXCEPTION_SELECTOR,
-    MI_THROW,
-    MI_RESUME,
     MI_JMP,
     MI_JMP_INDIRECT,
     MI_JNE,
@@ -215,7 +213,6 @@ struct Instruction
   // dead-copy elimination hint: a pool-register copy of a call-style
   // result (removed when the target register is never mentioned again)
   bool result_copy_hint = false;
-  bool call_returns_noreturn = false;
   bool call_variadic = false;
   bool has_source_position = false;
   std::size_t source_position = 0;

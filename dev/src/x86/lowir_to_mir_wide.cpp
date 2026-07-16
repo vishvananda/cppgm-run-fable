@@ -139,11 +139,14 @@ void FunctionLowering::LowerWideBinary(const LowIRInstruction & ins)
 void FunctionLowering::LowerWideShift(const LowIRInstruction & ins)
 {
 	long long count = 0;
+	std::map<std::string, long long>::const_iterator known =
+		ins.operands[1].kind == LOWIR_OPERAND_TEMP
+			? wide_consts_.find(ins.operands[1].name)
+			: wide_consts_.end();
 	if (ins.operands[1].is_literal())
 		count = ParseIntLiteral(ins.operands[1]);
-	else if (ins.operands[1].kind == LOWIR_OPERAND_TEMP &&
-	         wide_consts_.count(ins.operands[1].name))
-		count = wide_consts_[ins.operands[1].name];
+	else if (known != wide_consts_.end())
+		count = known->second;
 	else
 		throw std::runtime_error("i128 shift count must be constant");
 	count &= 127;
