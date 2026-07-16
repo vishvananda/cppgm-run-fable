@@ -1066,77 +1066,7 @@ string FunctionLowerer::LowerPointerOperand(const SemNode& node)
 }
 
 // --- calls -------------------------------------------------------------------
-
-
-string FunctionLowerer::LowerCallArgument(const SemNode& node,
-                                          const TypePtr& param)
-{
-	if (!param)
-	{
-		// 5.2.2p7 default argument promotions for trailing variadic
-		// arguments.
-		TypePtr source = NodeType(node);
-		TypePtr promoted = source;
-		if (source->kind == TK_FUNDAMENTAL &&
-		    source->fundamental == FT_FLOAT)
-			promoted = MakeFundamentalType(FT_DOUBLE);
-		else if (IsIntegralType(source) || IsUnscopedEnum(source))
-			promoted = PromoteForArithmetic(source);
-		else if (source->kind == TK_ARRAY ||
-		         source->kind == TK_FUNCTION)
-			return LowerPointerOperand(node);
-		else if (RemoveTopCv(source)->kind == TK_CLASS)
-			// 5.2.2p7: a class through the ellipsis is conditionally
-			// supported; the reference passes the object's address.
-			return MaterializeClassArg(node, RemoveTopCv(source));
-		return LowerValueAs(node, promoted, LCC_INIT);
-	}
-	if (IsReferenceType(param))
-		return LowerReferenceArgument(node, param->target);
-	if (RemoveTopCv(param)->kind == TK_CLASS)
-	{
-		TypePtr bare = RemoveTopCv(param);
-		if (!LowerClassDirect(bare))
-			// The indirect boundary: the caller materializes the
-			// argument object and passes its address.
-			return MaterializeClassArg(node, bare);
-		// The direct obj boundary: a fresh object slot passes by name.
-		string slot = AddMatSlot("argobj", LowerSlotType(bare));
-		string copy_address = NewTemp();
-		Emit(copy_address + " = addr $" + slot);
-		if (node.kind == SN_CONSTRUCTOR_ACTION && node.trivial_init)
-			;  // default-constructed argument object: storage only
-		else if (node.kind == SN_ID_EXPRESSION ||
-		         node.kind == SN_MEMBER_EXPRESSION)
-		{
-			// The PA15 empty-class direct binding kept the slot
-			// untouched; non-empty trivial sources copy their bytes.
-			string source_address = LowerAddressExpr(node);
-			if (bare->named->class_record &&
-			    !bare->named->class_record->is_empty)
-				Emit("copyobj " + LowerObjSpan(bare) + " " +
-				     source_address + ", " + copy_address);
-		}
-		else
-			LowerClassInit(node, copy_address);
-		return "$" + slot;
-	}
-	return LowerValueAs(node, RemoveTopCv(param), LCC_INIT);
-}
-
-string FunctionLowerer::MaterializeClassArg(const SemNode& node,
-                                            const TypePtr& bare)
-{
-	if (node.kind == SN_CONSTRUCTOR_ACTION)
-		// The callee destroys its by-value parameter object;
-		// no caller-side cleanup registers.
-		return MaterializeTemporary(node, "arg", false);
-	string slot = AddMatSlot("arg", LowerSlotType(bare));
-	string address = NewTemp();
-	Emit(address + " = addr $" + slot);
-	LowerClassInit(node, address);
-	return address;
-}
+// (argument binding and materialization live in lower_arg_bind.cpp)
 
 
 // The called function type: the direct callee's own, or the target of

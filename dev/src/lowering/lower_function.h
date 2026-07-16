@@ -193,7 +193,7 @@ private:
 
 	// --- expressions (lower_expr.cpp) ---
 	// One spelled binary value operation; 128-bit division and
-	// remainder expand to an inline shift-subtract loop.
+	// remainder expand through LowerWideDivMod (lower_expand.cpp).
 	string EmitBinaryValue(const string& op_name, const TypePtr& type,
 	                       const string& lhs, const string& rhs);
 	string LowerWideDivMod(const string& op_name, const TypePtr& type,
@@ -221,7 +221,7 @@ private:
 	void BranchOnValue(const SemNode& node, const string& true_label,
 	                   const string& false_label);
 	void LowerEffect(const SemNode& node);
-	// PA29 GNU statement expressions (lower_expr.cpp): the trailing
+	// PA29 GNU statement expressions (lower_expand.cpp): the trailing
 	// expression statement's node ("" value when absent) and the
 	// value/effect lowering over the bound compound statement.
 	const SemNode* StatementExpressionTail(const SemNode& node);
@@ -234,13 +234,14 @@ private:
 	// the consumer).
 	LowerValue LowerCall(const SemNode& node,
 	                     const string& result_address = "");
-	// PA29 float-classification builtins: a direct call to the
-	// global-scope __builtin_isnan / __builtin_nanl expands inline (an
-	// f80 storage-image bit test / a `const f80 nanL`), so the NaN
-	// query never lowers to a call to itself.
+	// PA29 float-classification builtins (lower_expand.cpp): a direct
+	// call to the global-scope __builtin_isnan / __builtin_nanl
+	// expands inline (an f80 storage-image bit test / a `const f80
+	// nanL`), so the NaN query never lowers to a call to itself.
 	bool IsFloatBuiltinCall(const SemNode& node) const;
 	LowerValue LowerFloatBuiltin(const SemNode& node,
 	                             const SemNode& callee);
+	// --- call-argument binding (lower_arg_bind.cpp) ---
 	string LowerCallArgument(const SemNode& node, const TypePtr& param);
 	string LowerReferenceArgument(const SemNode& node,
 	                              const TypePtr& referee);
@@ -258,7 +259,7 @@ private:
 	// (or into `dest` when given); returns the object address text.
 	string MaterializeClassResult(const SemNode& call, const char* kind,
 	                              const string& dest);
-	// One by_address call argument object (slot kind "arg").
+	// One by_address call argument object (lower_arg_bind.cpp).
 	string MaterializeClassArg(const SemNode& node, const TypePtr& bare);
 	// --- PA16 allocation expressions (lower_new.cpp) ---
 	LowerValue LowerNewArray(const SemNode& node);
