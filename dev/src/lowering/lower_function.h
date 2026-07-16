@@ -384,6 +384,13 @@ private:
 		const SemNode* action;  // SN_DESTRUCTOR_ACTION (no address)
 	};
 	void LowerConstructorAction(const SemNode& node);
+	// The construction call of one statement-position action (the
+	// region/arming wrapper above owns the 15.2p2 bookkeeping).
+	void LowerConstructorActionCall(const SemNode& node);
+	// PA29 15.2p2: destroys the constructor's armed fully-constructed
+	// subobjects (reverse construction order) on paths where the
+	// exception leaves the function.
+	void EmitCtorUnwindCleanups();
 	void BeginFullExpression(const SemNode& root,
 	                         bool open_segment = true);
 	void EndFullExpression();
@@ -510,6 +517,11 @@ private:
 	// Cleanup scopes parallel the lowered compound statements; each
 	// scope holds per-object action groups in declaration order.
 	vector<vector<vector<const SemNode*>>> cleanup_scopes_;
+	// PA29 15.2p2: destructor actions of the constructor's fully-
+	// constructed subobjects, in construction order. Unwind dispatches
+	// that leave the function destroy them (in reverse) after the
+	// temporaries and scope cleanups; normal exits never run them.
+	vector<const SemNode*> ctor_cleanups_;
 	// Parameter cleanup groups registered at entry (non-arming).
 	size_t param_cleanup_count_;
 	// The shared materialized return-object slot (one per function).

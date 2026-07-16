@@ -788,8 +788,13 @@ LowerValue FunctionLowerer::LowerAssignment(const SemNode& node)
 {
 	const SemNode& lhs = *node.children[0];
 	const SemNode& rhs = *node.children[1];
+	// A class-typed store is always a synthesized construction shape
+	// (member initialization, PA29 dynamic global initialization) -
+	// user assignments to class objects resolve to operator= calls.
 	if (node.op == OP_ASS &&
-	    (node.member_ref || lhs.kind == SN_MEMBER_EXPRESSION))
+	    (node.member_ref || lhs.kind == SN_MEMBER_EXPRESSION ||
+	     (lhs.type && !IsReferenceType(lhs.type) &&
+	      RemoveTopCv(lhs.type)->kind == TK_CLASS)))
 		return LowerMemberAssignment(node);
 	TypePtr type = NodeType(lhs);
 	if (node.op != OP_ASS)

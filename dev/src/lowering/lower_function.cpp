@@ -374,10 +374,33 @@ string FunctionLowerer::Render() const
 
 // --- statements ----------------------------------------------------------
 
+// A statement-position subobject construction (constructor member and
+// base initialization). 15.2p2: with earlier subobjects armed, a
+// may-unwind construction runs under its own dispatch region - the
+// unwind destroys the already-constructed subobjects - closed as the
+// new subobject comes alive; the new subobject's pinned destructor
+// action then arms for the later initializers and the body.
+void FunctionLowerer::LowerConstructorAction(const SemNode& node)
+{
+	bool guard = !ctor_cleanups_.empty() && !eh_open_ &&
+		!in_cleanup_emission_ && !suppress_eh_regions_ &&
+		!node.trivial_init && !node.elided && !node.trivial_copy &&
+		!node.children.empty() &&
+		!node.children[0]->children.empty() &&
+		program_.CalleeMayUnwind(*node.children[0]->children[0]);
+	if (guard)
+		OpenEhRegion();
+	LowerConstructorActionCall(node);
+	if (guard && eh_open_)
+		CloseEhRegion();
+	if (node.subobject_dtor)
+		ctor_cleanups_.push_back(node.subobject_dtor.get());
+}
+
 // Subobject construction inside synthesized bodies: an elided chain
 // only demands its callee; value-initialization zero-fills through the
 // constructor's address first.
-void FunctionLowerer::LowerConstructorAction(const SemNode& node)
+void FunctionLowerer::LowerConstructorActionCall(const SemNode& node)
 {
 	if (node.trivial_init)
 		return;

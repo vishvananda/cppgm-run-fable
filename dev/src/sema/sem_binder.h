@@ -265,6 +265,10 @@ private:
 	void AppendVBaseTransfers(const ClassInfo& cls, bool is_move,
 	                          const SemNode& source_proto,
 	                          vector<SemNodePtr>& out);
+	// PA29 15.2p2: pins the subobject's destructor action on its
+	// constructor-body initialization action (sem_ctor.cpp).
+	void ArmSubobjectCleanup(SemNode& action, const ClassInfo& subobject,
+	                         bool base_entry, SemNodePtr address);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,

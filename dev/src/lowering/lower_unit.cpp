@@ -1255,6 +1255,15 @@ void LowerProgram::BuildLifetimeHelpers()
 				else
 					init_def->children.push_back(CloneSemNode(child));
 			}
+			else if (is_class && !IsReferenceType(info.type) &&
+			         info.type->kind != TK_ARRAY && !tls_dynamic &&
+			         j == 0 &&
+			         (child.kind == SN_CALL_EXPRESSION ||
+			          child.kind == SN_CONDITIONAL_EXPRESSION))
+				// PA29: a class object copy-initialized from a prvalue
+				// producer (a factory call) constructs dynamically into
+				// the global object itself (copy elision).
+				AppendDynamicInit(info, child, false, *init_def);
 			else if (IsReferenceType(info.type) && j == 0)
 				// The reference binds dynamically: the helper stores
 				// the referent's address into the pointer object.

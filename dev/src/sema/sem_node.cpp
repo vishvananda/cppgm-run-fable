@@ -251,6 +251,8 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.typeid_dynamic = node.typeid_dynamic;
 	if (node.result_dtor)
 		out.result_dtor = CloneSemNode(*node.result_dtor);
+	if (node.subobject_dtor)
+		out.subobject_dtor = CloneSemNode(*node.subobject_dtor);
 	for (size_t i = 0; i < node.children.size(); i++)
 		out.children.push_back(CloneSemNode(*node.children[i]));
 	return copy;

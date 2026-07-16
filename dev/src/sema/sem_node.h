@@ -355,6 +355,14 @@ struct SemNode
 	// re-derives the callee. Kept out of `children` so argument
 	// lowering and may-throw analysis see only the call's operands.
 	SemNodePtr result_dtor;
+	// PA29 SN_CONSTRUCTOR_ACTION of a constructor's member/base
+	// initialization: the resolved destructor action of the subobject
+	// (15.2p2). Once the subobject is fully constructed, an exception
+	// from a later initializer (or the constructor body) destroys it
+	// through this action before leaving the constructor. Kept out of
+	// `children` (like result_dtor) so the dump and the may-throw walks
+	// see only the construction itself.
+	SemNodePtr subobject_dtor;
 	// PA25 SN_TYPEID: the resolved operand type of the query, and
 	// whether the result reads the operand's dynamic type through its
 	// vpointer (children[0] is the polymorphic glvalue then).

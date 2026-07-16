@@ -646,6 +646,7 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		{
 			Emit("call void " + end_catch_ref + "()");
 			Emit("eh_end");
+			EmitCtorUnwindCleanups();
 			Terminate("resume");
 		}
 	}
@@ -668,7 +669,10 @@ void FunctionLowerer::EmitCatchNext(EhContext& context)
 		Terminate("jump ^" + outer.entry_label);
 	}
 	else
+	{
+		EmitCtorUnwindCleanups();
 		Terminate("resume");
+	}
 }
 
 // PA25 15.1: throw allocates the exception object, builds the payload
@@ -701,8 +705,12 @@ void FunctionLowerer::LowerThrow(const SemNode& node)
 		"(%arg0 : ptr, %arg1 : ptr, %arg2 : ptr) -> void "
 		"[return=noreturn, role=eh_throw, linkage=c, binding=strong, "
 		"object=__cxa_throw]");
+	// Destructible locals and armed constructor subobjects must
+	// destroy when the raise leaves the function (15.2p2), so their
+	// cleanups also put the throw under a dispatch region.
 	bool wrap = !in_cleanup_emission_ && !suppress_eh_regions_ &&
-		(eh_armed_ || !temp_cleanups_.empty());
+		(eh_armed_ || !temp_cleanups_.empty() ||
+		 !ctor_cleanups_.empty());
 	if (wrap && !eh_open_)
 		OpenEhRegion("throw_alloc_unwind_end");
 	string storage = NewTemp();

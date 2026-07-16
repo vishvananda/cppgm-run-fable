@@ -33,6 +33,22 @@ void SemBinder::EnsureSpecialCtorHost(const ClassInfo& cls, int index)
 
 // --- constructor member initialization -------------------------------------
 
+// 15.2p2 / 12.6.2p10: once a constructor finishes constructing this
+// subobject, an exception from a later initializer (or the body) must
+// destroy it before leaving the constructor. The pinned destructor
+// action rides outside `children` (like result_dtor) so the dump and
+// the may-throw walks see only the construction; the lowering arms it
+// as an unwind-only cleanup after the construction runs.
+void SemBinder::ArmSubobjectCleanup(SemNode& action,
+                                    const ClassInfo& subobject,
+                                    bool base_entry, SemNodePtr address)
+{
+	if (!unit_.classes.DestructionHasEffects(subobject))
+		return;
+	action.subobject_dtor =
+		MakeDestructorCall(subobject, base_entry, std::move(address));
+}
+
 // 12.6.2 class-type member: the aggregate braced form, 8.5p10
 // value-initialization, or direct/list-initialization by constructor.
 void SemBinder::AppendClassMemberInit(const ClassField& field,
@@ -87,6 +103,8 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
 				                           member_cls.size);
 			}
+			ArmSubobjectCleanup(*action, member_cls, false,
+			                    AddressOfNode(ThisFieldExpr(field)));
 			out.push_back(std::move(action));
 			return;
 		}
@@ -120,6 +138,8 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 				call.children.begin() + 1,
 				AddressOfNode(ThisFieldExpr(field)));
 			action->ctor_addressed = true;
+			ArmSubobjectCleanup(*action, member_cls, false,
+			                    AddressOfNode(ThisFieldExpr(field)));
 			out.push_back(std::move(action));
 			return;
 		}
@@ -148,9 +168,12 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 		vector<SemNodePtr> arg_nodes;
 		for (size_t i = 0; i < values.size(); i++)
 			arg_nodes.push_back(std::move(values[i].node));
-		out.push_back(MakeConstructorCall(
+		SemNodePtr action = MakeConstructorCall(
 			member_cls, index, false,
-			AddressOfNode(ThisFieldExpr(field)), std::move(arg_nodes)));
+			AddressOfNode(ThisFieldExpr(field)), std::move(arg_nodes));
+		ArmSubobjectCleanup(*action, member_cls, false,
+		                    AddressOfNode(ThisFieldExpr(field)));
+		out.push_back(std::move(action));
 		return;
 	}
 }
@@ -387,10 +410,13 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 			vector<SemNodePtr> arg_nodes;
 			for (size_t j = 0; j < no_args.size(); j++)
 				arg_nodes.push_back(std::move(no_args[j].node));
-			out.push_back(MakeConstructorCall(
+			SemNodePtr action = MakeConstructorCall(
 				*member_cls, index, false,
 				AddressOfNode(ThisFieldExpr(field)),
-				std::move(arg_nodes)));
+				std::move(arg_nodes));
+			ArmSubobjectCleanup(*action, *member_cls, false,
+			                    AddressOfNode(ThisFieldExpr(field)));
+			out.push_back(std::move(action));
 		}
 		return;
 	}
@@ -421,10 +447,14 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 			vector<SemNodePtr> arg_nodes;
 			for (size_t j = 0; j < no_args.size(); j++)
 				arg_nodes.push_back(std::move(no_args[j].node));
-			out.push_back(MakeConstructorCall(
+			SemNodePtr action = MakeConstructorCall(
 				*member_cls, index, false,
 				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)),
-				std::move(arg_nodes)));
+				std::move(arg_nodes));
+			ArmSubobjectCleanup(
+				*action, *member_cls, false,
+				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)));
+			out.push_back(std::move(action));
 		}
 		return;
 	}
@@ -474,9 +504,12 @@ void SemBinder::AppendOneBaseDefaultInit(const ClassInfo& cls,
 	vector<SemNodePtr> arg_nodes;
 	for (size_t j = 0; j < no_args.size(); j++)
 		arg_nodes.push_back(std::move(no_args[j].node));
-	out.push_back(MakeConstructorCall(base, index, true,
-	                                  ThisBaseAddress(cls, base_index),
-	                                  std::move(arg_nodes)));
+	SemNodePtr action = MakeConstructorCall(
+		base, index, true, ThisBaseAddress(cls, base_index),
+		std::move(arg_nodes));
+	ArmSubobjectCleanup(*action, base, true,
+	                    ThisBaseAddress(cls, base_index));
+	out.push_back(std::move(action));
 }
 
 // The demand side of an elided subobject chain: the nearest
@@ -589,9 +622,12 @@ void SemBinder::AppendVBaseInits(const ClassInfo& cls,
 			vector<SemNodePtr> arg_nodes;
 			for (size_t i = 0; i < values.size(); i++)
 				arg_nodes.push_back(std::move(values[i].node));
-			out.push_back(MakeConstructorCall(base, index, true,
-			                                  ThisVBaseAddress(cls, v),
-			                                  std::move(arg_nodes)));
+			SemNodePtr action = MakeConstructorCall(
+				base, index, true, ThisVBaseAddress(cls, v),
+				std::move(arg_nodes));
+			ArmSubobjectCleanup(*action, base, true,
+			                    ThisVBaseAddress(cls, v));
+			out.push_back(std::move(action));
 		}
 		else
 		{
@@ -613,9 +649,12 @@ void SemBinder::AppendVBaseInits(const ClassInfo& cls,
 				vector<SemNodePtr> arg_nodes;
 				for (size_t j = 0; j < no_args.size(); j++)
 					arg_nodes.push_back(std::move(no_args[j].node));
-				out.push_back(MakeConstructorCall(
+				SemNodePtr action = MakeConstructorCall(
 					base, index, true, ThisVBaseAddress(cls, v),
-					std::move(arg_nodes)));
+					std::move(arg_nodes));
+				ArmSubobjectCleanup(*action, base, true,
+				                    ThisVBaseAddress(cls, v));
+				out.push_back(std::move(action));
 			}
 		}
 		for (size_t i = mark; i < out.size(); i++)
@@ -777,9 +816,11 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 		vector<SemNodePtr> arg_nodes;
 		for (size_t i = 0; i < values.size(); i++)
 			arg_nodes.push_back(std::move(values[i].node));
-		actions.push_back(MakeConstructorCall(base, index, true,
-		                                      ThisBaseAddress(cls, b),
-		                                      std::move(arg_nodes)));
+		SemNodePtr action = MakeConstructorCall(base, index, true,
+		                                        ThisBaseAddress(cls, b),
+		                                        std::move(arg_nodes));
+		ArmSubobjectCleanup(*action, base, true, ThisBaseAddress(cls, b));
+		actions.push_back(std::move(action));
 	}
 	// PA17: the vpointer stores after base construction, before any
 	// member initialization.

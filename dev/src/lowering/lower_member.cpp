@@ -328,8 +328,10 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	     rhs.kind == SN_CONDITIONAL_EXPRESSION))
 	{
 		// A same-class prvalue initializer constructs the member
-		// object directly (copy elision).
-		string storage = MemberAddress(lhs);
+		// object directly (copy elision). PA29: the dynamic global
+		// initializer targets the namespace-scope object itself.
+		string storage = lhs.kind == SN_MEMBER_EXPRESSION
+			? MemberAddress(lhs) : LowerAddressExpr(lhs);
 		LowerClassInit(rhs, storage);
 		LowerValue result;
 		result.type = type;
@@ -1104,9 +1106,26 @@ void FunctionLowerer::CloseEhRegion()
 	{
 		EmitTempCleanups(0);
 		EmitCleanupsFrom(0);
+		EmitCtorUnwindCleanups();
 		Terminate("resume");
 	}
 	OpenBlock(eh_end_);
+}
+
+// 15.2p2: the exception is leaving the constructor - the armed
+// fully-constructed subobjects destroy in reverse construction order
+// (members, then direct bases, then the virtual bases of a
+// complete-object entry), after the temporaries and scope cleanups.
+void FunctionLowerer::EmitCtorUnwindCleanups()
+{
+	bool saved = in_lifetime_action_;
+	in_lifetime_action_ = true;
+	bool saved_emission = in_cleanup_emission_;
+	in_cleanup_emission_ = true;
+	for (size_t i = ctor_cleanups_.size(); i-- > 0;)
+		LowerCall(*ctor_cleanups_[i]->children[0]);
+	in_cleanup_emission_ = saved_emission;
+	in_lifetime_action_ = saved;
 }
 
 // The content identity of the dispatch a region opened now would
@@ -1146,6 +1165,12 @@ string FunctionLowerer::CleanupSignature() const
 				         (const void*)groups[group][i]);
 				signature += string("c") + buffer + ";";
 			}
+	}
+	for (size_t i = ctor_cleanups_.size(); i-- > 0;)
+	{
+		snprintf(buffer, sizeof(buffer), "%p",
+		         (const void*)ctor_cleanups_[i]);
+		signature += string("s") + buffer + ";";
 	}
 	return signature;
 }
