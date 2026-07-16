@@ -137,7 +137,8 @@ private:
 	void BindCondition(const AstCondition& condition, bool for_switch);
 	void BindThrowStatement(const AstStmt& stmt);
 	void BindTryStatement(const AstStmt& stmt,
-	                      const DeferredBody* ctor_inits = 0);
+	                      const DeferredBody* ctor_inits = 0,
+	                      const ClassInfo* dtor_epilogue_cls = 0);
 	void BindConditionDeclaration(const AstCondition& condition,
 	                              bool for_switch);
 	void BindIfStatement(const AstStmt& stmt);

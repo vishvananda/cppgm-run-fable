@@ -1029,6 +1029,30 @@ bool FunctionLowerer::HaveCleanups() const
 	return groups > param_cleanup_count_;
 }
 
+bool FunctionLowerer::HaveCleanupsAboveEhBoundary() const
+{
+	size_t boundary = 0;
+	if (!eh_contexts_.empty())
+		boundary = eh_contexts_.back().cleanup_depth;
+	size_t groups = 0;
+	for (size_t i = boundary; i < cleanup_scopes_.size(); i++)
+		groups += cleanup_scopes_[i].size();
+	// At function depth the parameter cleanups do not arm (they run at
+	// normal exits only; see HaveCleanups).
+	if (boundary == 0)
+		return groups > param_cleanup_count_;
+	return groups > 0;
+}
+
+bool FunctionLowerer::RouteKeepsOuterTryArmed() const
+{
+	size_t tries = 0;
+	for (size_t i = 0; i < eh_contexts_.size(); i++)
+		if (!eh_contexts_[i].is_catch)
+			tries++;
+	return tries >= 2;
+}
+
 void FunctionLowerer::EmitCleanupsFrom(size_t from)
 {
 	bool saved = in_lifetime_action_;
@@ -1102,7 +1126,11 @@ void FunctionLowerer::CloseEhRegion()
 		if (outer.ctor_rethrow)
 			EmitCtorUnwindCleanups();
 		Emit("eh_end");
-		Emit("eh_end");
+		// The balancing pop of the next frame record stays out when it
+		// would drop an enclosing try whose markers never ran here; the
+		// resume re-landing dispatches that try instead.
+		if (!RouteKeepsOuterTryArmed())
+			Emit("eh_end");
 		ReferenceLabel(outer.entry_label);
 		Terminate("jump ^" + outer.entry_label);
 	}

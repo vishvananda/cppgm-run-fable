@@ -1238,11 +1238,12 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 			callee_text + "(" + arguments + ")";
 	}
 	// Argument-temporary registration may have closed the region; the
-	// call itself still runs protected.
+	// call itself still runs protected (under the same condition as
+	// the initial wrap, including armed constructor subobjects).
 	if (!eh_open_ && !in_cleanup_emission_ && !suppress_eh_regions_ &&
 	    !in_lifetime_action_ &&
 	    (!temp_cleanups_.empty() ||
-	     (HaveCleanups() &&
+	     ((HaveCleanups() || !ctor_cleanups_.empty()) &&
 	      (!direct || dispatch_may_unwind ||
 	       program_.CalleeMayUnwind(callee) ||
 	       program_.CalleeGuardedBody(callee)))))

@@ -488,7 +488,21 @@ private:
 	// innermost scope first; later objects destroy before earlier ones,
 	// array elements in their recorded order.
 	void EmitCleanupsFrom(size_t from);
+	// The destructor's subobject destructions (12.4): the trailing
+	// function-node actions, or the pre-handler try-region actions of
+	// a destructor function-try-block. Returns leave through them.
+	void CollectDtorEpilogue(size_t first_statement);
+	void EmitDtorEpilogueActions();
 	bool HaveCleanups() const;
+	// Scope cleanups registered above the innermost try/catch context's
+	// depth: no landing edge runs them, so a raise over them needs its
+	// own dispatch region.
+	bool HaveCleanupsAboveEhBoundary() const;
+	// True when a synthetic route into an enclosing try's entry chain
+	// must leave the outer try's frame record armed (two or more
+	// same-frame enclosing tries; the outer markers never ran here, so
+	// the resume re-landing owns the outer try).
+	bool RouteKeepsOuterTryArmed() const;
 	void CloseEhRegion();
 
 	LowerProgram& program_;
@@ -538,6 +552,15 @@ private:
 	// that leave the function destroy them (in reverse) after the
 	// temporaries and scope cleanups; normal exits never run them.
 	vector<const SemNode*> ctor_cleanups_;
+	// The destructor's subobject destruction actions in destruction
+	// order (see CollectDtorEpilogue); entries before
+	// dtor_epilogue_done_ already ran at statement position on the
+	// fall-through path.
+	vector<const SemNode*> dtor_epilogue_;
+	size_t dtor_epilogue_done_;
+	// Inside a ctor/dtor function-try-block handler: the unwind edge
+	// already destroyed the subobjects, so returns skip the epilogue.
+	bool in_function_try_handler_;
 	// Parameter cleanup groups registered at entry (non-arming).
 	size_t param_cleanup_count_;
 	// The shared materialized return-object slot (one per function).

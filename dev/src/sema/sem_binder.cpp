@@ -984,6 +984,11 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 		BindMemberFunctionBody(decl, composed, name);
 		return;
 	}
+	// A ctor-initializer parses on any function-try-block, but only
+	// constructors may have one (12.6.2p1).
+	if (decl.has_ctor_initializer)
+		throw runtime_error(
+			"ctor-initializer on a non-constructor function");
 	SemNode* item = AppendItem(SN_FUNCTION_DEFINITION);
 	item->name = CanonicalQualifiedName(declaring, name);
 	item->type = composed.type;
@@ -1188,7 +1193,8 @@ void SemBinder::BindThrowStatement(const AstStmt& stmt)
 // exception declaration in a fresh block scope around the handler
 // body.
 void SemBinder::BindTryStatement(const AstStmt& stmt,
-                                 const DeferredBody* ctor_inits)
+                                 const DeferredBody* ctor_inits,
+                                 const ClassInfo* dtor_epilogue_cls)
 {
 	SemNode* item = AppendItem(SN_TRY);
 	parents_.push_back(item);
@@ -1201,6 +1207,15 @@ void SemBinder::BindTryStatement(const AstStmt& stmt,
 		AnalyzeMemberInits(*ctor_inits, *item);
 	}
 	BindStatement(*stmt.body);
+	if (dtor_epilogue_cls)
+	{
+		// PA29 destructor function-try-block: the member and base
+		// destructions run inside the try region (before any handler
+		// is entered, 15.2p11), and the handlers implicitly rethrow
+		// (15.3p15).
+		item->function_try = true;
+		AnalyzeDtorEpilogue(*dtor_epilogue_cls, *item);
+	}
 	for (size_t i = 0; i < stmt.handlers.size(); i++)
 	{
 		const AstHandler& handler = stmt.handlers[i];

@@ -298,9 +298,18 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	parents_.push_back(node);
 	try
 	{
-		bool ctor_function_try = special == SF_CONSTRUCTOR &&
-			body.decl->body && body.decl->body->kind == SK_TRY &&
+		bool function_try = body.decl->body &&
+			body.decl->body->kind == SK_TRY &&
 			body.decl->body->function_try;
+		bool ctor_function_try = special == SF_CONSTRUCTOR &&
+			function_try;
+		bool dtor_function_try = special == SF_DESTRUCTOR &&
+			function_try;
+		// A ctor-initializer parses on any function-try-block, but
+		// only constructors may have one (12.6.2p1).
+		if (special != SF_CONSTRUCTOR && body.decl->has_ctor_initializer)
+			throw runtime_error(
+				"ctor-initializer on a non-constructor function");
 		if (special == SF_CONSTRUCTOR && !ctor_function_try)
 			AnalyzeMemberInits(body, *node);
 		// PA17: a polymorphic destructor re-stores this class's
@@ -309,9 +318,11 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 			node->children.push_back(MakeVPointerStore(*body.cls));
 		if (ctor_function_try)
 			BindTryStatement(*body.decl->body, &body);
+		else if (dtor_function_try)
+			BindTryStatement(*body.decl->body, 0, body.cls);
 		else
 			BindStatement(*body.decl->body);
-		if (special == SF_DESTRUCTOR)
+		if (special == SF_DESTRUCTOR && !dtor_function_try)
 			AnalyzeDtorEpilogue(*body.cls, *node);
 	}
 	catch (...)

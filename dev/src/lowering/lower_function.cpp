@@ -34,6 +34,7 @@ FunctionLowerer::FunctionLowerer(LowerProgram& program,
 	  return_type_(definition.type->target),
 	  indirect_ret_(false), nrvo_scope_(0), nrvo_active_(false),
 	  temp_counter_(0), label_counter_(0), mat_counter_(0),
+	  dtor_epilogue_done_(0), in_function_try_handler_(false),
 	  param_cleanup_count_(0), eh_open_(false), eh_reused_(false),
 	  cond_arm_depth_(0), catch_selector_counter_(0),
 	  suppress_eh_regions_(false),
@@ -109,6 +110,7 @@ string FunctionLowerer::Lower()
 			program_.VTableGroupRef(method_class);
 	}
 	EmitParameterStores();
+	CollectDtorEpilogue(first_statement);
 	LowerStatementList(def_.children, first_statement);
 	// PA17: a deleting destructor entry frees the object after the
 	// (shared) destructor body ran.
@@ -451,6 +453,42 @@ void FunctionLowerer::LowerStatementList(const vector<SemNodePtr>& items,
 		LowerStatement(*items[i]);
 }
 
+void FunctionLowerer::CollectDtorEpilogue(size_t first_statement)
+{
+	for (size_t i = first_statement; i < def_.children.size(); i++)
+	{
+		const SemNode& child = *def_.children[i];
+		if (child.kind == SN_DESTRUCTOR_ACTION)
+			dtor_epilogue_.push_back(&child);
+		if (child.kind == SN_TRY && child.function_try)
+			for (size_t j = 0; j < child.children.size(); j++)
+				if (child.children[j]->kind == SN_DESTRUCTOR_ACTION)
+					dtor_epilogue_.push_back(
+						child.children[j].get());
+	}
+}
+
+// 12.4: a return statement leaves the destructor through the
+// member/base destructions that have not already run at statement
+// position. Handlers of a destructor function-try run after the
+// unwind edge already destroyed them, so returns there skip the
+// epilogue.
+void FunctionLowerer::EmitDtorEpilogueActions()
+{
+	if (dtor_epilogue_done_ >= dtor_epilogue_.size() ||
+	    in_function_try_handler_)
+		return;
+	bool saved = in_lifetime_action_;
+	in_lifetime_action_ = true;
+	bool saved_emission = in_cleanup_emission_;
+	in_cleanup_emission_ = true;
+	for (size_t i = dtor_epilogue_done_; i < dtor_epilogue_.size(); i++)
+		if (!SkipVBaseAction(*dtor_epilogue_[i]))
+			LowerCall(*dtor_epilogue_[i]->children[0]);
+	in_cleanup_emission_ = saved_emission;
+	in_lifetime_action_ = saved;
+}
+
 void FunctionLowerer::LowerStatement(const SemNode& node)
 {
 	switch (node.kind)
@@ -497,6 +535,15 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		in_lifetime_action_ = true;
 		LowerCall(*node.children[0]);
 		in_lifetime_action_ = saved;
+		// A retiring armed epilogue destruction (destructor
+		// function-try-block) leaves the unwind set once it ran, and
+		// the fall-through path marks it done so the implicit return
+		// does not re-emit it.
+		if (!ctor_cleanups_.empty() && ctor_cleanups_.back() == &node)
+			ctor_cleanups_.pop_back();
+		if (dtor_epilogue_done_ < dtor_epilogue_.size() &&
+		    dtor_epilogue_[dtor_epilogue_done_] == &node)
+			dtor_epilogue_done_++;
 		return;
 	}
 	case SN_STATIC_GUARD:

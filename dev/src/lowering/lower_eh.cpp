@@ -478,6 +478,7 @@ void FunctionLowerer::EmitEhReturnUnwind()
 					"binding=strong, object=__cxa_end_catch]") + "()");
 		}
 	EmitCleanupsFrom(0);
+	EmitDtorEpilogueActions();
 	for (size_t i = eh_contexts_.size(); i-- > 0;)
 		if (!eh_contexts_[i].is_catch)
 			Emit("eh_end");
@@ -517,6 +518,16 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 	ReferenceLabel(context.dispatch_label);
 	Emit("eh_try ^" + context.dispatch_label);
 	eh_contexts_.push_back(context);
+	// A destructor function-try-block enters with every member/base
+	// fully constructed: the pre-handler destruction actions arm now
+	// (in construction order) so any unwind edge destroys them before
+	// a handler runs (15.2p11); each retires as the normal path
+	// executes it.
+	if (node.function_try)
+		for (size_t i = first_handler; i-- > 0;)
+			if (node.children[i]->kind == SN_DESTRUCTOR_ACTION &&
+			    !SkipVBaseAction(*node.children[i]))
+				ctor_cleanups_.push_back(node.children[i].get());
 	for (size_t i = 0; i < first_handler; i++)
 		LowerStatement(*node.children[i]);
 	context = eh_contexts_.back();
@@ -556,17 +567,19 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 		if (i + 1 < context.handlers.size())
 			OpenBlock(miss);
 	}
-	// The fn-try handlers run after every armed subobject was already
-	// destroyed on the way in (15.2p2); only the unmatched-selector
-	// path still owns their destruction.
+	// Every edge into a fn-try dispatch destroys the armed subobjects
+	// on the way in (15.2p2): region dispatches and inner catch_next
+	// routes destroy exactly the armed-so-far set, and direct landings
+	// have nothing armed. The handlers and the unmatched-selector path
+	// must therefore never re-destroy.
 	vector<const SemNode*> saved_ctor_cleanups;
 	if (node.function_try)
 		saved_ctor_cleanups.swap(ctor_cleanups_);
 	for (size_t i = 0; i < context.handlers.size(); i++)
 		EmitCatchHandler(context, context.handlers[i], exc);
+	EmitCatchNext(context);
 	if (node.function_try)
 		ctor_cleanups_.swap(saved_ctor_cleanups);
-	EmitCatchNext(context);
 	// The join survives even when every path terminated (the
 	// reference keeps the dead continuation).
 	ReferenceLabel(context.end_label);
@@ -677,16 +690,20 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		catch_context.cleanup_label = cleanup_label;
 		catch_context.cleanup_depth = cleanup_scopes_.size();
 		eh_contexts_.push_back(catch_context);
+		bool saved_handler = in_function_try_handler_;
+		if (context.ctor_rethrow)
+			in_function_try_handler_ = true;
 		LowerStatement(*handler_node.children[0]);
+		in_function_try_handler_ = saved_handler;
 		eh_contexts_.pop_back();
 		if (!blocks_.back().terminated)
 		{
 			if (context.ctor_rethrow)
 			{
-				// 15.3p15: flowing off a constructor's handler end
-				// rethrows; the armed catch cleanup ends the caught
-				// exception as the rethrow unwinds through it.
-				EmitCatchParamDtor(param_slot, param_dtor);
+				// 15.3p15: flowing off a ctor/dtor handler end rethrows;
+				// the armed catch cleanup destroys the by-value parameter
+				// and ends the caught exception as the rethrow unwinds
+				// through it, so nothing destroys here.
 				Emit("call void " +
 				     program_.ExternalRuntimeFnRef(
 						"__cxa_rethrow",
@@ -718,7 +735,10 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 			EmitCatchParamDtor(param_slot, param_dtor);
 			Emit("call void " + end_catch_ref + "()");
 			Emit("eh_end");
-			Emit("eh_end");
+			// See CloseEhRegion: the balancing pop must not drop an
+			// enclosing try whose markers never ran on this route.
+			if (!RouteKeepsOuterTryArmed())
+				Emit("eh_end");
 			ReferenceLabel(outer.entry_label);
 			Terminate("jump ^" + outer.entry_label);
 		}
@@ -746,6 +766,10 @@ void FunctionLowerer::EmitCatchNext(EhContext& context)
 	{
 		EhContext& outer = eh_contexts_[enclosing - 1];
 		EmitCleanupsFrom(outer.cleanup_depth);
+		// 15.2p2: routing into a fn-try's handler chain destroys the
+		// armed subobjects first, like the region dispatches do.
+		if (outer.ctor_rethrow)
+			EmitCtorUnwindCleanups();
 		ReferenceLabel(outer.entry_label);
 		Terminate("jump ^" + outer.entry_label);
 	}
@@ -765,12 +789,22 @@ void FunctionLowerer::LowerThrow(const SemNode& node)
 	program_.RequireEhRuntime();
 	if (node.children.empty())
 	{
+		// A rethrow unwinds like a throw: armed cleanups and
+		// constructor/destructor subobjects destroy on the way out.
+		bool rethrow_wrap = !in_cleanup_emission_ &&
+			!suppress_eh_regions_ &&
+			(eh_armed_ || !temp_cleanups_.empty() ||
+			 !ctor_cleanups_.empty() || HaveCleanupsAboveEhBoundary());
+		if (rethrow_wrap && !eh_open_)
+			OpenEhRegion("rethrow_unwind_end");
 		Emit("call void " +
 		     program_.ExternalRuntimeFnRef(
 				"__cxa_rethrow",
 				"() -> void [return=noreturn, role=eh_rethrow, "
 				"linkage=c, binding=strong, object=__cxa_rethrow]") +
 		     "()");
+		if (eh_open_)
+			CloseEhRegion();
 		EmitZeroValueReturn();
 		return;
 	}
@@ -788,10 +822,12 @@ void FunctionLowerer::LowerThrow(const SemNode& node)
 		"object=__cxa_throw]");
 	// Destructible locals and armed constructor subobjects must
 	// destroy when the raise leaves the function (15.2p2), so their
-	// cleanups also put the throw under a dispatch region.
+	// cleanups also put the throw under a dispatch region. Locals in
+	// scopes deeper than the innermost try/catch boundary count too:
+	// no landing edge runs them.
 	bool wrap = !in_cleanup_emission_ && !suppress_eh_regions_ &&
 		(eh_armed_ || !temp_cleanups_.empty() ||
-		 !ctor_cleanups_.empty());
+		 !ctor_cleanups_.empty() || HaveCleanupsAboveEhBoundary());
 	if (wrap && !eh_open_)
 		OpenEhRegion("throw_alloc_unwind_end");
 	string storage = NewTemp();
