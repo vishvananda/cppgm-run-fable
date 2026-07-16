@@ -325,7 +325,8 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	if (type->kind == TK_CLASS &&
 	    (rhs.kind == SN_CALL_EXPRESSION ||
 	     rhs.kind == SN_CONSTRUCTOR_ACTION ||
-	     rhs.kind == SN_CONDITIONAL_EXPRESSION))
+	     rhs.kind == SN_CONDITIONAL_EXPRESSION ||
+	     (rhs.kind == SN_BINARY_EXPRESSION && rhs.op == OP_COMMA)))
 	{
 		// A same-class prvalue initializer constructs the member
 		// object directly (copy elision). PA29: the dynamic global
@@ -340,8 +341,10 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	}
 	if (type->kind == TK_CLASS)
 	{
-		// Value-initialization zero-fills the object representation.
-		string storage = MemberAddress(lhs);
+		// Value-initialization zero-fills the object representation
+		// (the lhs may be a namespace-scope object, not a member).
+		string storage = lhs.kind == SN_MEMBER_EXPRESSION
+			? MemberAddress(lhs) : LowerAddressExpr(lhs);
 		unsigned long long size = TypeSize(type);
 		string width;
 		switch (size)
@@ -600,6 +603,16 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 	case SN_CALL_EXPRESSION:
 		MaterializeClassResult(node, "tmpobj", dest);
 		return;
+	case SN_BINARY_EXPRESSION:
+		if (node.op == OP_COMMA)
+		{
+			// 5.18: the left operand is a discarded-value expression;
+			// the right operand initializes the object.
+			LowerEffect(*node.children[0]);
+			LowerClassInit(*node.children[1], dest);
+			return;
+		}
+		break;
 	case SN_CONDITIONAL_EXPRESSION:
 	{
 		string then_label = NewLabel("condobj_then");
@@ -1027,30 +1040,6 @@ bool FunctionLowerer::HaveCleanups() const
 	for (size_t i = 0; i < cleanup_scopes_.size(); i++)
 		groups += cleanup_scopes_[i].size();
 	return groups > param_cleanup_count_;
-}
-
-bool FunctionLowerer::HaveCleanupsAboveEhBoundary() const
-{
-	size_t boundary = 0;
-	if (!eh_contexts_.empty())
-		boundary = eh_contexts_.back().cleanup_depth;
-	size_t groups = 0;
-	for (size_t i = boundary; i < cleanup_scopes_.size(); i++)
-		groups += cleanup_scopes_[i].size();
-	// At function depth the parameter cleanups do not arm (they run at
-	// normal exits only; see HaveCleanups).
-	if (boundary == 0)
-		return groups > param_cleanup_count_;
-	return groups > 0;
-}
-
-bool FunctionLowerer::RouteKeepsOuterTryArmed() const
-{
-	size_t tries = 0;
-	for (size_t i = 0; i < eh_contexts_.size(); i++)
-		if (!eh_contexts_[i].is_catch)
-			tries++;
-	return tries >= 2;
 }
 
 void FunctionLowerer::EmitCleanupsFrom(size_t from)

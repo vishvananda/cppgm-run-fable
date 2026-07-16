@@ -131,10 +131,21 @@ LowerValue FunctionLowerer::LowerStatementExpression(const SemNode& node,
 {
 	LowerValue value;
 	value.type = NodeType(node);
+	// Sema types a tail-less statement expression void and rejects it
+	// in value positions; reaching one here as a value is a desync,
+	// not a shape to paper over with an empty value.
 	if (node.children.empty())
+	{
+		if (as_value)
+			throw std::runtime_error(
+				"empty statement expression used as a value");
 		return value;
+	}
 	const SemNode& compound = *node.children.back();
 	const SemNode* tail = StatementExpressionTail(node);
+	if (!tail && as_value)
+		throw std::runtime_error(
+			"void statement expression used as a value");
 	PushCleanupScope();
 	size_t count = compound.children.size();
 	for (size_t i = 0; i + (tail ? 1 : 0) < count; i++)

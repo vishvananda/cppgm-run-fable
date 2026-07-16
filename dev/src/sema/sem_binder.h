@@ -7,6 +7,7 @@
 #include "sema/const_eval.h"
 #include "sema/decl_binder.h"
 #include "sema/sem_expr.h"
+#include "sema/sem_lambda_state.h"
 #include "sema/sem_node.h"
 
 // The PA12 semantic binder: the PA11 declaration traversal extended
@@ -213,6 +214,9 @@ private:
 	                            const string& name);
 	void FlushDeferredBodies();
 	void AnalyzeDeferredBody(const DeferredBody& body);
+	void BindDeferredBodyStatement(const DeferredBody& body,
+	                               ESpecialFunction special,
+	                               SemNode& node);
 	// 14.7.1: an instantiated member whose body failed to bind keeps a
 	// poisoned weak definition; demanding it reports the stored error.
 	void AppendPoisonedBody(const DeferredBody& body, const string& what);
@@ -958,47 +962,10 @@ private:
 		string fn_template_name;
 	};
 
-	// --- PA24 lambda state (sem_lambda.cpp) ---
-	// One capture of an open (or synthesized) lambda, in field order.
-	struct LambdaCapture
-	{
-		const ScopeBinding* binding = 0;  // null for `this`
-		string name;
-		unsigned long long offset = 0;
-		TypePtr referee;  // captured entity type (references stripped)
-		bool is_this = false;
-		bool by_copy = false;  // PA25: a value field, not a reference
-	};
-	// The body-binding context of one lambda whose statements are
-	// currently being bound; `cls` is null for a captureless lambda.
-	struct LambdaFrame
-	{
-		Scope* fn_scope = 0;
-		ClassInfo* cls = 0;
-		Scope* members = 0;
-		bool by_ref_default = false;   // [&] spelled
-		bool by_copy_default = false;  // PA25: [=] spelled
-		bool this_spelled = false;     // [this] spelled
-		bool is_mutable = false;       // `mutable` spelled
-		TypePtr this_param_type;       // the closure's own this
-		TypePtr enclosing_this;        // the captured-this type (or null)
-		vector<string> explicit_names; // [&name] / [name] spellings
-		vector<char> explicit_copy;    // parallel: spelled by copy
-		vector<LambdaCapture> captures;
-		bool this_captured = false;
-		unsigned long long this_offset = 0;
-	};
-	// The synthesized identity of an analyzed lambda-expression,
-	// cached per (lambda AST, enclosing body) so the deduction and
-	// initialization analyses of one declaration share one synthesis.
-	struct LambdaInfo
-	{
-		bool captureless = true;
-		string fn_name;   // captureless: the internal function
-		TypePtr fn_type;
-		ClassInfo* cls = 0;  // capturing: the closure class
-		vector<LambdaCapture> captures;
-	};
+	// --- PA24 lambda state (sem_lambda_state.h / sem_lambda.cpp) ---
+	typedef SemLambdaCapture LambdaCapture;
+	typedef SemLambdaFrame LambdaFrame;
+	typedef SemLambdaInfo LambdaInfo;
 	LambdaFrame* ActiveLambdaFrame();
 	SemNodePtr ClosureThisId(const LambdaFrame& frame);
 	void EnsureThisField(LambdaFrame& frame);

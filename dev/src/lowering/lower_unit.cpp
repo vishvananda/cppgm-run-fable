@@ -1259,11 +1259,22 @@ void LowerProgram::BuildLifetimeHelpers()
 			         info.type->kind != TK_ARRAY && !tls_dynamic &&
 			         j == 0 &&
 			         (child.kind == SN_CALL_EXPRESSION ||
-			          child.kind == SN_CONDITIONAL_EXPRESSION))
+			          child.kind == SN_CONDITIONAL_EXPRESSION ||
+			          (child.kind == SN_BINARY_EXPRESSION &&
+			           child.op == OP_COMMA)))
 				// PA29: a class object copy-initialized from a prvalue
-				// producer (a factory call) constructs dynamically into
-				// the global object itself (copy elision).
+				// producer (a factory call, possibly behind discarded
+				// comma operands) constructs dynamically into the
+				// global object itself (copy elision).
 				AppendDynamicInit(info, child, false, *init_def);
+			else if (is_class && !IsReferenceType(info.type) &&
+			         info.type->kind != TK_ARRAY && !tls_dynamic &&
+			         j == 0 && child.kind != SN_BRACED_INIT_LIST)
+				// An unrecognized dynamic initializer must fail loudly
+				// rather than leave the object zero-filled.
+				throw std::runtime_error(
+					"namespace-scope class object initializer form "
+					"outside boundary");
 			else if (IsReferenceType(info.type) && j == 0)
 				// The reference binds dynamically: the helper stores
 				// the referent's address into the pointer object.

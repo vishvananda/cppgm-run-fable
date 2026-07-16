@@ -80,7 +80,8 @@ bool check_boundary_metadata_item(const string & key, const string & value)
 
 // Validates one top-level symbol metadata item shared by globals and
 // functions (role checked separately); returns false when unrecognized.
-bool check_symbol_metadata_item(const string & key, const string & value)
+bool check_symbol_metadata_item(const string & key, const string & value,
+                                const string & low_name)
 {
 	if(key == "linkage")
 	{
@@ -103,9 +104,13 @@ bool check_symbol_metadata_item(const string & key, const string & value)
 	if(key == "object")
 	{
 		// PA29: `object=@low` marks a weak entity that merges across
-		// translation units by its own (deterministic) low name.
+		// translation units by its own (deterministic) low name; any
+		// other @-spelling would merge under a name nobody checks.
 		if(value.empty() || value == "@")
 			fail("bad object symbol value: " + value);
+		if(value[0] == '@' && value.substr(1) != low_name)
+			fail("object self-merge key names a different symbol: " +
+			     value);
 		return true;
 	}
 	return false;
@@ -244,7 +249,7 @@ struct Validator
 				if(!value_in(value, kStorages))
 					fail("unknown storage value: " + value);
 			}
-			else if(!check_symbol_metadata_item(key, value))
+			else if(!check_symbol_metadata_item(key, value, global.name))
 				fail("unknown global metadata key: " + key);
 		}
 	}
@@ -281,7 +286,8 @@ struct Validator
 				check_tls_for(function, value);
 			else if(check_boundary_metadata_item(key, value))
 				continue;
-			else if(!check_symbol_metadata_item(key, value))
+			else if(!check_symbol_metadata_item(key, value,
+			                                    function.name))
 				fail("unknown function metadata key: " + key);
 		}
 		for(size_t i = 0; i < function.params.size(); ++i)

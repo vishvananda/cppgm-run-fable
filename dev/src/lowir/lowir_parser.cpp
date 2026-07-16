@@ -571,11 +571,16 @@ LowIRInstruction Parser::parse_statement_instruction()
 	{
 		// Handler-classification markers carry no PA13 code of their own.
 		// PA25 emission appends the handler's selector id (", N").
+		// Selectors are 1-based: 0 is the runtime's no-match sentinel.
 		ins.opcode = LOWIR_INS_EH_MARKER;
 		ins.operation = "eh_catch";
 		ins.eh_types.push_back(expect(LOWIR_TOK_GLOBAL_NAME, "type symbol"));
 		if(accept_punct(","))
+		{
 			ins.eh_selector = parse_integer_literal();
+			if(ins.eh_selector < 1)
+				fail("handler selector must be positive");
+		}
 	}
 	else if(accept_word("eh_filter"))
 	{
@@ -593,7 +598,11 @@ LowIRInstruction Parser::parse_statement_instruction()
 		ins.opcode = LOWIR_INS_EH_MARKER;
 		ins.operation = "eh_catch_all";
 		if(accept_punct(","))
+		{
 			ins.eh_selector = parse_integer_literal();
+			if(ins.eh_selector < 1)
+				fail("handler selector must be positive");
+		}
 	}
 	else if(accept_word("eh_end"))
 		ins.opcode = LOWIR_INS_EH_END;

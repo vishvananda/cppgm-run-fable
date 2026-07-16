@@ -252,6 +252,40 @@ static bool ConversionBodyPerformsNoWork(const SemNode& fn,
 			*named->class_record);
 }
 
+// The deferred body statement with its special-member framing: ctor
+// member inits and dtor subobject destructions route into the try
+// region of a function-try-block (15.2p11, 15.3p15), around the plain
+// body otherwise.
+void SemBinder::BindDeferredBodyStatement(const DeferredBody& body,
+                                          ESpecialFunction special,
+                                          SemNode& node)
+{
+	bool function_try = body.decl->body &&
+		body.decl->body->kind == SK_TRY &&
+		body.decl->body->function_try;
+	bool ctor_function_try = special == SF_CONSTRUCTOR && function_try;
+	bool dtor_function_try = special == SF_DESTRUCTOR && function_try;
+	// A ctor-initializer parses on any function-try-block, but only
+	// constructors may have one (12.6.2p1).
+	if (special != SF_CONSTRUCTOR && body.decl->has_ctor_initializer)
+		throw runtime_error(
+			"ctor-initializer on a non-constructor function");
+	if (special == SF_CONSTRUCTOR && !ctor_function_try)
+		AnalyzeMemberInits(body, node);
+	// PA17: a polymorphic destructor re-stores this class's vpointer
+	// before the body runs (12.4, 10.4p6 dispatch model).
+	if (special == SF_DESTRUCTOR && body.cls->is_polymorphic)
+		node.children.push_back(MakeVPointerStore(*body.cls));
+	if (ctor_function_try)
+		BindTryStatement(*body.decl->body, &body);
+	else if (dtor_function_try)
+		BindTryStatement(*body.decl->body, 0, body.cls);
+	else
+		BindStatement(*body.decl->body);
+	if (special == SF_DESTRUCTOR && !dtor_function_try)
+		AnalyzeDtorEpilogue(*body.cls, node);
+}
+
 void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 {
 	ESpecialFunction special = SF_NONE;
@@ -298,32 +332,7 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	parents_.push_back(node);
 	try
 	{
-		bool function_try = body.decl->body &&
-			body.decl->body->kind == SK_TRY &&
-			body.decl->body->function_try;
-		bool ctor_function_try = special == SF_CONSTRUCTOR &&
-			function_try;
-		bool dtor_function_try = special == SF_DESTRUCTOR &&
-			function_try;
-		// A ctor-initializer parses on any function-try-block, but
-		// only constructors may have one (12.6.2p1).
-		if (special != SF_CONSTRUCTOR && body.decl->has_ctor_initializer)
-			throw runtime_error(
-				"ctor-initializer on a non-constructor function");
-		if (special == SF_CONSTRUCTOR && !ctor_function_try)
-			AnalyzeMemberInits(body, *node);
-		// PA17: a polymorphic destructor re-stores this class's
-		// vpointer before the body runs (12.4, 10.4p6 dispatch model).
-		if (special == SF_DESTRUCTOR && body.cls->is_polymorphic)
-			node->children.push_back(MakeVPointerStore(*body.cls));
-		if (ctor_function_try)
-			BindTryStatement(*body.decl->body, &body);
-		else if (dtor_function_try)
-			BindTryStatement(*body.decl->body, 0, body.cls);
-		else
-			BindStatement(*body.decl->body);
-		if (special == SF_DESTRUCTOR && !dtor_function_try)
-			AnalyzeDtorEpilogue(*body.cls, *node);
+		BindDeferredBodyStatement(body, special, *node);
 	}
 	catch (...)
 	{

@@ -1436,16 +1436,8 @@ TypePtr SemBinder::ResolveTypeName(const AstName& name)
 	const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
 	if (!found)
 	{
-		// The builtin typedef names of the 128-bit extended integer
-		// types resolve when no declaration shadows them.
-		if (name.parts.size() == 1 &&
-		    name.parts[0].kind == NP_IDENTIFIER && !name.parts[0].tilde)
-		{
-			if (name.parts[0].identifier == "__int128_t")
-				return MakeFundamentalType(FT_INT128);
-			if (name.parts[0].identifier == "__uint128_t")
-				return MakeFundamentalType(FT_UINT128);
-		}
+		if (TypePtr builtin = ResolveBuiltinTypeName(name))
+			return builtin;
 		throw runtime_error("undeclared type name " + TerminalName(name));
 	}
 	if (found->kind != SB_TYPE && found->kind != SB_TYPE_ALIAS)

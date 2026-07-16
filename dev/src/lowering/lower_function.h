@@ -492,6 +492,7 @@ private:
 	// function-node actions, or the pre-handler try-region actions of
 	// a destructor function-try-block. Returns leave through them.
 	void CollectDtorEpilogue(size_t first_statement);
+	void LowerDestructorActionStatement(const SemNode& node);
 	void EmitDtorEpilogueActions();
 	bool HaveCleanups() const;
 	// Scope cleanups registered above the innermost try/catch context's

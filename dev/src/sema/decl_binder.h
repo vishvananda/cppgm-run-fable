@@ -40,6 +40,11 @@ public:
 	virtual void RequireCompleteForLayout(const TypePtr& type);
 
 protected:
+	// The builtin typedef names of the 128-bit extended integer types
+	// resolve when no declaration shadows them; null otherwise. One
+	// owner for the PA11 and PA12+ type-name resolvers.
+	static TypePtr ResolveBuiltinTypeName(const AstName& name);
+
 	// --- declarations ---
 	void BindDeclarations(const std::vector<AstDeclPtr>& decls);
 	void BindDeclaration(const AstDecl& decl);

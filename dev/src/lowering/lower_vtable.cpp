@@ -516,13 +516,23 @@ string LowerProgram::MemberPointerThunkRef(const SemNode& member)
 	int slot = FindVirtualSlotIndex(*record, member.entity_name,
 	                                member.type);
 	// The member reference usually carries the this-adjusted type;
-	// match the slot's adjusted signature directly then.
+	// match the slot's adjusted signature directly then. The this
+	// parameters may name different (adjusted) classes, but their
+	// pointee cv-qualification still separates const overloads.
 	for (size_t i = 0; slot < 0 && i < record->vslots.size(); i++)
 	{
 		const VirtualSlot& vs = record->vslots[i];
 		if (vs.kind != VS_METHOD || vs.name != member.entity_name ||
 		    !vs.type || !member.type ||
+		    vs.type->parameters.empty() ||
+		    member.type->parameters.empty() ||
 		    vs.type->parameters.size() != member.type->parameters.size())
+			continue;
+		const TypePtr& vs_this = vs.type->parameters[0]->target;
+		const TypePtr& mb_this = member.type->parameters[0]->target;
+		if (vs_this && mb_this &&
+		    (vs_this->is_const != mb_this->is_const ||
+		     vs_this->is_volatile != mb_this->is_volatile))
 			continue;
 		bool same = true;
 		for (size_t p = 1; p < vs.type->parameters.size(); p++)
@@ -539,12 +549,27 @@ string LowerProgram::MemberPointerThunkRef(const SemNode& member)
 		pm_thunk_names_.find(key);
 	if (found != pm_thunk_names_.end())
 		return "@" + found->second;
+	const TypePtr& fn_type = member.type;
+	// The forwarding thunk moves scalar and pointer values only; a
+	// class-valued parameter or result changes the ABI row (hidden
+	// result destination, by-address passing) and must fail loudly
+	// rather than dispatch through a mismatched signature.
+	if (fn_type->target && !IsReferenceType(fn_type->target) &&
+	    RemoveTopCv(fn_type->target)->kind == TK_CLASS)
+		throw std::runtime_error(
+			"member-pointer dispatch with class-valued result "
+			"outside boundary");
+	for (size_t i = 0; i < fn_type->parameters.size(); i++)
+		if (!IsReferenceType(fn_type->parameters[i]) &&
+		    RemoveTopCv(fn_type->parameters[i])->kind == TK_CLASS)
+			throw std::runtime_error(
+				"member-pointer dispatch with class-valued parameter "
+				"outside boundary");
+
 	LowFunctionInfo& target = CalleeEntryInfo(member);
 	string name =
 		UniqueSymbol(target.low_name + "__member_pointer_thunk");
 	pm_thunk_names_[key] = name;
-
-	const TypePtr& fn_type = member.type;
 	string ret = fn_type->target && !IsVoidType(fn_type->target)
 		? LowerValueType(fn_type->target) : "void";
 	string params = "%this : ptr";

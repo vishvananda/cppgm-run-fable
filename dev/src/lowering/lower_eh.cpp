@@ -462,6 +462,30 @@ void FunctionLowerer::EmitTryMarkers(EhContext& context)
 	}
 }
 
+bool FunctionLowerer::HaveCleanupsAboveEhBoundary() const
+{
+	size_t boundary = 0;
+	if (!eh_contexts_.empty())
+		boundary = eh_contexts_.back().cleanup_depth;
+	size_t groups = 0;
+	for (size_t i = boundary; i < cleanup_scopes_.size(); i++)
+		groups += cleanup_scopes_[i].size();
+	// At function depth the parameter cleanups do not arm (they run at
+	// normal exits only; see HaveCleanups).
+	if (boundary == 0)
+		return groups > param_cleanup_count_;
+	return groups > 0;
+}
+
+bool FunctionLowerer::RouteKeepsOuterTryArmed() const
+{
+	size_t tries = 0;
+	for (size_t i = 0; i < eh_contexts_.size(); i++)
+		if (!eh_contexts_[i].is_catch)
+			tries++;
+	return tries >= 2;
+}
+
 // A return crossing active try/catch contexts pops their markers: the
 // catch contexts close (and end the caught exception) before the
 // scope cleanups run, the try contexts after.

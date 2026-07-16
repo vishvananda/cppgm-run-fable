@@ -468,6 +468,25 @@ void FunctionLowerer::CollectDtorEpilogue(size_t first_statement)
 	}
 }
 
+// A statement-position subobject destruction (the destructor's
+// epilogue). A retiring armed action (destructor function-try-block)
+// leaves the unwind set once it ran, and the fall-through path marks
+// it done so the implicit return does not re-emit it.
+void FunctionLowerer::LowerDestructorActionStatement(const SemNode& node)
+{
+	if (SkipVBaseAction(node))
+		return;
+	bool saved = in_lifetime_action_;
+	in_lifetime_action_ = true;
+	LowerCall(*node.children[0]);
+	in_lifetime_action_ = saved;
+	if (!ctor_cleanups_.empty() && ctor_cleanups_.back() == &node)
+		ctor_cleanups_.pop_back();
+	if (dtor_epilogue_done_ < dtor_epilogue_.size() &&
+	    dtor_epilogue_[dtor_epilogue_done_] == &node)
+		dtor_epilogue_done_++;
+}
+
 // 12.4: a return statement leaves the destructor through the
 // member/base destructions that have not already run at statement
 // position. Handlers of a destructor function-try run after the
@@ -528,24 +547,8 @@ void FunctionLowerer::LowerStatement(const SemNode& node)
 		return;
 	}
 	case SN_DESTRUCTOR_ACTION:
-	{
-		if (SkipVBaseAction(node))
-			return;
-		bool saved = in_lifetime_action_;
-		in_lifetime_action_ = true;
-		LowerCall(*node.children[0]);
-		in_lifetime_action_ = saved;
-		// A retiring armed epilogue destruction (destructor
-		// function-try-block) leaves the unwind set once it ran, and
-		// the fall-through path marks it done so the implicit return
-		// does not re-emit it.
-		if (!ctor_cleanups_.empty() && ctor_cleanups_.back() == &node)
-			ctor_cleanups_.pop_back();
-		if (dtor_epilogue_done_ < dtor_epilogue_.size() &&
-		    dtor_epilogue_[dtor_epilogue_done_] == &node)
-			dtor_epilogue_done_++;
+		LowerDestructorActionStatement(node);
 		return;
-	}
 	case SN_STATIC_GUARD:
 		LowerStaticGuard(node);
 		return;
