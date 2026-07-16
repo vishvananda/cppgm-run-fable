@@ -1220,6 +1220,34 @@ void SemBinder::BindTryStatement(const AstStmt& stmt)
 				RequireCompleteType(bare->named);
 			else if (bare->kind != TK_FUNDAMENTAL)
 				throw OutsideBoundary("handler type form");
+			if (bare->kind == TK_CLASS && !IsReferenceType(type))
+			{
+				// 15.3p16-p17: a by-value handler copy-initializes its
+				// parameter object from the exception object and
+				// destroys it when the handler exits; the resolved
+				// calls pin on the handler node for the lowering.
+				const ClassInfo* cls = unit_.classes.Find(bare->named);
+				if (!cls)
+					throw runtime_error("handler class record missing");
+				vector<SemValue> args;
+				SemValue source;
+				source.type = MakeCvQualifiedType(bare, true, false);
+				source.category = VC_LVALUE;
+				source.node = MakeSemNode(SN_LITERAL);
+				source.node->type = source.type;
+				args.push_back(std::move(source));
+				int index = ResolveClassCtorHost(*cls, args, true,
+				                                 "catch");
+				vector<SemNodePtr> arg_nodes;
+				for (size_t a = 0; a < args.size(); a++)
+					arg_nodes.push_back(std::move(args[a].node));
+				handler_item->handler_ctor = MakeConstructorCall(
+					*cls, index, false, SemNodePtr(),
+					std::move(arg_nodes));
+				if (unit_.classes.NeedsDestruction(*cls))
+					handler_item->subobject_dtor =
+						MakeDestructorCall(*cls, false, SemNodePtr());
+			}
 			if (!var_name.empty())
 			{
 				ScopeBinding binding;

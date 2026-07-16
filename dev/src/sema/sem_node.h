@@ -363,6 +363,10 @@ struct SemNode
 	// `children` (like result_dtor) so the dump and the may-throw walks
 	// see only the construction itself.
 	SemNodePtr subobject_dtor;
+	// PA29 SN_CATCH_HANDLER of a by-value class handler: the resolved
+	// copy-construction of the parameter object from the exception
+	// object, pinned outside `children` (the dump keeps its shape).
+	SemNodePtr handler_ctor;
 	// PA25 SN_TYPEID: the resolved operand type of the query, and
 	// whether the result reads the operand's dynamic type through its
 	// vpointer (children[0] is the polymorphic glvalue then).

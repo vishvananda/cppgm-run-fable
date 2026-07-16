@@ -253,6 +253,8 @@ SemNodePtr CloneSemNode(const SemNode& node)
 		out.result_dtor = CloneSemNode(*node.result_dtor);
 	if (node.subobject_dtor)
 		out.subobject_dtor = CloneSemNode(*node.subobject_dtor);
+	if (node.handler_ctor)
+		out.handler_ctor = CloneSemNode(*node.handler_ctor);
 	for (size_t i = 0; i < node.children.size(); i++)
 		out.children.push_back(CloneSemNode(*node.children[i]));
 	return copy;

@@ -426,6 +426,15 @@ const char * const kRuntimeLines[] = {
 	"extern \"C\" void cppgm_builtin_operator_delete(void *)",
 	"{",
 	"}",
+	"",
+	"extern \"C\" void * malloc(cppgm_usize size)",
+	"{",
+	"  return cppgm_builtin_operator_new(size);",
+	"}",
+	"",
+	"extern \"C\" void free(void *)",
+	"{",
+	"}",
 };
 
 }  // namespace

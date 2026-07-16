@@ -445,6 +445,7 @@ private:
 	void EmitEhReturnUnwind();
 	void LowerTry(const SemNode& node);
 	void LowerThrow(const SemNode& node);
+	void EmitCatchParamDtor(const string& slot, const string& dtor);
 	// PA25 5.2.7 dynamic_cast: null-checks the operand, calls the
 	// __dynamic_cast runtime, and (reference form) raises
 	// __cxa_bad_cast on failure; returns the result pointer text.

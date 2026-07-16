@@ -559,6 +559,17 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 	OpenBlock(context.end_label);
 }
 
+// The by-value handler parameter's destruction (before end_catch).
+void FunctionLowerer::EmitCatchParamDtor(const string& slot,
+                                         const string& dtor)
+{
+	if (dtor.empty())
+		return;
+	string address = NewTemp();
+	Emit(address + " = addr $" + slot);
+	Emit("call void " + dtor + "(" + address + ")");
+}
+
 // One catch handler: __cxa_begin_catch, the declared entity binding,
 // the guarded body, and the handler's own unwind path (ending the
 // caught exception before continuing outward).
@@ -600,17 +611,43 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 			else
 			{
 				TypePtr bare = RemoveTopCv(declared);
-				if (bare->kind == TK_CLASS)
-					throw OutsideBoundary("by-value class handler");
-				string slot = AddSlot(handler_node.entity_scope,
-				                      handler_node.entity_name,
-				                      LowerSlotType(bare));
-				string value = NewTemp();
-				Emit(value + " = load " + LowerValueType(bare) + " " +
-				     object);
-				Emit("store " + LowerValueType(bare) + " " + value +
-				     ", $" + slot);
+				if (bare->kind != TK_CLASS)
+				{
+					string slot = AddSlot(handler_node.entity_scope,
+					                      handler_node.entity_name,
+					                      LowerSlotType(bare));
+					string value = NewTemp();
+					Emit(value + " = load " + LowerValueType(bare) +
+					     " " + object);
+					Emit("store " + LowerValueType(bare) + " " + value +
+					     ", $" + slot);
+				}
 			}
+		}
+		// 15.3p16-p17: a by-value class handler copy-initializes its
+		// parameter object (named or not) from the exception object;
+		// the object destroys on every handler exit before end_catch.
+		string param_slot;
+		string param_dtor;
+		if (handler_node.handler_ctor && handler_node.type &&
+		    !IsReferenceType(handler_node.type))
+		{
+			TypePtr bare = RemoveTopCv(handler_node.type);
+			param_slot = handler_node.entity_name.empty()
+				? AddMatSlot("__catch", LowerSlotType(bare))
+				: AddSlot(handler_node.entity_scope,
+				          handler_node.entity_name,
+				          LowerSlotType(bare));
+			string address = NewTemp();
+			Emit(address + " = addr $" + param_slot);
+			string ctor = program_.MemberFunctionRef(
+				*handler_node.handler_ctor->children[0]->children[0]);
+			Emit("call void " + ctor + "(" + address + ", " + object +
+			     ")");
+			if (handler_node.subobject_dtor)
+				param_dtor = program_.MemberFunctionRef(
+					*handler_node.subobject_dtor
+						->children[0]->children[0]);
 		}
 		EhContext catch_context;
 		catch_context.is_catch = true;
@@ -622,6 +659,7 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		if (!blocks_.back().terminated)
 		{
 			Emit("eh_end");
+			EmitCatchParamDtor(param_slot, param_dtor);
 			Emit("call void " + end_catch_ref + "()");
 			ReferenceLabel(context.end_label);
 			Terminate("jump ^" + context.end_label);
@@ -636,6 +674,7 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		{
 			EhContext& outer = eh_contexts_[enclosing - 1];
 			EmitTryMarkers(outer);
+			EmitCatchParamDtor(param_slot, param_dtor);
 			Emit("call void " + end_catch_ref + "()");
 			Emit("eh_end");
 			Emit("eh_end");
@@ -644,6 +683,7 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		}
 		else
 		{
+			EmitCatchParamDtor(param_slot, param_dtor);
 			Emit("call void " + end_catch_ref + "()");
 			Emit("eh_end");
 			EmitCtorUnwindCleanups();
@@ -726,7 +766,26 @@ void FunctionLowerer::LowerThrow(const SemNode& node)
 			CloseEhRegion();
 		storage = NewTemp();
 		Emit(storage + " = load ptr $" + slot);
-		LowerClassInit(*node.children[0], storage);
+		// 12.8p31: a prvalue thrown operand constructs the exception
+		// object directly - the selected copy elides (the reference
+		// shape), though it stays odr-used.
+		const SemNode* init = node.children[0].get();
+		if (init->kind == SN_CONSTRUCTOR_ACTION &&
+		    !init->children.empty() &&
+		    init->children[0]->children.size() == 2)
+		{
+			const SemNode& source = *init->children[0]->children[1];
+			if (source.category == VC_PRVALUE && source.type &&
+			    source.kind == SN_CONSTRUCTOR_ACTION &&
+			    TypeEquals(RemoveTopCv(source.type),
+			               RemoveTopCv(type)))
+			{
+				program_.DemandElidedCtor(
+					*init->children[0]->children[0]);
+				init = &source;
+			}
+		}
+		LowerClassInit(*init, storage);
 		if (wrap && !eh_open_)
 			OpenEhRegion();
 	}
