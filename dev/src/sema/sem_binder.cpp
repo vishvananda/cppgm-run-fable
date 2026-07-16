@@ -1187,10 +1187,19 @@ void SemBinder::BindThrowStatement(const AstStmt& stmt)
 // PA25 15: a try block with its handlers. Each handler binds its
 // exception declaration in a fresh block scope around the handler
 // body.
-void SemBinder::BindTryStatement(const AstStmt& stmt)
+void SemBinder::BindTryStatement(const AstStmt& stmt,
+                                 const DeferredBody* ctor_inits)
 {
 	SemNode* item = AppendItem(SN_TRY);
 	parents_.push_back(item);
+	if (ctor_inits)
+	{
+		// PA29 constructor function-try-block: the member and base
+		// initialization actions run inside the try region, and the
+		// handlers implicitly rethrow (15.3p15).
+		item->function_try = true;
+		AnalyzeMemberInits(*ctor_inits, *item);
+	}
 	BindStatement(*stmt.body);
 	for (size_t i = 0; i < stmt.handlers.size(); i++)
 	{

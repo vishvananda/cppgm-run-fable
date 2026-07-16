@@ -16,12 +16,6 @@ using std::to_string;
 
 namespace {
 
-runtime_error OutsideBoundary(const char* what)
-{
-	return runtime_error(string(what) +
-	                     " is outside the PA14 assignment boundary");
-}
-
 TypePtr StripReference(const TypePtr& type)
 {
 	return IsReferenceType(type) ? type->target : type;
@@ -497,7 +491,18 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 	context.entry_label = NewLabel("catch_entry");
 	context.end_label = NewLabel("try_end");
 	context.cleanup_depth = cleanup_scopes_.size();
-	for (size_t i = 1; i < node.children.size(); i++)
+	context.ctor_rethrow = node.function_try;
+	// A constructor function-try-block leads with the member/base
+	// initialization actions; the handlers follow the body.
+	size_t first_handler = 1;
+	if (node.function_try)
+	{
+		first_handler = 0;
+		while (first_handler < node.children.size() &&
+		       node.children[first_handler]->kind != SN_CATCH_HANDLER)
+			first_handler++;
+	}
+	for (size_t i = first_handler; i < node.children.size(); i++)
 	{
 		const SemNode& handler_node = *node.children[i];
 		EhHandler handler;
@@ -512,7 +517,8 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 	ReferenceLabel(context.dispatch_label);
 	Emit("eh_try ^" + context.dispatch_label);
 	eh_contexts_.push_back(context);
-	LowerStatement(*node.children[0]);
+	for (size_t i = 0; i < first_handler; i++)
+		LowerStatement(*node.children[i]);
 	context = eh_contexts_.back();
 	eh_contexts_.pop_back();
 	if (!blocks_.back().terminated)
@@ -550,8 +556,16 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 		if (i + 1 < context.handlers.size())
 			OpenBlock(miss);
 	}
+	// The fn-try handlers run after every armed subobject was already
+	// destroyed on the way in (15.2p2); only the unmatched-selector
+	// path still owns their destruction.
+	vector<const SemNode*> saved_ctor_cleanups;
+	if (node.function_try)
+		saved_ctor_cleanups.swap(ctor_cleanups_);
 	for (size_t i = 0; i < context.handlers.size(); i++)
 		EmitCatchHandler(context, context.handlers[i], exc);
+	if (node.function_try)
+		ctor_cleanups_.swap(saved_ctor_cleanups);
 	EmitCatchNext(context);
 	// The join survives even when every path terminated (the
 	// reference keeps the dead continuation).
@@ -568,6 +582,61 @@ void FunctionLowerer::EmitCatchParamDtor(const string& slot,
 	string address = NewTemp();
 	Emit(address + " = addr $" + slot);
 	Emit("call void " + dtor + "(" + address + ")");
+}
+
+void FunctionLowerer::EmitCatchParamInit(const SemNode& handler_node,
+                                         const string& object,
+                                         string& param_slot,
+                                         string& param_dtor)
+{
+	if (!handler_node.entity_name.empty())
+	{
+		TypePtr declared = handler_node.type;
+		if (IsReferenceType(declared))
+		{
+			string slot = AddSlot(handler_node.entity_scope,
+			                      handler_node.entity_name, "ptr");
+			Emit("store ptr " + object + ", $" + slot);
+		}
+		else
+		{
+			TypePtr bare = RemoveTopCv(declared);
+			if (bare->kind != TK_CLASS)
+			{
+				string slot = AddSlot(handler_node.entity_scope,
+				                      handler_node.entity_name,
+				                      LowerSlotType(bare));
+				string value = NewTemp();
+				Emit(value + " = load " + LowerValueType(bare) +
+				     " " + object);
+				Emit("store " + LowerValueType(bare) + " " + value +
+				     ", $" + slot);
+			}
+		}
+	}
+	// A by-value class handler copy-initializes its parameter object
+	// (named or not) from the exception object; the object destroys
+	// on every handler exit before end_catch.
+	if (handler_node.handler_ctor && handler_node.type &&
+	    !IsReferenceType(handler_node.type))
+	{
+		TypePtr bare = RemoveTopCv(handler_node.type);
+		param_slot = handler_node.entity_name.empty()
+			? AddMatSlot("__catch", LowerSlotType(bare))
+			: AddSlot(handler_node.entity_scope,
+			          handler_node.entity_name,
+			          LowerSlotType(bare));
+		string address = NewTemp();
+		Emit(address + " = addr $" + param_slot);
+		string ctor = program_.MemberFunctionRef(
+			*handler_node.handler_ctor->children[0]->children[0]);
+		Emit("call void " + ctor + "(" + address + ", " + object +
+		     ")");
+		if (handler_node.subobject_dtor)
+			param_dtor = program_.MemberFunctionRef(
+				*handler_node.subobject_dtor
+					->children[0]->children[0]);
+	}
 }
 
 // One catch handler: __cxa_begin_catch, the declared entity binding,
@@ -599,56 +668,10 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		string cleanup_label = NewLabel("catch_cleanup");
 		ReferenceLabel(cleanup_label);
 		Emit("eh_cleanup ^" + cleanup_label);
-		if (!handler_node.entity_name.empty())
-		{
-			TypePtr declared = handler_node.type;
-			if (IsReferenceType(declared))
-			{
-				string slot = AddSlot(handler_node.entity_scope,
-				                      handler_node.entity_name, "ptr");
-				Emit("store ptr " + object + ", $" + slot);
-			}
-			else
-			{
-				TypePtr bare = RemoveTopCv(declared);
-				if (bare->kind != TK_CLASS)
-				{
-					string slot = AddSlot(handler_node.entity_scope,
-					                      handler_node.entity_name,
-					                      LowerSlotType(bare));
-					string value = NewTemp();
-					Emit(value + " = load " + LowerValueType(bare) +
-					     " " + object);
-					Emit("store " + LowerValueType(bare) + " " + value +
-					     ", $" + slot);
-				}
-			}
-		}
-		// 15.3p16-p17: a by-value class handler copy-initializes its
-		// parameter object (named or not) from the exception object;
-		// the object destroys on every handler exit before end_catch.
 		string param_slot;
 		string param_dtor;
-		if (handler_node.handler_ctor && handler_node.type &&
-		    !IsReferenceType(handler_node.type))
-		{
-			TypePtr bare = RemoveTopCv(handler_node.type);
-			param_slot = handler_node.entity_name.empty()
-				? AddMatSlot("__catch", LowerSlotType(bare))
-				: AddSlot(handler_node.entity_scope,
-				          handler_node.entity_name,
-				          LowerSlotType(bare));
-			string address = NewTemp();
-			Emit(address + " = addr $" + param_slot);
-			string ctor = program_.MemberFunctionRef(
-				*handler_node.handler_ctor->children[0]->children[0]);
-			Emit("call void " + ctor + "(" + address + ", " + object +
-			     ")");
-			if (handler_node.subobject_dtor)
-				param_dtor = program_.MemberFunctionRef(
-					*handler_node.subobject_dtor
-						->children[0]->children[0]);
-		}
+		EmitCatchParamInit(handler_node, object, param_slot,
+		                   param_dtor);
 		EhContext catch_context;
 		catch_context.is_catch = true;
 		catch_context.cleanup_label = cleanup_label;
@@ -658,11 +681,29 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		eh_contexts_.pop_back();
 		if (!blocks_.back().terminated)
 		{
-			Emit("eh_end");
-			EmitCatchParamDtor(param_slot, param_dtor);
-			Emit("call void " + end_catch_ref + "()");
-			ReferenceLabel(context.end_label);
-			Terminate("jump ^" + context.end_label);
+			if (context.ctor_rethrow)
+			{
+				// 15.3p15: flowing off a constructor's handler end
+				// rethrows; the armed catch cleanup ends the caught
+				// exception as the rethrow unwinds through it.
+				EmitCatchParamDtor(param_slot, param_dtor);
+				Emit("call void " +
+				     program_.ExternalRuntimeFnRef(
+						"__cxa_rethrow",
+						"() -> void [return=noreturn, role=eh_rethrow, "
+						"linkage=c, binding=strong, "
+						"object=__cxa_rethrow]") +
+				     "()");
+				Terminate("return void");
+			}
+			else
+			{
+				Emit("eh_end");
+				EmitCatchParamDtor(param_slot, param_dtor);
+				Emit("call void " + end_catch_ref + "()");
+				ReferenceLabel(context.end_label);
+				Terminate("jump ^" + context.end_label);
+			}
 		}
 		// The unwind path out of the handler ends the caught
 		// exception, pops the try marker, and continues.

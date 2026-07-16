@@ -189,6 +189,10 @@ private:
 	AstStmtPtr ParseIterationStatement();
 	AstStmtPtr ParseJumpStatement();
 	AstStmtPtr ParseTryBlock();
+	// PA29 function-try-block: `try ctor-initializer? compound
+	// handler-seq` as a function body (KW_TRY at the current token).
+	AstStmtPtr ParseFunctionTryBody(AstDecl& decl);
+	bool ParseHandlerSeq(AstStmt& stmt);
 	AstStmtPtr ParseExpressionStatement();
 	AstConditionPtr ParseCondition();
 	AstStmtPtr ParseForInitStatement();

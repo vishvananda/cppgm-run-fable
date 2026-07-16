@@ -1180,7 +1180,7 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	bool lazy_wrap = !in_cleanup_emission_ && !suppress_eh_regions_ &&
 		!in_lifetime_action_ &&
 		(!temp_cleanups_.empty() ||
-		 (HaveCleanups() &&
+		 ((HaveCleanups() || !ctor_cleanups_.empty()) &&
 		  (!direct || dispatch_may_unwind ||
 		   program_.CalleeMayUnwind(callee) ||
 		   program_.CalleeGuardedBody(callee))));

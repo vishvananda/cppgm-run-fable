@@ -355,7 +355,7 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 		return AstDeclPtr();
 	}
 	bool has_params = DeclaratorHasParameterClause(*decl->declarator);
-	if (!has_params || !AtSimple(OP_LBRACE))
+	if (!has_params || !(AtSimple(OP_LBRACE) || AtSimple(KW_TRY)))
 	{
 		Restore(state);
 		return AstDeclPtr();
@@ -365,7 +365,8 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 		Register(id->parts[0].identifier, NF_VALUE | TemplatedFlag());
 	PushTransientScope();
 	RegisterParameters(*decl->declarator);
-	decl->body = ParseCompoundStatement();
+	decl->body = AtSimple(KW_TRY) ? ParseFunctionTryBody(*decl)
+	                              : ParseCompoundStatement();
 	PopScope();
 	if (!decl->body)
 	{

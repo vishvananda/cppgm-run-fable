@@ -15,6 +15,9 @@
 // SemUnit. One instance binds one translation unit.
 class SemBinder : public DeclBinder, public ISemExprHost
 {
+	struct DeferredBody;
+
+
 public:
 	SemBinder(TypesModel& model, SemUnit& unit);
 	~SemBinder();
@@ -133,7 +136,8 @@ private:
 	SemNodePtr WrapReturnValue(SemValue value, const TypePtr& bare);
 	void BindCondition(const AstCondition& condition, bool for_switch);
 	void BindThrowStatement(const AstStmt& stmt);
-	void BindTryStatement(const AstStmt& stmt);
+	void BindTryStatement(const AstStmt& stmt,
+	                      const DeferredBody* ctor_inits = 0);
 	void BindConditionDeclaration(const AstCondition& condition,
 	                              bool for_switch);
 	void BindIfStatement(const AstStmt& stmt);
@@ -185,7 +189,6 @@ private:
 	                                       TypePtr& ctor_type);
 
 	// --- PA15 class machinery (sem_class.cpp) ---
-	struct DeferredBody;
 	ClassInfo* OpenClass() const;
 	Scope* EnclosingNamespace();
 	void RecordMemberField(ScopeBinding& binding,
@@ -921,19 +924,15 @@ private:
 	// analyzed when the outermost enclosing class completes (9.2p2).
 	struct DeferredBody
 	{
-		DeferredBody() : decl(0), fn_scope(0), declaring(0), cls(0),
-		                 is_friend(false), is_static(false),
-		                 out_of_class(false) {}
-
-		const AstDecl* decl;
+		const AstDecl* decl = 0;
 		DeclaratorInfo composed;  // DK_FUNCTION methods / friends
 		string name;
-		Scope* fn_scope;
-		Scope* declaring;   // class scope (methods) / namespace (friends)
-		ClassInfo* cls;     // lexical class context
-		bool is_friend;
-		bool is_static;
-		bool out_of_class;  // qualified definition: strong emission
+		Scope* fn_scope = 0;
+		Scope* declaring = 0;  // class scope (methods) / namespace (friends)
+		ClassInfo* cls = 0;    // lexical class context
+		bool is_friend = false;
+		bool is_static = false;
+		bool out_of_class = false;  // qualified definition: strong emission
 		// The qualified definition spelled `inline`: it still prints,
 		// but weak (7.1.2p4 linkage with the reference's presentation).
 		bool spelled_inline = false;

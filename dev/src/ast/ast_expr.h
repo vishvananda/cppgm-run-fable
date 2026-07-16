@@ -180,4 +180,5 @@ struct AstStmt
 	AstDeclPtr for_range_decl;
 	AstExprPtr for_range_init;
 	std::vector<AstHandler> handlers;  // SK_TRY
+	bool function_try = false;         // SK_TRY as a function body
 };

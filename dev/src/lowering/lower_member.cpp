@@ -1097,6 +1097,10 @@ void FunctionLowerer::CloseEhRegion()
 		Emit("eh_cleanup");
 		EmitTempCleanups(0);
 		EmitCleanupsFrom(outer.cleanup_depth);
+		// 15.2p2: entering a constructor function-try-block handler
+		// destroys the fully constructed subobjects first.
+		if (outer.ctor_rethrow)
+			EmitCtorUnwindCleanups();
 		Emit("eh_end");
 		Emit("eh_end");
 		ReferenceLabel(outer.entry_label);

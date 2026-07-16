@@ -442,6 +442,17 @@ AstStmtPtr AstParser::ParseTryBlock()
 	}
 	AstStmtPtr stmt = MakeStmt(SK_TRY);
 	stmt->body = move(body);
+	if (!ParseHandlerSeq(*stmt))
+	{
+		Restore(state);
+		return AstStmtPtr();
+	}
+	return stmt;
+}
+
+// handler-seq: catch ( exception-declaration ) compound-statement ...
+bool AstParser::ParseHandlerSeq(AstStmt& stmt)
+{
 	while (AtSimple(KW_CATCH))
 	{
 		State handler_state = Save();
@@ -491,9 +502,31 @@ AstStmtPtr AstParser::ParseTryBlock()
 			Restore(handler_state);
 			break;
 		}
-		stmt->handlers.push_back(move(handler));
+		stmt.handlers.push_back(move(handler));
 	}
-	if (stmt->handlers.empty())
+	return !stmt.handlers.empty();
+}
+
+// PA29 function-try-block (15p1): `try ctor-initializer?
+// compound-statement handler-seq` as the function body.
+AstStmtPtr AstParser::ParseFunctionTryBody(AstDecl& decl)
+{
+	State state = Save();
+	if (!MatchSimple(KW_TRY))
+		return AstStmtPtr();
+	bool ok = true;
+	if (AtSimple(OP_COLON))
+		ok = ParseCtorInitializer(decl);
+	AstStmtPtr body = ok ? ParseCompoundStatement() : AstStmtPtr();
+	if (!body)
+	{
+		Restore(state);
+		return AstStmtPtr();
+	}
+	AstStmtPtr stmt = MakeStmt(SK_TRY);
+	stmt->body = move(body);
+	stmt->function_try = true;
+	if (!ParseHandlerSeq(*stmt))
 	{
 		Restore(state);
 		return AstStmtPtr();

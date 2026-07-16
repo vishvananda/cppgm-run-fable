@@ -298,13 +298,19 @@ void SemBinder::AnalyzeDeferredBody(const DeferredBody& body)
 	parents_.push_back(node);
 	try
 	{
-		if (special == SF_CONSTRUCTOR)
+		bool ctor_function_try = special == SF_CONSTRUCTOR &&
+			body.decl->body && body.decl->body->kind == SK_TRY &&
+			body.decl->body->function_try;
+		if (special == SF_CONSTRUCTOR && !ctor_function_try)
 			AnalyzeMemberInits(body, *node);
 		// PA17: a polymorphic destructor re-stores this class's
 		// vpointer before the body runs (12.4, 10.4p6 dispatch model).
 		if (special == SF_DESTRUCTOR && body.cls->is_polymorphic)
 			node->children.push_back(MakeVPointerStore(*body.cls));
-		BindStatement(*body.decl->body);
+		if (ctor_function_try)
+			BindTryStatement(*body.decl->body, &body);
+		else
+			BindStatement(*body.decl->body);
 		if (special == SF_DESTRUCTOR)
 			AnalyzeDtorEpilogue(*body.cls, *node);
 	}

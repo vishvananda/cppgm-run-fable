@@ -400,6 +400,18 @@ void SemBinder::AppendFieldDefaultInit(const ClassInfo& cls,
 					*member_cls))
 			{
 				AppendElidedCtorDemand(*member_cls, false, out);
+				// The subobject still constructs (worklessly): a later
+				// initializer's throw must destroy it (15.2p2).
+				if (unit_.classes.DestructionHasEffects(*member_cls))
+				{
+					SemNodePtr marker =
+						MakeSemNode(SN_CONSTRUCTOR_ACTION);
+					marker->trivial_init = true;
+					ArmSubobjectCleanup(
+						*marker, *member_cls, false,
+						AddressOfNode(ThisFieldExpr(field)));
+					out.push_back(std::move(marker));
+				}
 				return;
 			}
 			vector<SemValue> no_args;

@@ -367,6 +367,10 @@ struct SemNode
 	// copy-construction of the parameter object from the exception
 	// object, pinned outside `children` (the dump keeps its shape).
 	SemNodePtr handler_ctor;
+	// PA29 SN_TRY: a constructor function-try-block - member/base
+	// initialization actions lead the children, and every handler
+	// implicitly rethrows at its end (15.3p15).
+	bool function_try = false;
 	// PA25 SN_TYPEID: the resolved operand type of the query, and
 	// whether the result reads the operand's dynamic type through its
 	// vpointer (children[0] is the polymorphic glvalue then).

@@ -589,12 +589,20 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition,
 		PushTransientScope();
 		RegisterParameters(*decl->declarator);
 		bool ok = true;
-		if (AtSimple(OP_COLON))
-			ok = ParseCtorInitializer(*decl);
-		if (ok)
+		if (AtSimple(KW_TRY))
 		{
-			decl->body = ParseCompoundStatement();
+			decl->body = ParseFunctionTryBody(*decl);
 			ok = decl->body != 0;
+		}
+		else
+		{
+			if (AtSimple(OP_COLON))
+				ok = ParseCtorInitializer(*decl);
+			if (ok)
+			{
+				decl->body = ParseCompoundStatement();
+				ok = decl->body != 0;
+			}
 		}
 		PopScope();
 		if (!ok)

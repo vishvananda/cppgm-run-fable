@@ -423,9 +423,13 @@ private:
 	};
 	struct EhContext
 	{
-		EhContext() : is_catch(false), cleanup_depth(0) {}
+		EhContext() : is_catch(false), ctor_rethrow(false),
+		              cleanup_depth(0) {}
 
 		bool is_catch;
+		// PA29 15.3p15: a constructor function-try-block handler
+		// implicitly rethrows when it flows off its end.
+		bool ctor_rethrow;
 		string dispatch_label;
 		string entry_label;
 		string next_label;
@@ -445,6 +449,11 @@ private:
 	void EmitEhReturnUnwind();
 	void LowerTry(const SemNode& node);
 	void LowerThrow(const SemNode& node);
+	// 15.3p16-p17: binds the handler's exception-declaration from the
+	// caught object; fills the by-value parameter slot/dtor pair.
+	void EmitCatchParamInit(const SemNode& handler_node,
+	                        const string& object, string& param_slot,
+	                        string& param_dtor);
 	void EmitCatchParamDtor(const string& slot, const string& dtor);
 	// PA25 5.2.7 dynamic_cast: null-checks the operand, calls the
 	// __dynamic_cast runtime, and (reference form) raises
