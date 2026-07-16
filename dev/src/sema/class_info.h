@@ -215,8 +215,7 @@ struct ClassInfo
 		  is_union(false), is_empty(true), dsize(0), size(1), alignment(1),
 		  is_aggregate(true), has_user_ctor(false), has_user_dtor(false),
 		  dtor_deleted(false), dtor_access(MA_PUBLIC), dtor_definition(0),
-		  dtor_unwind_no(false), bit_cursor(0),
-		  implicit_ctor_built(false),
+		  dtor_unwind_no(false), bit_cursor(0), implicit_ctor_built(false),
 		  implicit_dtor_built(false), implicit_ctor_unwind_no(false),
 		  implicit_dtor_unwind_no(false), dtor_user_declared(false),
 		  has_user_copy_ctor(false), has_user_move_ctor(false),
@@ -225,9 +224,8 @@ struct ClassInfo
 		  move_assign_index(-1), copy_assign_deleted(false),
 		  copy_assign_built(false), move_assign_built(false),
 		  copy_assign_unwind_no(false), move_assign_unwind_no(false),
-		  is_polymorphic(false), declares_virtual(false),
-		  dtor_virtual(false), dtor_slot(-1), key_is_dtor(false),
-		  key_defined_in_tu(false),
+		  is_polymorphic(false), declares_virtual(false), dtor_virtual(false),
+		  dtor_slot(-1), key_is_dtor(false), key_defined_in_tu(false),
 		  facts_version(0), facts_valid(0), facts_value(0)
 	{}
 
@@ -246,9 +244,8 @@ struct ClassInfo
 	// PA27: the virtual-base table (DFS order) and polymorphic views.
 	vector<ClassVBase> vbases;
 	vector<ClassView> views;
-	// PA29: some base subobject's own vbase-table order disagrees with
-	// this (complete) class's table, so each vtable view's header rows
-	// must follow the view class's own table instead of the shared one.
+	// PA29: a subobject's vbase-table order disagrees, so each vtable
+	// view's header rows follow the view class's own table.
 	bool vbase_views_use_own_tables = false;
 	vector<ClassField> fields;  // declaration order
 	bool is_union;

@@ -208,70 +208,6 @@ TypePtr SemBinder::ResolveCastTypeId(const AstTypeId& type_id)
 	return builder_.ResolveTypeId(type_id);
 }
 
-const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
-{
-	TypePtr void_type = MakeFundamentalType(FT_VOID);
-	TypePtr size_type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
-	TypePtr byte_ptr = MakePointerType(MakeFundamentalType(FT_VOID),
-	                                   false, false);
-	TypePtr const_char_ptr = MakePointerType(
-		MakeCvQualifiedType(MakeFundamentalType(FT_CHAR), true, false),
-		false, false);
-	TypePtr type;
-	vector<TypePtr> params;
-	if (name == "__builtin_strlen")
-	{
-		params.push_back(const_char_ptr);
-		type = MakeFunctionType(size_type, params, false);
-	}
-	else if (name == "__builtin_memcpy" || name == "__builtin_memmove")
-	{
-		params.push_back(byte_ptr);
-		params.push_back(MakePointerType(
-			MakeCvQualifiedType(MakeFundamentalType(FT_VOID), true,
-			                    false), false, false));
-		params.push_back(size_type);
-		type = MakeFunctionType(byte_ptr, params, false);
-	}
-	else if (name == "__builtin_unreachable")
-		type = MakeFunctionType(void_type, params, false);
-	else if (name == "__builtin_isnan")
-	{
-		// PA29: any floating operand arrives through its long double
-		// conversion; the lowering expands the classification inline
-		// (never a runtime call, so it cannot recurse into itself).
-		params.push_back(MakeFundamentalType(FT_LONG_DOUBLE));
-		type = MakeFunctionType(MakeFundamentalType(FT_BOOL), params,
-		                        false);
-	}
-	else if (name == "__builtin_nanl")
-	{
-		// PA29: a default quiet NaN (the tag argument only evaluates);
-		// the lowering materializes the constant inline.
-		params.push_back(const_char_ptr);
-		type = MakeFunctionType(MakeFundamentalType(FT_LONG_DOUBLE),
-		                        params, false);
-	}
-	else
-		return 0;
-	if (const ScopeBinding* existing =
-	        FindOwnBinding(*model_.global(), name))
-		return existing;
-	ScopeBinding binding;
-	binding.kind = SB_FUNCTION;
-	binding.name = name;
-	binding.type = type;
-	binding.c_linkage = true;
-	binding.fn_defaults.resize(1);
-	binding.fn_deleted.resize(1, false);
-	binding.fn_access.resize(1, MA_PUBLIC);
-	binding.fn_static.resize(1, false);
-	binding.fn_inline_def.resize(1, false);
-	binding.fn_adl_only.resize(1, false);
-	binding.fn_unwind_no.resize(1, true);
-	binding.fn_noexcept_decl.resize(1, true);
-	return &AddBinding(*model_.global(), binding);
-}
 
 bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 {
@@ -1238,32 +1174,6 @@ void SemBinder::BindExpressionStatement(const AstStmt& stmt)
 	item->children.push_back(std::move(value.node));
 }
 
-// PA29 GNU statement expression: the compound statement binds into a
-// detached holder in the current function context (block scope and
-// all); the last expression statement's value is the expression's
-// value, a prvalue whose temporary lives to the end of the enclosing
-// full-expression.
-SemValue SemBinder::AnalyzeStatementExpression(const AstExpr& expr)
-{
-	SemNodePtr holder = MakeSemNode(SN_STATEMENT_EXPRESSION);
-	parents_.push_back(holder.get());
-	BindStatement(*expr.stmt_body);
-	parents_.pop_back();
-	SemValue value;
-	value.type = MakeFundamentalType(FT_VOID);
-	const SemNode* compound = holder->children.empty()
-		? 0 : holder->children.back().get();
-	const SemNode* last = compound && !compound->children.empty()
-		? compound->children.back().get() : 0;
-	if (last && last->kind == SN_EXPRESSION_STATEMENT &&
-	    !last->children.empty() && last->children[0]->type)
-		value.type = last->children[0]->type;
-	value.category = VC_PRVALUE;
-	holder->type = value.type;
-	holder->category = VC_PRVALUE;
-	value.node = std::move(holder);
-	return value;
-}
 
 // PA25 15.1: a throw statement is an expression statement over the
 // throw-expression.

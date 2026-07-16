@@ -193,6 +193,7 @@ private:
 
 	// --- expressions (lower_expr.cpp) ---
 	LowerValue LowerValueExpr(const SemNode& node);
+	TypePtr CalleeFnType(const SemNode& callee);
 	string LowerValueAs(const SemNode& node, const TypePtr& dest,
 	                    ELowerConvertContext context);
 	LowerValue ConvertValue(LowerValue value, const TypePtr& dest,
@@ -220,6 +221,8 @@ private:
 	const SemNode* StatementExpressionTail(const SemNode& node);
 	LowerValue LowerStatementExpression(const SemNode& node,
 	                                    bool as_value);
+	string LowerStatementExpressionReference(const SemNode& node,
+	                                         const TypePtr& referee);
 	// `result_address` carries the caller-owned destination of an
 	// indirect class-valued call ("" lets class results materialize at
 	// the consumer).

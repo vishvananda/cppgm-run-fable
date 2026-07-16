@@ -777,3 +777,30 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	info.cls = &cls;
 	info.captures = bound.captures;
 }
+
+// PA29 GNU statement expression: the compound statement binds into a
+// detached holder in the current function context (block scope and
+// all); the last expression statement's value is the expression's
+// value, a prvalue whose temporary lives to the end of the enclosing
+// full-expression.
+SemValue SemBinder::AnalyzeStatementExpression(const AstExpr& expr)
+{
+	SemNodePtr holder = MakeSemNode(SN_STATEMENT_EXPRESSION);
+	parents_.push_back(holder.get());
+	BindStatement(*expr.stmt_body);
+	parents_.pop_back();
+	SemValue value;
+	value.type = MakeFundamentalType(FT_VOID);
+	const SemNode* compound = holder->children.empty()
+		? 0 : holder->children.back().get();
+	const SemNode* last = compound && !compound->children.empty()
+		? compound->children.back().get() : 0;
+	if (last && last->kind == SN_EXPRESSION_STATEMENT &&
+	    !last->children.empty() && last->children[0]->type)
+		value.type = last->children[0]->type;
+	value.category = VC_PRVALUE;
+	holder->type = value.type;
+	holder->category = VC_PRVALUE;
+	value.node = std::move(holder);
+	return value;
+}
