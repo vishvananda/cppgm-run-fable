@@ -73,10 +73,14 @@ symbols; unreferenced declares impose nothing on the link.
   are aligned to 64 bytes so no entry sleds are inserted and
   symbol+addend patches (block addresses, ELF section offsets) resolve
   exactly.
-- The runtime library is compiled on demand: if unresolved names
-  remain after normal inputs, the linker compiles the built-in runtime
-  TU (once) through the ordinary pipeline and retries. No name lists,
-  no test-shape gating.
+- The runtime library is compiled on demand: if names remain
+  unresolved after the normal inputs and the synthesized support
+  module, the linker requests the built-in runtime TU (once) through
+  a supplier callback the driver wires to the ordinary compile
+  pipeline, then resolves again. No name lists, no test-shape gating;
+  the callback keeps the linker free of front-end dependencies, and
+  cleanup-only programs (which reference only support-module globals)
+  link without the runtime library.
 
 ## Host ELF objects (`-L`/`-l`, `elf_reader`)
 
@@ -149,3 +153,79 @@ compares work).
 - Negative driver tests (duplicate strong symbol, unresolved external,
   missing main) exercise the linker error paths.
 - `perl scripts/cppgm_file_audit.pl --stage pa29 --paths dev/src`.
+
+## Architecture Review
+
+The implemented pipeline matches the plan: `-c` and each link-mode
+source input run the identical five-step per-TU compilation
+(`toolchain/compile_unit.cpp`, on a large-stack worker thread), the
+LowIR text round-trips through the parser and validator as the
+frontend/backend contract, and the PA28 MIR backend encodes into
+relocatable `NativeModule` items that `BuildObjectModule` lifts into
+the object model. Direct/mixed/explicit parity is by construction -
+the three paths share `CompileSourceFileToModule` and differ only in
+whether bytes pass through a `CPPGMOBJ` file.
+
+Module ownership after the audit:
+
+- `dev/cppgm++.cpp` - option parsing and mode orchestration only.
+  Object-content classification (`LoadObjectModuleFile`), `-l`
+  search (`FindLibraryObject`), and the on-demand runtime decision
+  all live behind toolchain interfaces now; the driver's one policy
+  contribution is wiring `CompileSourceTextToModule` into the
+  linker's `RuntimeModuleSupplier`.
+- `dev/src/toolchain/link_executable.cpp` - all symbol-resolution
+  policy: the strong/weak definition table, hook externalization,
+  the synthesized support module (start, `__cppgm_unwind_raise`,
+  `__cppgm_exit`, the EH chain globals), and the runtime-on-demand
+  retry, which runs after the support module joins so cleanup-only
+  programs link without the runtime library. The supplier callback
+  keeps the linker free of front-end dependencies.
+- `dev/src/toolchain/object_module.cpp` / `elf_reader.cpp` - the
+  serialized object contract and the host ET_REL mapping, both with
+  bounds/role/alignment validation on every field an attacker (or a
+  bug) could bend; `binding=internal` symbols never carry external
+  names, so resolution-participation is a typed invariant.
+- `dev/src/toolchain/runtime_library.cpp` - freestanding C++ source
+  text compiled by this compiler at link time: a real exception
+  arena, the Itanium RTTI match walk, `__dynamic_cast` with
+  cross-cast search, and the type-info vtable anchors. No name
+  lists, no test-shape gates, no embedded binaries.
+- `dev/src/x86/` - encoding only. EH records
+  (`EmitEhPush`/`EmitEhPop`) are genuine instruction sequences with
+  frame-guarded pops; the dispatch address is a labeled ABS imm64
+  back-filled in `Finish`; external names never appear (labels and
+  patches only). i128 lowering is frame-resident staging that
+  clobbers argument registers like a call, and the analysis knows it.
+- `dev/src/lowering/` - the separate-compilation flag plus the EH
+  lowering. The fn-try subobject discipline has one owner: region
+  dispatches (and the fn-try-directed catch_next edges) destroy the
+  armed-so-far set; handlers and the unmatched path never
+  re-destroy. Destructor epilogues are collected once
+  (`CollectDtorEpilogue`) and consumed by statement flow, returns,
+  and fn-try arming without duplication.
+
+## Final Architecture Review
+
+The stage boundary holds. The object format stays an internal
+contract behind `object_module.h` (PA31/32 replace the encoding
+without touching the linker's resolution policy); mangling stays in
+`lowering/lower_name*` for PA30; the LowIR text remains the only
+frontend/backend interface, and its PA29 extensions
+(`eh_catch @rtti, N` with positive selectors, `exception_selector`,
+`object_root`, self-consistent `object=@low` merge keys, bare
+`eh_cleanup` markers) are validated, additive, and leave PA13-27
+accept/reject behavior unchanged - the checked-in LowIR refs pass
+byte-identical.
+
+Known, recorded boundaries (loud, not silent): variable i128 shift
+counts, i128 global load/store forms, and class-valued member-pointer
+dispatch throw compile-time boundary errors; i128 arguments use an
+internal 16-byte container ABI consistent across our own objects
+(`__int128` does not cross the tested `extern "C"` subset);
+`__builtin_nanl` ignores a non-empty payload tag. The CY86-era
+re-landing protocol for unmatched selectors is the reference
+compiler's own emission shape and is preserved verbatim where refs
+pin it; every PA29-new EH path (function-try, ctor/dtor subobject
+cleanups, deep try nesting) was validated by native execution
+against g++ oracles.
