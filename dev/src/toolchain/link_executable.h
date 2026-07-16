@@ -10,9 +10,12 @@
 // order, the entry, then the role=fini hooks in reverse), and lay the
 // items out into one native executable through the PA9 image writer.
 //
-// The linker is name-driven and knows nothing about the front end; the
-// driver decides which modules to link (including the on-demand
-// runtime-library module) using UnresolvedExternals.
+// The linker owns all symbol-resolution policy, including when the
+// built-in runtime library joins the link: only when names remain
+// unresolved after the normal inputs and the synthesized support
+// module. It stays ignorant of the front end by receiving the
+// runtime module through a supplier the driver wires to the ordinary
+// compile pipeline.
 
 namespace toolchain {
 
@@ -22,15 +25,13 @@ struct LinkInput
 	ObjectModule module;
 };
 
-// External names referenced by patches in `inputs` with no strong or
-// weak definition anywhere in `inputs` (deduplicated, in first-use
-// order). Duplicate-definition errors are NOT raised here; they
-// surface in LinkExecutable.
-std::vector<std::string> UnresolvedExternals(
-	const std::vector<LinkInput> & inputs);
+typedef LinkInput (*RuntimeModuleSupplier)(const std::string & target);
 
-void LinkExecutable(const std::vector<LinkInput> & inputs,
+// Takes the inputs by value: the link rewrites hook symbols and patch
+// labels in place, so callers hand their modules over (move them in).
+void LinkExecutable(std::vector<LinkInput> inputs,
                     const std::string & outfile,
-                    const std::string & target);
+                    const std::string & target,
+                    RuntimeModuleSupplier runtime_supplier);
 
 }  // namespace toolchain

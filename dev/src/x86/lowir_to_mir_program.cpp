@@ -487,8 +487,11 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
 	current_position_ = position;
 
 	// PA29: 128-bit forms lower through the frame-resident pair path.
+	// They stage pairs through rax:rdx with rcx/rsi/r10/r11 scratch, so
+	// register-resident parameter homes do not survive them.
 	if (LowerWideInstruction(ins))
 	{
+		arg_homes_clobbered_ = true;
 		if (ins.result.empty() || !pending_loads_.count(ins.result))
 			release_after_use(ins);
 		return;

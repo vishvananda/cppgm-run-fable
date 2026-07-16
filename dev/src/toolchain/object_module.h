@@ -57,6 +57,16 @@ bool IsCppgmObjectBytes(const std::string & bytes);
 // Object-like input filenames accepted by link mode (.o / .obj).
 bool HasObjectFileName(const std::string & path);
 
+// One link-mode object input, classified by content: cppgm compiler
+// objects and host ELF relocatables are both accepted.
+ObjectModule LoadObjectModuleFile(const std::string & path,
+                                  const std::string & target);
+
+// -l name resolution: lib<name>.o / lib<name>.obj across the -L dirs
+// in command order; the first existing candidate wins.
+std::string FindLibraryObject(const std::vector<std::string> & lib_dirs,
+                              const std::string & name);
+
 void WriteObjectModuleFile(const std::string & path,
                            const ObjectModule & module);
 ObjectModule ParseObjectModuleBytes(const std::string & bytes,

@@ -102,14 +102,18 @@ struct ProgramFacts
 	std::map<std::string, std::string> tls_wrapper_of_global;
 };
 
-// Shared LowIR fact predicates (single owners; see lowir_to_mir_value.cpp
-// and lowir_to_mir_analyze.cpp for the definitions).
+// Shared LowIR fact predicates (single owners; see lowir_to_mir_value.cpp,
+// lowir_to_mir_analyze.cpp, and lowir_to_mir_wide.cpp for the definitions).
 std::string ContainerSpelling(long long bytes);
 bool FitsImm32(long long value);
 bool ParamPassWantsAddress(const LowIRParam & param);
 bool StorageIsTls(const LowIROperand & operand, const ProgramFacts & facts);
 bool InstructionEmbedsCall(const LowIRInstruction & ins,
                            const ProgramFacts & facts);
+// True for instructions the 128-bit path lowers; they stage through
+// rax:rdx with rcx/rsi/r10/r11 as scratch, so they clobber every
+// caller-saved argument register like a call does.
+bool WideOperandIsI128(const LowIRInstruction & ins);
 const std::vector<LowIRParam> * FindCalleeParams(const LowIRInstruction & call,
                                                  const ProgramFacts & facts);
 

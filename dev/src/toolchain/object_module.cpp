@@ -4,6 +4,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "toolchain/elf_reader.h"
+
 using std::runtime_error;
 using std::string;
 
@@ -153,6 +155,38 @@ bool HasObjectFileName(const string & path)
 	return extension == ".o" || extension == ".obj";
 }
 
+ObjectModule LoadObjectModuleFile(const string & path,
+                                  const string & target)
+{
+	const string bytes = ReadFileBytes(path);
+	if (IsCppgmObjectBytes(bytes))
+		return ParseObjectModuleBytes(bytes, path);
+	if (IsElfObjectBytes(bytes))
+		return ParseElfObjectBytes(bytes, path, target);
+	throw runtime_error("unrecognized object file format: " + path);
+}
+
+string FindLibraryObject(const std::vector<string> & lib_dirs,
+                         const string & name)
+{
+	static const char * const suffixes[] = {".o", ".obj"};
+	for (size_t d = 0; d < lib_dirs.size(); d++)
+	{
+		string dir = lib_dirs[d];
+		if (!dir.empty() && dir[dir.size() - 1] != '/')
+			dir += '/';
+		for (size_t s = 0; s < 2; s++)
+		{
+			const string candidate = dir + "lib" + name + suffixes[s];
+			std::ifstream probe(candidate.c_str(),
+			                    std::ios::in | std::ios::binary);
+			if (probe)
+				return candidate;
+		}
+	}
+	throw runtime_error("cannot find library: -l" + name);
+}
+
 void WriteObjectModuleFile(const string & path, const ObjectModule & module)
 {
 	string out;
@@ -237,6 +271,9 @@ ObjectModule ParseObjectModuleBytes(const string & bytes,
 	{
 		ImageItem item;
 		item.align = static_cast<size_t>(reader.u64());
+		if (item.align == 0 || (item.align & (item.align - 1)) != 0 ||
+		    item.align > 4096)
+			reader.fail("bad item alignment");
 		item.is_code = reader.u8() != 0;
 		unsigned long byte_count = reader.u32();
 		reader.need(byte_count);
@@ -275,6 +312,11 @@ ObjectModule ParseObjectModuleBytes(const string & bytes,
 	module.entry_symbol = static_cast<int>(reader.i32());
 	module.init_symbol = static_cast<int>(reader.i32());
 	module.fini_symbol = static_cast<int>(reader.i32());
+	int role_symbols[3] = {module.entry_symbol, module.init_symbol,
+	                       module.fini_symbol};
+	for (int i = 0; i < 3; i++)
+		if (role_symbols[i] >= static_cast<int>(module.symbols.size()))
+			reader.fail("role symbol out of range");
 
 	for (size_t i = 0; i < module.symbols.size(); i++)
 		if (module.symbols[i].item >=

@@ -348,66 +348,50 @@ void CollectReferencedUndefined(const ObjectModule & module,
 	}
 }
 
-}  // namespace
-
-vector<string> UnresolvedExternals(const vector<LinkInput> & inputs)
+// True when any module's patches reference an external name the
+// definition table cannot satisfy; the trigger for the on-demand
+// runtime-library module.
+bool HasUnresolvedReference(const vector<LinkInput> & linked,
+                            const map<string, Definition> & definitions)
 {
-	map<string, Definition> definitions;
-	// Weak/strong conflicts are reported by LinkExecutable; here any
-	// definition satisfies a reference.
-	for (size_t m = 0; m < inputs.size(); m++)
-		for (size_t s = 0; s < inputs[m].module.symbols.size(); s++)
-		{
-			const ObjectSymbol & symbol = inputs[m].module.symbols[s];
-			if (symbol.item >= 0 && !symbol.external_name.empty())
-				definitions[symbol.external_name] = Definition();
-		}
-	vector<string> unresolved;
-	set<string> seen;
-	for (size_t m = 0; m < inputs.size(); m++)
+	for (size_t m = 0; m < linked.size(); m++)
 	{
 		set<size_t> referenced;
-		CollectReferencedUndefined(inputs[m].module, referenced);
+		CollectReferencedUndefined(linked[m].module, referenced);
 		for (set<size_t>::const_iterator it = referenced.begin();
 		     it != referenced.end(); ++it)
-		{
-			const string & name =
-				inputs[m].module.symbols[*it].external_name;
-			if (!definitions.count(name) && seen.insert(name).second)
-				unresolved.push_back(name);
-		}
+			if (!definitions.count(
+					linked[m].module.symbols[*it].external_name))
+				return true;
 	}
-	return unresolved;
+	return false;
 }
 
-void LinkExecutable(const vector<LinkInput> & inputs,
-                    const string & outfile, const string & target)
+// The program hooks: entry (exactly one), init/fini per module.
+// Internal hook symbols are reached through synthesized external
+// names so the support module's calls can resolve to them.
+struct ProgramHooks
 {
-	for (size_t m = 0; m < inputs.size(); m++)
-		if (inputs[m].module.target != target)
-			throw runtime_error(
-				"linked inputs must target the same native backend "
-				"target: " + inputs[m].name);
-
-	// The program hooks: entry (exactly one), init/fini per module.
-	// Internal hook symbols are reached through synthesized external
-	// names so the support module's calls can resolve to them.
 	vector<string> inits;
 	vector<string> finis;
-	string entry_name;
-	vector<LinkInput> linked = inputs;
+	string entry;
+};
+
+ProgramHooks ExternalizeProgramHooks(vector<LinkInput> & linked)
+{
+	ProgramHooks hooks;
 	for (size_t m = 0; m < linked.size(); m++)
 	{
 		ObjectModule & module = linked[m].module;
 		if (module.entry_symbol >= 0)
 		{
-			if (!entry_name.empty())
+			if (!hooks.entry.empty())
 				throw runtime_error(
 					"duplicate program entry (main) in " +
 					linked[m].name);
-			entry_name = "__cppgm_hook_entry";
+			hooks.entry = "__cppgm_hook_entry";
 			module.symbols[module.entry_symbol].external_name =
-				entry_name;
+				hooks.entry;
 			module.symbols[module.entry_symbol].binding =
 				ObjectSymbol::SB_STRONG;
 		}
@@ -417,7 +401,7 @@ void LinkExecutable(const vector<LinkInput> & inputs,
 			module.symbols[module.init_symbol].external_name = name;
 			module.symbols[module.init_symbol].binding =
 				ObjectSymbol::SB_STRONG;
-			inits.push_back(name);
+			hooks.inits.push_back(name);
 		}
 		if (module.fini_symbol >= 0)
 		{
@@ -425,19 +409,46 @@ void LinkExecutable(const vector<LinkInput> & inputs,
 			module.symbols[module.fini_symbol].external_name = name;
 			module.symbols[module.fini_symbol].binding =
 				ObjectSymbol::SB_STRONG;
-			finis.push_back(name);
+			hooks.finis.push_back(name);
 		}
 	}
-	if (entry_name.empty())
+	if (hooks.entry.empty())
 		throw runtime_error("program has no main function");
+	return hooks;
+}
+
+}  // namespace
+
+void LinkExecutable(vector<LinkInput> linked, const string & outfile,
+                    const string & target,
+                    RuntimeModuleSupplier runtime_supplier)
+{
+	for (size_t m = 0; m < linked.size(); m++)
+		if (linked[m].module.target != target)
+			throw runtime_error(
+				"linked inputs must target the same native backend "
+				"target: " + linked[m].name);
+
+	ProgramHooks hooks = ExternalizeProgramHooks(linked);
 
 	LinkInput support;
 	support.name = "<cppgm++ startup>";
-	support.module =
-		BuildSupportModule(inits, entry_name, finis, target);
+	support.module = BuildSupportModule(hooks.inits, hooks.entry,
+	                                    hooks.finis, target);
 	linked.insert(linked.begin(), support);
 
 	map<string, Definition> definitions = BuildDefinitionTable(linked);
+
+	// Runtime names (EH entry points, RTTI anchors, operator new) come
+	// from the built-in runtime library, compiled once through the
+	// ordinary pipeline when the link still needs definitions. The
+	// support module already owns the exception-chain globals, so
+	// cleanup-only programs link without it.
+	if (runtime_supplier && HasUnresolvedReference(linked, definitions))
+	{
+		linked.push_back(runtime_supplier(target));
+		definitions = BuildDefinitionTable(linked);
+	}
 
 	// Global item order: module order, items in module order. Code
 	// items align to cache lines so no entry sleds are inserted and
@@ -454,10 +465,10 @@ void LinkExecutable(const vector<LinkInput> & inputs,
 	image.SetLabelCount(static_cast<int>(total_items));
 	for (size_t m = 0; m < linked.size(); m++)
 	{
-		const ObjectModule & module = linked[m].module;
+		ObjectModule & module = linked[m].module;
 		for (size_t i = 0; i < module.items.size(); i++)
 		{
-			ImageItem item = module.items[i];
+			ImageItem & item = module.items[i];
 			if (item.is_code && item.align < 64)
 				item.align = 64;
 			// Rewrite patches from module-local symbol indices to

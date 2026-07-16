@@ -22,7 +22,6 @@
 #include "sema/sem_binder.h"
 #include "sema/sem_node.h"
 #include "toolchain/compile_unit.h"
-#include "toolchain/elf_reader.h"
 #include "toolchain/link_executable.h"
 #include "toolchain/object_module.h"
 #include "toolchain/runtime_library.h"
@@ -478,39 +477,19 @@ int run_compile_mode(const DriverInvocation & invocation)
   return EXIT_SUCCESS;
 }
 
-// Object-like link inputs are classified by content: cppgm compiler
-// objects and host ELF relocatables are both accepted.
-toolchain::ObjectModule load_object_input(const string & path,
-                                          const string & target)
+// The linker calls back for the built-in runtime library when the
+// link still needs definitions; it compiles through the same
+// pipeline as any other translation unit.
+toolchain::LinkInput compile_runtime_module(const string & target)
 {
-  const string bytes = toolchain::ReadFileBytes(path);
-  if(toolchain::IsCppgmObjectBytes(bytes)) {
-    return toolchain::ParseObjectModuleBytes(bytes, path);
-  }
-  if(toolchain::IsElfObjectBytes(bytes)) {
-    return toolchain::ParseElfObjectBytes(bytes, path, target);
-  }
-  throw logic_error("unrecognized object file format: " + path);
-}
-
-string find_library_object(const DriverInvocation & invocation,
-                           const string & name)
-{
-  static const char * const suffixes[] = {".o", ".obj"};
-  for(size_t d = 0; d < invocation.lib_dirs.size(); ++d) {
-    string dir = invocation.lib_dirs[d];
-    if(!dir.empty() && dir[dir.size() - 1] != '/') {
-      dir += '/';
-    }
-    for(size_t s = 0; s < 2; ++s) {
-      const string candidate = dir + "lib" + name + suffixes[s];
-      ifstream probe(candidate.c_str(), ios::in | ios::binary);
-      if(probe) {
-        return candidate;
-      }
-    }
-  }
-  throw logic_error("cannot find library: -l" + name);
+  toolchain::CompileOptions options;
+  options.target = target;
+  toolchain::LinkInput runtime;
+  runtime.name = toolchain::RuntimeLibraryName();
+  runtime.module = toolchain::CompileSourceTextToModule(
+      toolchain::RuntimeLibraryName(), toolchain::RuntimeLibrarySource(),
+      options);
+  return runtime;
 }
 
 int run_link_mode(const DriverInvocation & invocation)
@@ -521,8 +500,8 @@ int run_link_mode(const DriverInvocation & invocation)
     toolchain::LinkInput input;
     input.name = invocation.inputs[i];
     if(toolchain::HasObjectFileName(invocation.inputs[i])) {
-      input.module = load_object_input(invocation.inputs[i],
-                                       options.target);
+      input.module = toolchain::LoadObjectModuleFile(invocation.inputs[i],
+                                                     options.target);
     }
     else {
       input.module = toolchain::CompileSourceFileToModule(
@@ -532,26 +511,17 @@ int run_link_mode(const DriverInvocation & invocation)
   }
   for(size_t i = 0; i < invocation.libs.size(); ++i) {
     toolchain::LinkInput input;
-    input.name = find_library_object(invocation, invocation.libs[i]);
-    input.module = load_object_input(input.name, options.target);
+    input.name = toolchain::FindLibraryObject(invocation.lib_dirs,
+                                              invocation.libs[i]);
+    input.module = toolchain::LoadObjectModuleFile(input.name,
+                                                   options.target);
     linked.push_back(input);
-  }
-
-  // Runtime names (EH entry points, RTTI anchors, operator new) come
-  // from the built-in runtime library, compiled through the same
-  // pipeline when the link still needs definitions.
-  if(!toolchain::UnresolvedExternals(linked).empty()) {
-    toolchain::LinkInput runtime;
-    runtime.name = toolchain::RuntimeLibraryName();
-    runtime.module = toolchain::CompileSourceTextToModule(
-        toolchain::RuntimeLibraryName(), toolchain::RuntimeLibrarySource(),
-        options);
-    linked.push_back(runtime);
   }
 
   const string outfile =
       invocation.explicit_outfile ? invocation.outfile : string("a.out");
-  toolchain::LinkExecutable(linked, outfile, options.target);
+  toolchain::LinkExecutable(std::move(linked), outfile, options.target,
+                            compile_runtime_module);
   return EXIT_SUCCESS;
 }
 

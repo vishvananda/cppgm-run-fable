@@ -545,6 +545,8 @@ bool FunctionLowering::ParamUseIsForwardable(const ValueInfo & info,
 			default:
 				break;
 		}
+		if(WideOperandIsI128(between))
+			return false;   // i128 staging clobbers the arg registers
 		if(InstructionEmbedsCall(between, facts_))
 			return false;
 	}

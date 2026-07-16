@@ -195,6 +195,9 @@ ObjectModule ParseElfObjectBytes(const string & bytes,
 		if (!SectionContributes(sections[i]))
 			continue;
 		ImageItem item;
+		if ((sections[i].addralign & (sections[i].addralign - 1)) != 0 ||
+		    sections[i].addralign > 4096)
+			elf.fail("bad section alignment");
 		item.align = sections[i].addralign > 1
 			? static_cast<size_t>(sections[i].addralign)
 			: 1;
@@ -256,6 +259,8 @@ ObjectModule ParseElfObjectBytes(const string & bytes,
 		{
 			// Tentative C definition: allocate zero storage here.
 			ImageItem item;
+			if ((value & (value - 1)) != 0 || value > 4096)
+				elf.fail("bad common symbol alignment");
 			item.align = value > 1 ? static_cast<size_t>(value) : 1;
 			item.bytes.assign(static_cast<size_t>(size), 0);
 			module.items.push_back(item);

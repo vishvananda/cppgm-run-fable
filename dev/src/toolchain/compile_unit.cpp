@@ -1,5 +1,6 @@
 #include "toolchain/compile_unit.h"
 
+#include <map>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -146,16 +147,24 @@ string ExternalNameFromMetadata(const LowIRMetadata & metadata,
 	return object_name;
 }
 
-int SymbolIndexForFunction(const ObjectModule & module,
-                           const vector<string> & label_names,
-                           const string & low_name)
+// Defined low name -> symbol index (first definition wins), so alias
+// targets and role hooks resolve without rescanning the label space.
+std::map<string, int> BuildDefinedSymbolIndex(
+	const ObjectModule & module, const vector<string> & label_names)
 {
-	if (low_name.empty())
-		return -1;
+	std::map<string, int> index;
 	for (size_t i = 0; i < label_names.size(); i++)
-		if (label_names[i] == low_name && module.symbols[i].item >= 0)
-			return static_cast<int>(i);
-	return -1;
+		if (!label_names[i].empty() && module.symbols[i].item >= 0)
+			index.insert(std::make_pair(label_names[i],
+			                            static_cast<int>(i)));
+	return index;
+}
+
+int FindDefinedSymbol(const std::map<string, int> & index,
+                      const string & low_name)
+{
+	std::map<string, int>::const_iterator found = index.find(low_name);
+	return found == index.end() ? -1 : found->second;
 }
 
 // Builds the object symbol table over the encoder's label space (one
@@ -220,13 +229,14 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 		module.symbols.push_back(symbol);
 	}
 
+	std::map<string, int> defined =
+		BuildDefinedSymbolIndex(module, native.label_names);
+
 	// `alias object X = @y`: X is a second external name of y's item.
 	for (size_t i = 0; i < program.aliases.size(); i++)
 	{
 		const LowIRAlias & alias = program.aliases[i];
-		int target_symbol =
-			SymbolIndexForFunction(module, native.label_names,
-			                       alias.target);
+		int target_symbol = FindDefinedSymbol(defined, alias.target);
 		if (target_symbol < 0)
 			continue;  // alias of an unlowered (undemanded) definition
 		ObjectSymbol symbol;
@@ -240,15 +250,9 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 		module.symbols.push_back(symbol);
 	}
 
-	module.entry_symbol =
-		SymbolIndexForFunction(module, native.label_names,
-		                       info.entry_function);
-	module.init_symbol =
-		SymbolIndexForFunction(module, native.label_names,
-		                       info.init_function);
-	module.fini_symbol =
-		SymbolIndexForFunction(module, native.label_names,
-		                       info.fini_function);
+	module.entry_symbol = FindDefinedSymbol(defined, info.entry_function);
+	module.init_symbol = FindDefinedSymbol(defined, info.init_function);
+	module.fini_symbol = FindDefinedSymbol(defined, info.fini_function);
 	return module;
 }
 
