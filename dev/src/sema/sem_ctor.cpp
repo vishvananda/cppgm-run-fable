@@ -100,8 +100,7 @@ void SemBinder::AppendClassMemberInit(const ClassField& field,
 			if (!user_provided)
 			{
 				action->has_value = true;
-				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
-				                           member_cls.size);
+				action->value = ConstValue(FT_UNSIGNED_LONG_INT, member_cls.size);
 			}
 			ArmSubobjectCleanup(*action, member_cls, false,
 			                    AddressOfNode(ThisFieldExpr(field)));

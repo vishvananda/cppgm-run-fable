@@ -163,10 +163,8 @@ private:
 	void AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	                         const AstInitializer* init);
 	// PA20: evaluates a constexpr (or engine-foldable const) object's
-	// analyzed initializer: records scalar values on the binding,
-	// stamps folded initializers for the lowering, stores object
-	// images for later constant reads, and enforces 7.1.5p9 (a
-	// constexpr object requires a constant initializer).
+	// analyzed initializer: records scalar values, stamps folded
+	// initializers, stores object images, and enforces 7.1.5p9.
 	void FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 	                           bool is_constexpr);
 	// 9.4.2p3: an initializer-less storage definition adopts the
@@ -265,8 +263,7 @@ private:
 	void AppendVBaseTransfers(const ClassInfo& cls, bool is_move,
 	                          const SemNode& source_proto,
 	                          vector<SemNodePtr>& out);
-	// PA29 15.2p2: pins the subobject's destructor action on its
-	// constructor-body initialization action (sem_ctor.cpp).
+	// PA29 15.2p2: pins the subobject's dtor on its init action.
 	void ArmSubobjectCleanup(SemNode& action, const ClassInfo& subobject,
 	                         bool base_entry, SemNodePtr address);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
@@ -329,11 +326,10 @@ private:
 	                             const SemNode& source_proto,
 	                             unsigned long long span,
 	                             unsigned long long alignment);
-	// The leading trivially copyable storage prefix of the class for a
-	// copy (is_move false) or move (true) transfer: returns the byte
-	// span (0 when none; cls.size when the whole object is trivial) and
-	// the span alignment, and sets `first_suffix` to the first field
-	// row needing individual lowering.
+	// The leading trivially copyable storage prefix of a copy
+	// (is_move false) or move transfer: the byte span (0 when none)
+	// and alignment; `first_suffix` is the first individually
+	// lowered field row.
 	unsigned long long TrivialStoragePrefix(const ClassInfo& cls,
 	                                        bool is_move, bool assign_form,
 	                                        unsigned long long& alignment,
