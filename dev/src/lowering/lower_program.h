@@ -307,6 +307,9 @@ public:
 	// first use with the given signature/metadata suffix.
 	string ExternalRuntimeFnRef(const string& object_name,
 	                            const string& declare_suffix);
+	// PA33: the "@name" of the noexcept-terminate trampoline
+	// (__cxa_begin_catch + std::terminate), synthesized on first use.
+	string TerminateHelperRef();
 	// PA25 15.1: the RTTI record a throw/catch type matches by - the
 	// strong external record for fundamentals (with the weak record
 	// rendered beside it), the program's own record otherwise.
@@ -537,6 +540,8 @@ private:
 	// __dynamic_cast, ...), keyed by their object name.
 	map<string, string> runtime_fn_names_;
 	vector<string> runtime_declares_;
+	// PA33: the noexcept-terminate trampoline ("" until first demand).
+	string terminate_helper_name_;
 	// PA25: strong external RTTI declares (throw/catch fundamentals)
 	// and the rendered exception-object scaffolding globals.
 	map<string, string> external_rtti_names_;

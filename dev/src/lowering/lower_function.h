@@ -156,6 +156,12 @@ private:
 	string SlotRef(const Scope* scope, const string& name) const;
 	string Render() const;
 	void TerminateOpenEnd();
+	// PA33 15.4p9 (host mode): a declared-noexcept body with a
+	// may-unwind call arms a whole-body catch-all region whose pad
+	// routes through the terminate trampoline.
+	bool SubtreeMayUnwind(const SemNode& node) const;
+	void ArmNoexceptTerminateRegion();
+	void EmitNoexceptTerminateDispatch();
 
 	// --- statements (lower_function.cpp) ---
 	// PA16: picks the single top-level local every class-valued return
@@ -607,6 +613,9 @@ private:
 	// catch-handler selector counter.
 	vector<EhContext> eh_contexts_;
 	int catch_selector_counter_;
+	// PA33: the noexcept whole-body terminate dispatch label ("" when
+	// this body arms none).
+	string terminate_dispatch_;
 	// Class return-value construction into the result object never
 	// opens unwind regions (the reference's final-action form).
 	bool suppress_eh_regions_;

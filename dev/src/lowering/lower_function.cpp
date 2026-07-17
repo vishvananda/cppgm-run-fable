@@ -111,6 +111,7 @@ string FunctionLowerer::Lower()
 			program_.VTableGroupRef(method_class);
 	}
 	EmitParameterStores();
+	ArmNoexceptTerminateRegion();
 	CollectDtorEpilogue(first_statement);
 	// Label contexts are relative to the body baseline (parameter
 	// cleanups may already occupy a scope).
@@ -124,7 +125,59 @@ string FunctionLowerer::Lower()
 	if (info_.special_code == "D0")
 		EmitDeletingEpilogue();
 	TerminateOpenEnd();
+	EmitNoexceptTerminateDispatch();
 	return Render();
+}
+
+// True when the body can raise: a throw statement, an indirect call,
+// or a named call the unwind analysis cannot prove non-throwing.
+bool FunctionLowerer::SubtreeMayUnwind(const SemNode& node) const
+{
+	if (node.kind == SN_THROW)
+		return true;
+	if (node.kind == SN_CALL_EXPRESSION && !node.children.empty())
+	{
+		const SemNode& callee = *node.children[0];
+		if (callee.kind != SN_CALLEE ||
+		    program_.CalleeMayUnwind(callee))
+			return true;
+	}
+	for (size_t i = 0; i < node.children.size(); i++)
+		if (SubtreeMayUnwind(*node.children[i]))
+			return true;
+	return false;
+}
+
+// 15.4p9: an exception leaving a noexcept function calls
+// std::terminate. Host mode arms one whole-body catch-all region; its
+// pad (the innermost parent of every unwind edge in the body) routes
+// through the terminate trampoline. Whole-program mode keeps the
+// pinned region-free shapes.
+void FunctionLowerer::ArmNoexceptTerminateRegion()
+{
+	if (!program_.SeparateCompilation())
+		return;
+	if (!def_.unwind_no && !def_.noexcept_decl)
+		return;
+	if (!SubtreeMayUnwind(def_))
+		return;
+	program_.RequireEhRuntime();
+	terminate_dispatch_ = NewLabel("noexcept_terminate_dispatch");
+	ReferenceLabel(terminate_dispatch_);
+	Emit("eh_try ^" + terminate_dispatch_);
+}
+
+void FunctionLowerer::EmitNoexceptTerminateDispatch()
+{
+	if (terminate_dispatch_.empty())
+		return;
+	OpenBlock(terminate_dispatch_);
+	Emit("eh_catch_all, " + to_string(++catch_selector_counter_));
+	string exc = NewTemp();
+	Emit(exc + " = exception ptr");
+	Emit("call void " + program_.TerminateHelperRef() + "(" + exc +
+	     ")");
+	EmitZeroValueReturn();
 }
 
 string FunctionLowerer::Header() const

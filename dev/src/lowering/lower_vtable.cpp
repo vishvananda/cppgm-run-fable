@@ -204,6 +204,34 @@ string LowerProgram::ExternalRttiVtableRef(ERttiVtableKind kind)
 	return "@" + name;
 }
 
+// PA33 15.4p9: the shared per-TU terminate trampoline of noexcept
+// landing pads - it enters the caught exception so std::terminate
+// runs with the handler context (the host __clang_call_terminate
+// shape), and never returns.
+string LowerProgram::TerminateHelperRef()
+{
+	if (!terminate_helper_name_.empty())
+		return "@" + terminate_helper_name_;
+	terminate_helper_name_ = UniqueSymbol("__cppgm_call_terminate");
+	string begin_catch = ExternalRuntimeFnRef(
+		"__cxa_begin_catch",
+		"(%arg0 : ptr) -> ptr [role=eh_begin_catch, linkage=c, "
+		"binding=strong, object=__cxa_begin_catch]");
+	string terminate = ExternalRuntimeFnRef(
+		"_ZSt9terminatev",
+		"() -> void [return=noreturn, binding=strong, "
+		"object=_ZSt9terminatev]");
+	thunk_texts_.push_back(
+		"function @" + terminate_helper_name_ +
+		"(%exc : ptr) -> void [unwind=no, binding=internal, "
+		"object=__cppgm_call_terminate] {\n"
+		"  block ^entry:\n"
+		"    %t1 = call ptr " + begin_catch + "(%exc)\n"
+		"    call void " + terminate + "()\n"
+		"    return void\n}");
+	return "@" + terminate_helper_name_;
+}
+
 string LowerProgram::ExternalRuntimeFnRef(const string& object_name,
                                           const string& declare_suffix)
 {
