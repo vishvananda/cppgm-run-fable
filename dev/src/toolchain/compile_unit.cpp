@@ -369,6 +369,8 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 				symbol.external_name =
 					ExternalNameFromMetadata(*metadata, low_name);
 			}
+			symbol.thread_local_symbol =
+				metadata->find("storage") == "thread_local";
 		}
 		else
 		{
@@ -379,6 +381,30 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 		}
 		module.symbols.push_back(symbol);
 	}
+
+	// PA32 host TLS: synthesized wrappers define their declared
+	// symbol (weak for the exported _ZTW spelling, module-private for
+	// internal thread-locals); the init probes bind weak undefined.
+	for (size_t w = 0; w < native.tls_wrapper_labels.size(); w++)
+		for (size_t s = 0; s < module.symbols.size(); s++)
+		{
+			ObjectSymbol & symbol = module.symbols[s];
+			if (symbol.low_name != native.tls_wrapper_labels[w] ||
+			    symbol.item < 0)
+				continue;
+			symbol.binding = symbol.external_name.empty() ||
+				symbol.external_name == symbol.low_name
+				? ObjectSymbol::SB_INTERNAL
+				: ObjectSymbol::SB_WEAK;
+			if (symbol.binding == ObjectSymbol::SB_INTERNAL)
+				symbol.external_name.clear();
+		}
+	for (size_t w = 0; w < native.weak_undefined_labels.size(); w++)
+		for (size_t s = 0; s < module.symbols.size(); s++)
+			if (module.symbols[s].low_name ==
+			        native.weak_undefined_labels[w] &&
+			    module.symbols[s].item < 0)
+				module.symbols[s].weak_undefined = true;
 
 	std::map<string, int> defined =
 		BuildDefinedSymbolIndex(module, native.label_names);
@@ -431,6 +457,9 @@ ObjectModule CompileToModule(const string & presumed_name,
 	string target = options.target.empty() ? "linux" : options.target;
 	mir_model::MirProgram machine_ir =
 		LowerLowIRProgramToMir(program, info, target);
+	// PA32: `-c` objects carry real host TLS (STT_TLS storage and the
+	// per-TU _ZTW wrapper).
+	machine_ir.host_tls = true;
 	NativeModule native = EncodeMirProgramModule(machine_ir);
 	return BuildObjectModule(program, info, native, target);
 }

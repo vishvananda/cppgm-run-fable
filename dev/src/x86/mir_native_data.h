@@ -47,4 +47,12 @@ void EncodeGlobal(ISymbolLabels & labels,
                   const mir_model::MirGlobalDefinition & global,
                   ImageItem & item);
 
+// PA32 host TLS: the per-TU thread_local wrapper body. It runs the
+// module's own guarded init when `init_label` >= 0, otherwise probes
+// the weak init hook `probe_label` (when >= 0), then returns the
+// thread-pointer-relative address of `global_label`'s storage
+// (local-exec R_X86_64_TPOFF32).
+ImageItem EncodeTlsWrapperItem(int init_label, int probe_label,
+                               int global_label);
+
 }  // namespace mir_native

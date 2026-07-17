@@ -39,6 +39,12 @@ struct ObjectSymbol
 	// entry so host tools see the entity.
 	std::string local_name;
 	Binding binding = SB_UNDEFINED;
+	// PA32: an undefined reference that must bind weak (the TLS init
+	// probe) so the host link resolves it to null when absent.
+	bool weak_undefined = false;
+	// PA32: the symbol names thread-local storage (an undefined TLS
+	// reference must carry STT_TLS for the host linker).
+	bool thread_local_symbol = false;
 	int item = -1;              // defining item index, -1 when undefined
 	long long offset = 0;       // symbol offset inside the item
 };

@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "ast/ast_expr.h"
 #include "ast/ast_names.h"
 #include "ast/ast_text.h"
 #include "lowering/lower_name_parts.h"
@@ -350,7 +351,24 @@ string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs)
 		return arg.value_param == 0
 			? string("T_") : "T" + to_string(arg.value_param - 1) + "_";
 	if (arg.dependent_value)
+	{
+		// An elided dependent-typed default keeps its written literal
+		// spelling (the g++ presentation types the literal by its own
+		// form); other shapes keep the placeholder pairing hint.
+		const AstExpr& expr = *arg.dependent_value;
+		if (expr.kind == EK_LITERAL &&
+		    IsIntegralFundamental(expr.literal_type))
+		{
+			bool digits = !expr.literal.empty();
+			for (size_t i = 0; i < expr.literal.size(); i++)
+				if (expr.literal[i] < '0' || expr.literal[i] > '9')
+					digits = false;
+			if (digits)
+				return "L" + string(BuiltinCode(expr.literal_type)) +
+					expr.literal + "E";
+		}
 		return "L_DEPE";
+	}
 	// 5.1.6: an entity-valued argument spells `L <mangled-name> E`; a
 	// function entity spells the address expression
 	// `X ad L_Z <name><bare-function-type> E E`.
@@ -1346,8 +1364,10 @@ string MangleVariableObjectName(const Scope* scope, const string& name)
 {
 	Substitutions subs;
 	vector<NameComponent> parts = ScopeComponents(scope);
+	// An unscoped variable's symbol is its unmangled source name
+	// (5.1.1: only nested and std-scoped names get an encoding).
 	if (parts.empty())
-		return "_Z" + SourceName(name);
+		return name;
 	if (parts.size() == 1 && !parts[0].args && parts[0].name == "std")
 		// 5.1.4.2: the abbreviation St spells the std prefix.
 		return "_ZSt" + SourceName(name);

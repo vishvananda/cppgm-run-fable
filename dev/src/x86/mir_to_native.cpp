@@ -42,6 +42,7 @@ const long double kTwoTo64 = 18446744073709551616.0L;
 // MIR width/data helpers are shared with the global-data encoder.
 using mir_native::AppendFloatBits;
 using mir_native::EncodeGlobal;
+using mir_native::EncodeTlsWrapperItem;
 using mir_native::AppendLittleEndian;
 using mir_native::ParseFloatLiteral;
 using mir_native::ScalarSize;
@@ -674,7 +675,10 @@ void FunctionEncoder::EmitTlsAddr(const Ins & ins)
 {
 	int dst = Reg(ins.operands[0]);
 	const std::string & wrapper = ins.operands[1].text;
-	if (env_.HasFunction(wrapper))
+	// PA32 host TLS: every access goes through the per-TU wrapper
+	// (synthesized below); the private executable model keeps the
+	// single-threaded direct-global fallback.
+	if (env_.HasFunction(wrapper) || env_.program().host_tls)
 	{
 		code_.CallRel32(X86Imm::Label(env_.SymbolLabel(wrapper), 0));
 		if (dst != X86_RAX)
@@ -1390,6 +1394,7 @@ NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
 	{
 		ImageItem item;
 		EncodeGlobal(env, program.globals[i], item);
+		item.is_thread_local = program.globals[i].thread_local_storage;
 		module.items.push_back(item);
 	}
 	std::size_t pool_base = module.items.size();
@@ -1399,6 +1404,57 @@ NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
 		item.align = env.pool()[i].align;
 		item.bytes = env.pool()[i].bytes;
 		module.items.push_back(item);
+	}
+
+	// PA32 host TLS: define the wrapper for every thread_local this
+	// module defines or accesses (the access sites call it).
+	std::vector<std::pair<int, int> > wrapper_items;
+	if (program.host_tls)
+	{
+		for (std::map<std::string, std::string>::const_iterator it =
+		         program.tls_wrappers.begin();
+		     it != program.tls_wrappers.end(); ++it)
+		{
+			const std::string & wrapper = it->first;
+			const std::string & global = it->second;
+			bool global_defined = false;
+			std::string init_name = global + "__tls_init";
+			bool init_defined = false;
+			for (std::size_t i = 0; i < program.globals.size(); i++)
+				if (program.globals[i].name == global)
+					global_defined = true;
+			for (std::size_t i = 0; i < program.functions.size(); i++)
+				if (program.functions[i].name == init_name)
+					init_defined = true;
+			bool wrapper_used = false;
+			const std::vector<std::string> & names = env.label_names();
+			for (std::size_t i = 0; i < names.size(); i++)
+				if (names[i] == wrapper)
+					wrapper_used = true;
+			if (!global_defined && !wrapper_used)
+				continue;
+			std::map<std::string, std::string>::const_iterator object =
+				program.tls_wrapper_objects.find(wrapper);
+			int init_label = init_defined
+				? env.SymbolLabel(init_name) : -1;
+			int probe_label = -1;
+			if (init_label < 0 && object !=
+			        program.tls_wrapper_objects.end() &&
+			    object->second.compare(0, 4, "_ZTW") == 0)
+			{
+				std::string probe = "_ZTH" + object->second.substr(4);
+				probe_label = env.SymbolLabel(probe);
+				module.weak_undefined_labels.push_back(probe);
+			}
+			int global_label = env.SymbolLabel(global);
+			int wrapper_label = env.SymbolLabel(wrapper);
+			module.items.push_back(EncodeTlsWrapperItem(
+				init_label, probe_label, global_label));
+			wrapper_items.push_back(std::make_pair(
+				wrapper_label,
+				static_cast<int>(module.items.size()) - 1));
+			module.tls_wrapper_labels.push_back(wrapper);
+		}
 	}
 
 	module.label_names = env.label_names();
@@ -1412,5 +1468,8 @@ NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
 	for (std::size_t i = 0; i < env.pool().size(); i++)
 		module.label_items[env.pool()[i].label] =
 			static_cast<int>(pool_base + i);
+	for (std::size_t i = 0; i < wrapper_items.size(); i++)
+		module.label_items[wrapper_items[i].first] =
+			wrapper_items[i].second;
 	return module;
 }

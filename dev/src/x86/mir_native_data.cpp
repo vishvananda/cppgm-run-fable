@@ -198,4 +198,69 @@ void EncodeGlobal(ISymbolLabels & labels,
 		EncodeDataGlobal(labels, global, item);
 }
 
+
+namespace {
+
+void AppendPatch(ImageItem & item, std::size_t offset, int size,
+                 EX86PatchKind kind, int label)
+{
+	X86Patch patch;
+	patch.offset = offset;
+	patch.size = size;
+	patch.kind = kind;
+	patch.imm = X86Imm::Label(label, 0);
+	item.patches.push_back(patch);
+}
+
+}  // namespace
+
+// PA32 host TLS: the per-TU thread_local wrapper body. It runs the
+// module's own guarded init when one exists, otherwise probes the
+// weak _ZTH init hook, then returns the thread-pointer-relative
+// address of the backing storage (local-exec R_X86_64_TPOFF32).
+ImageItem EncodeTlsWrapperItem(int init_label, int probe_label,
+                               int global_label)
+{
+	ImageItem item;
+	item.is_code = true;
+	item.align = 16;
+	std::vector<unsigned char> & b = item.bytes;
+	const unsigned char sub_rsp[4] = { 0x48, 0x83, 0xEC, 0x08 };
+	b.insert(b.end(), sub_rsp, sub_rsp + 4);
+	if (init_label >= 0)
+	{
+		b.push_back(0xE8);   // call rel32 <init>
+		AppendPatch(item, b.size(), 4, X86_PATCH_PCREL, init_label);
+		b.insert(b.end(), 4, 0);
+	}
+	else if (probe_label >= 0)
+	{
+		b.push_back(0x48);   // movabs rax, <probe>
+		b.push_back(0xB8);
+		AppendPatch(item, b.size(), 8, X86_PATCH_ABS, probe_label);
+		b.insert(b.end(), 8, 0);
+		const unsigned char test_call[7] = {
+			0x48, 0x85, 0xC0,   // test rax, rax
+			0x74, 0x02,         // je +2
+			0xFF, 0xD0,         // call rax
+		};
+		b.insert(b.end(), test_call, test_call + 7);
+	}
+	const unsigned char fs_zero[9] = {
+		0x64, 0x48, 0x8B, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00,
+	};   // mov rax, fs:[0]
+	b.insert(b.end(), fs_zero, fs_zero + 9);
+	b.push_back(0x48);   // lea rax, [rax + <global>@tpoff]
+	b.push_back(0x8D);
+	b.push_back(0x80);
+	AppendPatch(item, b.size(), 4, X86_PATCH_TPOFF, global_label);
+	b.insert(b.end(), 4, 0);
+	const unsigned char epilogue[5] = {
+		0x48, 0x83, 0xC4, 0x08,   // add rsp, 8
+		0xC3,                     // ret
+	};
+	b.insert(b.end(), epilogue, epilogue + 5);
+	return item;
+}
+
 }  // namespace mir_native

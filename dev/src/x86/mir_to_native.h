@@ -69,6 +69,11 @@ struct NativeModule
 	std::vector<std::string> label_names;  // label id -> name ("" = pool)
 	std::vector<int> label_items;          // label id -> item index or -1
 	std::vector<NativeFunctionEh> function_eh;  // one per function item
+	// PA32 host TLS synthesis: wrappers the encoder defined (their
+	// declared binding decides weak/internal downstream), and init
+	// probes that must bind as weak undefined symbols.
+	std::vector<std::string> tls_wrapper_labels;
+	std::vector<std::string> weak_undefined_labels;
 };
 
 NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program);

@@ -63,6 +63,9 @@ void LowerProgram::AppendTlsWrapperDeclares(vector<string>& declares)
 		string object = info.object_name;
 		if (object.compare(0, 2, "_Z") == 0)
 			object = "_ZTW" + object.substr(2);
+		else if (!object.empty())
+			// An unmangled spelling wraps as _ZTW<length><name>.
+			object = "_ZTW" + to_string(object.size()) + object;
 		string meta = info.internal ? "binding=internal"
 		                            : "binding=strong";
 		if (!object.empty())

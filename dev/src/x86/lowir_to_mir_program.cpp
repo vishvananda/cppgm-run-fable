@@ -811,6 +811,8 @@ mir_model::MirProgram LowerLowIRProgramToMir(const LowIRProgram & program,
 			std::string global = strip_sigil(tls_for);
 			facts.tls_wrapper_of_global[global] = function.name;
 			result.tls_wrappers[function.name] = global;
+			result.tls_wrapper_objects[function.name] =
+				function.metadata.find("object");
 		}
 	}
 	for(size_t g = 0; g < program.globals.size(); g++) {

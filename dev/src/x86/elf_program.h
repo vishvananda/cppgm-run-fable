@@ -28,10 +28,13 @@ using std::vector;
 // translation size.
 struct ImageItem
 {
-	ImageItem() : align(1), is_code(false) {}
+	ImageItem() : align(1), is_code(false), is_thread_local(false) {}
 
 	size_t align;
 	bool is_code;
+	// PA32: thread-local data lands in .tdata with STT_TLS symbols on
+	// the host object path (the private executable image ignores it).
+	bool is_thread_local;
 	vector<unsigned char> bytes;
 	vector<X86Patch> patches;
 };

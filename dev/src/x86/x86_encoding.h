@@ -81,7 +81,8 @@ enum EX86PatchKind
 {
 	X86_PATCH_TRUNC,  // little-endian value truncated to size (data)
 	X86_PATCH_ABS,    // absolute address; must survive sign-extension
-	X86_PATCH_PCREL   // value minus the address after the field
+	X86_PATCH_PCREL,  // value minus the address after the field
+	X86_PATCH_TPOFF   // PA32: thread-pointer offset (R_X86_64_TPOFF32)
 };
 
 // A pending little-endian fixup: write the resolved immediate, as

@@ -34,6 +34,7 @@ const unsigned long long kFlagAlloc = 2;
 const unsigned long long kFlagExecinstr = 4;
 const unsigned long long kFlagInfoLink = 0x40;
 const unsigned long long kFlagGroup = 0x200;  // SHF_GROUP
+const unsigned long long kFlagTls = 0x400;    // SHF_TLS
 
 const unsigned kGroupComdat = 1;              // GRP_COMDAT
 
@@ -43,6 +44,7 @@ const unsigned kRelocPlt32 = 4;         // R_X86_64_PLT32
 const unsigned kRelocAbs32 = 10;        // R_X86_64_32
 const unsigned kRelocAbs32Signed = 11;  // R_X86_64_32S
 const unsigned kRelocPc64 = 24;         // R_X86_64_PC64
+const unsigned kRelocTpoff32 = 23;      // R_X86_64_TPOFF32
 
 struct ElfReloc
 {
@@ -134,6 +136,10 @@ private:
 	void BuildRoleSections();
 	void EmitSymbolRecord(const ElfSymbolEntry & entry);
 	void EmitSymtab();
+	void AppendGroupHeaders(vector<SectionHeader> & headers,
+	                        vector<vector<unsigned char> > & group_payloads,
+	                        const vector<size_t> & rela_sources,
+	                        size_t rela_base, size_t symtab_index);
 	vector<SectionHeader> BuildSectionHeaders(
 		vector<vector<unsigned char> > & rela_payloads,
 		vector<vector<unsigned char> > & group_payloads,
@@ -141,7 +147,7 @@ private:
 	void EmitFile(const string & path);
 
 	const ObjectModule & module_;
-	SectionData text_, data_, eh_frame_, except_, init_array_,
+	SectionData text_, data_, tdata_, eh_frame_, except_, init_array_,
 		fini_array_, note_;
 	// COMDAT member sections, one per weak definition item (deque:
 	// item placement holds stable pointers while appending).
@@ -169,6 +175,9 @@ ElfObjectWriter::ElfObjectWriter(const ObjectModule & module)
 	data_.name = ".data";
 	data_.flags = kFlagAlloc | kFlagWrite;
 	data_.align = 8;
+	tdata_.name = ".tdata";
+	tdata_.flags = kFlagAlloc | kFlagWrite | kFlagTls;
+	tdata_.align = 8;
 	eh_frame_.name = ".eh_frame";
 	eh_frame_.type = kSectionUnwind;
 	eh_frame_.flags = kFlagAlloc;
@@ -196,6 +205,9 @@ void ElfObjectWriter::PlanSections()
 {
 	text_.present = true;
 	data_.present = true;
+	for (size_t i = 0; i < module_.items.size(); i++)
+		if (module_.items[i].is_thread_local)
+			tdata_.present = true;
 	eh_frame_.present = !module_.eh_functions.empty();
 	for (size_t f = 0; f < module_.eh_functions.size(); f++)
 		if (!module_.eh_functions[f].call_sites.empty())
@@ -239,7 +251,13 @@ void ElfObjectWriter::PlaceItems()
 		if ((align & (align - 1)) != 0 || align > 4096)
 			throw runtime_error("bad item alignment in object emission");
 		SectionData * section;
-		if (comdat_symbol[i] >= 0 && !strong_named[i])
+		if (item.is_thread_local)
+		{
+			section = &tdata_;
+			if (align > section->align)
+				section->align = align;
+		}
+		else if (comdat_symbol[i] >= 0 && !strong_named[i])
 		{
 			const string & name = module_
 				.symbols[static_cast<size_t>(comdat_symbol[i])]
@@ -287,9 +305,9 @@ void ElfObjectWriter::FinalizeLayout()
 	     c != comdat_sections_.end(); ++c)
 		if (!(c->flags & kFlagExecinstr))
 			layout_.push_back(&*c);
-	SectionData * tail[5] = { &eh_frame_, &except_, &init_array_,
-	                          &fini_array_, &note_ };
-	for (int s = 0; s < 5; s++)
+	SectionData * tail[6] = { &tdata_, &eh_frame_, &except_,
+	                          &init_array_, &fini_array_, &note_ };
+	for (int s = 0; s < 6; s++)
 		if (tail[s]->present)
 			layout_.push_back(tail[s]);
 
@@ -325,7 +343,8 @@ void ElfObjectWriter::PlanLocalSymbols()
 			module_.items[static_cast<size_t>(symbol.item)];
 		ElfSymbolEntry entry;
 		entry.name = symbol.local_name;
-		entry.info = item.is_code ? 2 : 1;   // LOCAL FUNC / OBJECT
+		// LOCAL: TLS / FUNC / OBJECT
+		entry.info = item.is_thread_local ? 6 : item.is_code ? 2 : 1;
 		entry.shndx = static_cast<unsigned short>(
 			item_section_[static_cast<size_t>(symbol.item)]->index);
 		entry.value = item_offset_[static_cast<size_t>(symbol.item)] +
@@ -353,6 +372,32 @@ void ElfObjectWriter::PlanDefinedSymbols()
 	for (size_t s = 0; s < module_.symbols.size(); s++)
 	{
 		const ObjectSymbol & symbol = module_.symbols[s];
+		if (symbol.item < 0 && symbol.weak_undefined &&
+		    !symbol.external_name.empty() &&
+		    !undefined_by_name_.count(symbol.external_name))
+		{
+			// A weak undefined reference (the TLS init probe): the
+			// host link resolves it to null when nothing defines it.
+			ElfSymbolEntry entry;
+			entry.name = symbol.external_name;
+			entry.info = 0x20;   // WEAK, NOTYPE
+			undefined_by_name_[symbol.external_name] =
+				AppendGlobal(entry);
+			continue;
+		}
+		if (symbol.item < 0 && symbol.thread_local_symbol &&
+		    !symbol.external_name.empty() &&
+		    !undefined_by_name_.count(symbol.external_name))
+		{
+			// An undefined thread_local reference carries STT_TLS so
+			// the host linker accepts the TLS relocation against it.
+			ElfSymbolEntry entry;
+			entry.name = symbol.external_name;
+			entry.info = 0x16;   // GLOBAL, TLS
+			undefined_by_name_[symbol.external_name] =
+				AppendGlobal(entry);
+			continue;
+		}
 		if (symbol.item < 0 ||
 		    symbol.binding == ObjectSymbol::SB_INTERNAL ||
 		    symbol.external_name.empty())
@@ -363,7 +408,9 @@ void ElfObjectWriter::PlanDefinedSymbols()
 		entry.name = symbol.external_name;
 		unsigned char bind = symbol.binding == ObjectSymbol::SB_WEAK
 			? 2 : 1;
-		unsigned char type = item.is_code ? 2 : 1;   // FUNC / OBJECT
+		// TLS / FUNC / OBJECT
+		unsigned char type = item.is_thread_local ? 6
+			: item.is_code ? 2 : 1;
 		entry.info = static_cast<unsigned char>((bind << 4) | type);
 		entry.shndx = static_cast<unsigned short>(
 			item_section_[static_cast<size_t>(symbol.item)]->index);
@@ -442,6 +489,9 @@ ElfReloc ElfObjectWriter::ConvertOnePatch(const X86Patch & patch)
 		reloc.kind = patch.size == 8 ? kRelocAbs64
 			: patch.size == 4 ? kRelocAbs32
 			: 0;
+		break;
+	case X86_PATCH_TPOFF:
+		reloc.kind = patch.size == 4 ? kRelocTpoff32 : 0;
 		break;
 	}
 	if (reloc.kind == 0)
@@ -692,6 +742,46 @@ void ElfObjectWriter::EmitSymtab()
 		EmitSymbolRecord(globals_[g]);
 }
 
+// The SHT_GROUP headers: GRP_COMDAT, the member section, its .rela
+// pair; sh_info names the signing symbol.
+void ElfObjectWriter::AppendGroupHeaders(
+	vector<SectionHeader> & headers,
+	vector<vector<unsigned char> > & group_payloads,
+	const vector<size_t> & rela_sources, size_t rela_base,
+	size_t symtab_index)
+{
+	for (std::deque<SectionData>::const_iterator c =
+	         comdat_sections_.begin();
+	     c != comdat_sections_.end(); ++c)
+	{
+		vector<unsigned char> payload;
+		AppendWord(payload, kGroupComdat, 4);
+		AppendWord(payload, static_cast<unsigned>(c->index), 4);
+		for (size_t r = 0; r < rela_sources.size(); r++)
+			if (layout_[rela_sources[r]] == &*c)
+				AppendWord(payload, rela_base + r, 4);
+		group_payloads.push_back(payload);
+	}
+	size_t group = 0;
+	for (std::deque<SectionData>::const_iterator c =
+	         comdat_sections_.begin();
+	     c != comdat_sections_.end(); ++c, ++group)
+	{
+		SectionHeader header;
+		header.name = ".group";
+		header.type = kSectionGroup;
+		header.size = group_payloads[group].size();
+		header.link = static_cast<unsigned>(symtab_index);
+		header.info = static_cast<unsigned>(
+			defined_symbol_elf_[static_cast<size_t>(
+				c->signature_symbol)]);
+		header.align = 4;
+		header.entsize = 4;
+		header.payload = &group_payloads[group];
+		headers.push_back(header);
+	}
+}
+
 // The section header table: null, the SHT_GROUP headers, the layout
 // sections, their .rela pairs, then .symtab/.strtab/.shstrtab.
 vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
@@ -711,40 +801,8 @@ vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 
 	vector<SectionHeader> headers;
 	headers.push_back(SectionHeader());
-
-	// COMDAT groups: GRP_COMDAT, the member section, its .rela pair.
-	for (std::deque<SectionData>::const_iterator c =
-	         comdat_sections_.begin();
-	     c != comdat_sections_.end(); ++c)
-	{
-		vector<unsigned char> payload;
-		AppendWord(payload, kGroupComdat, 4);
-		AppendWord(payload, static_cast<unsigned>(c->index), 4);
-		for (size_t r = 0; r < rela_sources.size(); r++)
-			if (layout_[rela_sources[r]] == &*c)
-				AppendWord(payload, rela_base + r, 4);
-		group_payloads.push_back(payload);
-	}
-	{
-		size_t group = 0;
-		for (std::deque<SectionData>::const_iterator c =
-		         comdat_sections_.begin();
-		     c != comdat_sections_.end(); ++c, ++group)
-		{
-			SectionHeader header;
-			header.name = ".group";
-			header.type = kSectionGroup;
-			header.size = group_payloads[group].size();
-			header.link = static_cast<unsigned>(symtab_index);
-			header.info = static_cast<unsigned>(
-				defined_symbol_elf_[static_cast<size_t>(
-					c->signature_symbol)]);
-			header.align = 4;
-			header.entsize = 4;
-			header.payload = &group_payloads[group];
-			headers.push_back(header);
-		}
-	}
+	AppendGroupHeaders(headers, group_payloads, rela_sources, rela_base,
+	                   symtab_index);
 
 	for (size_t s = 0; s < layout_.size(); s++)
 	{
