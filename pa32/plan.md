@@ -201,6 +201,20 @@ wrapper carries no CFI/FDE yet, and abbreviation-as-prefix mangling
 waits for hosted headers (PA34). `make test-report-through-pa32` and
 the pa32 file audit pass on the final tree.
 
+A follow-up audit pass chased a `pa3/tests/300-triple.t` timeout that
+appeared on a loaded machine after the audit landed. It was not a
+pa32 regression: the shared phase 1-2 representation
+(`TranslatedChar`) spent 24 bytes per source code point and grew
+without a reserve (~0.4GB peak on the 12MB stress input), the four
+early-stage tool mains read stdin one character at a time through the
+synced streambuf, and the PA3 calculator re-grew its per-line token
+vector from zero capacity on each of 492k lines. All three were fixed
+at their owners (`source_translation`, a shared `tool_stdin.h` reader
+used by the tool entry points, `ctrl_expr`); outputs stay
+byte-identical and the run dropped from 3.6s/432MB to 1.83s/168MB
+(reference: 1.32s/9.8MB), restoring comfortable headroom against the
+10s text-test budget. Details in pa32/audit.md.
+
 ## Validation
 
 - Per-cluster: `make -C pa32 check TEST=tests/general/<case>.t` plus targeted

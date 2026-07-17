@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 using namespace std;
@@ -8,6 +7,7 @@ using namespace std;
 #include "ctrl_expr.h"
 #include "pp_tokenizer.h"
 #include "source_translation.h"
+#include "tool_stdin.h"
 
 // ctrlexpr: applies translation phases 1-3 to the C++ source file on
 // stdin (no preprocessing directives, predefined macros, or pragma
@@ -43,10 +43,7 @@ int main(int argc, char** argv)
 
 	try
 	{
-		ostringstream oss;
-		oss << cin.rdbuf();
-
-		TranslatedSource source = TranslateSource(oss.str());
+		TranslatedSource source = TranslateSource(ReadAllStdin());
 
 		CtrlExprStream evaluator(cout, &PA3Mock_IsDefinedIdentifier);
 		TokenizePPTokens(source, evaluator);

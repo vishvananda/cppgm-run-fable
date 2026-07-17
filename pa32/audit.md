@@ -83,6 +83,35 @@ File-audit issues to check:
   concern (cohesion, not size-dodging), headers gained declarations
   only, and nothing moved to a path outside `--paths dev/src`.
 
+### Follow-up pass: pa3 stress-test timeout
+
+A later `make test-report-through-pa32` run reported
+`pa3/tests/300-triple.t: EXIT_TIMEOUT` (10s text-test budget). The
+test is a 12MB / 492k-line controlling-expression stress input; the
+tool completes it in ~3.6s on an idle machine (reference: ~1.9s), so
+the failure is headroom, not a hang - under a fully parallel suite run
+the 2x-slower-than-reference tool crosses the budget. Timeout bumps
+are not an acceptable fix; the tool must get faster. Files to inspect:
+
+- `pa3/ctrlexpr.cpp` (and the identical stdin-read pattern in
+  `pa1/pptoken.cpp`, `pa2/posttoken.cpp`, `pa4/macro.cpp`): profile
+  shows `oss << cin.rdbuf()` running character-at-a-time through the
+  C-stdio-synchronized streambuf (`uflow`/`ungetc`/`_IO_getc` +
+  `__copy_streambufs` memmove ~ 13% of samples).
+- `dev/src/ctrl_expr.cpp` `FinishLineResult`: per-line
+  `unit.swap(unit_)` hands the buffer's capacity away every line, so
+  every line's `push_back`s reallocate from zero
+  (`vector<PostToken>::_M_realloc_append` + malloc/free churn ~ 7%,
+  plus the kernel page-fault time that shows as ~1.1s sys).
+- `dev/src/ctrl_expr.cpp` parse/eval exceptions: 105k of 492k lines
+  print `error`; check whether throw-per-error-line contributes
+  materially (`_Unwind_Find_FDE` ~ 2%).
+
+Ownership/regression constraints on the fix: the tool entry points own
+process-level I/O policy (buffering mode), the calculator owns its
+token buffer lifetime; no output-format or evaluation-order change is
+acceptable (outputs are byte-compared against pinned `.ref` files).
+
 ## Findings
 
 No cheating shapes, skipped phases, or regressions were found. What
@@ -161,6 +190,37 @@ Accepted as fine: `TrivialDefaultConstruction`'s linear scan over
 off before it), and the once-per-function `ScanLabelContexts` walk
 (linear, comparable to the existing epilogue pre-scan).
 
+### Follow-up findings: pa3 stress-test timeout
+
+The timeout was headroom loss, not a hang or a pa32 regression: the
+tool produces byte-identical output but was ~1.7x the reference's
+wall time with ~13x its system time, and a loaded machine pushed the
+3.6s idle run past the 10s budget. Three compounding inefficiencies
+in the shared frontend, none pa32-specific:
+
+1. **`TranslatedSource::chars` peaked at ~0.4GB on a 12MB input**
+   (reference tool: 9.5MB). `TranslatedChar` carried two `size_t`
+   provenance offsets (24 bytes per source code point = 288MB), and
+   the vector was grown by doubling with no reserve, overshooting to
+   432MB peak RSS - 179k minor faults and 1.7s of kernel time per
+   run, all on the dominant allocation of every pa1-pa4 tool run.
+2. **`oss << cin.rdbuf()` under C-stdio sync reads stdin one
+   character at a time** (`uflow`/`ungetc`/`__copy_streambufs`
+   memmove ~ 13% of samples) in all four early-stage tool mains.
+3. **`CtrlExprCalculator::FinishLineResult` swapped `unit_` into a
+   local every line**, handing the buffer's capacity away so each of
+   the 492k lines re-grew its token vector from zero.
+
+Also found adjacent to (2): `posttoken.cpp`'s printer still flushed
+per token (`endl`), the exact pattern `macro.cpp` had already fixed
+with an explanatory comment.
+
+Not pursued: the remaining ~1.4x-of-reference user time is spread
+across the real tokenize/parse/evaluate work (17%/8%/6% profile
+shares); the throw-per-error-line cost measured ~2% and converting
+the recursive-descent parser to error returns is not worth the
+regression risk on a fixture-pinned surface.
+
 ## Changes Made
 
 - `dev/src/toolchain/elf_object.cpp`: `SectionData` records its
@@ -177,6 +237,34 @@ off before it), and the once-per-function `ScanLabelContexts` walk
 
 No functional behavior changed; all three are scan-shape cleanups.
 
+Follow-up pass (pa3 timeout):
+
+- `dev/src/source_translation.h/.cpp`: `TranslatedChar` provenance
+  offsets are now `uint32_t` (24 -> 12 bytes per code point);
+  `TranslateSource` rejects >= 4GB inputs with a `length_error`
+  instead of silently truncating offsets, and reserves `chars` to its
+  exact upper bound (one char consumes at least one source byte), so
+  the dominant allocation neither regrows nor overshoots.
+- `dev/src/tool_stdin.h` (new): `ReadAllStdin()` reads stdin with
+  block-sized `fread` on the stdio FILE, replacing the
+  character-at-a-time synced-streambuf copy; correct for the
+  `--batch-stdin` runner children, which inherit stdio state.
+- `dev/pptoken.cpp`, `dev/posttoken.cpp`, `dev/ctrlexpr.cpp`,
+  `dev/macro.cpp`: use `ReadAllStdin()` (also drops the extra
+  full-input copy the `ostringstream::str()` round-trip made).
+- `dev/posttoken.cpp`: per-token `endl` -> `"\n"`, matching
+  `macro.cpp`'s documented fix; output is still flushed at exit on
+  every path that compares it.
+- `dev/src/ctrl_expr.cpp`: `FinishLineResult` evaluates `unit_` in
+  place and `clear()`s it, keeping the buffer's capacity across
+  lines.
+
+Net effect on `pa3/tests/300-triple.t` (idle machine, reference
+alongside for scale): 3.6s wall / 1.1s sys / 432MB / 179k faults
+before, 1.83s wall / 0.13s sys / 168MB / 45k faults after (reference:
+1.32s / 0.05s / 9.8MB). Output remains byte-identical to the
+reference on the full input.
+
 ## Validation
 
 - `make -C pa32 test`: 78/78 pass on the cleaned tree.
@@ -186,3 +274,18 @@ No functional behavior changed; all three are scan-shape cleanups.
 - `perl scripts/cppgm_file_audit.pl --stage pa32 --paths dev/src`:
   pass with the six pre-existing `bad-division` warnings (all predate
   PA32; PA32 added declarations only to the warned headers).
+
+Follow-up pass (pa3 timeout):
+
+- `pa3/tests/300-triple.t` output is byte-identical to the pinned
+  `.ref` before and after each change; the run dropped from 3.6s wall
+  / 432MB peak RSS / 179k minor faults to 1.83s / 168MB / 45k faults
+  (reference binary alongside: 1.32s / 9.8MB).
+- `make -C pa1 test`, `-C pa2`, `-C pa3`, `-C pa4`: course suites
+  pass (21/21, 4/4, 11/11, 30/30).
+- `make test-report-through-pa32` after the frontend rebuild: ALL
+  TESTS PASSED (2843/2843), exit 0 - the `TranslatedChar` narrowing
+  and the stdin-reader change perturb none of the pinned
+  LowIR/MIR/mangling/own-link surfaces, and the timeout is gone.
+- `perl scripts/cppgm_file_audit.pl --stage pa32 --paths dev/src`:
+  pass (same six pre-existing warnings; `tool_stdin.h` is clean).

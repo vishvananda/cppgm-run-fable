@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 using namespace std;
@@ -11,6 +10,7 @@ using namespace std;
 #include "pp_token.h"
 #include "pp_tokenizer.h"
 #include "source_translation.h"
+#include "tool_stdin.h"
 
 // macro: applies translation phases 1-6 and the tokenization part of
 // phase 7 to the C++ source file on stdin. Phase 4 handles the PA4 input
@@ -50,10 +50,7 @@ int main(int argc, char** argv)
 
 	try
 	{
-		ostringstream oss;
-		oss << cin.rdbuf();
-
-		TranslatedSource source = TranslateSource(oss.str());
+		TranslatedSource source = TranslateSource(ReadAllStdin());
 
 		PPTokenCollector collector;
 		TokenizePPTokens(source, collector);

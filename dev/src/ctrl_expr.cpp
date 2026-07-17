@@ -728,9 +728,11 @@ bool CtrlExprCalculator::FinishLineResult(CtrlExprResult& result)
 	}
 	if (unit_.empty())
 		return false;
-	std::vector<PostToken> unit;
-	unit.swap(unit_);
-	result = EvaluateUnit(unit);
+	// evaluate in place and clear() so the buffer's capacity survives
+	// into the next line; a per-line swap-to-local re-grows the vector
+	// from zero on every line of the multi-megabyte stress inputs
+	result = EvaluateUnit(unit_);
+	unit_.clear();
 	return true;
 }
 

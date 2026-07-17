@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -21,11 +22,16 @@ const int kInvalidChar = -2;
 // lets the tokenizer revert translations inside raw string literals by
 // rescanning the byte stream, then resuming the translated stream after
 // the closing quote.
+//
+// The offsets are 32-bit on purpose: chars is the dominant allocation of
+// every tool run (one entry per code point of the whole file), and
+// size_t offsets made the 12MB stress inputs peak at ~0.4GB. TranslateSource
+// rejects inputs that could overflow them.
 struct TranslatedChar
 {
 	int cp;
-	size_t src_begin;
-	size_t src_end;
+	uint32_t src_begin;
+	uint32_t src_end;
 };
 
 struct TranslatedSource
@@ -43,6 +49,8 @@ struct TranslatedSource
 	std::vector<TranslatedChar> chars;
 };
 
-// Applies translation phases 1 and 2 to a UTF-8 source file image. Never
-// throws: malformed bytes become kInvalidChar entries (see above).
+// Applies translation phases 1 and 2 to a UTF-8 source file image.
+// Malformed bytes never throw; they become kInvalidChar entries (see
+// above). The only throw is a length_error for inputs too large for the
+// 32-bit provenance offsets (>= 4GB).
 TranslatedSource TranslateSource(const std::string& input);

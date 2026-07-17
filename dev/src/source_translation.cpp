@@ -1,5 +1,7 @@
 #include "source_translation.h"
 
+#include <stdexcept>
+
 #include "utf8.h"
 
 namespace {
@@ -74,7 +76,9 @@ private:
 
 	void Emit(int cp, size_t begin, size_t end)
 	{
-		out_.push_back({cp, begin, end});
+		out_.push_back({cp,
+		                static_cast<uint32_t>(begin),
+		                static_cast<uint32_t>(end)});
 	}
 
 	// Consumed-lookahead read: one raw byte, identity-mapped.
@@ -204,12 +208,19 @@ private:
 TranslatedSource TranslateSource(const std::string& input)
 {
 	TranslatedSource source;
+	if (input.size() >= 0xFFFFFFFFul)
+		throw std::length_error(
+			"source file too large for 32-bit provenance offsets");
 	source.bytes = input;
 	// A non-empty file (even a bare BOM, which the translator drops) gets
 	// its missing final line feed before splicing; a splice that consumes
 	// it is not restored.
 	if (!source.bytes.empty() && source.bytes.back() != '\n')
 		source.bytes += '\n';
+	// Every translated char consumes at least one source byte, so this
+	// reserve is an exact upper bound: the dominant allocation of a tool
+	// run neither regrows nor overshoots.
+	source.chars.reserve(source.bytes.size());
 	Translator(source.bytes, source.chars).Run();
 	return source;
 }

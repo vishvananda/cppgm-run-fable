@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 using namespace std;
@@ -9,6 +8,7 @@ using namespace std;
 #include "post_tokenizer.h"
 #include "pp_tokenizer.h"
 #include "source_translation.h"
+#include "tool_stdin.h"
 
 // posttoken: applies translation phases 1-6 and the tokenization part of
 // phase 7 to the C++ source file on stdin (which contains no
@@ -22,9 +22,11 @@ namespace {
 
 struct PrintingPostTokenStream : IPostTokenStream
 {
+	// "\n", not endl: a per-token flush dominates large outputs, and
+	// stdout is only compared on success, where exit flushes the stream.
 	void emit(const PostToken& token)
 	{
-		cout << DescribePostToken(token) << endl;
+		cout << DescribePostToken(token) << "\n";
 	}
 };
 
@@ -44,10 +46,7 @@ int main(int argc, char** argv)
 
 	try
 	{
-		ostringstream oss;
-		oss << cin.rdbuf();
-
-		TranslatedSource source = TranslateSource(oss.str());
+		TranslatedSource source = TranslateSource(ReadAllStdin());
 
 		PrintingPostTokenStream printer;
 		PostTokenizer post_tokenizer(printer);
