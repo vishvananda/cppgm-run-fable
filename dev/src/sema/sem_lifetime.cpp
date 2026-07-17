@@ -833,8 +833,10 @@ void SemBinder::AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
 	if (!unit_.classes.DestructionHasEffects(*cls))
 	{
 		// The destructor is still potentially invoked (resolved and
-		// access-checked); an effect-free chain emits no cleanup.
-		MakeDestructorCall(*cls, false, SemNodePtr());
+		// access-checked); an effect-free chain emits no cleanup, but
+		// the selected destructor stays odr-used (3.2p3).
+		unit_.elided_dtor_uses.push_back(
+			MakeDestructorCall(*cls, false, SemNodePtr()));
 		return;
 	}
 	item.needs_dtor = true;

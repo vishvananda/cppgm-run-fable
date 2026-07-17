@@ -161,6 +161,10 @@ struct ScopeBinding
 	vector<EMemberAccess> fn_access;
 	vector<bool> fn_static;      // static member function
 	vector<bool> fn_inline_def;  // defined in-class: weak, demand-emitted
+	// 7.1.2p2: a function is inline if any declaration spells
+	// `inline`, so a later out-of-class definition emits weak even
+	// without respelling it.
+	vector<bool> fn_declared_inline;
 	vector<bool> fn_adl_only;    // hidden friend: visible to ADL only
 	// Non-throwing facts per overload. `fn_unwind_no` merges the
 	// declared specification with the derived body fact (unwind-region

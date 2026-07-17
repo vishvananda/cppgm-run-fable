@@ -34,6 +34,7 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 	body.declaring = declaring;
 	body.cls = cls;
 	const ScopeBinding* binding = FindOwnBinding(*declaring, name);
+	bool declared_inline = false;
 	if (binding)
 	{
 		size_t index = 0;
@@ -42,6 +43,8 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 				index = i + 1;
 		if (index < binding->fn_static.size())
 			body.is_static = binding->fn_static[index];
+		if (index < binding->fn_declared_inline.size())
+			declared_inline = binding->fn_declared_inline[index];
 	}
 	if (OpenClass() && OpenClass()->members == declaring)
 	{
@@ -52,7 +55,7 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 	// body analyzes immediately (and emits as a strong definition
 	// unless spelled inline, 7.1.2p4).
 	body.out_of_class = true;
-	body.spelled_inline = DeclSpellsInline(decl);
+	body.spelled_inline = DeclSpellsInline(decl) || declared_inline;
 	// PA17: defining the class's key function anchors its vtable in
 	// this translation unit (emitted strong by the lowering). An
 	// instantiated member definition anchors nothing: specialization

@@ -121,6 +121,7 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	binding.fn_access.resize(count, MA_PUBLIC);
 	binding.fn_static.resize(count, false);
 	binding.fn_inline_def.resize(count, false);
+	binding.fn_declared_inline.resize(count, false);
 	binding.fn_adl_only.resize(count, false);
 	binding.fn_unwind_no.resize(count, false);
 	binding.fn_noexcept_decl.resize(count, false);
@@ -143,6 +144,11 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 		binding.fn_static[index] = true;
 	if (inline_def)
 		binding.fn_inline_def[index] = true;
+	// Only the spelled specifiers make the entity inline here
+	// (7.1.2p2, 7.1.5p2); `inline_def` also covers out-of-class
+	// definitions bound against the class scope.
+	if (specs && (specs->is_inline || specs->is_constexpr))
+		binding.fn_declared_inline[index] = true;
 	if (composed.noexcept_simple)
 	{
 		binding.fn_unwind_no[index] = true;

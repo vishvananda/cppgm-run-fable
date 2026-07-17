@@ -356,10 +356,19 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 		if (metadata)
 		{
 			symbol.binding = BindingFromMetadata(*metadata, is_definition);
-			symbol.external_name =
-				symbol.binding == ObjectSymbol::SB_INTERNAL
-					? string()
-					: ExternalNameFromMetadata(*metadata, low_name);
+			if (symbol.binding == ObjectSymbol::SB_INTERNAL)
+			{
+				// Internal definitions keep their ABI spelling as a
+				// host-visible LOCAL name (never a resolution key).
+				string object_name = metadata->find("object");
+				if (!object_name.empty() && object_name[0] != '@')
+					symbol.local_name = object_name;
+			}
+			else
+			{
+				symbol.external_name =
+					ExternalNameFromMetadata(*metadata, low_name);
+			}
 		}
 		else
 		{
@@ -382,11 +391,23 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 		if (target_symbol < 0)
 			continue;  // alias of an unlowered (undemanded) definition
 		ObjectSymbol symbol;
-		symbol.external_name = alias.object_symbol;
-		symbol.binding =
-			module.symbols[target_symbol].binding == ObjectSymbol::SB_WEAK
-				? ObjectSymbol::SB_WEAK
-				: ObjectSymbol::SB_STRONG;
+		if (module.symbols[target_symbol].binding ==
+		    ObjectSymbol::SB_INTERNAL)
+		{
+			// An alias of an internal definition is a second local
+			// spelling, never an exported name.
+			symbol.local_name = alias.object_symbol;
+			symbol.binding = ObjectSymbol::SB_INTERNAL;
+		}
+		else
+		{
+			symbol.external_name = alias.object_symbol;
+			symbol.binding =
+				module.symbols[target_symbol].binding ==
+					ObjectSymbol::SB_WEAK
+					? ObjectSymbol::SB_WEAK
+					: ObjectSymbol::SB_STRONG;
+		}
 		symbol.item = module.symbols[target_symbol].item;
 		symbol.offset = module.symbols[target_symbol].offset;
 		module.symbols.push_back(symbol);

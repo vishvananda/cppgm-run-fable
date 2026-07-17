@@ -1,6 +1,7 @@
 #include "toolchain/elf_object.h"
 
 #include <cstdio>
+#include <deque>
 #include <map>
 #include <stdexcept>
 #include <vector>
@@ -25,12 +26,16 @@ const unsigned kSectionStrtab = 3;
 const unsigned kSectionRela = 4;
 const unsigned kSectionInitArray = 14;
 const unsigned kSectionFiniArray = 15;
+const unsigned kSectionGroup = 17;            // SHT_GROUP
 const unsigned kSectionUnwind = 0x70000001;   // SHT_X86_64_UNWIND
 
 const unsigned long long kFlagWrite = 1;
 const unsigned long long kFlagAlloc = 2;
 const unsigned long long kFlagExecinstr = 4;
 const unsigned long long kFlagInfoLink = 0x40;
+const unsigned long long kFlagGroup = 0x200;  // SHF_GROUP
+
+const unsigned kGroupComdat = 1;              // GRP_COMDAT
 
 const unsigned kRelocAbs64 = 1;         // R_X86_64_64
 const unsigned kRelocPc32 = 2;          // R_X86_64_PC32
@@ -69,6 +74,8 @@ struct SectionData
 	bool present = false;
 	int index = 0;          // section header index once present
 	int symbol = 0;         // section symbol (ELF symtab index)
+	// COMDAT member sections: the module symbol signing the group.
+	int signature_symbol = -1;
 };
 
 // One section header record under assembly (payload bound later for
@@ -112,6 +119,8 @@ public:
 private:
 	void PlanSections();
 	void PlaceItems();
+	void FinalizeLayout();
+	void PlanLocalSymbols();
 	void PlanDefinedSymbols();
 	int SymbolForModuleIndex(size_t module_symbol);
 	int UndefinedByName(const string & name);
@@ -127,12 +136,16 @@ private:
 	void EmitSymtab();
 	vector<SectionHeader> BuildSectionHeaders(
 		vector<vector<unsigned char> > & rela_payloads,
+		vector<vector<unsigned char> > & group_payloads,
 		size_t & shstrtab_index);
 	void EmitFile(const string & path);
 
 	const ObjectModule & module_;
 	SectionData text_, data_, eh_frame_, except_, init_array_,
 		fini_array_, note_;
+	// COMDAT member sections, one per weak definition item (deque:
+	// item placement holds stable pointers while appending).
+	std::deque<SectionData> comdat_sections_;
 	vector<SectionData *> layout_;      // present sections in order
 	vector<SectionData *> item_section_;
 	vector<unsigned long long> item_offset_;
@@ -190,16 +203,100 @@ void ElfObjectWriter::PlanSections()
 	init_array_.present = module_.init_symbol >= 0;
 	fini_array_.present = module_.fini_symbol >= 0;
 	note_.present = true;
+}
 
-	SectionData * order[7] = { &text_, &data_, &eh_frame_, &except_,
-	                           &init_array_, &fini_array_, &note_ };
-	for (int s = 0; s < 7; s++)
+// A weak definition item becomes its own COMDAT member section so the
+// host linker coalesces duplicate inline/template emissions by group.
+// An item also carrying a strong named definition stays in the plain
+// section (COMDAT discard must never drop a strong definition).
+void ElfObjectWriter::PlaceItems()
+{
+	item_section_.assign(module_.items.size(), 0);
+	item_offset_.assign(module_.items.size(), 0);
+	vector<int> comdat_symbol(module_.items.size(), -1);
+	vector<bool> strong_named(module_.items.size(), false);
+	for (size_t s = 0; s < module_.symbols.size(); s++)
 	{
-		if (!order[s]->present)
+		const ObjectSymbol & symbol = module_.symbols[s];
+		if (symbol.item < 0 || symbol.external_name.empty())
 			continue;
-		order[s]->index = static_cast<int>(layout_.size()) + 1;
-		layout_.push_back(order[s]);
+		size_t item = static_cast<size_t>(symbol.item);
+		if (symbol.binding == ObjectSymbol::SB_WEAK)
+		{
+			if (comdat_symbol[item] < 0)
+				comdat_symbol[item] = static_cast<int>(s);
+		}
+		else
+		{
+			strong_named[item] = true;
+		}
 	}
+
+	for (size_t i = 0; i < module_.items.size(); i++)
+	{
+		const ImageItem & item = module_.items[i];
+		unsigned long long align = item.align > 1 ? item.align : 1;
+		if ((align & (align - 1)) != 0 || align > 4096)
+			throw runtime_error("bad item alignment in object emission");
+		SectionData * section;
+		if (comdat_symbol[i] >= 0 && !strong_named[i])
+		{
+			const string & name = module_
+				.symbols[static_cast<size_t>(comdat_symbol[i])]
+				.external_name;
+			comdat_sections_.push_back(SectionData());
+			SectionData & own = comdat_sections_.back();
+			own.name = (item.is_code ? ".text." : ".data.") + name;
+			own.flags = kFlagGroup |
+				(item.is_code ? kFlagAlloc | kFlagExecinstr
+				              : kFlagAlloc | kFlagWrite);
+			own.align = align;
+			own.present = true;
+			own.signature_symbol = comdat_symbol[i];
+			section = &own;
+		}
+		else
+		{
+			section = item.is_code ? &text_ : &data_;
+			if (align > section->align)
+				section->align = align;
+		}
+		AppendPadding(section->bytes, align);
+		item_section_[i] = section;
+		item_offset_[i] = section->bytes.size();
+		section->bytes.insert(section->bytes.end(), item.bytes.begin(),
+		                      item.bytes.end());
+	}
+	for (size_t f = 0; f < module_.eh_functions.size(); f++)
+		function_size_[module_.eh_functions[f].item] =
+			module_.eh_functions[f].code_size;
+}
+
+// Section header order: the SHT_GROUP headers occupy the first
+// indices, then .text and its COMDAT members, .data and its COMDAT
+// members, and the fixed tail sections.
+void ElfObjectWriter::FinalizeLayout()
+{
+	layout_.push_back(&text_);
+	for (std::deque<SectionData>::iterator c = comdat_sections_.begin();
+	     c != comdat_sections_.end(); ++c)
+		if (c->flags & kFlagExecinstr)
+			layout_.push_back(&*c);
+	layout_.push_back(&data_);
+	for (std::deque<SectionData>::iterator c = comdat_sections_.begin();
+	     c != comdat_sections_.end(); ++c)
+		if (!(c->flags & kFlagExecinstr))
+			layout_.push_back(&*c);
+	SectionData * tail[5] = { &eh_frame_, &except_, &init_array_,
+	                          &fini_array_, &note_ };
+	for (int s = 0; s < 5; s++)
+		if (tail[s]->present)
+			layout_.push_back(tail[s]);
+
+	size_t group_count = comdat_sections_.size();
+	for (size_t s = 0; s < layout_.size(); s++)
+		layout_[s]->index =
+			static_cast<int>(group_count + s) + 1;
 	for (size_t s = 0; s < layout_.size(); s++)
 	{
 		if (layout_[s] == &note_)
@@ -210,31 +307,35 @@ void ElfObjectWriter::PlanSections()
 		locals_.push_back(entry);
 		layout_[s]->symbol = static_cast<int>(locals_.size());
 	}
-	global_base_ = locals_.size() + 1;
 }
 
-void ElfObjectWriter::PlaceItems()
+// Internal-linkage definitions with an ABI spelling become named
+// LOCAL symbols: host tools (nm, debuggers) see the entity while
+// resolution still bypasses it entirely.
+void ElfObjectWriter::PlanLocalSymbols()
 {
-	item_section_.assign(module_.items.size(), 0);
-	item_offset_.assign(module_.items.size(), 0);
-	for (size_t i = 0; i < module_.items.size(); i++)
+	for (size_t s = 0; s < module_.symbols.size(); s++)
 	{
-		const ImageItem & item = module_.items[i];
-		SectionData & section = item.is_code ? text_ : data_;
-		unsigned long long align = item.align > 1 ? item.align : 1;
-		if ((align & (align - 1)) != 0 || align > 4096)
-			throw runtime_error("bad item alignment in object emission");
-		if (align > section.align)
-			section.align = align;
-		AppendPadding(section.bytes, align);
-		item_section_[i] = &section;
-		item_offset_[i] = section.bytes.size();
-		section.bytes.insert(section.bytes.end(), item.bytes.begin(),
-		                     item.bytes.end());
+		const ObjectSymbol & symbol = module_.symbols[s];
+		if (symbol.item < 0 ||
+		    symbol.binding != ObjectSymbol::SB_INTERNAL ||
+		    symbol.local_name.empty())
+			continue;
+		const ImageItem & item =
+			module_.items[static_cast<size_t>(symbol.item)];
+		ElfSymbolEntry entry;
+		entry.name = symbol.local_name;
+		entry.info = item.is_code ? 2 : 1;   // LOCAL FUNC / OBJECT
+		entry.shndx = static_cast<unsigned short>(
+			item_section_[static_cast<size_t>(symbol.item)]->index);
+		entry.value = item_offset_[static_cast<size_t>(symbol.item)] +
+		              static_cast<unsigned long long>(symbol.offset);
+		if (item.is_code && symbol.offset == 0 &&
+		    function_size_.count(symbol.item))
+			entry.size = function_size_[symbol.item];
+		locals_.push_back(entry);
 	}
-	for (size_t f = 0; f < module_.eh_functions.size(); f++)
-		function_size_[module_.eh_functions[f].item] =
-			module_.eh_functions[f].code_size;
+	global_base_ = locals_.size() + 1;
 }
 
 int ElfObjectWriter::AppendGlobal(const ElfSymbolEntry & entry)
@@ -461,10 +562,14 @@ void ElfObjectWriter::AppendFde(size_t fn, bool with_lsda,
 	unsigned long long cie = with_lsda ? cie_plr_offset_ : 0;
 	AppendWord(out, out.size() - static_cast<size_t>(cie), 4);
 	{
-		ElfReloc reloc;   // pc begin: pcrel sdata4 against .text
+		// pc begin: pcrel sdata4 against the function's own section
+		// (COMDAT members included, so GNU linkers drop the FDE with
+		// a discarded group).
+		ElfReloc reloc;
 		reloc.offset = out.size();
 		reloc.kind = kRelocPc32;
-		reloc.symbol = text_.symbol;
+		reloc.symbol =
+			item_section_[static_cast<size_t>(eh.item)]->symbol;
 		reloc.addend = static_cast<long long>(
 			item_offset_[static_cast<size_t>(eh.item)] + eh.item_offset);
 		eh_frame_.relocs.push_back(reloc);
@@ -587,14 +692,60 @@ void ElfObjectWriter::EmitSymtab()
 		EmitSymbolRecord(globals_[g]);
 }
 
-// The section header table: null, the layout sections, their .rela
-// pairs, then .symtab/.strtab/.shstrtab.
+// The section header table: null, the SHT_GROUP headers, the layout
+// sections, their .rela pairs, then .symtab/.strtab/.shstrtab.
 vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 	vector<vector<unsigned char> > & rela_payloads,
+	vector<vector<unsigned char> > & group_payloads,
 	size_t & shstrtab_index)
 {
+	// Which layout sections carry relocations decides every later
+	// index: .rela headers follow the layout block, .symtab follows
+	// them.
+	vector<size_t> rela_sources;
+	for (size_t s = 0; s < layout_.size(); s++)
+		if (!layout_[s]->relocs.empty())
+			rela_sources.push_back(s);
+	size_t rela_base = 1 + comdat_sections_.size() + layout_.size();
+	size_t symtab_index = rela_base + rela_sources.size();
+
 	vector<SectionHeader> headers;
 	headers.push_back(SectionHeader());
+
+	// COMDAT groups: GRP_COMDAT, the member section, its .rela pair.
+	for (std::deque<SectionData>::const_iterator c =
+	         comdat_sections_.begin();
+	     c != comdat_sections_.end(); ++c)
+	{
+		vector<unsigned char> payload;
+		AppendWord(payload, kGroupComdat, 4);
+		AppendWord(payload, static_cast<unsigned>(c->index), 4);
+		for (size_t r = 0; r < rela_sources.size(); r++)
+			if (layout_[rela_sources[r]] == &*c)
+				AppendWord(payload, rela_base + r, 4);
+		group_payloads.push_back(payload);
+	}
+	{
+		size_t group = 0;
+		for (std::deque<SectionData>::const_iterator c =
+		         comdat_sections_.begin();
+		     c != comdat_sections_.end(); ++c, ++group)
+		{
+			SectionHeader header;
+			header.name = ".group";
+			header.type = kSectionGroup;
+			header.size = group_payloads[group].size();
+			header.link = static_cast<unsigned>(symtab_index);
+			header.info = static_cast<unsigned>(
+				defined_symbol_elf_[static_cast<size_t>(
+					c->signature_symbol)]);
+			header.align = 4;
+			header.entsize = 4;
+			header.payload = &group_payloads[group];
+			headers.push_back(header);
+		}
+	}
+
 	for (size_t s = 0; s < layout_.size(); s++)
 	{
 		const SectionData & section = *layout_[s];
@@ -610,15 +761,13 @@ vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 	}
 
 	vector<size_t> rela_headers;
-	for (size_t s = 0; s < layout_.size(); s++)
+	for (size_t r = 0; r < rela_sources.size(); r++)
 	{
-		const SectionData & section = *layout_[s];
-		if (section.relocs.empty())
-			continue;
+		const SectionData & section = *layout_[rela_sources[r]];
 		vector<unsigned char> payload;
-		for (size_t r = 0; r < section.relocs.size(); r++)
+		for (size_t i = 0; i < section.relocs.size(); i++)
 		{
-			const ElfReloc & reloc = section.relocs[r];
+			const ElfReloc & reloc = section.relocs[i];
 			AppendWord(payload, reloc.offset, 8);
 			AppendWord(payload,
 			           (static_cast<unsigned long long>(
@@ -632,6 +781,8 @@ vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 		header.name = ".rela" + section.name;
 		header.type = kSectionRela;
 		header.flags = kFlagInfoLink;
+		if (section.flags & kFlagGroup)
+			header.flags |= kFlagGroup;
 		header.size = payload.size();
 		header.info = static_cast<unsigned>(section.index);
 		header.align = 8;
@@ -642,7 +793,8 @@ vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 	for (size_t r = 0; r < rela_headers.size(); r++)
 		headers[rela_headers[r]].payload = &rela_payloads[r];
 
-	size_t symtab_index = headers.size();
+	if (symtab_index != headers.size())
+		throw runtime_error("section header planning drifted");
 	{
 		SectionHeader header;
 		header.name = ".symtab";
@@ -680,9 +832,11 @@ vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 void ElfObjectWriter::EmitFile(const string & path)
 {
 	vector<vector<unsigned char> > rela_payloads;
+	vector<vector<unsigned char> > group_payloads;
 	size_t shstrtab_index = 0;
 	vector<SectionHeader> headers =
-		BuildSectionHeaders(rela_payloads, shstrtab_index);
+		BuildSectionHeaders(rela_payloads, group_payloads,
+		                    shstrtab_index);
 
 	shstrtab_.push_back(0);
 	vector<unsigned long long> name_offsets(headers.size(), 0);
@@ -752,6 +906,8 @@ void ElfObjectWriter::Write(const string & path)
 {
 	PlanSections();
 	PlaceItems();
+	FinalizeLayout();
+	PlanLocalSymbols();
 	PlanDefinedSymbols();
 	ConvertPatches();
 	BuildEhSections();

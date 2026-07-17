@@ -442,6 +442,11 @@ struct SemUnit
 	// undeclared). Sema owns the recognition; the lowering folds
 	// type_info operator==/!= calls through this identity.
 	const NamedTypeInfo* std_type_info = 0;
+	// PA32: destructor invocations whose effect-free cleanup emits no
+	// code. The selected destructor stays odr-used (3.2p3): the
+	// lowering demands its deferred definition without emitting the
+	// call, so the object file carries the host-expected weak entry.
+	vector<SemNodePtr> elided_dtor_uses;
 };
 
 // Writes the `translation-unit` line and the tree below it.

@@ -34,6 +34,10 @@ struct ObjectSymbol
 
 	std::string low_name;       // module-local spelling ("" for aliases)
 	std::string external_name;  // resolution key ("" for module-private)
+	// PA32: the ABI spelling of an internal-linkage definition. Not a
+	// resolution key; host objects render it as a named LOCAL symtab
+	// entry so host tools see the entity.
+	std::string local_name;
 	Binding binding = SB_UNDEFINED;
 	int item = -1;              // defining item index, -1 when undefined
 	long long offset = 0;       // symbol offset inside the item
