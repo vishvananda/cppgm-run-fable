@@ -87,6 +87,26 @@ const char * const kSupportedFeatures[] = {
 	0
 };
 
+// Builtin type transforms the sema type builder evaluates
+// (type_builder.cpp ResolveTransformSpecifier).
+const char * const kBuiltinTransforms[] = {
+	"__decay",
+	"__remove_reference_t",
+	"__remove_reference",
+	"__remove_const",
+	"__remove_volatile",
+	"__remove_cv",
+	"__remove_cvref",
+	"__remove_extent",
+	"__remove_all_extents",
+	"__remove_pointer",
+	"__add_pointer",
+	"__add_lvalue_reference",
+	"__add_rvalue_reference",
+	"__underlying_type",
+	0
+};
+
 const char * const kSupportedAttributes[] = {
 	// using_if_exists: a using-declaration whose target may be missing
 	// binds nothing instead of erroring (hosted libc++-style headers).
@@ -107,7 +127,13 @@ set<string> MakeNameSet(const char * const * names)
 bool HostedProbeHasBuiltin(const string & name)
 {
 	static const set<string> builtins = MakeNameSet(kSupportedBuiltins);
-	return builtins.count(name) != 0;
+	return builtins.count(name) != 0 || HostedBuiltinTransformName(name);
+}
+
+bool HostedBuiltinTransformName(const string & name)
+{
+	static const set<string> transforms = MakeNameSet(kBuiltinTransforms);
+	return transforms.count(name) != 0;
 }
 
 bool HostedProbeHasFeature(const string & name)

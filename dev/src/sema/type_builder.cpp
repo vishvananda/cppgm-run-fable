@@ -144,27 +144,8 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 			resolved = host_.BindNestedTypeSpecifier(*spec.nested_decl);
 			break;
 		case SPEC_TRANSFORM:
-		{
-			// PA33 __decay(T) (20.9.7.4): references strip, arrays
-			// decay to element pointers, functions to function
-			// pointers, everything else drops its top cv. A dependent
-			// operand needs instantiation-time facts (the deferred
-			// alias-substitution path re-resolves it concretely).
-			TypePtr operand = ResolveTypeId(*spec.transform_type);
-			if (TypeIsDependent(operand))
-				throw runtime_error(
-					"builtin transform of a dependent type");
-			TypePtr stripped = IsReferenceType(operand)
-				? operand->target : operand;
-			if (stripped->kind == TK_ARRAY)
-				resolved = MakePointerType(stripped->target, false,
-				                           false);
-			else if (stripped->kind == TK_FUNCTION)
-				resolved = MakePointerType(stripped, false, false);
-			else
-				resolved = RemoveTopCv(stripped);
+			resolved = ResolveTransformSpecifier(spec);
 			break;
-		}
 		}
 		if (named)
 			throw runtime_error("multiple type specifiers");
@@ -196,6 +177,85 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 			: MakeFundamentalType(CombineSimpleTypeSpecifiers(simple));
 	info.type = MakeCvQualifiedType(base, is_const, is_volatile);
 	return info;
+}
+
+// PA33 __decay / PA34 transform family (20.9.7): each transform maps
+// the resolved operand type structurally. Dependent operands defer to
+// the instantiation-time re-resolution path.
+TypePtr TypeBuilder::ResolveTransformSpecifier(const AstSpecifier& spec)
+{
+	TypePtr operand = ResolveTypeId(*spec.transform_type);
+	if (TypeIsDependent(operand))
+		throw runtime_error("builtin transform of a dependent type");
+	const string& name = spec.spelling;
+	if (name == "__decay")
+	{
+		// 20.9.7.4: references strip, arrays decay to element
+		// pointers, functions to function pointers, everything else
+		// drops its top cv.
+		TypePtr stripped = IsReferenceType(operand)
+			? operand->target : operand;
+		if (stripped->kind == TK_ARRAY)
+			return MakePointerType(stripped->target, false, false);
+		if (stripped->kind == TK_FUNCTION)
+			return MakePointerType(stripped, false, false);
+		return RemoveTopCv(stripped);
+	}
+	if (name == "__remove_reference_t" || name == "__remove_reference")
+		return IsReferenceType(operand) ? operand->target : operand;
+	if (name == "__remove_const" || name == "__remove_volatile" ||
+	    name == "__remove_cv")
+	{
+		bool keep_const = name == "__remove_volatile" &&
+			operand->is_const;
+		bool keep_volatile = name == "__remove_const" &&
+			operand->is_volatile;
+		return MakeCvQualifiedType(RemoveTopCv(operand), keep_const,
+		                           keep_volatile);
+	}
+	if (name == "__remove_cvref")
+	{
+		TypePtr stripped = IsReferenceType(operand)
+			? operand->target : operand;
+		return RemoveTopCv(stripped);
+	}
+	if (name == "__remove_extent")
+		return operand->kind == TK_ARRAY ? operand->target : operand;
+	if (name == "__remove_all_extents")
+	{
+		TypePtr element = operand;
+		while (element->kind == TK_ARRAY)
+			element = element->target;
+		return element;
+	}
+	if (name == "__remove_pointer")
+		return operand->kind == TK_POINTER ? operand->target : operand;
+	if (name == "__add_pointer")
+	{
+		TypePtr stripped = IsReferenceType(operand)
+			? operand->target : operand;
+		return MakePointerType(stripped, false, false);
+	}
+	if (name == "__add_lvalue_reference" ||
+	    name == "__add_rvalue_reference")
+	{
+		// 20.9.7.2: non-referenceable types (cv void) pass through;
+		// reference collapse applies (&& of & is &).
+		if (operand->kind == TK_FUNDAMENTAL &&
+		    operand->fundamental == FT_VOID)
+			return operand;
+		return MakeReferenceType(operand,
+		                         name == "__add_rvalue_reference",
+		                         true);
+	}
+	if (name == "__underlying_type")
+	{
+		if (operand->kind != TK_ENUM)
+			throw runtime_error("__underlying_type operand is not an "
+			                    "enumeration: " + DescribeType(operand));
+		return MakeFundamentalType(operand->named->enum_underlying);
+	}
+	throw runtime_error("unknown builtin transform: " + name);
 }
 
 // Whether the parameter's declarator carries a top-level `...` pack

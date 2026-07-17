@@ -1,5 +1,7 @@
 #include "ast/ast_parser.h"
 
+#include "hosted_probes.h"
+
 using std::string;
 using std::vector;
 using std::move;
@@ -137,8 +139,9 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		if (type != OP_COLON2)
 			return false;
 	}
-	// PA33 builtin transform: __decay ( type-id ).
-	if (type_state == kNoType && AtIdentifierSpelled("__decay") &&
+	// PA33 __decay / PA34 transform family: __remove_cv ( type-id ) etc.
+	if (type_state == kNoType && Peek().kind == PTOK_IDENTIFIER &&
+	    HostedBuiltinTransformName(Peek().spelling) &&
 	    AtSimple(OP_LPAREN, 1))
 	{
 		State state = Save();

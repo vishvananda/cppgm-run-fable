@@ -182,6 +182,11 @@ public:
 	                     bool* extra_variadic = 0);
 
 private:
+	// PA33 __decay / PA34 builtin transform family: dispatches one
+	// SPEC_TRANSFORM specifier on its spelling. A dependent operand
+	// needs instantiation-time facts (the deferred alias-substitution
+	// path re-resolves it concretely).
+	TypePtr ResolveTransformSpecifier(const AstSpecifier& spec);
 	void ConsumeSpecifierKeyword(const AstSpecifier& spec,
 	                             bool allow_storage,
 	                             DeclSpecifierInfo& info,

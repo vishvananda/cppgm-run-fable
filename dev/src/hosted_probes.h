@@ -25,3 +25,8 @@ bool HostedProbeHasAttribute(const std::string & name);
 
 // __has_cpp_attribute: C++ standard attribute probe.
 bool HostedProbeHasCppAttribute(const std::string & name);
+
+// Builtin type-transform identifiers (`__remove_cv(T)` and family):
+// parsed as type specifiers, evaluated by the sema type builder. The
+// __has_builtin answer for these names follows this same table.
+bool HostedBuiltinTransformName(const std::string & name);
