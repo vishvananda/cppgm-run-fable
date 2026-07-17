@@ -348,10 +348,18 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			}
 			else if(arg.kind == LOWIR_OPERAND_SLOT) {
 				const SlotInfo & home = slots_[arg.name];
-				bool by_address = slot.by_address ||
-					(slot.param_type.kind == LOWIR_TYPE_PTR &&
-					 home.type.kind != LOWIR_TYPE_PTR) ||
-					home.type.kind == LOWIR_TYPE_OBJ;
+				// A register-class object parameter travels by value
+				// (the callee spills the container bytes); everything
+				// else object-homed passes its address.
+				bool by_value_obj =
+					home.type.kind == LOWIR_TYPE_OBJ &&
+					slot.param_type.kind == LOWIR_TYPE_OBJ &&
+					slot.param_type.obj_bytes <= 8 && !slot.by_address;
+				bool by_address = !by_value_obj &&
+					(slot.by_address ||
+					 (slot.param_type.kind == LOWIR_TYPE_PTR &&
+					  home.type.kind != LOWIR_TYPE_PTR) ||
+					 home.type.kind == LOWIR_TYPE_OBJ);
 				if(by_address) {
 					mir_model::Instruction & lea =
 						emit(mir_model::Instruction::MI_LEA);
@@ -362,7 +370,9 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 				else {
 					mir_model::Instruction & fill =
 						emit(mir_model::Instruction::MI_LOAD);
-					fill.type = SpellType(home.type);
+					fill.type = home.type.kind == LOWIR_TYPE_OBJ
+						? ContainerSpelling(home.type.obj_bytes)
+						: SpellType(home.type);
 					fill.operands.push_back(MakeReg(target));
 					fill.operands.push_back(
 						frame_operand(home.frame_offset));

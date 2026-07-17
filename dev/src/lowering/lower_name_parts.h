@@ -15,6 +15,7 @@
 // points stay in lower_name.h.
 
 struct AstTypeId;
+struct AstTemplateArgument;
 
 namespace lower_mangle {
 
@@ -48,6 +49,10 @@ void ArgsPackSpan(const vector<TemplateParam>& params, size_t arg_count,
 // The named components (namespaces and classes) from the global scope
 // down to `scope`, outermost first.
 vector<NameComponent> ScopeComponents(const Scope* scope);
+
+// 5.1.4.2: whether the component list opens with the global ::std
+// namespace (spelled St, never a substitution candidate).
+bool HeadIsStd(const vector<NameComponent>& parts);
 
 // Component substitution table (5.1.9): previously seen substitutable
 // fragments compress to S_/S<n>_.
@@ -123,9 +128,31 @@ public:
 	// mangles: decltype return expressions spell fp_/fp<n-1>_
 	// references through this list.
 	const vector<string>* fn_param_names = 0;
+	// PA32 alias transparency (14.5.7p2: an alias template-id is
+	// equivalent to the aliased type): written names resolve against
+	// this scope chain so alias template-ids expand to their aliased
+	// type-ids while mangling.
+	const Scope* written_scope = 0;
+	// The active alias-expansion frame: the alias's parameter names
+	// bind the use site's written arguments, spelled in the enclosing
+	// context captured here.
+	struct AliasFrame
+	{
+		const TemplateInfo* alias = 0;
+		const vector<AstTemplateArgument>* args = 0;
+		const vector<TemplateParam>* outer_params = 0;
+		const vector<string>* outer_fn_params = 0;
+		const Scope* outer_scope = 0;
+		const AliasFrame* outer = 0;
+	};
+	const AliasFrame* alias_frame = 0;
 };
 
 string SourceName(const string& name);
+
+// The Itanium <operator-name> code of an operator's source spelling
+// ("-" -> "mi"); false when the spelling has no binary/unary code.
+bool LookupOperatorCode(const string& text, string& code);
 
 // A pointer-identity substitution key fragment (stable within one
 // mangled name, independent of substitution-dependent spellings).
@@ -153,6 +180,9 @@ string MangleBareParameters(const TypePtr& fn, Substitutions& subs,
 // `J <args> E` (an empty pack still spells `JE`).
 string MangleArgList(const vector<TemplateArg>& args, size_t pack_start,
                      size_t pack_end, Substitutions& subs);
+
+// One template argument (5.1.6/5.1.7).
+string MangleTemplateArg(const TemplateArg& arg, Substitutions& subs);
 
 // Appends the enclosing components of a symbol's nested-name prefix,
 // registering each as a substitution candidate. Returns the prefix
