@@ -164,13 +164,15 @@ One EH codegen, table-driven both ways:
   and both caller consumption paths. Nothing before
   `100-host-eh-compact-unwind-callee-save` returned a two-eightbyte
   class through a non-inlined call.
-- The register allocator double-books a callee-saved pool register
-  when a parameter copied to the pool at entry coexists with a
-  negation temp (`mov reg,0; sub`) - observed while reshaping the
-  runtime's `__cxa_throw`. Sidestepped by giving the runtime a
-  `cppgm_eh_record_of` helper (the arithmetic lives in its own frame);
-  the pinned pa28 register discipline was left untouched. Worth a
-  dedicated look in a later audit turn.
+- The register allocator double-booked a callee-saved pool register
+  when a scratch parameter's pending prologue copy materialized after
+  a temp had already used and released the same register (observed
+  while reshaping the runtime's `__cxa_throw`; the runtime kept the
+  `cppgm_eh_record_of` helper as good factoring). Fixed in the audit
+  turn: `resolve_location` hoists the copy into the prologue, so it
+  now only targets registers no already-emitted code has written
+  (`pool_clobbered_` tracking). Pinned pa28 fixtures are unchanged -
+  they never exercised the corrupting overlap.
 
 ## Validation
 
@@ -194,3 +196,59 @@ One EH codegen, table-driven both ways:
 hosted-library EH, `new`/`delete` host mapping (still
 `cppgm_builtin_operator_new` — first needed by pa32), Mach-O compact unwind
 (no Mach-O target on this host).
+
+## Architecture Review
+
+- One EH codegen serves both link paths, exactly as planned: the region
+  dataflow (`lowir_to_mir_eh.cpp`) annotates calls and publishes typed
+  regions; `mir_to_native.cpp` records call-site byte ranges, landing
+  offsets, and frame facts; `compile_unit.cpp` converts them to
+  `EhFunctionInfo` on the `ObjectModule`. The ELF writer renders host
+  sections from those facts, the ELF reader parses them back, and the
+  private linker renders the same facts into its flat table. No path
+  reconstructs semantic facts from strings or from emitted bytes other
+  than at the declared ELF boundary.
+- Pinned surfaces held: pa25/pa26/pa27 LowIR text is untouched (all
+  PA31 work is below LowIR), pa28 strict MIR fixtures pass unchanged,
+  and the pa29 object round-trip now flows through real ET_REL ELF.
+- Ownership is single-homed: `IsRuntimeOwnedTypeinfoName` owns the
+  demotion/provision set (demote in `compile_unit.cpp`, provide in
+  `runtime_library.cpp`); `eh_table.cpp` owns LSDA bytes both ways;
+  `frame_cfi.cpp` owns DWARF CFI knowledge; the reader/writer pair own
+  the ELF layout constants as the two sides of one documented boundary.
+- The audit found three real backend defects (the walker's
+  abandoned-frame callee-save loss, the hoisted-copy double-booking,
+  and the `LowerIndex` fast path dropping runtime counts) and one
+  quadratic scan; all four are fixed (see pa31/audit.md
+  Findings/Changes Made).
+
+## Final Architecture Review
+
+- Landing-pad frames now snapshot the full callee-saved pool set
+  (`FinishFrame`): the private walker's landing contract (only
+  rax/rdx/rbp installed, abandoned frames' spills lost) is sound
+  because the landed frame's own epilogue restores its entry snapshot;
+  the host unwinder sees the same snapshot through the CFI offset
+  rules. This is the one deliberate cost of keeping a single codegen
+  for both unwinders: five extra prologue stores per catch/cleanup
+  frame, none for throw-only or non-EH functions.
+- The hoisted prologue param copy (`resolve_location`) only targets
+  never-clobbered registers (`pool_clobbered_`), closing the
+  double-booking miscompile; the fallback (named frame home) already
+  existed and is unchanged.
+- The EH region dataflow resolves block labels through a map instead
+  of per-merge linear scans, so the pass every function now runs stays
+  linear-ish in block count.
+- `LowerIndex`'s pinned-base fast path is gated on literal counts;
+  runtime counts always take the general scale-in-rdx path (the fast
+  path used to parse a temp count as literal 0 and drop the index -
+  reachable only from hand-written LowIR, fixed regardless).
+- Loud subset boundaries, verified not silently reachable: the LSDA
+  action encoder's one-byte sleb profile (>63 distinct catch filters
+  per function throws), item alignment caps, and the linux-only host
+  object target. Each fails the compile loudly rather than degrading
+  output.
+- `make test-report-through-pa31` passes 2765/2765 with the file audit
+  clean after all audit fixes; the fact-bearing pa31 tests pin the
+  emission surface and the executed programs exercise the CFI/LSDA
+  under the real host unwinder.
