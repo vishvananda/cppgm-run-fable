@@ -1409,29 +1409,26 @@ NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
 	// PA32 host TLS: define the wrapper for every thread_local this
 	// module defines or accesses (the access sites call it).
 	std::vector<std::pair<int, int> > wrapper_items;
-	if (program.host_tls)
+	if (program.host_tls && !program.tls_wrappers.empty())
 	{
+		std::set<std::string> global_names;
+		for (std::size_t i = 0; i < program.globals.size(); i++)
+			global_names.insert(program.globals[i].name);
+		std::set<std::string> function_names;
+		for (std::size_t i = 0; i < program.functions.size(); i++)
+			function_names.insert(program.functions[i].name);
+		std::set<std::string> used_names(env.label_names().begin(),
+		                                 env.label_names().end());
 		for (std::map<std::string, std::string>::const_iterator it =
 		         program.tls_wrappers.begin();
 		     it != program.tls_wrappers.end(); ++it)
 		{
 			const std::string & wrapper = it->first;
 			const std::string & global = it->second;
-			bool global_defined = false;
 			std::string init_name = global + "__tls_init";
-			bool init_defined = false;
-			for (std::size_t i = 0; i < program.globals.size(); i++)
-				if (program.globals[i].name == global)
-					global_defined = true;
-			for (std::size_t i = 0; i < program.functions.size(); i++)
-				if (program.functions[i].name == init_name)
-					init_defined = true;
-			bool wrapper_used = false;
-			const std::vector<std::string> & names = env.label_names();
-			for (std::size_t i = 0; i < names.size(); i++)
-				if (names[i] == wrapper)
-					wrapper_used = true;
-			if (!global_defined && !wrapper_used)
+			bool global_defined = global_names.count(global) > 0;
+			bool init_defined = function_names.count(init_name) > 0;
+			if (!global_defined && !used_names.count(wrapper))
 				continue;
 			std::map<std::string, std::string>::const_iterator object =
 				program.tls_wrapper_objects.find(wrapper);

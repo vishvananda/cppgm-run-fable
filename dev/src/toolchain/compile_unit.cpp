@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -385,12 +386,24 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 	// PA32 host TLS: synthesized wrappers define their declared
 	// symbol (weak for the exported _ZTW spelling, module-private for
 	// internal thread-locals); the init probes bind weak undefined.
-	for (size_t w = 0; w < native.tls_wrapper_labels.size(); w++)
+	if (!native.tls_wrapper_labels.empty() ||
+	    !native.weak_undefined_labels.empty())
+	{
+		std::set<string> wrappers(native.tls_wrapper_labels.begin(),
+		                          native.tls_wrapper_labels.end());
+		std::set<string> weak_undef(
+			native.weak_undefined_labels.begin(),
+			native.weak_undefined_labels.end());
 		for (size_t s = 0; s < module.symbols.size(); s++)
 		{
 			ObjectSymbol & symbol = module.symbols[s];
-			if (symbol.low_name != native.tls_wrapper_labels[w] ||
-			    symbol.item < 0)
+			if (symbol.item < 0)
+			{
+				if (weak_undef.count(symbol.low_name))
+					symbol.weak_undefined = true;
+				continue;
+			}
+			if (!wrappers.count(symbol.low_name))
 				continue;
 			symbol.binding = symbol.external_name.empty() ||
 				symbol.external_name == symbol.low_name
@@ -399,12 +412,7 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 			if (symbol.binding == ObjectSymbol::SB_INTERNAL)
 				symbol.external_name.clear();
 		}
-	for (size_t w = 0; w < native.weak_undefined_labels.size(); w++)
-		for (size_t s = 0; s < module.symbols.size(); s++)
-			if (module.symbols[s].low_name ==
-			        native.weak_undefined_labels[w] &&
-			    module.symbols[s].item < 0)
-				module.symbols[s].weak_undefined = true;
+	}
 
 	std::map<string, int> defined =
 		BuildDefinedSymbolIndex(module, native.label_names);

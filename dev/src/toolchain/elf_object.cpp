@@ -78,6 +78,9 @@ struct SectionData
 	int symbol = 0;         // section symbol (ELF symtab index)
 	// COMDAT member sections: the module symbol signing the group.
 	int signature_symbol = -1;
+	// The section's .rela header index, -1 when it carries no
+	// relocations (group payloads list the member's .rela section).
+	int rela_index = -1;
 };
 
 // One section header record under assembly (payload bound later for
@@ -138,8 +141,7 @@ private:
 	void EmitSymtab();
 	void AppendGroupHeaders(vector<SectionHeader> & headers,
 	                        vector<vector<unsigned char> > & group_payloads,
-	                        const vector<size_t> & rela_sources,
-	                        size_t rela_base, size_t symtab_index);
+	                        size_t symtab_index);
 	vector<SectionHeader> BuildSectionHeaders(
 		vector<vector<unsigned char> > & rela_payloads,
 		vector<vector<unsigned char> > & group_payloads,
@@ -747,7 +749,6 @@ void ElfObjectWriter::EmitSymtab()
 void ElfObjectWriter::AppendGroupHeaders(
 	vector<SectionHeader> & headers,
 	vector<vector<unsigned char> > & group_payloads,
-	const vector<size_t> & rela_sources, size_t rela_base,
 	size_t symtab_index)
 {
 	for (std::deque<SectionData>::const_iterator c =
@@ -757,9 +758,9 @@ void ElfObjectWriter::AppendGroupHeaders(
 		vector<unsigned char> payload;
 		AppendWord(payload, kGroupComdat, 4);
 		AppendWord(payload, static_cast<unsigned>(c->index), 4);
-		for (size_t r = 0; r < rela_sources.size(); r++)
-			if (layout_[rela_sources[r]] == &*c)
-				AppendWord(payload, rela_base + r, 4);
+		if (c->rela_index >= 0)
+			AppendWord(payload,
+			           static_cast<unsigned>(c->rela_index), 4);
 		group_payloads.push_back(payload);
 	}
 	size_t group = 0;
@@ -798,11 +799,13 @@ vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
 			rela_sources.push_back(s);
 	size_t rela_base = 1 + comdat_sections_.size() + layout_.size();
 	size_t symtab_index = rela_base + rela_sources.size();
+	for (size_t r = 0; r < rela_sources.size(); r++)
+		layout_[rela_sources[r]]->rela_index =
+			static_cast<int>(rela_base + r);
 
 	vector<SectionHeader> headers;
 	headers.push_back(SectionHeader());
-	AppendGroupHeaders(headers, group_payloads, rela_sources, rela_base,
-	                   symtab_index);
+	AppendGroupHeaders(headers, group_payloads, symtab_index);
 
 	for (size_t s = 0; s < layout_.size(); s++)
 	{

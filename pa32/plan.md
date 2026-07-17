@@ -144,6 +144,63 @@ the file audit passes. Design points settled during implementation:
   and callee agreed on content-in-register everywhere else), and i128
   loads/stores accept global operands.
 
+## Architecture Review
+
+- Naming has one owner per layer, as planned. Sema records the facts
+  (declared language linkage per overload slot, `fn_declared_inline`,
+  elided-dtor odr-uses, `anonymous_storage` field rows); lowering
+  turns them into ABI spellings exactly once (`lower_name*.cpp`,
+  `FunctionEntry` for the four replaceable allocation functions,
+  `AppendTlsWrapperDeclares` for `_ZTW`); the toolchain preserves the
+  spelling it was given. The only downstream name derivation is the
+  `_ZTW`→`_ZTH` probe spelling at wrapper-synthesis time, which is the
+  ABI-defined mechanical prefix swap on an already-mangled encoding.
+- The mode boundary is one bit with one meaning. The three
+  `SeparateCompilation()`-gated behaviors (Itanium allocation
+  spellings, elided-dtor demand, trivial-default-construction pruning)
+  choose between two complete presentations - the host-parity object
+  surface and the fixture-pinned whole-program shape - never between
+  implemented and skipped work. `host_tls` is the same boundary one
+  layer down: the `-c` path always routes `tls_addr` through the
+  synthesized per-TU wrapper, while the private executable model keeps
+  its pinned single-threaded shape.
+- The runtime library now defines the replaceable allocation functions
+  as ordinary C++ `operator new/delete` definitions, so their object
+  names flow through the same `FunctionEntry` decision as every call
+  site; no string of either spelling exists outside that one function.
+- ELF emission consumes typed module facts only: COMDAT membership
+  from `ObjectSymbol` bindings, TLS placement from
+  `ImageItem::is_thread_local`, LOCAL names from
+  `ObjectSymbol::local_name`, weak-undefined probes from an explicit
+  flag. Nothing in the writer parses names or re-derives semantics.
+- Mangler additions are written-form/AST-driven: `Tn` from the NTTP's
+  written declared type mentioning the template's own parameters,
+  alias transparency through a scoped expansion frame with real
+  shadowing rules, `St`/`Sa`/`Ss`-family abbreviations keyed on the
+  semantic owner scope (direct member of global `::std`), not on name
+  text.
+- Pinned surfaces held: pa13/pa15/pa18 LowIR and pa28 strict MIR
+  fixtures are byte-identical (TLS wrapper bodies synthesize below
+  MIR), pa30 mangling fixtures pass, and the pa29/pa31 own-link path
+  is unchanged apart from the shared allocation-function spelling.
+
+## Final Architecture Review
+
+The audit (pa32/audit.md) confirmed the plan's shape survived
+implementation and found no skipped phases, fallback success paths,
+fixture-shape gates, or ownership splits. Three avoidable scan costs
+were cleaned up: the SHT_GROUP payload builder scanned every .rela
+source per group (now an O(1) `rela_index` recorded on the section),
+and the TLS wrapper paths in `compile_unit.cpp` / `mir_to_native.cpp`
+rescanned full module lists per wrapper (now one pass with set
+lookups). Accepted boundaries, all documented in Outcome notes: all
+TLS data lands in `.tdata` (zero-filled bytes instead of a separate
+`.tbss`, semantically equivalent for the host linker), dynamic-init
+TLS interop beyond the module-local guarded init is PA33+, the
+wrapper carries no CFI/FDE yet, and abbreviation-as-prefix mangling
+waits for hosted headers (PA34). `make test-report-through-pa32` and
+the pa32 file audit pass on the final tree.
+
 ## Validation
 
 - Per-cluster: `make -C pa32 check TEST=tests/general/<case>.t` plus targeted
