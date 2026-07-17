@@ -1022,6 +1022,63 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 		                           key_out);
 	case TK_TEMPLATE_SPEC:
 	{
+		// 5.1.5: a template-template-parameter specialization spells
+		// the parameter itself (T_/Tn_, a param candidate) with its
+		// argument list; the whole spelling is a candidate.
+		if (type->named->is_template_anchor &&
+		    type->named->param_index >= 0)
+		{
+			int index = type->named->param_index;
+			string param_key = "TP:" +
+				PointerKey(subs.pattern_params) + ":" +
+				to_string(index);
+			string spelled = subs.FindParam(param_key);
+			if (spelled.empty())
+			{
+				subs.AddParam(param_key);
+				spelled = index == 0
+					? string("T_")
+					: "T" + to_string(index - 1) + "_";
+			}
+			string body = spelled + "I";
+			string key = param_key + "<";
+			for (size_t a = 0; a < type->targs.size(); a++)
+			{
+				body += MangleTemplateArg(type->targs[a], subs);
+				key += ArgKey(type->targs[a], subs.pattern_params) +
+					",";
+			}
+			body += "E";
+			key += ">";
+			if (key_out)
+				*key_out = key;
+			string found = subs.Find(key);
+			if (!found.empty())
+				return found;
+			subs.Add(key);
+			return body;
+		}
+		// 14.5.7p2: an alias-template specialization pattern is the
+		// aliased type - expand the written target with the pattern
+		// arguments bound. Targets outside the written subset fall
+		// back to the alias's own component spelling (a pairing hint,
+		// like the function-level written fallback), with the table
+		// restored so partial expansion never shifts later numbering.
+		if (type->named->spec_template &&
+		    type->named->spec_template->kind == TMPL_ALIAS)
+		{
+			Substitutions saved_state = subs;
+			try
+			{
+				return MangleTypedAliasExpansion(
+					*type->named->spec_template, type->targs, subs,
+					key_out);
+			}
+			catch (const std::exception&)
+			{
+				subs = saved_state;
+			}
+		}
 		// A dependent specialization pattern (`box<T>`): the anchor's
 		// components with this node's argument patterns on the leaf.
 		vector<NameComponent> parts = EntityComponents(*type->named);

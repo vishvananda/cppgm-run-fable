@@ -140,6 +140,9 @@ public:
 	{
 		const TemplateInfo* alias = 0;
 		const vector<AstTemplateArgument>* args = 0;
+		// PA33: a typed pattern expansion binds the alias parameters
+		// to resolved TemplateArgs instead of written arguments.
+		const vector<TemplateArg>* typed_args = 0;
 		const vector<TemplateParam>* outer_params = 0;
 		const vector<string>* outer_fn_params = 0;
 		const Scope* outer_scope = 0;
@@ -191,6 +194,14 @@ string ManglePrefixComponents(const vector<NameComponent>& parts,
                               Substitutions& subs, string& encoding);
 
 string MangleTerminalName(const string& name, size_t arity);
+
+// PA33 14.5.7p2 (lower_name_template.cpp): an alias-template
+// specialization pattern is the aliased type - the alias's written
+// target mangles with its parameters bound to the resolved pattern
+// arguments.
+string MangleTypedAliasExpansion(const TemplateInfo& alias,
+                                 const vector<TemplateArg>& args,
+                                 Substitutions& subs, string* key_out);
 
 // 5.1.8 dependent names (lower_name_template.cpp): a written type-id
 // (dependent qualified names, dependent template-ids, pointer /

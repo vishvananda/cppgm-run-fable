@@ -227,6 +227,24 @@ const TemplateInfo* FindAliasTemplate(const Substitutions& subs,
 	return 0;
 }
 
+// Any class/alias template `id` names in the written lookup scope
+// (parameters and frame bindings shadow it) - the argument spellings
+// consult its parameter kinds.
+const TemplateInfo* FindNamedTemplate(const Substitutions& subs,
+                                      const string& id)
+{
+	if (AliasParamIndex(subs, id) >= 0 ||
+	    TemplateParamIndex(subs, TPK_TYPE, id) >= 0 ||
+	    TemplateParamIndex(subs, TPK_TEMPLATE, id) >= 0)
+		return 0;
+	for (const Scope* scope = subs.written_scope; scope;
+	     scope = scope->parent)
+		if (const ScopeBinding* binding = FindOwnBinding(*scope, id))
+			return binding->kind == SB_CLASS_TEMPLATE ? binding->templ
+			                                          : 0;
+	return 0;
+}
+
 // Mangles the type bound to alias parameter `index`: the use site's
 // written argument in the use site's own context, or the alias's own
 // default (written in the alias head, so the frame stays active).
@@ -235,6 +253,27 @@ string MangleAliasBoundType(Substitutions& subs, int index,
 {
 	const Substitutions::AliasFrame& frame = *subs.alias_frame;
 	MangleContext saved(subs);
+	// A typed pattern expansion splices the resolved argument type in
+	// the enclosing (pattern) context.
+	if (frame.typed_args)
+	{
+		if ((size_t)index >= frame.typed_args->size())
+		{
+			const AstTypeId* fallback =
+				frame.alias->params[(size_t)index].default_type;
+			if (!fallback)
+				throw OutsideBoundary("mangled dependent type form");
+			return MangleWrittenTypeId(*fallback, subs, key_out);
+		}
+		const TemplateArg& arg = (*frame.typed_args)[index];
+		if (arg.is_value || !arg.type)
+			throw OutsideBoundary("mangled dependent type form");
+		subs.pattern_params = frame.outer_params;
+		subs.fn_param_names = frame.outer_fn_params;
+		subs.written_scope = frame.outer_scope;
+		subs.alias_frame = frame.outer;
+		return MangleType(arg.type, subs, key_out);
+	}
 	const AstTypeId* type = 0;
 	if ((size_t)index < frame.args->size())
 	{
@@ -262,6 +301,36 @@ string MangleAliasBoundExprNode(Substitutions& subs, int index)
 {
 	const Substitutions::AliasFrame& frame = *subs.alias_frame;
 	MangleContext saved(subs);
+	// A typed pattern expansion splices the resolved value argument:
+	// a forwarded value parameter spells T_/Tn_ in the enclosing
+	// context; a deferred dependent expression re-spells as written.
+	if (frame.typed_args)
+	{
+		if ((size_t)index >= frame.typed_args->size())
+			throw OutsideBoundary("mangled dependent expression form");
+		const TemplateArg& arg = (*frame.typed_args)[index];
+		if (!arg.is_value)
+			throw OutsideBoundary("mangled dependent expression form");
+		subs.pattern_params = frame.outer_params;
+		subs.fn_param_names = frame.outer_fn_params;
+		subs.written_scope = frame.outer_scope;
+		subs.alias_frame = frame.outer;
+		if (arg.value_param >= 0)
+		{
+			string key = "TP:" + PointerKey(subs.pattern_params) + ":" +
+				to_string(arg.value_param);
+			string found = subs.FindParam(key);
+			if (!found.empty())
+				return found;
+			subs.AddParam(key);
+			return arg.value_param == 0
+				? string("T_")
+				: "T" + to_string(arg.value_param - 1) + "_";
+		}
+		if (arg.dependent_value)
+			return MangleWrittenExprNode(*arg.dependent_value, subs);
+		throw OutsideBoundary("mangled dependent expression form");
+	}
 	const AstExpr* expr = 0;
 	if ((size_t)index < frame.args->size())
 	{
@@ -455,6 +524,23 @@ string MangleWrittenExprNode(const AstExpr& expr, Substitutions& subs)
 		return code + MangleWrittenExprNode(*expr.operands[0], subs) +
 			MangleWrittenExprNode(*expr.operands[1], subs);
 	}
+	case EK_UNARY:
+	{
+		// 5.1.2: the unary forms of the dual-meaning operators carry
+		// their own codes.
+		if (expr.operands.size() != 1)
+			throw OutsideBoundary("mangled dependent expression form");
+		string code = expr.op_spelling == "*" ? "de"
+			: expr.op_spelling == "&" ? "ad"
+			: expr.op_spelling == "+" ? "ps"
+			: expr.op_spelling == "-" ? "ng"
+			: expr.op_spelling == "!" ? "nt"
+			: expr.op_spelling == "~" ? "co"
+			: string();
+		if (code.empty())
+			throw OutsideBoundary("mangled dependent expression form");
+		return code + MangleWrittenExprNode(*expr.operands[0], subs);
+	}
 	case EK_MEMBER:
 	{
 		// 5.1.6: class member access spells `dt`/`pt` with the object
@@ -560,10 +646,50 @@ string MangleWrittenArg(const AstTemplateArgument& argument,
 	return "J" + spelled + "E";
 }
 
+// The bare qualified-name of a type-id with no declarator operations
+// and exactly one unqualified type-name specifier, or null.
+const AstName* BareTypeIdName(const AstTypeId& id)
+{
+	if (id.declarator && !id.declarator->Empty())
+		return 0;
+	vector<const AstSpecifier*> specifiers = TypeSpecifiers(id.specifiers);
+	if (specifiers.size() != 1 ||
+	    specifiers[0]->kind != SPEC_TYPE_NAME ||
+	    specifiers[0]->name.typename_keyword ||
+	    specifiers[0]->name.global_scope)
+		return 0;
+	return &specifiers[0]->name;
+}
+
+// A written argument in a value-parameter position: an argument the
+// type-preferred parse committed as a bare qualified-name re-reads as
+// its expression spelling (`X sr..E` - the parameter kind decides the
+// ambiguity the parse could not).
+string MangleWrittenValueArg(const AstTemplateArgument& argument,
+                             Substitutions& subs, string* key_out)
+{
+	const AstName* name = argument.is_type && argument.type
+		? BareTypeIdName(*argument.type) : 0;
+	if (!name)
+		return MangleWrittenArg(argument, subs, key_out);
+	string body = MangleWrittenCallee(*name, subs);
+	if (key_out)
+	{
+		Substitutions throwaway;
+		throwaway.pattern_params = subs.pattern_params;
+		throwaway.fn_param_names = subs.fn_param_names;
+		throwaway.written_scope = subs.written_scope;
+		throwaway.alias_frame = subs.alias_frame;
+		*key_out = "XE:" + MangleWrittenCallee(*name, throwaway);
+	}
+	return "X" + body + "E";
+}
+
 // The structural key of one written argument (aligned with the typed
 // ArgKey format), independent of the live substitution state.
 string WrittenArgKey(const AstTemplateArgument& argument,
-                     const Substitutions& subs)
+                     const Substitutions& subs,
+                     bool value_position = false)
 {
 	Substitutions throwaway;
 	throwaway.pattern_params = subs.pattern_params;
@@ -571,7 +697,10 @@ string WrittenArgKey(const AstTemplateArgument& argument,
 	throwaway.written_scope = subs.written_scope;
 	throwaway.alias_frame = subs.alias_frame;
 	string key;
-	MangleWrittenArg(argument, throwaway, &key);
+	if (value_position)
+		MangleWrittenValueArg(argument, throwaway, &key);
+	else
+		MangleWrittenArg(argument, throwaway, &key);
 	return key;
 }
 
@@ -594,6 +723,7 @@ string MangleDependentName(const AstName& name, Substitutions& subs,
 		throw OutsideBoundary("mangled dependent name form");
 	string body;
 	string prev_key;
+	bool prefixed = false;
 	for (size_t i = 0; i < name.parts.size(); i++)
 	{
 		const AstNamePart& part = name.parts[i];
@@ -632,15 +762,52 @@ string MangleDependentName(const AstName& name, Substitutions& subs,
 				continue;
 			}
 		}
+		// A leading name homed in a named namespace spells its
+		// declaring prefix (each level a substitution candidate), so
+		// the qualified dependent name unifies with the typed
+		// spellings of the same scope (`NS_2IdIT_E4typeE`).
+		if (i == 0 && prev_key.empty())
+		{
+			const Scope* declaring = 0;
+			for (const Scope* s = subs.written_scope; s; s = s->parent)
+				if (FindOwnBinding(*s, part.identifier))
+				{
+					declaring = s;
+					break;
+				}
+			if (declaring && declaring->parent &&
+			    declaring->kind == SCOPE_NAMESPACE)
+			{
+				vector<NameComponent> prefix_parts =
+					ScopeComponents(declaring);
+				if (!prefix_parts.empty())
+				{
+					prev_key = ManglePrefixComponents(prefix_parts,
+					                                  subs, body);
+					prefixed = true;
+				}
+			}
+		}
 		string name_key = (prev_key.empty() ? string("T:")
 		                                    : prev_key + "::") +
 			part.identifier;
 		string full_key = name_key;
+		// The named template's parameter kinds decide each argument's
+		// type-versus-expression reading (the parse preferred type).
+		const TemplateInfo* named_templ =
+			part.kind == NP_TEMPLATE_ID && i == 0
+				? FindNamedTemplate(subs, part.identifier) : 0;
 		if (part.kind == NP_TEMPLATE_ID)
 		{
 			full_key += "<";
 			for (size_t a = 0; a < part.arguments.size(); a++)
-				full_key += WrittenArgKey(part.arguments[a], subs) + ",";
+			{
+				bool value_position = named_templ &&
+					a < named_templ->params.size() &&
+					named_templ->params[a].kind == TPK_VALUE;
+				full_key += WrittenArgKey(part.arguments[a], subs,
+				                          value_position) + ",";
+			}
 			full_key += ">";
 		}
 		string found = subs.Find(full_key);
@@ -664,7 +831,14 @@ string MangleDependentName(const AstName& name, Substitutions& subs,
 			}
 			body += tname + "I";
 			for (size_t a = 0; a < part.arguments.size(); a++)
-				body += MangleWrittenArg(part.arguments[a], subs, 0);
+			{
+				bool value_position = named_templ &&
+					a < named_templ->params.size() &&
+					named_templ->params[a].kind == TPK_VALUE;
+				body += value_position
+					? MangleWrittenValueArg(part.arguments[a], subs, 0)
+					: MangleWrittenArg(part.arguments[a], subs, 0);
+			}
 			body += "E";
 		}
 		subs.Add(full_key);
@@ -672,7 +846,7 @@ string MangleDependentName(const AstName& name, Substitutions& subs,
 	}
 	if (key_out)
 		*key_out = prev_key;
-	if (name.parts.size() > 1)
+	if (name.parts.size() > 1 || prefixed)
 		body = "N" + body + "E";
 	return body;
 }
@@ -684,7 +858,9 @@ string MangleWrittenBase(const vector<const AstSpecifier*>& specifiers,
                          bool keep_cv, Substitutions& subs, string& key)
 {
 	// decltype(expr) spells the expression (5.1.9 DT..E), a
-	// substitution candidate like any other type.
+	// substitution candidate like any other type. The key re-spells
+	// against a fresh table so live substitution state never leaks in
+	// (two spellings of the same decltype must unify).
 	if (specifiers.size() == 1 &&
 	    specifiers[0]->kind == SPEC_DECLTYPE &&
 	    specifiers[0]->decltype_expr)
@@ -692,7 +868,14 @@ string MangleWrittenBase(const vector<const AstSpecifier*>& specifiers,
 		string body = "DT" +
 			MangleWrittenExprNode(*specifiers[0]->decltype_expr, subs) +
 			"E";
-		key = body;
+		Substitutions throwaway;
+		throwaway.pattern_params = subs.pattern_params;
+		throwaway.fn_param_names = subs.fn_param_names;
+		throwaway.written_scope = subs.written_scope;
+		throwaway.alias_frame = subs.alias_frame;
+		key = "DT:" +
+			MangleWrittenExprNode(*specifiers[0]->decltype_expr,
+			                      throwaway);
 		return MangleSubstitutable(key, body, subs);
 	}
 	bool is_const = false;
@@ -1212,6 +1395,27 @@ string MangleFunctionTemplateSpelled(const FunctionSpecialization& spec,
 }
 
 }  // namespace
+
+string MangleTypedAliasExpansion(const TemplateInfo& alias,
+                                 const vector<TemplateArg>& args,
+                                 Substitutions& subs, string* key_out)
+{
+	if (!alias.alias_type || args.size() > alias.params.size())
+		throw OutsideBoundary("mangled dependent type form");
+	Substitutions::AliasFrame frame;
+	frame.alias = &alias;
+	frame.typed_args = &args;
+	frame.outer_params = subs.pattern_params;
+	frame.outer_fn_params = subs.fn_param_names;
+	frame.outer_scope = subs.written_scope;
+	frame.outer = subs.alias_frame;
+	MangleContext saved(subs);
+	subs.alias_frame = &frame;
+	subs.pattern_params = 0;
+	subs.fn_param_names = 0;
+	subs.written_scope = TemplateLookupScope(alias);
+	return MangleWrittenTypeId(*alias.alias_type, subs, key_out);
+}
 
 string MangleDependentTypeId(const AstTypeId& id, Substitutions& subs,
                              string* key_out)
