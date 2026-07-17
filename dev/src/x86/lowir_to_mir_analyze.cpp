@@ -42,8 +42,10 @@ FunctionLowering::FunctionLowering(const LowIRFunction & function,
                                    mir_model::MirFunction & out)
 	: function_(function), facts_(facts), out_(out)
 {
-	for(int i = 0; i < kPoolSize; i++)
+	for(int i = 0; i < kPoolSize; i++) {
 		pool_holder_[i] = "";
+		pool_clobbered_[i] = false;
+	}
 	for(int i = 0; i < 8; i++)
 		xmm_holder_[i] = "";
 }

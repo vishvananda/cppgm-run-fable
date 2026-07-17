@@ -152,6 +152,7 @@ bool FunctionLowering::alloc_pool_gpr(const std::string & name,
 	if(index < 0)
 		return false;
 	pool_holder_[index] = name;
+	pool_clobbered_[index] = true;
 	ValueLocation location;
 	location.kind = ValueLocation::VL_GPR;
 	location.reg = kPool[index];
@@ -373,9 +374,16 @@ ValueLocation & FunctionLowering::resolve_location(const std::string & name)
 	if(location.kind != ValueLocation::VL_PENDING_COPY)
 		return location;
 	X64Register home = location.reg;
-	int index = pool_scan(false, location.pending_r9_first);
-	if(index < 0)
-		index = pool_scan(false, false);
+	// The copy is hoisted to the prologue, so only registers no
+	// already-emitted code has written can carry it to this read.
+	int index = -1;
+	int start = location.pending_r9_first ? 1 : 0;
+	for(int i = start; i < kPoolSize && index < 0; i++)
+		if(pool_holder_[i].empty() && !pool_clobbered_[i])
+			index = i;
+	for(int i = 0; i < start && index < 0; i++)
+		if(pool_holder_[i].empty() && !pool_clobbered_[i])
+			index = i;
 	if(index < 0) {
 		// out of registers: fall back to a named frame home
 		long long offset = alloc_frame_home(
@@ -602,6 +610,7 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 		if(index >= 0) {
 			out_reg = kPool[index];
 			pool_holder_[index] = dest;
+			pool_clobbered_[index] = true;
 			ValueLocation location;
 			location.kind = ValueLocation::VL_GPR;
 			location.reg = out_reg;

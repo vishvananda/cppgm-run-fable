@@ -207,6 +207,7 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		X64Register scratch = kPool[index];
 		emit_mov(MakeReg(scratch), MakeReg(bounce.reg));
 		pool_holder_[index] = arg.name;
+		pool_clobbered_[index] = true;
 		bounce.kind = ValueLocation::VL_GPR;
 		bounce.reg = scratch;
 	}

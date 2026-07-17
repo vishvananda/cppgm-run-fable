@@ -247,6 +247,11 @@ private:
 	std::map<std::string, ValueLocation> locations_;
 	std::string pool_holder_[kPoolSize];  // value name; "" free;
 	                                      // "*pending:name" deferred load
+	// register written since entry (excludes unmaterialized pending
+	// reservations): a hoisted prologue param copy must not target one,
+	// or code already emitted between the prologue and the hoist point
+	// would clobber the copy (the pa31-audit double-booking bug)
+	bool pool_clobbered_[kPoolSize];
 	std::string xmm_holder_[8];
 	std::string rax_alias_;               // value also present in rax
 	long long frame_cursor_ = 0;

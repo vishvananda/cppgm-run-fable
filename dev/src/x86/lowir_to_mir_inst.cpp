@@ -634,11 +634,16 @@ void FunctionLowering::LowerIndex(const LowIRInstruction & ins)
 			base_callee_saved = true;
 	}
 	index_dest_lowering_ = true;
-	if(base_callee_saved && !value_dies_here(base.name)) {
+	// The pinned-base fast path folds the element offset into one lea,
+	// so it only applies to literal counts; runtime counts take the
+	// general scale-in-rdx path below.
+	if(base_callee_saved && !value_dies_here(base.name) &&
+	   ins.operands[1].kind == LOWIR_OPERAND_LITERAL) {
 		int index = pool_scan(true, false);
 		if(index >= 0) {
 			reg = kPool[index];
 			pool_holder_[index] = ins.result;
+			pool_clobbered_[index] = true;
 			ValueLocation location;
 			location.kind = ValueLocation::VL_GPR;
 			location.reg = reg;
@@ -1052,6 +1057,7 @@ void FunctionLowering::LowerConvert(const LowIRInstruction & ins)
 		if(index >= 0) {
 			reg = kPool[index];
 			pool_holder_[index] = ins.result;
+			pool_clobbered_[index] = true;
 			ValueLocation location;
 			location.kind = ValueLocation::VL_GPR;
 			location.reg = reg;
