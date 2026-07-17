@@ -28,6 +28,9 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 		BindFriendDeclaration(decl);
 		return;
 	}
+	// 7.5p7 applies to the definition itself, not to declarations
+	// nested inside its body.
+	in_linkage_single_ = false;
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(decl.specifiers, true);
 	if (specs.is_typedef)

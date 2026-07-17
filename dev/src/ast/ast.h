@@ -141,6 +141,9 @@ struct AstDecl
 	AstName target;        // using-directive/declaration, alias target
 	AstTypeIdPtr type;     // DK_ALIAS aliased type, DK_ENUM base
 	std::string linkage;   // DK_LINKAGE language ("C", "C++")
+	// DK_LINKAGE: unbraced form (7.5p7: the contained declaration is
+	// treated as if it contains the extern specifier).
+	bool linkage_single;
 
 	// class / enum
 	bool has_name;

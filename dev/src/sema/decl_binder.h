@@ -252,6 +252,9 @@ protected:
 	int anonymous_enums_;
 	// PA14: inside an extern "C" linkage-specification body.
 	bool in_c_linkage_;
+	// 7.5p7: the next directly-contained declaration of an unbraced
+	// linkage-specification is treated as if it spells `extern`.
+	bool in_linkage_single_;
 	// PA15: the access of the current member-specification region
 	// (11p1: private for `class`, public for `struct`/`union`).
 	EMemberAccess current_access_;

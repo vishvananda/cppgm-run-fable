@@ -135,7 +135,7 @@ bool DeclHasConstexpr(const AstDecl& decl)
 
 AstDecl::AstDecl(EDeclKind kind_in)
 	: kind(kind_in), begin_token(0), end_token(0),
-	  inline_namespace(false), unnamed(false),
+	  inline_namespace(false), unnamed(false), linkage_single(false),
 	  has_name(false), class_key(KW_CLASS), has_enum_key(false),
 	  enum_key(KW_CLASS), has_enum_base(false), enum_body(false),
 	  has_message(false),

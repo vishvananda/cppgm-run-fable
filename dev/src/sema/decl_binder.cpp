@@ -74,7 +74,7 @@ DeclBinder::DeclBinder(TypesModel& model)
 	: model_(model), builder_(*this), current_(model.global()),
 	  allow_qualified_class_name_(false), current_fields_(0),
 	  anonymous_enums_(0), in_c_linkage_(false),
-	  current_access_(MA_PUBLIC)
+	  in_linkage_single_(false), current_access_(MA_PUBLIC)
 {
 }
 
@@ -140,6 +140,26 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	}
 	else if (!adl_only)
 		binding.fn_adl_only[index] = false;
+	// 7.1.1p7: the linkages implied by successive declarations must
+	// agree - a namespace-scope function first declared without
+	// internal linkage cannot be redeclared static.
+	if (specs && specs->is_static && index < old_count &&
+	    !binding.fn_static[index] && binding.owner &&
+	    binding.owner->kind == SCOPE_NAMESPACE)
+		throw runtime_error("static declaration of " + binding.name +
+		                    " follows non-static declaration");
+	// 7.5p6: at most one function with a particular name can have C
+	// language linkage.
+	binding.fn_c_linkage.resize(count, false);
+	if (in_c_linkage_)
+	{
+		for (size_t i = 0; i < count; i++)
+			if (i != index && binding.fn_c_linkage[i])
+				throw runtime_error(
+					"conflicting C language linkage declarations for " +
+					binding.name);
+		binding.fn_c_linkage[index] = true;
+	}
 	if (specs && specs->is_static)
 		binding.fn_static[index] = true;
 	if (inline_def)
@@ -464,7 +484,11 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 		// the scope model itself is unaffected.
 		bool saved = in_c_linkage_;
 		in_c_linkage_ = saved || decl.linkage == "C";
+		// 7.5p7: the declaration directly contained in an unbraced
+		// linkage-specification is treated as if it spells `extern`.
+		in_linkage_single_ = decl.linkage_single;
 		BindDeclarations(decl.body_decls);
+		in_linkage_single_ = false;
 		in_c_linkage_ = saved;
 		return;
 	}
@@ -662,6 +686,13 @@ void DeclBinder::BindSimpleDeclaration(const AstDecl& decl)
 			has_nested_type = true;
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(decl.specifiers, true);
+	// 7.5p7: consumed by the direct declaration only, so nothing
+	// nested (initializer lambdas, class bodies) inherits it.
+	if (in_linkage_single_)
+	{
+		specs.is_extern = true;
+		in_linkage_single_ = false;
+	}
 	if (decl.declarators.empty())
 	{
 		// Legal only when the specifier itself declared a class or

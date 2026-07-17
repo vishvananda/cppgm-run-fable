@@ -206,6 +206,7 @@ AstDeclPtr AstParser::ParseLinkageSpecification()
 		Restore(state);
 		return AstDeclPtr();
 	}
+	decl->linkage_single = true;
 	decl->body_decls.push_back(move(inner));
 	return decl;
 }

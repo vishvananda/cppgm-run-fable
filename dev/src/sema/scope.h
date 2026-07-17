@@ -152,6 +152,9 @@ struct ScopeBinding
 	vector<vector<const AstExpr*>> fn_defaults;
 	vector<bool> fn_deleted;
 	bool c_linkage;  // declared inside extern "C"
+	// 7.5p6: which overload slots were declared with C language
+	// linkage (at most one function per name may be).
+	vector<bool> fn_c_linkage;
 	// PA15 member facts. `access` is the declared access of a non-function
 	// member (and of the first function overload); functions carry one
 	// entry per overload position in the fn_* vectors below.
