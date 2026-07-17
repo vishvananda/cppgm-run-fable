@@ -280,8 +280,10 @@ private:
 			return;
 		}
 		output_.emit_identifier(ident);
+		// PA34: #include_next shares the header-name context (16.2).
 		include_state_ =
-			(include_state_ == kAfterHash && ident == "include")
+			(include_state_ == kAfterHash &&
+			 (ident == "include" || ident == "include_next"))
 				? kAfterInclude : kNormal;
 	}
 

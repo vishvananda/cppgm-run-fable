@@ -23,6 +23,7 @@
 #include "sema/sem_node.h"
 #include "toolchain/compile_unit.h"
 #include "toolchain/elf_object.h"
+#include "toolchain/hosted_env.h"
 #include "toolchain/link_executable.h"
 #include "toolchain/object_module.h"
 #include "toolchain/runtime_library.h"
@@ -61,6 +62,7 @@ enum class DriverMode
 struct DriverInvocation
 {
   DriverMode mode;
+  string query_flag;
   string outfile;
   bool explicit_outfile;
   string target;
@@ -69,6 +71,9 @@ struct DriverInvocation
   vector<string> libs;
   vector<string> inputs;
   int optimize;  // -O<n> level (0 when unspecified)
+  // PA34: -D/-U/-include actions in command order plus -isystem dirs,
+  // applied to the hosted preprocessor in every driver mode.
+  toolchain::HostedPreprocessConfig preprocess;
 
   DriverInvocation()
       : mode(DriverMode::Link), explicit_outfile(false), optimize(0)
@@ -265,21 +270,6 @@ SourceOutputInvocation parse_source_output_invocation(
   return invocation;
 }
 
-bool consume_preprocess_option(const vector<string> & args, size_t & i)
-{
-  if(consume_joined_or_separate_option(args, i, "-D", "macro definition")) {
-    return true;
-  }
-  if(consume_joined_or_separate_option(args, i, "-U", "macro name")) {
-    return true;
-  }
-  if(args[i] == "-include") {
-    consume_required_option_argument(args, i, "-include", "file");
-    return true;
-  }
-  return false;
-}
-
 // Joined-or-separate option value collection: `-I dir` and `-Idir`.
 bool collect_joined_or_separate_option(const vector<string> & args,
                                        size_t & i,
@@ -299,6 +289,42 @@ bool collect_joined_or_separate_option(const vector<string> & args,
   return false;
 }
 
+// A joined-or-separate preprocessor control (-D/-U) recorded as one
+// command-ordered action.
+bool collect_preprocess_action(const vector<string> & args, size_t & i,
+                               const string & option, char kind,
+                               const string & expected,
+                               DriverInvocation & invocation)
+{
+  vector<string> values;
+  if(!collect_joined_or_separate_option(args, i, option, expected, values)) {
+    return false;
+  }
+  invocation.preprocess.actions.push_back(
+      toolchain::HostedDriverAction(kind, values[0]));
+  return true;
+}
+
+bool consume_preprocess_option(const vector<string> & args, size_t & i,
+                               DriverInvocation & invocation)
+{
+  if(collect_preprocess_action(args, i, "-D", 'D', "macro definition",
+                               invocation)) {
+    return true;
+  }
+  if(collect_preprocess_action(args, i, "-U", 'U', "macro name",
+                               invocation)) {
+    return true;
+  }
+  if(args[i] == "-include") {
+    consume_required_option_argument(args, i, "-include", "file");
+    invocation.preprocess.actions.push_back(
+        toolchain::HostedDriverAction('i', args[i]));
+    return true;
+  }
+  return false;
+}
+
 bool consume_search_option(const vector<string> & args, size_t & i,
                            DriverInvocation & invocation)
 {
@@ -306,7 +332,8 @@ bool consume_search_option(const vector<string> & args, size_t & i,
                                        invocation.include_dirs)) {
     return true;
   }
-  if(consume_joined_or_separate_option(args, i, "-isystem", "path")) {
+  if(collect_joined_or_separate_option(args, i, "-isystem", "path",
+                                       invocation.preprocess.isystem_dirs)) {
     return true;
   }
   if(collect_joined_or_separate_option(args, i, "-L", "path",
@@ -340,6 +367,12 @@ bool consume_dependency_option(const vector<string> & args, size_t & i)
 bool consume_toolchain_option(const vector<string> & args, size_t & i,
                               DriverInvocation & invocation)
 {
+  if(args[i] == "-pthread") {
+    // Host-driver parity: -pthread's front-end effect is _REENTRANT.
+    invocation.preprocess.actions.push_back(
+        toolchain::HostedDriverAction('D', "_REENTRANT"));
+    return true;
+  }
   if(is_debug_info_flag(args[i])) {
     return true;
   }
@@ -372,9 +405,6 @@ bool consume_toolchain_option(const vector<string> & args, size_t & i,
   if(starts_with(args[i], "-stdlib=")) {
     return true;
   }
-  if(args[i] == "-pthread") {
-    throw logic_error("option not yet supported: -pthread");
-  }
   return false;
 }
 
@@ -390,6 +420,7 @@ DriverInvocation parse_driver_invocation(const vector<string> & args)
       throw logic_error("query flag must be used as a direct invocation");
     }
     invocation.mode = DriverMode::Query;
+    invocation.query_flag = args[0];
     return invocation;
   }
 
@@ -414,7 +445,7 @@ DriverInvocation parse_driver_invocation(const vector<string> & args)
       invocation.explicit_outfile = true;
       continue;
     }
-    if(consume_preprocess_option(args, i) ||
+    if(consume_preprocess_option(args, i, invocation) ||
        consume_search_option(args, i, invocation) ||
        consume_dependency_option(args, i) ||
        consume_toolchain_option(args, i, invocation) ||
@@ -465,7 +496,99 @@ toolchain::CompileOptions make_compile_options(
   options.include_dirs = invocation.include_dirs;
   options.target = toolchain::NormalizeTargetName(invocation.target);
   options.optimize = invocation.optimize;
+  // PA34: every driver compile runs against the hosted environment.
+  options.hosted = true;
+  options.preprocess = invocation.preprocess;
   return options;
+}
+
+// The PA34 direct driver queries. No fixture compares this output; the
+// answers describe this compiler and the language level it implements.
+int run_query_mode(const DriverInvocation & invocation)
+{
+  const string & flag = invocation.query_flag;
+  if(flag == "--version") {
+    cout << "cppgm++ (CPPGM) 4.8.0\n"
+         << "C++11 compiler for x86_64-linux-gnu\n";
+  }
+  else if(flag == "-v") {
+    cerr << "cppgm++ version 4.8.0 (CPPGM)\n"
+         << "Target: x86_64-linux-gnu\n"
+         << "Host compiler: " << toolchain::HostCompilerSpelling() << "\n";
+  }
+  else if(flag == "-dumpmachine") {
+    cout << "x86_64-linux-gnu\n";
+  }
+  else if(flag == "-dumpversion") {
+    cout << "4.8\n";
+  }
+  else if(flag == "-print-search-dirs") {
+    cout << "install: /usr/local/lib/cppgm\n";
+    cout << "programs: =/usr/local/lib/cppgm/bin\n";
+    cout << "libraries: =";
+    vector<string> dirs = toolchain::HostStandardIncludeDirs();
+    for(size_t i = 0; i < dirs.size(); ++i) {
+      if(i != 0) {
+        cout << ":";
+      }
+      cout << dirs[i];
+    }
+    cout << "\n";
+  }
+  else {
+    throw logic_error("unknown query flag: " + flag);
+  }
+  return EXIT_SUCCESS;
+}
+
+// Writes the PA5 structured posttoken stream (`-E` output). A phase-7
+// invalid token is an error, matching the preproc frontend.
+struct PreprocessOutputStream : IPostTokenStream
+{
+  explicit PreprocessOutputStream(ostream & out) : out_(out) {}
+
+  void emit(const PostToken & token)
+  {
+    if(token.kind == PTK_INVALID) {
+      throw runtime_error("invalid token at phase 7: " + token.source);
+    }
+    out_ << DescribePostToken(token) << "\n";
+  }
+
+  ostream & out_;
+};
+
+// PA34 hosted preprocess mode: phases 1-6 plus phase-7 tokenization over
+// each srcfile against the hosted environment, in the PA5 preproc
+// frontend's stream format.
+int run_preprocess_mode(const DriverInvocation & invocation)
+{
+  ofstream file_out;
+  ostream * out = &cout;
+  if(invocation.explicit_outfile) {
+    file_out.open(invocation.outfile.c_str());
+    if(!file_out) {
+      throw runtime_error("cannot create output file: " +
+                          invocation.outfile);
+    }
+    out = &file_out;
+  }
+
+  const vector<pair<string, string>> predefined = PredefinedObjectMacros();
+  *out << "preproc " << invocation.inputs.size() << "\n";
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    *out << "sof " << invocation.inputs[i] << "\n";
+    PreprocessOutputStream printer(*out);
+    PostTokenizer post_tokenizer(printer);
+    Preprocessor preprocessor(post_tokenizer, predefined);
+    for(size_t d = 0; d < invocation.include_dirs.size(); ++d) {
+      preprocessor.AddIncludeDir(invocation.include_dirs[d]);
+    }
+    toolchain::ConfigureHostedPreprocessor(preprocessor,
+                                           invocation.preprocess);
+    preprocessor.ProcessSourceFile(invocation.inputs[i]);
+  }
+  return EXIT_SUCCESS;
 }
 
 int run_compile_mode(const DriverInvocation & invocation)
@@ -530,14 +653,6 @@ int run_link_mode(const DriverInvocation & invocation)
   toolchain::LinkExecutable(std::move(linked), outfile, options.target,
                             compile_runtime_module);
   return EXIT_SUCCESS;
-}
-
-int run_unimplemented_mode(const char * feature,
-                           const char * owner)
-{
-  (void)feature;
-  (void)owner;
-  throw NotImplementedException();
 }
 
 // Collects the phase-7 tokens of one srcfile for the parser; invalid
@@ -762,14 +877,39 @@ int run_emit_lowir_mode(const vector<string> & args)
   return EXIT_SUCCESS;
 }
 
+// The harness's standard-include injection point: CPPGM_STDINC_PATHS
+// (colon-separated) searches before the baked host standard paths. The
+// process environment is translated into explicit configuration here in
+// the tool entry layer; the compiler implementation reads only options.
+void collect_stdinc_path_env(vector<string> & dirs)
+{
+  const char * env = getenv("CPPGM_STDINC_PATHS");
+  if(!env) {
+    return;
+  }
+  const string paths = env;
+  size_t pos = 0;
+  while(pos <= paths.size()) {
+    size_t colon = paths.find(':', pos);
+    if(colon == string::npos) {
+      colon = paths.size();
+    }
+    if(colon > pos) {
+      dirs.push_back(paths.substr(pos, colon - pos));
+    }
+    pos = colon + 1;
+  }
+}
+
 int run_driver_mode(const vector<string> & args)
 {
-  const DriverInvocation invocation = parse_driver_invocation(args);
+  DriverInvocation invocation = parse_driver_invocation(args);
+  collect_stdinc_path_env(invocation.preprocess.stdinc_dirs);
   switch(invocation.mode) {
   case DriverMode::Query:
-    return run_unimplemented_mode("driver query mode", "PA34");
+    return run_query_mode(invocation);
   case DriverMode::Preprocess:
-    return run_unimplemented_mode("hosted preprocess driver mode (-E)", "PA34");
+    return run_preprocess_mode(invocation);
   case DriverMode::Compile:
     return run_compile_mode(invocation);
   case DriverMode::Link:

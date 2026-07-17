@@ -32,6 +32,10 @@ TARGETS = \
 	cy86
 
 CXX ?= g++
+ifeq ($(origin CPPGM_HOST_CXX), undefined)
+CPPGM_HOST_CXX := $(CXX)
+endif
+export CPPGM_HOST_CXX
 V ?= 0
 Q = $(if $(filter 1,$(V)),,@)
 quiet = @if [ "$(V)" != "1" ]; then printf '  %-7s %s\n' '$(1)' '$(2)'; fi
@@ -45,7 +49,9 @@ SRC = src
 OBJ ?= ../obj
 OBJDIR = $(OBJ)/dev
 DEPDIR = $(OBJDIR)/.d
-INC = -I$(SRC)
+GENERATED = $(OBJ)/generated
+BUILTIN_HOST_CONFIG = $(GENERATED)/cppgm_builtin_host_config.h
+INC = -I$(SRC) -I$(GENERATED)
 
 include frontend_source_sets.mk
 $(foreach target,$(TARGETS),$(if $(filter undefined,$(origin FRONTEND_OBJ_BASENAMES_$(target))),$(error missing FRONTEND_OBJ_BASENAMES_$(target) in frontend_source_sets.mk),))
@@ -79,6 +85,18 @@ $(OBJDIR):
 	@mkdir -p $@
 
 FORCE:
+
+# PA34: the hosted-environment probe header (host predefined macros and
+# standard include paths). Regenerated on every build; the compare guard
+# keeps the mtime stable when the probe result is unchanged.
+$(BUILTIN_HOST_CONFIG): FORCE
+	@mkdir -p $(dir $@)
+	@CPPGM_BUILD_HOST_CXX='$(CPPGM_HOST_CXX)' \
+		CPPGM_STDLIB_FLAGS='$(CPPGM_STDLIB_FLAGS)' \
+		perl gen_builtin_host_config.pl > $@.tmp
+	@if ! cmp -s $@.tmp $@ 2>/dev/null; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+$(OBJDIR)/toolchain/hosted_env.o: $(BUILTIN_HOST_CONFIG)
 
 $(COMPILE_CONFIG_STAMP): FORCE | $(OBJDIR)
 	@printf '%s\n%s\n' "$(CC_FLAGS)" "$(ENTRY_CC_FLAGS)" > $@.tmp

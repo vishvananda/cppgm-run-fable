@@ -20,7 +20,12 @@ enum EMacroBuiltin
 {
 	kBuiltinNone,
 	kBuiltinFile,
-	kBuiltinLine
+	kBuiltinLine,
+	// PA34: a hosted probe operator name (__has_include, __has_builtin,
+	// ...). Defined for #ifdef/defined; controlling expressions fold its
+	// invocations before expansion, and a stray text occurrence produces
+	// itself (inert, the invoking name is painted).
+	kBuiltinHostedProbe
 };
 
 // One macro definition (16.3). The replacement list is stored trimmed

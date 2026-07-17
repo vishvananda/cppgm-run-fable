@@ -230,7 +230,8 @@ bool MatchFloating(const string& s, char& suffix)
 		return false;
 	suffix = 0;
 	if (i < s.size() &&
-	    (s[i] == 'f' || s[i] == 'F' || s[i] == 'l' || s[i] == 'L'))
+	    (s[i] == 'f' || s[i] == 'F' || s[i] == 'l' || s[i] == 'L' ||
+	     s[i] == 'q' || s[i] == 'Q'))
 		suffix = s[i++];
 	return i == s.size();
 }
@@ -273,7 +274,8 @@ bool MatchHexFloating(const string& s, char& suffix)
 	if (exponent_digits == 0)
 		return false;
 	suffix = 0;
-	if (i < s.size() && (s[i] == 'l' || s[i] == 'L'))
+	if (i < s.size() &&
+	    (s[i] == 'l' || s[i] == 'L' || s[i] == 'q' || s[i] == 'Q'))
 		suffix = s[i++];
 	return i == s.size();
 }
@@ -308,8 +310,11 @@ PostToken MakeFloatingLiteral(const string& source, char suffix)
 		token.type = FT_FLOAT;
 		token.data = ValueObjectBytes(&x, sizeof(x), sizeof(x));
 	}
-	else if (suffix == 'l' || suffix == 'L')
+	else if (suffix == 'l' || suffix == 'L' ||
+	         suffix == 'q' || suffix == 'Q')
 	{
+		// PA34: the GNU __float128 suffix arrives through hosted headers;
+		// this stage evaluates it at long double precision.
 		long double x = std::strtold(spelling.c_str(), nullptr);
 		token.type = FT_LONG_DOUBLE;
 		token.data = ValueObjectBytes(&x, 10, 16);

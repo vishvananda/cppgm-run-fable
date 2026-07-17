@@ -73,6 +73,9 @@ void * compile_unit_thread_main(void * opaque)
 		                          PredefinedObjectMacros());
 		for (size_t i = 0; i < task->options->include_dirs.size(); i++)
 			preprocessor.AddIncludeDir(task->options->include_dirs[i]);
+		if (task->options->hosted)
+			ConfigureHostedPreprocessor(preprocessor,
+			                            task->options->preprocess);
 		if (task->text)
 			preprocessor.ProcessSourceText(*task->presumed_name,
 			                               *task->text);

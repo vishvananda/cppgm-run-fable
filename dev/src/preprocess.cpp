@@ -177,7 +177,7 @@ string FileNameSpelling(const string& name)
 Preprocessor::Preprocessor(IPPTokenStream& output,
                            const vector<pair<string, string>>& object_macros)
 	: expander_(table_, this), output_(output), current_file_(-1),
-	  cond_base_(0), include_depth_(0)
+	  cond_base_(0), include_depth_(0), hosted_(false)
 {
 	for (size_t i = 0; i < object_macros.size(); i++)
 		DefineObjectMacro(object_macros[i].first, object_macros[i].second);
@@ -213,8 +213,12 @@ void Preprocessor::ProcessSourceText(const string& presumed_name,
 	FileInstance instance;
 	instance.presumed_name = presumed_name;
 	instance.line_offset = 0;
+	instance.search_chain_index = -1;
 	files_.push_back(instance);
-	ProcessFileTokens(TokenizeSource(bytes, file_index), file_index);
+	vector<PPToken> tokens = TokenizeSource(bytes, file_index);
+	if (!pre_include_files_.empty())
+		ProcessPreIncludeFiles();
+	ProcessFileTokens(std::move(tokens), file_index);
 	output_.emit_eof();
 }
 
@@ -328,7 +332,11 @@ void Preprocessor::ProcessDirective(const vector<PPToken>& line,
 	else if (name == "undef")
 		table_.Undef(args);
 	else if (name == "include")
-		HandleInclude(args);
+		HandleInclude(args, false);
+	else if (hosted_ && name == "include_next")
+		HandleInclude(args, true);
+	else if (hosted_ && name == "warning")
+		HandleWarning(args, terminator);
 	else if (name == "line")
 		HandleLine(args, terminator);
 	else if (name == "error")
@@ -434,8 +442,9 @@ bool Preprocessor::EvaluateCondition(const vector<PPToken>& tokens)
 {
 	if (tokens.empty())
 		throw runtime_error("no tokens in controlling expression");
-	vector<PPToken> expanded =
-		expander_.ExpandTextSequence(FoldDefinedOperators(tokens));
+	vector<PPToken> expanded = expander_.ExpandTextSequence(
+		FoldDefinedOperators(hosted_ ? FoldHostedProbeOperators(tokens)
+		                             : tokens));
 	if (expanded.empty())
 		throw runtime_error("no tokens in controlling expression");
 	std::vector<PostToken> converted;
@@ -491,10 +500,12 @@ vector<PPToken> Preprocessor::FoldDefinedOperators(
 }
 
 // 16.2 with the course-defined search: macro-replace the operand, accept
-// one header-name or one ordinary string-literal, then try the presumed
-// __FILE__'s directory followed by the current working directory. A
-// fileid already pragma-onced skips the include.
-void Preprocessor::HandleInclude(const vector<PPToken>& args)
+// one header-name or one ordinary string-literal, then search through
+// ResolveIncludeFile. A fileid already pragma-onced skips the include.
+// PA34 #include_next resumes the -I/system chain after the slot that
+// produced the current file.
+void Preprocessor::HandleInclude(const vector<PPToken>& args,
+                                 bool include_next)
 {
 	vector<PPToken> expanded = expander_.ExpandTextSequence(args);
 	if (expanded.size() != 1)
@@ -508,54 +519,99 @@ void Preprocessor::HandleInclude(const vector<PPToken>& args)
 		throw runtime_error("invalid token in #include: " +
 		                    expanded[0].data);
 
-	const string& presumed = files_[current_file_].presumed_name;
-	size_t slash = presumed.rfind('/');
-	string chosen;
-	PreprocFileId fileid;
-	bool found = false;
-	if (slash != string::npos)
+	IncludeResolution resolved = ResolveIncludeFile(
+		nextf, include_next ? IncludeNextChainStart() : -1);
+	if (!resolved.found)
+		throw runtime_error("include file not found: " + nextf);
+	if (pragma_onced_.count(resolved.fileid))
+		return;
+	ProcessIncludedFile(resolved);
+}
+
+// The search order: the presumed __FILE__'s directory, the -I chain, the
+// current working directory, then the PA34 system chain (-isystem and
+// the hosted standard paths). from_chain_index >= 0 (#include_next and
+// __has_include_next) restricts the search to -I/system chain slots at
+// or after that index, skipping the file-relative and working-directory
+// positions.
+Preprocessor::IncludeResolution Preprocessor::ResolveIncludeFile(
+	const string& name, int from_chain_index) const
+{
+	IncludeResolution result;
+	if (from_chain_index < 0 && current_file_ >= 0)
 	{
-		string pathrel = presumed.substr(0, slash + 1) + nextf;
-		if (GetPreprocFileId(pathrel, fileid))
+		const string& presumed = files_[current_file_].presumed_name;
+		size_t slash = presumed.rfind('/');
+		if (slash != string::npos)
 		{
-			chosen = pathrel;
-			found = true;
+			string pathrel = presumed.substr(0, slash + 1) + name;
+			if (GetPreprocFileId(pathrel, result.fileid))
+			{
+				result.found = true;
+				result.path = pathrel;
+				return result;
+			}
 		}
 	}
-	// PA29: -I directories search between the including file's
-	// directory and the working-directory fallback.
-	for (size_t i = 0; !found && i < include_dirs_.size(); i++)
+	size_t user_dirs = include_dirs_.size();
+	size_t start = from_chain_index < 0 ? 0 : (size_t)from_chain_index;
+	for (size_t i = start; i < user_dirs; i++)
 	{
 		string dir = include_dirs_[i];
 		if (!dir.empty() && dir[dir.size() - 1] != '/')
 			dir += '/';
-		if (GetPreprocFileId(dir + nextf, fileid))
+		if (GetPreprocFileId(dir + name, result.fileid))
 		{
-			chosen = dir + nextf;
-			found = true;
+			result.found = true;
+			result.path = dir + name;
+			result.chain_index = (int)i;
+			return result;
 		}
 	}
-	if (!found && GetPreprocFileId(nextf, fileid))
+	if (from_chain_index < 0 && GetPreprocFileId(name, result.fileid))
 	{
-		chosen = nextf;
-		found = true;
+		result.found = true;
+		result.path = name;
+		return result;
 	}
-	if (!found)
-		throw runtime_error("include file not found: " + nextf);
-	if (pragma_onced_.count(fileid))
-		return;
+	size_t sys_start = start > user_dirs ? start - user_dirs : 0;
+	for (size_t i = sys_start; i < system_include_dirs_.size(); i++)
+	{
+		string dir = system_include_dirs_[i];
+		if (!dir.empty() && dir[dir.size() - 1] != '/')
+			dir += '/';
+		if (GetPreprocFileId(dir + name, result.fileid))
+		{
+			result.found = true;
+			result.path = dir + name;
+			result.chain_index = (int)(user_dirs + i);
+			return result;
+		}
+	}
+	return result;
+}
 
+int Preprocessor::IncludeNextChainStart() const
+{
+	if (current_file_ < 0)
+		return 0;
+	return files_[current_file_].search_chain_index + 1;
+}
+
+void Preprocessor::ProcessIncludedFile(const IncludeResolution& resolved)
+{
 	if (include_depth_ >= kMaxIncludeDepth)
 		throw runtime_error("maximum include nesting reached");
-	std::ifstream in(chosen.c_str(), std::ios::binary);
+	std::ifstream in(resolved.path.c_str(), std::ios::binary);
 	if (!in)
-		throw runtime_error("cannot read include file: " + chosen);
+		throw runtime_error("cannot read include file: " + resolved.path);
 	std::ostringstream buffer;
 	buffer << in.rdbuf();
 	int file_index = (int)files_.size();
 	FileInstance instance;
-	instance.presumed_name = chosen;
+	instance.presumed_name = resolved.path;
 	instance.line_offset = 0;
+	instance.search_chain_index = resolved.chain_index;
 	files_.push_back(instance);
 	include_depth_++;
 	ProcessFileTokens(TokenizeSource(buffer.str(), file_index), file_index);
@@ -660,6 +716,8 @@ void Preprocessor::FlushText(vector<PPToken>& text)
 PPToken Preprocessor::MakeBuiltinToken(EMacroBuiltin builtin,
                                        const PPToken& head)
 {
+	if (builtin == kBuiltinHostedProbe)
+		return PPToken(PPT_IDENTIFIER, head.data);
 	const FileInstance& instance =
 		files_[head.file >= 0 ? head.file : current_file_];
 	if (builtin == kBuiltinFile)

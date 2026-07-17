@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "toolchain/hosted_env.h"
 #include "toolchain/object_module.h"
 
 // PA29 per-translation-unit compilation: one C++ source runs the full
@@ -20,6 +21,11 @@ struct CompileOptions
 	std::vector<std::string> include_dirs;  // -I, in command order
 	std::string target;                     // normalized backend target
 	int optimize = 0;                       // -O<n> level
+	// PA34: driver compiles run against the hosted environment (host
+	// predefined macros, system include chain, -D/-U/-include/-isystem).
+	// The built-in runtime library TU keeps the unhosted environment.
+	bool hosted = false;
+	HostedPreprocessConfig preprocess;
 };
 
 ObjectModule CompileSourceFileToModule(const std::string & path,

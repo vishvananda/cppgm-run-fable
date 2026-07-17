@@ -52,6 +52,34 @@ public:
 	// including file's directory and before the working directory.
 	void AddIncludeDir(const string& dir);
 
+	// PA34 hosted mode: enables the hosted preprocessor surface --
+	// the __has_* probe operators in controlling expressions (their
+	// names also read as defined), #include_next, #warning, and the
+	// system include chain below.
+	void EnableHostedMode();
+
+	// PA34: system include directories (-isystem, then the hosted
+	// environment's standard paths), searched after the working
+	// directory. Together with the -I directories they form the
+	// ordered chain #include_next resumes in.
+	void AddSystemIncludeDir(const string& dir);
+
+	// PA34: a driver -include file, processed inside the main source
+	// file's token stream before its first token.
+	void AddPreIncludeFile(const string& path);
+
+	// PA34: one host-probe `#define` body ("name replacement" /
+	// "name(params) replacement"). Names already defined are skipped so
+	// the course predefined set and earlier imports stay authoritative.
+	void DefineHostMacroLine(const string& line);
+
+	// PA34: driver -D spec ("name", "name=", "name=value"); overrides
+	// any existing definition silently, like the host driver.
+	void DefineCommandLineMacro(const string& spec);
+
+	// PA34: driver -U name; undefining an unknown name is a no-op.
+	void UndefCommandLineMacro(const string& name);
+
 	// Runs phases 1-4 over the source file named on the command line.
 	void ProcessSourceFile(const string& path);
 
@@ -71,11 +99,27 @@ private:
 	// Append-only so position stamps on stored tokens (e.g. replacement
 	// lists defined inside an include) stay resolvable after the include
 	// exits. presumed_name and line_offset are the mutable #line state:
-	// presumed line = physical line + line_offset.
+	// presumed line = physical line + line_offset. search_chain_index is
+	// the -I/system chain slot that produced the file (-1 for the main
+	// file and file-relative or working-directory finds); #include_next
+	// resumes strictly after it.
 	struct FileInstance
 	{
 		string presumed_name;
 		long line_offset;
+		int search_chain_index;
+	};
+
+	// Outcome of one include search (PA34: shared by #include,
+	// #include_next, and the __has_include probes).
+	struct IncludeResolution
+	{
+		IncludeResolution() : found(false), chain_index(-1) {}
+
+		bool found;
+		string path;
+		PreprocFileId fileid;
+		int chain_index;
 	};
 
 	// One conditional-inclusion group (16.1). `parent_active` is the
@@ -107,7 +151,7 @@ private:
 	vector<PPToken> FoldDefinedOperators(const vector<PPToken>& tokens);
 	bool LookupDefinedName(const vector<PPToken>& args) const;
 
-	void HandleInclude(const vector<PPToken>& args);
+	void HandleInclude(const vector<PPToken>& args, bool include_next);
 	void HandleLine(const vector<PPToken>& args, const PPToken& terminator);
 	void HandlePragma(const vector<PPToken>& args);
 	void ExecutePragmaOperator(const string& spelling);
@@ -115,14 +159,39 @@ private:
 
 	void DefineObjectMacro(const string& name, const string& spelling);
 
+	// The include search (PA5/PA29 order, PA34 system chain appended):
+	// including file's directory (quoted position, skipped for
+	// include_next), -I chain, working directory, system chain.
+	// from_chain_index >= 0 restricts the search to chain entries at or
+	// after that slot (the #include_next resume point).
+	IncludeResolution ResolveIncludeFile(const string& name,
+	                                     int from_chain_index) const;
+	void ProcessIncludedFile(const IncludeResolution& resolved);
+	int IncludeNextChainStart() const;
+
+	// PA34 hosted handlers (preprocess_hosted.cpp).
+	vector<PPToken> FoldHostedProbeOperators(const vector<PPToken>& tokens);
+	long FoldOneHostedProbe(const vector<PPToken>& tokens, size_t at,
+	                        size_t& consumed);
+	long EvaluateHasIncludeOperand(const string& op,
+	                               const vector<PPToken>& operand);
+	long EvaluateNamedProbeOperand(const string& op,
+	                               const vector<PPToken>& operand);
+	void HandleWarning(const vector<PPToken>& args,
+	                   const PPToken& terminator);
+	void ProcessPreIncludeFiles();
+
 	MacroTable table_;
 	MacroExpander expander_;
 	IPPTokenStream& output_;
 	vector<string> include_dirs_;
+	vector<string> system_include_dirs_;
+	vector<string> pre_include_files_;
 	vector<FileInstance> files_;
 	vector<CondGroup> conds_;
 	set<PreprocFileId> pragma_onced_;
 	int current_file_;
 	size_t cond_base_;
 	int include_depth_;
+	bool hosted_;
 };
