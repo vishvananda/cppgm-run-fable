@@ -53,7 +53,8 @@ string serialize_type_word(const AbiType & type)
     return out + serialize_type_word(type.types.front());
   }
   case ABI_TYPE_ARRAY:
-    return "array:" + type.array_bound.value + ":" + serialize_type_word(type.types.front());
+    return "array:" + (type.array_bound.value.empty() ? "-" : type.array_bound.value) + ":" +
+           serialize_type_word(type.types.front());
   case ABI_TYPE_MEMBER_POINTER:
     return "memberptr:" + type.types[0].name + ":" + serialize_type_word(type.types[1]);
   case ABI_TYPE_VENDOR_QUALIFIED:
@@ -112,7 +113,8 @@ string serialize_type(const AbiType & type)
   case ABI_TYPE_DECLTYPE_EXPRESSION:
     return "decltype " + type.expression_ref;
   case ABI_TYPE_CV:
-    return string(type.is_const ? "const " : "volatile ") + serialize_type(type.types.front());
+    return string(type.is_const ? "const " : "") + (type.is_volatile ? "volatile " : "") +
+           serialize_type(type.types.front());
   case ABI_TYPE_POINTER:
     return "ptr " + serialize_type(type.types.front());
   case ABI_TYPE_LVALUE_REFERENCE:

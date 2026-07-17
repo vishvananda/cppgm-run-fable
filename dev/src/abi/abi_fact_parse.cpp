@@ -7,6 +7,7 @@
 
 #include "abi/abi_mangle_encode.h"
 
+#include <cerrno>
 #include <cstdlib>
 
 using namespace std;
@@ -39,7 +40,12 @@ long long parse_integer(const string & word)
       throw AbiFactError("malformed integer '" + word + "'");
     }
   }
-  return strtoll(word.c_str(), 0, 10);
+  errno = 0;
+  const long long value = strtoll(word.c_str(), 0, 10);
+  if(errno != 0) {
+    throw AbiFactError("integer out of range '" + word + "'");
+  }
+  return value;
 }
 
 size_t parse_index(const string & word)
@@ -62,6 +68,15 @@ bool is_unsigned_number(const string & word)
     }
   }
   return true;
+}
+
+// Local-entity occurrence numbers and lambda numbers: "-" means none.
+const string & parse_occurrence_word(const string & word)
+{
+  if(word != "-" && !is_unsigned_number(word)) {
+    throw AbiFactError("malformed occurrence number '" + word + "'");
+  }
+  return word;
 }
 
 bool parse_yes_no(const string & word)
@@ -261,14 +276,14 @@ AbiType parse_spaced_type(const vector<string> & words, size_t begin, size_t end
     type.kind = ABI_TYPE_LOCAL_TYPE;
     type.context_ref = words[begin + 1];
     type.name = words[begin + 2];
-    type.discriminator = words[begin + 3];
+    type.discriminator = parse_occurrence_word(words[begin + 3]);
     return type;
   }
   if(head == "lambda-closure") {
     require_words(words, begin + 3, "lambda closure type");
     type.kind = ABI_TYPE_LAMBDA_CLOSURE;
     type.context_ref = words[begin + 1];
-    type.discriminator = words[begin + 2];
+    type.discriminator = parse_occurrence_word(words[begin + 2]);
     for(size_t i = begin + 3; i < end; ++i) {
       type.types.push_back(parse_type_words(words, i, i + 1));
     }
@@ -343,14 +358,14 @@ AbiFunctionTarget parse_function_target(const vector<string> & words, size_t beg
     target.context_ref = words[begin + 1];
     target.source_name = words[begin + 2];
     target.terminal = words[begin + 3];
-    target.discriminator = words[begin + 4];
+    target.discriminator = parse_occurrence_word(words[begin + 4]);
     return target;
   }
   if(head == "lambda") {
     require_words(words, begin + 4, "lambda function target");
     target.kind = ABI_FUNCTION_TARGET_LAMBDA;
     target.context_ref = words[begin + 1];
-    target.discriminator = words[begin + 2];
+    target.discriminator = parse_occurrence_word(words[begin + 2]);
     target.terminal = words[begin + 3];
     for(size_t i = begin + 4; i < words.size(); ++i) {
       target.signature_parameter_types.push_back(parse_type_words(words, i, i + 1));
@@ -680,7 +695,7 @@ AbiTargetRecord parse_target(const vector<string> & words)
     require_words(words, 4, "construction vtable target");
     target.kind = ABI_TARGET_FACT_CONSTRUCTION_VTABLE;
     target.type = parse_type_words(words, 1, 2);
-    target.base_offset = static_cast<unsigned long long>(parse_integer(words[2]));
+    target.base_offset = parse_index(words[2]);
     target.base_type = parse_type_words(words, 3, 4);
     return target;
   }
@@ -797,14 +812,14 @@ AbiFunctionRecord parse_function_record(const vector<string> & words)
     record.kind = ABI_FUNCTION_RECORD_LOCAL_CONTEXT;
     record.context_ref = words[1];
     record.source_name = words[2];
-    record.discriminator = words[3];
+    record.discriminator = parse_occurrence_word(words[3]);
     return record;
   }
   if(keyword == "lambda-context") {
     require_words(words, 3, "lambda context");
     record.kind = ABI_FUNCTION_RECORD_LAMBDA_CONTEXT;
     record.context_ref = words[1];
-    record.discriminator = words[2];
+    record.discriminator = parse_occurrence_word(words[2]);
     for(size_t i = 3; i < words.size(); ++i) {
       record.types.push_back(parse_type_words(words, i, i + 1));
     }

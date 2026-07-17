@@ -56,6 +56,18 @@ const AbiEntityFact & CaseEnvironment::entity(const string & id) const
   return *it->second;
 }
 
+namespace {
+
+template <typename Fact>
+void define_fact(map<string, const Fact *> & facts, const string & id, const Fact & fact)
+{
+  if(!facts.insert(make_pair(id, &fact)).second) {
+    throw AbiFactError("duplicate definition of fact '" + id + "'");
+  }
+}
+
+}  // namespace
+
 CaseEnvironment build_case_environment(const AbiFactCase & fact_case)
 {
   CaseEnvironment env;
@@ -67,19 +79,19 @@ CaseEnvironment build_case_environment(const AbiFactCase & fact_case)
     const AbiDefinitionRecord & def = record.definition;
     switch(def.kind) {
     case ABI_DEFINITION_TYPE:
-      env.types[def.id] = &def.type;
+      define_fact(env.types, def.id, def.type);
       break;
     case ABI_DEFINITION_TEMPLATE_ARGUMENT:
-      env.arguments[def.id] = &def.template_argument;
+      define_fact(env.arguments, def.id, def.template_argument);
       break;
     case ABI_DEFINITION_EXPRESSION:
-      env.expressions[def.id] = &def.expression;
+      define_fact(env.expressions, def.id, def.expression);
       break;
     case ABI_DEFINITION_CONTEXT:
-      env.contexts[def.id] = &def.context;
+      define_fact(env.contexts, def.id, def.context);
       break;
     case ABI_DEFINITION_ENTITY:
-      env.entities[def.id] = &def.entity;
+      define_fact(env.entities, def.id, def.entity);
       break;
     }
   }
@@ -389,10 +401,12 @@ void build_function_name(EncodeContext & ctx, const AbiFunctionTarget & target,
 
 // The terminal component: an explicit terminal record, the target's semantic
 // terminal name (local/lambda call operators), or the already-built last link.
-void place_terminal(EncodeContext & ctx, const AbiFunctionTarget & target,
-                    const FunctionDetails & details, size_t parameter_count, FunctionName & name)
+// Operator arity counts the implicit object argument only when the name has
+// prefix components; an unqualified operator is a free function.
+void place_terminal(const AbiFunctionTarget & target, const FunctionDetails & details,
+                    size_t parameter_count, FunctionName & name)
 {
-  const bool is_member = !name.links.empty() || name.has_terminal_slot;
+  const bool is_member = !name.links.empty();
   const size_t operand_count = parameter_count + (is_member ? 1 : 0);
   NameLink link;
   bool have_terminal = false;
@@ -449,7 +463,7 @@ string encode_function_encoding(EncodeContext & ctx, const AbiFunctionTarget & t
                                      details.template_argument_refs.begin(),
                                      details.template_argument_refs.end());
   name.parameters.insert(name.parameters.end(), details.parameters.begin(), details.parameters.end());
-  place_terminal(ctx, target, details, name.parameters.size(), name);
+  place_terminal(target, details, name.parameters.size(), name);
   if(name.links.empty()) {
     throw AbiFactError("function target has no name");
   }
@@ -536,6 +550,8 @@ string closure_type_piece(EncodeContext & ctx, const string & number, const vect
   return out;
 }
 
+// Itanium discriminators number the nth same-named entity as n-2, omitted
+// for n <= 1, and use the __<number>_ spelling once the number reaches 10.
 string local_discriminator(const string & occurrence)
 {
   if(occurrence.empty() || occurrence == "-") {
@@ -544,6 +560,9 @@ string local_discriminator(const string & occurrence)
   const long long value = strtoll(occurrence.c_str(), 0, 10);
   if(value < 2) {
     return "";
+  }
+  if(value - 2 >= 10) {
+    return "__" + decimal(value - 2) + "_";
   }
   return "_" + decimal(value - 2);
 }

@@ -132,6 +132,62 @@ name maps **canonical keys → seq ids** (`S_`, `S0_`, … base-36).
 - Exit criteria: `perl scripts/cppgm_file_audit.pl --stage pa30 --paths
   dev/src` clean and root `make test-report-through-pa30` clean.
 
+## Architecture Review
+
+Reviewed after the implementation landed (`bf6b359a6`), against the README
+contract and `doc/itanium-mangling.txt`.
+
+- **Module boundaries hold.** `dev/abimangle.cpp` is the starter-kit CLI
+  shape and holds no encoding logic. The parser produces the handout
+  scaffold's typed records (`dev/src/abi_mangle.h` is unmodified handout);
+  the serializer is its canonical inverse; the encoder is split at the
+  `EncodeContext` seam declared in `dev/src/abi/abi_mangle_encode.h`
+  (types/args/exprs vs. names/encodings/targets). No module reparses
+  another's assembled strings: names are built from `NameLink` structure and
+  substitution decisions use canonical keys, not emitted text.
+- **Substitution identity is structural and single-owner.** All keys are
+  produced by `type_key`/`argument_key`/`expression_key` or carried
+  explicitly by the facts; the table itself only maps keys to seq-ids.
+  Key unification (named-type keys are qualified names) is what lets parsed
+  parameter types hit entries created from `name-source` facts, so no
+  second bookkeeping channel exists.
+- **Failure paths are loud.** Unknown keywords, heads, operators, terminals,
+  and dangling `*_ref`s all throw `AbiFactError`; the driver maps any
+  exception to a nonzero exit. There are no fallback name spellings.
+- **Fixture-pinned quirks are contained.** The `template-param` vs
+  `template-param-subst` split, the member-template terminal-slot rule, and
+  the `Tn` dependent-value prefix are recorded in "Encoding rules pinned by
+  fixtures" above and implemented in exactly one place each.
+
+Audit findings (defects fixed; details in `pa30/audit.md`):
+
+- unqualified operator terminals counted an implicit object argument, so a
+  global unary `operator-` encoded as binary `mi` — member-ness now comes
+  from prefix components only;
+- plain (non-address-of) entity template arguments were wrapped as
+  `XL…EE` instead of the direct `L…E` expr-primary the template-arg grammar
+  specifies;
+- discriminator numbers ≥ 10 lacked the `__<n>_` spelling;
+- the serializer dropped `volatile` from combined `const:volatile:` layers
+  and emitted raw array bounds as unparseable `array::…`;
+- parsing accepted negative construction-vtable offsets (wrapping through
+  an unsigned cast), non-numeric discriminators (silently meaning "none"),
+  silent 19-digit integer overflow, and duplicate `let-*` ids (last-wins).
+
+## Final Architecture Review
+
+After the audit fixes, the implementation matches the plan as written: three
+concerns in three modules plus a names/encodings unit, one substitution
+table per mangled name keyed structurally, facts validated loudly at parse
+time, and encoding rules that follow `doc/itanium-mangling.txt` where the
+fixtures do not pin behavior (expr-primary entity arguments, two-form
+discriminators, non-member operator arity). Round-trip
+`parse → serialize → parse → serialize/mangle` is stable over all 73
+fixtures plus synthetic coverage of the repaired spellings; the pa30 suite,
+the pa30 file audit, and `make test-report-through-pa30` all pass. The
+encoder remains a standalone `dev/src/abi/` library with no fact-file or
+CLI dependencies in the encoding path, ready for PA31+ compiler-side reuse.
+
 ## Stage handoff
 
 PA31+ starts consuming host-object EH facts; the encoder here stays a

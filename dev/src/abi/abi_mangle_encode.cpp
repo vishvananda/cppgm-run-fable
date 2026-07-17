@@ -707,11 +707,13 @@ void encode_member_template_entity(EncodeContext & ctx, const AbiTemplateArgumen
   out += "E";
 }
 
+// An address-of entity argument is an X…E expression (XadL…EE); a plain
+// entity argument is the direct L…E expr-primary form of the template-arg
+// grammar.
 void encode_entity_address(EncodeContext & ctx, const AbiTemplateArgument & argument, string & out)
 {
-  out += "X";
   if(argument.address_of) {
-    out += "ad";
+    out += "Xad";
   }
   out += "L";
   if(argument.kind == ABI_TEMPLATE_ARGUMENT_ENTITY) {
@@ -720,7 +722,9 @@ void encode_entity_address(EncodeContext & ctx, const AbiTemplateArgument & argu
     out += argument.symbol;
   }
   out += "E";
-  out += "E";
+  if(argument.address_of) {
+    out += "E";
+  }
 }
 
 }  // namespace
