@@ -716,6 +716,23 @@ AstDeclPtr AstParser::ParseMemberDeclarationForms()
 	}
 	if (MatchSimple(OP_SEMICOLON))
 		return MakeDecl(DK_EMPTY);
+	// A leading [[...]] attribute (7.6.1) - [[no_unique_address]] is
+	// captured onto the member declaration, the rest discard.
+	bool no_unique_address = false;
+	last_no_unique_address_ = false;
+	while (SkipSquareAttribute())
+	{
+		if (last_no_unique_address_)
+			no_unique_address = true;
+		last_no_unique_address_ = false;
+	}
+	if (no_unique_address)
+	{
+		AstDeclPtr decl = ParseSimpleDeclaration();
+		if (decl)
+			decl->no_unique_address = true;
+		return decl;
+	}
 	if (AtSimple(KW_TEMPLATE))
 		return ParseTemplateDeclaration();
 	if (AtSimple(KW_USING))

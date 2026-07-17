@@ -104,6 +104,8 @@ struct DeclSpecifierInfo
 	// PA15 member specifiers.
 	bool is_friend;
 	bool is_mutable;
+	// PA33 [[no_unique_address]] on the member declaration.
+	bool no_unique_address = false;
 };
 
 // One declared parameter (PA11 keeps the declared type; no 8.3.5p5

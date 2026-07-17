@@ -138,6 +138,13 @@ private:
 	void ParseClassAdornments(AstDecl& decl);
 	bool SkipSquareAttribute();  // [[ ... ]]
 	bool SkipBalancedParens();
+	// __attribute__ argument list: balanced skip that records abi_tag
+	// string arguments into last_abi_tags_ (harvested by the
+	// function-qualifier parse).
+	bool SkipAttributeParens();
+	std::vector<std::string> last_abi_tags_;
+	// [[no_unique_address]] seen by the last SkipSquareAttribute.
+	bool last_no_unique_address_ = false;
 
 	// --- names (ast_parse_names.cpp) --------------------------------
 	// Template-id attempt policy for `name <`, from the name table:

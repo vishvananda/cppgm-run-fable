@@ -367,6 +367,11 @@ private:
 	// copy (`copyobj`) instead of a synthesized helper call. The
 	// destination is `this_text` when non-empty, else the action's own
 	// address child.
+	// PA33 -O1 (lower_member.cpp): call-site expansion of a simple
+	// inline constructor (literal member stores only).
+	bool LowerSimpleInlineConstruction(const SemNode& action,
+	                                   const SemNode& callee,
+	                                   const string& this_text);
 	void LowerTrivialCopyAction(const SemNode& action,
 	                            const string& this_text);
 	// A class temporary: a fresh object slot plus its constructor run;

@@ -90,6 +90,7 @@ void * compile_unit_thread_main(void * opaque)
 
 		LowerProgram lowering;
 		lowering.SetSeparateCompilation();
+		lowering.SetOptimizeLevel(task->options->optimize);
 		lowering.AddUnit(semantics);
 		std::ostringstream lowir;
 		lowering.Write(lowir);

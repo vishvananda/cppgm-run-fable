@@ -68,9 +68,10 @@ struct DriverInvocation
   vector<string> lib_dirs;
   vector<string> libs;
   vector<string> inputs;
+  int optimize;  // -O<n> level (0 when unspecified)
 
   DriverInvocation()
-      : mode(DriverMode::Link), explicit_outfile(false)
+      : mode(DriverMode::Link), explicit_outfile(false), optimize(0)
   {
   }
 };
@@ -343,6 +344,9 @@ bool consume_toolchain_option(const vector<string> & args, size_t & i,
     return true;
   }
   if(is_optimization_flag(args[i])) {
+    if(args[i].size() == 3 && args[i][2] >= '0' && args[i][2] <= '9') {
+      invocation.optimize = args[i][2] - '0';
+    }
     return true;
   }
   if(args[i] == "--target") {
@@ -460,6 +464,7 @@ toolchain::CompileOptions make_compile_options(
   toolchain::CompileOptions options;
   options.include_dirs = invocation.include_dirs;
   options.target = toolchain::NormalizeTargetName(invocation.target);
+  options.optimize = invocation.optimize;
   return options;
 }
 

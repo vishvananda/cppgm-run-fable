@@ -195,6 +195,24 @@ string ManglePrefixComponents(const vector<NameComponent>& parts,
 
 string MangleTerminalName(const string& name, size_t arity);
 
+// The position of `id` among the active alias frame's parameters
+// (-1 when the frame does not bind it), and the builtin code of a
+// written simple-type keyword run (lower_name_local.cpp).
+int AliasParamIndex(const Substitutions& subs, const string& id);
+string FundamentalKeywordCode(const string& keywords);
+
+// 5.1.7 local-entity manglings (lower_name_local.cpp): the enclosing
+// function scope of a local entity (null for non-local), the
+// recursive enclosing-function encoding, the Itanium <lambda-sig>,
+// and the Z..E local-name spelling.
+const Scope* LocalEntityFunctionScope(const NamedTypeInfo& info);
+string MangleEnclosingFunctionEncoding(const Scope* fn_scope,
+                                       Substitutions& subs);
+string ClosureLambdaSignature(const NamedTypeInfo& info,
+                              Substitutions& subs);
+string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
+                       Substitutions& subs, string* key_out);
+
 // PA33 14.5.7p2 (lower_name_template.cpp): an alias-template
 // specialization pattern is the aliased type - the alias's written
 // target mangles with its parameters bound to the resolved pattern

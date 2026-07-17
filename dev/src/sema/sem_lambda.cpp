@@ -613,6 +613,9 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 		"class " + name, current_, name);
 	entity->class_key = "class";
 	entity->is_closure = true;
+	// The operator() body scope belongs to this closure: a nested
+	// lambda's local encoding recurses through it (5.1.7).
+	fn_scope->closure_entity = entity;
 	{
 		// 5.1.7: the <lambda-sig> discriminator counts earlier
 		// lambdas with the same signature in the same context: the

@@ -766,21 +766,6 @@ string MangleCvQualified(const TypePtr& type, Substitutions& subs,
 	return cv + inner;
 }
 
-// 5.1.7: the enclosing function scope of a local entity (null when
-// the entity is not function-local).
-const Scope* LocalEntityFunctionScope(const NamedTypeInfo& info)
-{
-	for (const Scope* scope = info.scope; scope && scope->parent;
-	     scope = scope->parent)
-	{
-		if (scope->kind == SCOPE_FUNCTION)
-			return scope;
-		if (scope->kind == SCOPE_NAMESPACE)
-			return 0;
-	}
-	return 0;
-}
-
 // Pointer-identity substitution key: stable within one mangled name
 // and independent of the substitution-dependent spelling (the same
 // entity mangled later in the name must compress even though its
@@ -790,111 +775,6 @@ string PointerKey(const void* p)
 	char buffer[24];
 	snprintf(buffer, sizeof(buffer), "%p", p);
 	return buffer;
-}
-
-// 5.1.7: the encoding of the function enclosing a local entity,
-// sharing the caller's substitution table so the components register
-// for later compression (`ZNS_8lookup_aE...EUlS6_PKcE_`).
-string MangleEnclosingFunctionEncoding(const Scope* fn_scope,
-                                       Substitutions& subs)
-{
-	subs.encoding_instance++;
-	const Scope* declaring = fn_scope->parent;
-	// The body scope carries its own composed type; a name lookup
-	// would find only the first overload of the name.
-	TypePtr fn_type = fn_scope->fn_type;
-	if (!fn_type && declaring)
-		if (const ScopeBinding* fn_binding =
-		        FindOwnBinding(*declaring, fn_scope->name))
-			fn_type = fn_binding->type;
-	if (!fn_type || !declaring)
-		throw OutsideBoundary("local entity mangling context");
-	// main is unmangled, so its local-name prefix is the bare source
-	// name with no signature (the g++/reference spelling).
-	if (fn_scope->name == "main" &&
-	    declaring->kind == SCOPE_NAMESPACE && !declaring->parent)
-		return "4main";
-	if (fn_scope->fn_spec)
-		return MangleFunctionTemplateEncoding(*fn_scope->fn_spec,
-		                                      subs);
-	if (declaring->kind == SCOPE_CLASS)
-	{
-		// The member encoding takes the this-adjusted type; a body
-		// scope's composed type carries only the declared signature.
-		TypePtr adjusted = fn_type;
-		bool has_this = !fn_type->parameters.empty() &&
-			fn_type->parameters[0]->kind == TK_POINTER &&
-			RemoveTopCv(fn_type->parameters[0]->target)->kind ==
-				TK_CLASS &&
-			RemoveTopCv(fn_type->parameters[0]->target)->named ==
-				declaring->entity;
-		if (!has_this && declaring->entity)
-		{
-			TypePtr class_type =
-				MakeNamedType(TK_CLASS, declaring->entity);
-			class_type = MakeCvQualifiedType(
-				class_type, fn_type->is_const, fn_type->is_volatile);
-			vector<TypePtr> params;
-			params.push_back(
-				MakePointerType(class_type, false, false));
-			for (size_t i = 0; i < fn_type->parameters.size(); i++)
-				params.push_back(fn_type->parameters[i]);
-			adjusted = MakeFunctionType(fn_type->target, params,
-			                            fn_type->variadic);
-		}
-		return MangleMemberFunctionEncoding(declaring, fn_scope->name,
-		                                    adjusted, "", subs);
-	}
-	return MangleFunctionEncoding(declaring, fn_scope->name, fn_type,
-	                              subs);
-}
-
-// The Itanium <lambda-sig> of a closure class
-// (Ul <bare-params> E <discriminator> _).
-string ClosureLambdaSignature(const NamedTypeInfo& info,
-                              Substitutions& subs)
-{
-	string params = "v";
-	if (info.class_record && info.class_record->members)
-		if (const ScopeBinding* op = FindOwnBinding(
-		        *info.class_record->members, "operator ()"))
-			if (op->type && op->type->kind == TK_FUNCTION)
-				params = MangleBareParameters(op->type, subs, 0);
-	return "Ul" + params + "E" +
-		(info.closure_discriminator > 0
-			 ? std::to_string(info.closure_discriminator - 1)
-			 : string()) + "_";
-}
-
-// 5.1.7: a function-local entity mangles as
-// `Z <function encoding> E <entity name>`.
-string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
-                       Substitutions& subs, string* key_out)
-{
-	string key = "ZL:" + PointerKey(&info);
-	if (key_out)
-		*key_out = key;
-	string found = subs.Find(key);
-	if (!found.empty())
-		return found;
-	string fn_encoding = MangleEnclosingFunctionEncoding(fn_scope, subs);
-	// PA25: a closure class spells the Itanium <lambda-sig> local
-	// name (Ul <bare-params> E <discriminator> _).
-	if (info.is_closure)
-	{
-		string signature = ClosureLambdaSignature(info, subs);
-		subs.Add(key);
-		return "Z" + fn_encoding + "E" + signature;
-	}
-	// The classes between the function and the entity, then the leaf.
-	string names;
-	for (const Scope* scope = info.scope;
-	     scope && scope != fn_scope; scope = scope->parent)
-		if (scope->kind == SCOPE_CLASS && !scope->name.empty())
-			names = SourceName(scope->name) + names;
-	names += SourceName(info.name);
-	subs.Add(key);
-	return "Z" + fn_encoding + "E" + names;
 }
 
 // PA26 5.1.5: `M <class> <member type>`; a cv-qualified member
@@ -935,6 +815,78 @@ string MangleMemberPointerType(const TypePtr& type, Substitutions& subs,
 		return found;
 	subs.Add(key);
 	return "M" + class_part + member_part;
+}
+
+// 5.1.5/14.5.7: a dependent specialization pattern - a
+// template-template-parameter spec spells the parameter (T_/Tn_) with
+// its argument list, an alias spec expands to the aliased written
+// target, anything else spells the anchor's components with the
+// argument patterns on the leaf.
+string MangleTemplateSpecPattern(const TypePtr& type, Substitutions& subs,
+                                 string* key_out)
+{
+		// 5.1.5: a template-template-parameter specialization spells
+		// the parameter itself (T_/Tn_, a param candidate) with its
+		// argument list; the whole spelling is a candidate.
+		if (type->named->is_template_anchor &&
+		    type->named->param_index >= 0)
+		{
+			int index = type->named->param_index;
+			string param_key = "TP:" +
+				PointerKey(subs.pattern_params) + ":" +
+				to_string(index);
+			string spelled = subs.FindParam(param_key);
+			if (spelled.empty())
+			{
+				subs.AddParam(param_key);
+				spelled = index == 0
+					? string("T_")
+					: "T" + to_string(index - 1) + "_";
+			}
+			string body = spelled + "I";
+			string key = param_key + "<";
+			for (size_t a = 0; a < type->targs.size(); a++)
+			{
+				body += MangleTemplateArg(type->targs[a], subs);
+				key += ArgKey(type->targs[a], subs.pattern_params) +
+					",";
+			}
+			body += "E";
+			key += ">";
+			if (key_out)
+				*key_out = key;
+			string found = subs.Find(key);
+			if (!found.empty())
+				return found;
+			subs.Add(key);
+			return body;
+		}
+		// 14.5.7p2: an alias-template specialization pattern is the
+		// aliased type - expand the written target with the pattern
+		// arguments bound. Targets outside the written subset fall
+		// back to the alias's own component spelling (a pairing hint,
+		// like the function-level written fallback), with the table
+		// restored so partial expansion never shifts later numbering.
+		if (type->named->spec_template &&
+		    type->named->spec_template->kind == TMPL_ALIAS)
+		{
+			Substitutions saved_state = subs;
+			try
+			{
+				return MangleTypedAliasExpansion(
+					*type->named->spec_template, type->targs, subs,
+					key_out);
+			}
+			catch (const std::exception&)
+			{
+				subs = saved_state;
+			}
+		}
+		// A dependent specialization pattern (`box<T>`): the anchor's
+		// components with this node's argument patterns on the leaf.
+		vector<NameComponent> parts = EntityComponents(*type->named);
+		parts.back().args = &type->targs;
+		return MangleComponentList(parts, subs, key_out);
 }
 
 string MangleType(const TypePtr& type, Substitutions& subs,
@@ -1021,70 +973,7 @@ string MangleType(const TypePtr& type, Substitutions& subs,
 		return MangleComponentList(EntityComponents(*type->named), subs,
 		                           key_out);
 	case TK_TEMPLATE_SPEC:
-	{
-		// 5.1.5: a template-template-parameter specialization spells
-		// the parameter itself (T_/Tn_, a param candidate) with its
-		// argument list; the whole spelling is a candidate.
-		if (type->named->is_template_anchor &&
-		    type->named->param_index >= 0)
-		{
-			int index = type->named->param_index;
-			string param_key = "TP:" +
-				PointerKey(subs.pattern_params) + ":" +
-				to_string(index);
-			string spelled = subs.FindParam(param_key);
-			if (spelled.empty())
-			{
-				subs.AddParam(param_key);
-				spelled = index == 0
-					? string("T_")
-					: "T" + to_string(index - 1) + "_";
-			}
-			string body = spelled + "I";
-			string key = param_key + "<";
-			for (size_t a = 0; a < type->targs.size(); a++)
-			{
-				body += MangleTemplateArg(type->targs[a], subs);
-				key += ArgKey(type->targs[a], subs.pattern_params) +
-					",";
-			}
-			body += "E";
-			key += ">";
-			if (key_out)
-				*key_out = key;
-			string found = subs.Find(key);
-			if (!found.empty())
-				return found;
-			subs.Add(key);
-			return body;
-		}
-		// 14.5.7p2: an alias-template specialization pattern is the
-		// aliased type - expand the written target with the pattern
-		// arguments bound. Targets outside the written subset fall
-		// back to the alias's own component spelling (a pairing hint,
-		// like the function-level written fallback), with the table
-		// restored so partial expansion never shifts later numbering.
-		if (type->named->spec_template &&
-		    type->named->spec_template->kind == TMPL_ALIAS)
-		{
-			Substitutions saved_state = subs;
-			try
-			{
-				return MangleTypedAliasExpansion(
-					*type->named->spec_template, type->targs, subs,
-					key_out);
-			}
-			catch (const std::exception&)
-			{
-				subs = saved_state;
-			}
-		}
-		// A dependent specialization pattern (`box<T>`): the anchor's
-		// components with this node's argument patterns on the leaf.
-		vector<NameComponent> parts = EntityComponents(*type->named);
-		parts.back().args = &type->targs;
-		return MangleComponentList(parts, subs, key_out);
-	}
+		return MangleTemplateSpecPattern(type, subs, key_out);
 	case TK_MEMBER_POINTER:
 		return MangleMemberPointerType(type, subs, key_out);
 	case TK_TYPE_PARAM:

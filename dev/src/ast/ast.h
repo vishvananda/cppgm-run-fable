@@ -133,6 +133,8 @@ struct AstDecl
 	std::vector<AstInitDeclarator> declarators;  // DK_SIMPLE
 	AstDeclaratorPtr declarator;   // DK_FUNCTION, special members
 	AstStmtPtr body;               // function/special-member compound
+	// PA33: a leading [[no_unique_address]] on a member declaration.
+	bool no_unique_address = false;
 
 	// namespace-definition / namespace-alias / alias-declaration
 	std::string name;

@@ -192,20 +192,6 @@ struct MangleContext
 	const Substitutions::AliasFrame* frame;
 };
 
-// The position of `id` among the active alias frame's parameters,
-// -1 when the frame does not bind it.
-int AliasParamIndex(const Substitutions& subs, const string& id)
-{
-	if (!subs.alias_frame || !subs.alias_frame->alias)
-		return -1;
-	const vector<TemplateParam>& params =
-		subs.alias_frame->alias->params;
-	for (size_t p = 0; p < params.size(); p++)
-		if (!params[p].name.empty() && params[p].name == id)
-			return (int)p;
-	return -1;
-}
-
 // The alias template `id` names in the written lookup scope, if any.
 // Template parameters and alias-frame bindings shadow it.
 const TemplateInfo* FindAliasTemplate(const Substitutions& subs,
@@ -375,31 +361,6 @@ string MangleAliasExpansion(const TemplateInfo& alias,
 	subs.fn_param_names = 0;
 	subs.written_scope = TemplateLookupScope(alias);
 	return MangleWrittenTypeId(*alias.alias_type, subs, key_out);
-}
-
-// 5.1.5: the builtin code of a written simple-type keyword sequence
-// (space-joined source order).
-string FundamentalKeywordCode(const string& keywords)
-{
-	struct Entry { const char* text; const char* code; };
-	static const Entry table[] = {
-		{"void", "v"}, {"bool", "b"}, {"char", "c"},
-		{"signed char", "a"}, {"unsigned char", "h"},
-		{"short", "s"}, {"short int", "s"},
-		{"unsigned short", "t"}, {"unsigned short int", "t"},
-		{"int", "i"}, {"signed", "i"}, {"signed int", "i"},
-		{"unsigned", "j"}, {"unsigned int", "j"},
-		{"long", "l"}, {"long int", "l"},
-		{"unsigned long", "m"}, {"unsigned long int", "m"},
-		{"long long", "x"}, {"long long int", "x"},
-		{"unsigned long long", "y"}, {"unsigned long long int", "y"},
-		{"wchar_t", "w"}, {"char16_t", "Ds"}, {"char32_t", "Di"},
-		{"float", "f"}, {"double", "d"}, {"long double", "e"},
-	};
-	for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
-		if (keywords == table[i].text)
-			return table[i].code;
-	throw OutsideBoundary("mangled dependent type form");
 }
 
 string MangleWrittenTypeId(const AstTypeId& id, Substitutions& subs,
@@ -876,6 +837,22 @@ string MangleWrittenBase(const vector<const AstSpecifier*>& specifiers,
 		key = "DT:" +
 			MangleWrittenExprNode(*specifiers[0]->decltype_expr,
 			                      throwaway);
+		return MangleSubstitutable(key, body, subs);
+	}
+	// PA33 builtin transform: the vendor-extended type production
+	// `u <source-name> I <operand> E` (the clang spelling the host
+	// toolchain pins), a substitution candidate.
+	if (specifiers.size() == 1 &&
+	    specifiers[0]->kind == SPEC_TRANSFORM &&
+	    specifiers[0]->transform_type)
+	{
+		string inner_key;
+		string inner = MangleWrittenTypeId(
+			*specifiers[0]->transform_type, subs, &inner_key);
+		const string& trait = specifiers[0]->spelling;
+		string body = "u" + to_string(trait.size()) + trait + "I" +
+			inner + "E";
+		key = "u:" + trait + "<" + inner_key + ">";
 		return MangleSubstitutable(key, body, subs);
 	}
 	bool is_const = false;

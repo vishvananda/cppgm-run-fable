@@ -503,7 +503,7 @@ void AstParser::SkipDeclAdornments()
 		if (AtIdentifierSpelled("__attribute__"))
 		{
 			Advance();
-			if (SkipBalancedParens())
+			if (SkipAttributeParens())
 				continue;
 			Restore(state);
 			return;
@@ -520,7 +520,61 @@ void AstParser::SkipDeclAdornments()
 	}
 }
 
-// [[ ... ]] attribute, accepted after declarators and discarded.
+// __attribute__ argument list: the balanced skip of
+// SkipBalancedParens, additionally recording abi_tag string
+// arguments (5.1: they spell B<len><tag> after the unqualified name).
+bool AstParser::SkipAttributeParens()
+{
+	if (!AtSimple(OP_LPAREN))
+		return false;
+	size_t depth = 0;
+	for (;;)
+	{
+		if (AtEof())
+			return false;
+		if (AtSimple(OP_LPAREN))
+		{
+			depth++;
+			Advance();
+			continue;
+		}
+		if (AtSimple(OP_RPAREN))
+		{
+			depth--;
+			Advance();
+			if (depth == 0)
+				return true;
+			continue;
+		}
+		if (depth == 2 &&
+		    (AtIdentifierSpelled("__abi_tag__") ||
+		     AtIdentifierSpelled("abi_tag")) &&
+		    AtSimple(OP_LPAREN, 1))
+		{
+			Advance();
+			Advance();
+			depth++;
+			while (!AtEof() && !AtSimple(OP_RPAREN))
+			{
+				const ParseToken& token = Peek();
+				if (token.kind == PTOK_LITERAL)
+				{
+					string chars = token.literal_data;
+					while (!chars.empty() && chars.back() == '\0')
+						chars.pop_back();
+					if (!chars.empty())
+						last_abi_tags_.push_back(chars);
+				}
+				Advance();
+			}
+			continue;
+		}
+		Advance();
+	}
+}
+
+// [[ ... ]] attribute, accepted after declarators and discarded
+// (a no_unique_address sighting is recorded for the member parse).
 bool AstParser::SkipSquareAttribute()
 {
 	if (!AtSimple(OP_LSQUARE) || !AtSimple(OP_LSQUARE, 1))
@@ -540,6 +594,8 @@ bool AstParser::SkipSquareAttribute()
 			depth++;
 		else if (AtSimple(OP_RSQUARE))
 			depth--;
+		else if (AtIdentifierSpelled("no_unique_address"))
+			last_no_unique_address_ = true;
 		Advance();
 	}
 	return true;

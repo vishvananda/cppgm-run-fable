@@ -147,6 +147,7 @@ void SemBinder::RecordMemberField(ScopeBinding& binding,
 	field.name = binding.name;
 	field.type = binding.type;
 	field.is_mutable = specs.is_mutable;
+	field.no_unique_address = specs.no_unique_address;
 	field.access = binding.access;
 	field.default_init = init;
 	if (init)
@@ -317,6 +318,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 		cls->dtor_deleted = deleted;
 		cls->dtor_definition = defined ? &decl : 0;
 		cls->dtor_unwind_no = composed.noexcept_simple;
+		if (decl.declarator)
+			cls->dtor_abi_tags = decl.declarator->abi_tags;
 		RecordVirtualDtor(*cls, is_virtual, composed, defined, defaulted,
 		                  deleted);
 		if (defined)
@@ -339,6 +342,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	ctor.type = composed.type;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		ctor.param_names.push_back(composed.parameters[i].name);
+	if (decl.declarator)
+		ctor.abi_tags = decl.declarator->abi_tags;
 	ctor.access = current_access_;
 	ctor.is_explicit = is_explicit;
 	ctor.deleted = deleted;

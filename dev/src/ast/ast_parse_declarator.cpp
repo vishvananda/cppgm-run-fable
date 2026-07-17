@@ -137,6 +137,25 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		if (type != OP_COLON2)
 			return false;
 	}
+	// PA33 builtin transform: __decay ( type-id ).
+	if (type_state == kNoType && AtIdentifierSpelled("__decay") &&
+	    AtSimple(OP_LPAREN, 1))
+	{
+		State state = Save();
+		AstSpecifier spec;
+		spec.kind = SPEC_TRANSFORM;
+		spec.spelling = Peek().spelling;
+		Advance();
+		Advance();
+		if (ParseTypeId(spec.transform_type) && MatchSimple(OP_RPAREN))
+		{
+			seq.push_back(move(spec));
+			type_state = kNamedType;
+			return true;
+		}
+		Restore(state);
+		return false;
+	}
 	if ((token.kind == PTOK_IDENTIFIER || AtSimple(OP_COLON2)) &&
 	    type_state == kNoType)
 	{
@@ -258,6 +277,13 @@ bool AstParser::ParseFunctionQualifiers(AstDeclarator& declarator)
 		if (SkipSquareAttribute())
 			continue;
 		SkipDeclAdornments();
+		if (!last_abi_tags_.empty())
+		{
+			declarator.abi_tags.insert(declarator.abi_tags.end(),
+			                           last_abi_tags_.begin(),
+			                           last_abi_tags_.end());
+			last_abi_tags_.clear();
+		}
 		const ParseToken& token = Peek();
 		if (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
 		{

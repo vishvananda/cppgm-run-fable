@@ -316,6 +316,10 @@ private:
 	// definitions.
 	void DeclareImplicitSpecialMembers(ClassInfo& cls);
 	void DeclareClosureSpecialMembers(ClassInfo& cls);
+	void AppendArrayStorageCopy(const ClassField& field,
+	                            const SemNode& source_proto,
+	                            EValueCategory category,
+	                            vector<SemNodePtr>& out);
 	void DeclareImplicitAssign(ClassInfo& cls, bool is_move, bool deleted);
 	void EnsureSpecialCtor(const ClassInfo& cls, int index,
 	                       bool out_of_class = false);

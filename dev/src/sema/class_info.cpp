@@ -617,6 +617,19 @@ ClassField& LayoutField(ClassInfo& info, const ClassField& field)
 	unsigned long long field_alignment = TypeAlignment(field.type);
 	ClassField row = field;
 	row.is_bit_field = false;
+	// PA33 [[no_unique_address]]: an empty-class member occupies no
+	// storage - the empty-base convention (offset 0, no cursor
+	// advance); its alignment still contributes.
+	TypePtr bare = RemoveTopCv(field.type);
+	if (row.no_unique_address && bare->kind == TK_CLASS &&
+	    bare->named->class_record && bare->named->class_record->is_empty)
+	{
+		row.offset = 0;
+		if (field_alignment > info.alignment)
+			info.alignment = field_alignment;
+		info.fields.push_back(row);
+		return info.fields.back();
+	}
 	if (info.is_union)
 	{
 		row.offset = 0;

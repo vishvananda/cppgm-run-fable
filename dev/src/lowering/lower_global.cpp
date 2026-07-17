@@ -424,3 +424,46 @@ string LowerProgram::RenderGlobal(LowGlobalInfo& info)
 		RenderScalarInit(info);
 }
 
+// PA18: a dynamically initialized thread-local object constructs on
+// first use: an internal thread-local i64 guard and an internal
+// `<name>__tls_init` function running the construction actions once
+// per thread (the backend's TLS wrapper calls it).
+void LowerProgram::BuildTlsGuardedInit(size_t global_index,
+                                       vector<SemNodePtr>& actions)
+{
+	string object_name = globals_[global_index].low_name;
+	LowGlobalInfo guard;
+	guard.type = MakeFundamentalType(FT_LONG_INT);
+	guard.low_name = UniqueSymbol(object_name + "__tls_guard");
+	guard.internal = true;
+	guard.is_thread_local = true;
+	guard.defined = true;
+	global_index_["#tls_guard#" + object_name] = globals_.size();
+	globals_.push_back(guard);
+
+	SemNodePtr guarded = MakeSemNode(SN_STATIC_GUARD);
+	guarded->name = globals_.back().low_name;
+	// The construction actions may reach this variable back through
+	// its own TLS wrapper; the host __tls_init shape sets the guard
+	// first so the re-entrant call sees it and stops. The
+	// whole-program presentation keeps the pinned guard-after-init
+	// order (its wrapper-free access path cannot recurse).
+	guarded->guard_first = separate_compilation_;
+	for (size_t i = 0; i < actions.size(); i++)
+		guarded->children.push_back(std::move(actions[i]));
+	SemNodePtr init_def = MakeSemNode(SN_FUNCTION_DEFINITION);
+	init_def->type = MakeFunctionType(MakeFundamentalType(FT_VOID),
+	                                  vector<TypePtr>(), false);
+	init_def->children.push_back(std::move(guarded));
+
+	LowFunctionInfo info;
+	info.scope = 0;
+	info.name = object_name + "__tls_init";
+	info.type = init_def->type;
+	info.low_name = UniqueSymbol(object_name + "__tls_init");
+	info.internal = true;
+	info.index = functions_.size();
+	functions_.push_back(info);
+	LowerHelper(functions_.back(), *init_def);
+	helper_defs_.push_back(std::move(init_def));
+}

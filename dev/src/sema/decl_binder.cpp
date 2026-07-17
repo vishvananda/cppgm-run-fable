@@ -697,6 +697,7 @@ void DeclBinder::BindSimpleDeclaration(const AstDecl& decl)
 			has_nested_type = true;
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(decl.specifiers, true);
+	specs.no_unique_address = decl.no_unique_address;
 	// 7.5p7: consumed by the direct declaration only, so nothing
 	// nested (initializer lambdas, class bodies) inherits it.
 	if (in_linkage_single_)

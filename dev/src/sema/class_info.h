@@ -55,6 +55,9 @@ struct ClassField
 	// PA25 5.1.2: the closure field holding the captured `this`
 	// pointer (stored as a pointer value, not a capture reference).
 	bool captured_this = false;
+	// PA33 [[no_unique_address]]: an empty-class member occupies no
+	// storage (the empty-base convention).
+	bool no_unique_address = false;
 };
 
 // PA16: the special-member role of a constructor (12.8p2/p3).
@@ -80,6 +83,8 @@ struct ClassCtor
 
 	vector<string> param_names;  // declared parameter names
 	bool inherited_built;        // forwarding definition synthesized
+	// PA33 abi_tag tags (B<len><tag>, sorted, after the C1/C2 codes).
+	vector<string> abi_tags;
 
 	TypePtr type;  // function type over the declared parameters
 	EMemberAccess access;
@@ -270,12 +275,12 @@ struct ClassInfo
 	EMemberAccess dtor_access;
 	const AstDecl* dtor_definition;  // user destructor body (null: implicit)
 	bool dtor_unwind_no;
+	vector<string> dtor_abi_tags;  // PA33 abi_tag (B<len><tag>)
 	// 11.3 friends: friend-class entities and friend-function names.
 	vector<const NamedTypeInfo*> friend_classes;
 	vector<std::pair<const Scope*, string>> friend_functions;
 	// PA21/PA22: declared constructor / conversion-function templates
-	// (selected specializations synthesize ClassCtor / ClassConversion
-	// entries).
+	// (specializations synthesize ClassCtor/ClassConversion entries).
 	vector<struct TemplateInfo*> ctor_templates;
 	vector<struct TemplateInfo*> conversion_templates;
 	vector<ClassConversion> conversions;  // declaration order (12.3.2)

@@ -143,6 +143,28 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 		case SPEC_NESTED_DECL:
 			resolved = host_.BindNestedTypeSpecifier(*spec.nested_decl);
 			break;
+		case SPEC_TRANSFORM:
+		{
+			// PA33 __decay(T) (20.9.7.4): references strip, arrays
+			// decay to element pointers, functions to function
+			// pointers, everything else drops its top cv. A dependent
+			// operand needs instantiation-time facts (the deferred
+			// alias-substitution path re-resolves it concretely).
+			TypePtr operand = ResolveTypeId(*spec.transform_type);
+			if (TypeIsDependent(operand))
+				throw runtime_error(
+					"builtin transform of a dependent type");
+			TypePtr stripped = IsReferenceType(operand)
+				? operand->target : operand;
+			if (stripped->kind == TK_ARRAY)
+				resolved = MakePointerType(stripped->target, false,
+				                           false);
+			else if (stripped->kind == TK_FUNCTION)
+				resolved = MakePointerType(stripped, false, false);
+			else
+				resolved = RemoveTopCv(stripped);
+			break;
+		}
 		}
 		if (named)
 			throw runtime_error("multiple type specifiers");

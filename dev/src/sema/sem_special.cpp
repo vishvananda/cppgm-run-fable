@@ -633,6 +633,24 @@ void SemBinder::AppendVBaseTransfers(const ClassInfo& cls, bool is_move,
 	}
 }
 
+// A non-class array member after a non-trivial prefix transfers as
+// raw storage (its elements are trivially copyable scalars).
+void SemBinder::AppendArrayStorageCopy(const ClassField& field,
+                                       const SemNode& source_proto,
+                                       EValueCategory category,
+                                       vector<SemNodePtr>& out)
+{
+	TypePtr bare = RemoveTopCv(field.type);
+	SemNodePtr action = MakeSemNode(SN_STORAGE_COPY);
+	action->has_value = true;
+	action->value = ConstValue(FT_UNSIGNED_LONG_INT, TypeSize(bare));
+	action->bit_width = TypeAlignment(bare);
+	action->children.push_back(ThisFieldExpr(field));
+	action->children.push_back(
+		SourceFieldExpr(source_proto, field, category));
+	out.push_back(std::move(action));
+}
+
 void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
                                       bool assign_form,
                                       const SemNode& source_proto,
@@ -679,18 +697,7 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 		}
 		if (!member && bare->kind == TK_ARRAY)
 		{
-			// A non-class array member after a non-trivial prefix
-			// transfers as raw storage (its elements are trivially
-			// copyable scalars).
-			SemNodePtr action = MakeSemNode(SN_STORAGE_COPY);
-			action->has_value = true;
-			action->value = ConstValue(FT_UNSIGNED_LONG_INT,
-			                           TypeSize(bare));
-			action->bit_width = TypeAlignment(bare);
-			action->children.push_back(ThisFieldExpr(field));
-			action->children.push_back(
-				SourceFieldExpr(source_proto, field, category));
-			out.push_back(std::move(action));
+			AppendArrayStorageCopy(field, source_proto, category, out);
 			continue;
 		}
 		if (member && !assign_form)

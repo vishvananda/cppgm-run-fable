@@ -421,6 +421,12 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	if (program_.SeparateCompilation() &&
 	    program_.TrivialDefaultConstruction(callee))
 		return;
+	// PA33 -O1: a simple inline constructor (only literal member
+	// stores) expands at the call site, so its linkonce body is never
+	// demanded and the optimized host object carries no C1/C2 symbol.
+	if (program_.SeparateCompilation() && program_.OptimizeLevel() >= 1 &&
+	    LowerSimpleInlineConstruction(action, callee, this_text))
+		return;
 	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	ctor_depth_++;
 	bool saved = in_lifetime_action_;
@@ -721,61 +727,6 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 
 // A trivial copy/move construction: the source object's bytes copy
 // directly into the destination (the PA16 direct value-transfer form).
-void FunctionLowerer::LowerTrivialCopyAction(const SemNode& action,
-                                             const string& this_text)
-{
-	const SemNode& call = *action.children[0];
-	if (!call.children.empty())
-		program_.DemandTrivialCtorBody(*call.children[0]);
-	size_t first_arg = action.ctor_addressed ? 2 : 1;
-	string dst = this_text;
-	// A member-addressed action (an aggregate item) owns its exact
-	// subobject address; a caller-supplied destination names only the
-	// enclosing object.
-	bool member_addressed = first_arg == 2 &&
-		(dst.empty() ||
-		 call.children[1]->children[0]->kind == SN_MEMBER_EXPRESSION);
-	if (member_addressed)
-		dst = LowerAddressExpr(*call.children[1]->children[0]);
-	else if (dst.empty())
-		throw OutsideBoundary("trivial copy without a destination");
-	const SemNode& source = *call.children[first_arg];
-	if (source.kind == SN_CALL_EXPRESSION && source.type &&
-	    !IsReferenceType(source.type) &&
-	    RemoveTopCv(source.type)->kind == TK_CLASS)
-	{
-		// A prvalue call result transfers straight into the
-		// destination (no intermediate temporary).
-		MaterializeClassResult(source, "tmpobj", dst);
-		return;
-	}
-	TypePtr cls_type = RemoveTopCv(action.type);
-	// An empty object has no bytes to transfer (the PA15 convention):
-	// a member-addressed action prints only the member address, while
-	// an argument/temporary copy still evaluates the source lvalue.
-	bool empty = cls_type->named->class_record &&
-		cls_type->named->class_record->is_empty;
-	if (empty && member_addressed)
-	{
-		// Only an effect-free source elides; a side-effecting source
-		// lvalue (`e(*get())` in a mem-initializer) must evaluate.
-		if (ExprHasSideEffects(source))
-			LowerAddressExpr(source);
-		return;
-	}
-	string src = LowerAddressExpr(source);
-	// A derived source adjusts to the copied base subobject.
-	TypePtr source_type = RemoveTopCv(StripRef(source.type));
-	if (source_type->kind == TK_CLASS)
-	{
-		src = AdjustToBase(src, source_type->named, cls_type->named);
-	}
-	if (empty)
-		return;
-	Emit("copyobj " + to_string(TypeSize(cls_type)) + "x" +
-	     to_string(TypeAlignment(cls_type)) + " " + src + ", " + dst);
-}
-
 string FunctionLowerer::MaterializeTemporary(const SemNode& action,
                                              const char* kind,
                                              bool register_cleanup)

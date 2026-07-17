@@ -93,8 +93,9 @@ enum ESpecifierKind
 	SPEC_KEYWORD,    // simple type, cv, storage, function specifiers
 	SPEC_TYPE_NAME,  // qualified-type-name / typename-specifier
 	SPEC_DECLTYPE,   // decltype-specifier
-	SPEC_NESTED_DECL // class-specifier / enum-specifier /
+	SPEC_NESTED_DECL,// class-specifier / enum-specifier /
 	                 // class-forward-declaration used as a specifier
+	SPEC_TRANSFORM   // PA33 builtin transform: __decay ( type-id )
 };
 
 struct AstSpecifier
@@ -105,10 +106,12 @@ struct AstSpecifier
 
 	ESpecifierKind kind;
 	ETokenType keyword;        // SPEC_KEYWORD
-	std::string spelling;      // SPEC_KEYWORD source spelling
+	std::string spelling;      // SPEC_KEYWORD source spelling;
+	                           // SPEC_TRANSFORM trait name
 	AstName name;              // SPEC_TYPE_NAME
 	AstExprPtr decltype_expr;  // SPEC_DECLTYPE
 	AstDeclPtr nested_decl;    // SPEC_NESTED_DECL
+	AstTypeIdPtr transform_type;  // SPEC_TRANSFORM operand
 };
 
 typedef std::vector<AstSpecifier> AstSpecifierSeq;
@@ -176,6 +179,9 @@ struct AstDeclarator
 	const AstName* IdName() const;  // declarator-id, through nesting
 
 	std::vector<AstDeclaratorItem> items;
+	// PA33 __attribute__((abi_tag("..."))) tags captured after the
+	// declarator (they append B<len><tag> to the mangled name).
+	std::vector<std::string> abi_tags;
 };
 
 struct AstParameter

@@ -237,6 +237,10 @@ struct Scope
 	// synthesized helper scopes). Local-entity mangling (5.1.7) needs
 	// the owning overload's identity, which a name lookup cannot give.
 	TypePtr fn_type;
+	// PA33: the closure class whose operator() this SCOPE_FUNCTION
+	// body belongs to (null otherwise). A lambda inside a lambda
+	// spells the recursive Z..EZ..E local encoding through it.
+	const NamedTypeInfo* closure_entity = 0;
 	// PA22 14.6.4 subset: set on instantiation argument-alias scopes to
 	// the owning template's capture stamp. Unqualified lookup under
 	// such a scope ignores namespace-scope objects declared after it,

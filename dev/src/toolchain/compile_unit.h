@@ -19,6 +19,7 @@ struct CompileOptions
 {
 	std::vector<std::string> include_dirs;  // -I, in command order
 	std::string target;                     // normalized backend target
+	int optimize = 0;                       // -O<n> level
 };
 
 ObjectModule CompileSourceFileToModule(const std::string & path,
