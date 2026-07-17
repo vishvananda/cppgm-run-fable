@@ -444,11 +444,18 @@ void FunctionLowering::FinishFrame()
 				   ins.operands[o].kind == mir_model::Operand::OP_DEREF)
 					used.insert(ins.operands[o].reg);
 		}
+	// Frames with real landing pads preserve the whole set: the
+	// private walker abandons the frames between the throw and the
+	// landing without restoring their callee-saved spills, so the
+	// landed frame's own entry snapshot (restored by its epilogue) is
+	// what keeps its ancestors' registers intact. The host unwinder
+	// gets the same snapshot through the CFI offset rules.
+	bool snapshot_all = !eh_landing_blocks_.empty();
 	std::vector<X64Register> ordered;
 	static const X64Register order[5] =
 		{ XR_RBX, XR_R12, XR_R13, XR_R14, XR_R15 };
 	for(int i = 0; i < 5; i++)
-		if(used.count(order[i]))
+		if(snapshot_all || used.count(order[i]))
 			ordered.push_back(order[i]);
 	out_.callee_saved_regs = ordered;
 	if(has_dead_source_spill_ && residual_bytes_ == 0)
