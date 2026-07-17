@@ -23,6 +23,22 @@ const ClassInfo* LowerProgram::MethodClass(const TypePtr& adjusted) const
 	return target->kind == TK_CLASS ? target->named->class_record : 0;
 }
 
+bool LowerProgram::TrivialDefaultConstruction(const SemNode& callee) const
+{
+	if (callee.special != SF_CONSTRUCTOR &&
+	    callee.special != SF_CONSTRUCTOR_BASE)
+		return false;
+	if (!callee.type || callee.type->parameters.size() != 1)
+		return false;
+	const ClassInfo* cls = MethodClass(callee.type);
+	if (!cls || cls->has_user_ctor)
+		return false;
+	for (size_t u = 0; u < units_.size(); u++)
+		if (units_[u]->classes.Find(cls->entity) == cls)
+			return !units_[u]->classes.NeedsConstruction(*cls);
+	return false;
+}
+
 namespace {
 
 // The readable name tail of a fundamental type ("long int" ->

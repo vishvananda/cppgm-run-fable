@@ -413,6 +413,14 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	// temporary's holds [callee, args...].
 	const SemNode& call = *action.children[0];
 	const SemNode& callee = *call.children[0];
+	// PA32 host parity: a fully implicit trivial default construction
+	// performs no work beyond the zero-fill above, so separate-
+	// compilation objects emit neither the call nor the demanded
+	// symbol. The whole-program presentation keeps the reference's
+	// explicit call.
+	if (program_.SeparateCompilation() &&
+	    program_.TrivialDefaultConstruction(callee))
+		return;
 	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	ctor_depth_++;
 	bool saved = in_lifetime_action_;

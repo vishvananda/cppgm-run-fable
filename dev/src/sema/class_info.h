@@ -48,6 +48,10 @@ struct ClassField
 	// storage row (variant members are not default-initialized or
 	// destroyed implicitly).
 	bool from_union = false;
+	// PA32 9.5: the anonymous aggregate's own storage row.
+	// Initialization runs through the injected member rows, never by
+	// default-constructing the aggregate wholesale.
+	bool anonymous_storage = false;
 	// PA25 5.1.2: the closure field holding the captured `this`
 	// pointer (stored as a pointer value, not a capture reference).
 	bool captured_this = false;

@@ -851,9 +851,10 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 			AppendMemberInit(cls, field, found->second->init.get(),
 			                 actions);
 		}
-		else if (!cls.is_union)
+		else if (!cls.is_union && !field.anonymous_storage)
 			// 12.6.2p8: union variant members are not implicitly
-			// initialized.
+			// initialized; an anonymous aggregate's storage row
+			// initializes through its injected member rows.
 			AppendFieldDefaultInit(cls, field, actions);
 	}
 	if (matched != body.decl->mem_initializers.size())

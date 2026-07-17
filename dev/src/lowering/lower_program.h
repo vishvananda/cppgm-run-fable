@@ -204,6 +204,7 @@ public:
 	// whole-program-only folds must stay off because sibling units are
 	// not visible at compile time.
 	void SetSeparateCompilation() { separate_compilation_ = true; }
+	bool SeparateCompilation() const { return separate_compilation_; }
 
 	// Registers one bound translation unit's namespace-scope items.
 	void AddUnit(const SemUnit& unit);
@@ -333,6 +334,10 @@ public:
 	const ClassInfo* ProgramClass(const NamedTypeInfo* entity) const;
 	// The class record behind a this-adjusted member function type.
 	const ClassInfo* MethodClass(const TypePtr& adjusted) const;
+	// PA32: whether a constructor callee is the fully implicit
+	// trivial default constructor of its class (no user constructors,
+	// no construction work in the subobject tree).
+	bool TrivialDefaultConstruction(const SemNode& callee) const;
 	// --- PA27 multi-vtable references (lower_vtable.cpp) ---
 	// Demands the class's full vtable group (primary, views, and the
 	// VTT with its construction vtables when the class is a

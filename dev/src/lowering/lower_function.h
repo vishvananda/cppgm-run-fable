@@ -544,6 +544,20 @@ private:
 	vector<string> continue_stack_;
 	map<const SemNode*, string> case_labels_;
 	map<string, string> goto_labels_;
+	// 6.6/15.1: each label's cleanup-scope and try/catch-context
+	// depths relative to the function-body baseline, pre-scanned so a
+	// goto destroys the automatic objects and closes the EH regions
+	// it jumps out of.
+	struct LabelContext
+	{
+		size_t cleanup_depth = 0;
+		size_t eh_depth = 0;
+	};
+	map<string, LabelContext> label_contexts_;
+	size_t goto_cleanup_base_ = 0;
+	size_t goto_eh_base_ = 0;
+	void ScanLabelContexts(const SemNode& node, size_t cleanups,
+	                       size_t ehs);
 
 	// --- PA15 lifetime state ---
 	// Cleanup scopes parallel the lowered compound statements; each

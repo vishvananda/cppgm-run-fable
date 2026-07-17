@@ -938,6 +938,7 @@ void SemBinder::BindAnonymousUnionMembers(const AstDecl& decl,
 		anon_field.name = storage_name;
 		anon_field.type = type;
 		anon_field.access = current_access_;
+		anon_field.anonymous_storage = true;
 		anon_row = &LayoutField(*enclosing, anon_field);
 	}
 	const ClassInfo* anon_cls =

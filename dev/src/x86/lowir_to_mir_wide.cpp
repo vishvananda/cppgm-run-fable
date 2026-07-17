@@ -421,6 +421,23 @@ void FunctionLowering::LowerWideLoad(const LowIRInstruction & ins)
 		WideStorePair(WideHome(ins.result), XR_RAX, XR_RDX);
 		return;
 	}
+	if (source.kind == LOWIR_OPERAND_GLOBAL)
+	{
+		// a global pair: materialize the symbol address, copy halves
+		emit_mov(MakeReg(XR_RCX), MakeSymbol(source.name, true));
+		mir_model::Instruction & lo =
+			emit(mir_model::Instruction::MI_LOAD);
+		lo.type = "i64";
+		lo.operands.push_back(MakeReg(XR_RAX));
+		lo.operands.push_back(MakeDeref(XR_RCX, 0));
+		mir_model::Instruction & hi =
+			emit(mir_model::Instruction::MI_LOAD);
+		hi.type = "i64";
+		hi.operands.push_back(MakeReg(XR_RDX));
+		hi.operands.push_back(MakeDeref(XR_RCX, 8));
+		WideStorePair(WideHome(ins.result), XR_RAX, XR_RDX);
+		return;
+	}
 	throw std::runtime_error("unsupported i128 load form");
 }
 
@@ -433,10 +450,16 @@ void FunctionLowering::LowerWideStore(const LowIRInstruction & ins)
 		WideStorePair(slots_[target.name].frame_offset, XR_RAX, XR_RDX);
 		return;
 	}
-	if (target.kind == LOWIR_OPERAND_TEMP)
+	if (target.kind == LOWIR_OPERAND_TEMP ||
+	    target.kind == LOWIR_OPERAND_GLOBAL)
 	{
-		mir_model::Operand pointer = gpr_read(target);
-		emit_mov(MakeReg(XR_RCX), pointer);
+		if (target.kind == LOWIR_OPERAND_GLOBAL)
+			emit_mov(MakeReg(XR_RCX), MakeSymbol(target.name, true));
+		else
+		{
+			mir_model::Operand pointer = gpr_read(target);
+			emit_mov(MakeReg(XR_RCX), pointer);
+		}
 		mir_model::Instruction & lo =
 			emit(mir_model::Instruction::MI_STORE);
 		lo.type = "i64";
