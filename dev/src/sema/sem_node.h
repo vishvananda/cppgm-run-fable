@@ -140,6 +140,9 @@ enum ESemNodeKind
 	// exception object's destructor action; `typeid_operand` is the
 	// thrown type. No children: a rethrow.
 	SN_THROW,
+	// PA33 __builtin_va_arg: children[0] is the va_list operand (the
+	// decayed cursor pointer); `typeid_operand` is the fetched type.
+	SN_VA_ARG,
 	// PA25 try: children[0] is the guarded compound, the rest are
 	// PA26 5.5: `object .* pm` / `pointer ->* pm`. children[0] is the
 	// (already base-adjusted) object expression, children[1] the member

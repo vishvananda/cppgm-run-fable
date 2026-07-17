@@ -1175,8 +1175,10 @@ void LowerProgram::BuildTlsGuardedInit(size_t global_index,
 	guarded->name = globals_.back().low_name;
 	// The construction actions may reach this variable back through
 	// its own TLS wrapper; the host __tls_init shape sets the guard
-	// first so the re-entrant call sees it and stops.
-	guarded->guard_first = true;
+	// first so the re-entrant call sees it and stops. The
+	// whole-program presentation keeps the pinned guard-after-init
+	// order (its wrapper-free access path cannot recurse).
+	guarded->guard_first = separate_compilation_;
 	for (size_t i = 0; i < actions.size(); i++)
 		guarded->children.push_back(std::move(actions[i]));
 	SemNodePtr init_def = MakeSemNode(SN_FUNCTION_DEFINITION);

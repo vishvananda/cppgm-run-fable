@@ -80,6 +80,12 @@ private:
 	void EmitGprParamCopies(
 		const std::vector<std::pair<int, X64Register> > & copies);
 	void FinishFrame();
+	// PA33 va_start support: a variadic body that fills a cursor gets
+	// a register save area spilled at entry; the role calls expand at
+	// their sites.
+	void PlanVarargSaveArea();
+	void ExpandVaStart(const LowIRInstruction & ins);
+	void ExpandAlloca(const LowIRInstruction & ins);
 
 	// -- value and register machinery (lowir_to_mir_value.cpp)
 	ValueInfo & value(const std::string & name);
@@ -267,6 +273,14 @@ private:
 	std::vector<std::pair<int, int> > prologue_entries_;   // (param, home)
 	size_t current_block_ = 0;
 	mir_model::MirBlock * mir_block_ = 0;
+	// PA33 variadic register save area (va_start): the frame offset of
+	// the 176-byte area (-1 when this body never fills a cursor), and
+	// the named-parameter register/stack consumption at entry.
+	bool va_save_planned_ = false;
+	long long va_save_offset_ = 0;
+	int va_named_gpr_ = 0;
+	int va_named_xmm_ = 0;
+	long long va_named_stack_end_ = 16;
 };
 
 }  // namespace lowir_to_mir

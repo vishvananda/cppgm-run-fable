@@ -112,6 +112,154 @@ LowerValue FunctionLowerer::LowerFloatBuiltin(const SemNode& node,
 	return result;
 }
 
+// PA33: the vararg-cursor and stack-allocation builtins (sem_binder's
+// ResolveBuiltinFunction); no runtime definition exists.
+bool FunctionLowerer::IsVarargBuiltinCall(const SemNode& node) const
+{
+	if (node.kind != SN_CALL_EXPRESSION || node.children.size() < 2 ||
+	    node.children[0]->kind != SN_CALLEE)
+		return false;
+	const SemNode& callee = *node.children[0];
+	if (callee.is_method || callee.special != SF_NONE ||
+	    callee.vtable_slot >= 0 || !callee.entity_scope ||
+	    callee.entity_scope->kind != SCOPE_NAMESPACE ||
+	    callee.entity_scope->parent)
+		return false;
+	return callee.entity_name == "__builtin_va_start" ||
+		callee.entity_name == "__builtin_va_end" ||
+		callee.entity_name == "__builtin_alloca";
+}
+
+// __builtin_va_end has no work on this ABI (the arguments still
+// evaluate). __builtin_va_start and __builtin_alloca lower to
+// role-annotated calls the backend expands in place: the register
+// save area and the frame pointer are backend facts.
+LowerValue FunctionLowerer::LowerVarargBuiltin(const SemNode& node,
+                                               const SemNode& callee)
+{
+	LowerValue result;
+	result.type = NodeType(node);
+	if (callee.entity_name == "__builtin_va_end")
+	{
+		LowerValueExpr(*node.children[1]);
+		return result;
+	}
+	if (callee.entity_name == "__builtin_alloca")
+	{
+		LowerValue size = LowerValueExpr(*node.children[1]);
+		string ref = program_.ExternalRuntimeFnRef(
+			"__builtin_alloca",
+			"(%arg0 : i64) -> ptr [role=alloca, unwind=no, linkage=c, "
+			"binding=strong, object=__builtin_alloca]");
+		result.text = NewTemp();
+		Emit(result.text + " = call ptr " + ref + "(" + size.text +
+		     ")");
+		return result;
+	}
+	// va_start(list, last): the cursor pointer fills from the variadic
+	// frame facts; the last-named-parameter argument only evaluates.
+	LowerValue list = LowerValueExpr(*node.children[1]);
+	for (size_t i = 2; i < node.children.size(); i++)
+		LowerEffect(*node.children[i]);
+	string ref = program_.ExternalRuntimeFnRef(
+		"__builtin_va_start",
+		"(%arg0 : ptr) -> void [role=va_start, unwind=no, linkage=c, "
+		"binding=strong, object=__builtin_va_start]");
+	Emit("call void " + ref + "(" + list.text + ")");
+	return result;
+}
+
+// __builtin_va_arg(list, T): the SysV cursor walk - registers first
+// (gp_offset under 48, fp_offset under 176), the overflow area after,
+// with the taken slot's cursor bumped in place. Expanded here as
+// plain loads/stores on the cursor record; only va_start needs
+// backend frame facts.
+LowerValue FunctionLowerer::LowerVaArg(const SemNode& node)
+{
+	const SemNode& list = *node.children[0];
+	string base;
+	if (RemoveTopCv(StripRef(list.type))->kind == TK_ARRAY)
+		base = LowerAddressExpr(list);
+	else
+		base = LowerValueExpr(list).text;
+	TypePtr type = RemoveTopCv(node.typeid_operand);
+	bool is_float = LowerFloatType(type);
+	bool is_f80 = is_float && TypeSize(type) == 16;
+	string address_slot = AddMatSlot("va_arg", "ptr");
+	string overflow_address = NewTemp();
+	Emit(overflow_address + " = index i8 " + base + ", 8");
+	if (is_f80)
+	{
+		// The x87 class lives in the overflow area only (16 bytes).
+		string overflow = NewTemp();
+		Emit(overflow + " = load ptr " + overflow_address);
+		Emit("store ptr " + overflow + ", $" + address_slot);
+		string next = NewTemp();
+		Emit(next + " = index i8 " + overflow + ", 16");
+		Emit("store ptr " + next + ", " + overflow_address);
+	}
+	else
+	{
+		// The register class: u32 cursor at +0 (INTEGER) or +4 (SSE),
+		// slot stride 8 or 16, register area limit 48 or 176.
+		long long cursor_offset = is_float ? 4 : 0;
+		long long limit = is_float ? 176 : 48;
+		long long stride = is_float ? 16 : 8;
+		string cursor_address = base;
+		if (cursor_offset)
+		{
+			cursor_address = NewTemp();
+			Emit(cursor_address + " = index i8 " + base + ", " +
+			     to_string(cursor_offset));
+		}
+		string cursor = NewTemp();
+		Emit(cursor + " = load u32 " + cursor_address);
+		string in_regs = NewTemp();
+		Emit(in_regs + " = cmp lt u32 " + cursor + ", " +
+		     to_string(limit));
+		string reg_label = NewLabel("va_arg_reg");
+		string mem_label = NewLabel("va_arg_mem");
+		string done_label = NewLabel("va_arg_done");
+		ReferenceLabel(reg_label);
+		ReferenceLabel(mem_label);
+		ReferenceLabel(done_label);
+		Terminate("branch " + in_regs + ", ^" + reg_label + ", ^" +
+		          mem_label);
+		OpenBlock(reg_label);
+		string save_address = NewTemp();
+		Emit(save_address + " = index i8 " + base + ", 16");
+		string save = NewTemp();
+		Emit(save + " = load ptr " + save_address);
+		string wide_cursor = NewTemp();
+		Emit(wide_cursor + " = convert zext i64 u32 " + cursor);
+		string reg_address = NewTemp();
+		Emit(reg_address + " = index i8 " + save + ", " + wide_cursor);
+		Emit("store ptr " + reg_address + ", $" + address_slot);
+		string bumped = NewTemp();
+		Emit(bumped + " = binary add u32 " + cursor + ", " +
+		     to_string(stride));
+		Emit("store u32 " + bumped + ", " + cursor_address);
+		Terminate("jump ^" + done_label);
+		OpenBlock(mem_label);
+		string overflow = NewTemp();
+		Emit(overflow + " = load ptr " + overflow_address);
+		Emit("store ptr " + overflow + ", $" + address_slot);
+		string next = NewTemp();
+		Emit(next + " = index i8 " + overflow + ", 8");
+		Emit("store ptr " + next + ", " + overflow_address);
+		Terminate("jump ^" + done_label);
+		OpenBlock(done_label);
+	}
+	string address = NewTemp();
+	Emit(address + " = load ptr $" + address_slot);
+	LowerValue result;
+	result.type = type;
+	result.text = NewTemp();
+	Emit(result.text + " = load " + LowerValueType(type) + " " +
+	     address);
+	return result;
+}
+
 // PA29 GNU statement expression: the leading statements run in their
 // own cleanup scope; the trailing expression statement (when present)
 // yields the expression's value.

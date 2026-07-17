@@ -220,7 +220,19 @@ bool AstParser::NameUsableAsType(const AstName& name) const
 		return true;
 	int flags = ResolveName(name);
 	if (flags == kUnresolved)
+	{
+		// The lazily-declared __builtin_* names are functions, never
+		// types (__builtin_va_list is the one builtin type spelling),
+		// so a statement like `__builtin_va_end(x);` keeps its
+		// expression reading.
+		if (name.parts.size() == 1 &&
+		    name.parts[0].kind == NP_IDENTIFIER &&
+		    name.parts[0].identifier.compare(0, 10,
+		                                     "__builtin_") == 0 &&
+		    name.parts[0].identifier != "__builtin_va_list")
+			return false;
 		return true;
+	}
 	return (flags & NF_TYPE) != 0;
 }
 

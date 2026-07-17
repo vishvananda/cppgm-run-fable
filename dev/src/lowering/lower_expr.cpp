@@ -306,6 +306,8 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 		return LowerStatementExpression(node, true);
 	case SN_ID_EXPRESSION:
 		return LowerIdValue(node);
+	case SN_VA_ARG:
+		return LowerVaArg(node);
 	case SN_CALL_EXPRESSION:
 	{
 		LowerValue result = LowerCall(node);
@@ -1114,6 +1116,10 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// runtime definition exists, and no eh region is needed.
 	if (IsFloatBuiltinCall(node))
 		return LowerFloatBuiltin(node, callee);
+	// PA33: the vararg-cursor and stack-allocation builtins lower to
+	// backend-expanded role calls (or nothing); never a runtime call.
+	if (IsVarargBuiltinCall(node))
+		return LowerVarargBuiltin(node, callee);
 	// A call with armed cleanups runs under an unwind-dispatch region:
 	// live temporaries protect every call, destructible locals only
 	// calls the unwind analysis cannot prove non-throwing. The result

@@ -249,6 +249,13 @@ private:
 	bool IsFloatBuiltinCall(const SemNode& node) const;
 	LowerValue LowerFloatBuiltin(const SemNode& node,
 	                             const SemNode& callee);
+	// PA33 vararg/stack builtins (lower_expand.cpp): va_end drops,
+	// va_start/alloca lower to backend-expanded role calls, va_arg
+	// expands to the SysV cursor walk.
+	bool IsVarargBuiltinCall(const SemNode& node) const;
+	LowerValue LowerVarargBuiltin(const SemNode& node,
+	                              const SemNode& callee);
+	LowerValue LowerVaArg(const SemNode& node);
 	// --- call-argument binding (lower_arg_bind.cpp) ---
 	string LowerCallArgument(const SemNode& node, const TypePtr& param);
 	string LowerReferenceArgument(const SemNode& node,

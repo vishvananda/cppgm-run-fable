@@ -220,6 +220,154 @@ void FunctionLowering::PlanParams()
 		prologue_entries_.push_back(std::make_pair(
 			copies[c].first, (int)binding.reg));
 	}
+	va_named_gpr_ = gpr > 6 ? 6 : gpr;
+	va_named_xmm_ = xmm > 8 ? 8 : xmm;
+	va_named_stack_end_ = stack_offset;
+}
+
+// PA33: a variadic body that fills a cursor (a va_start role call)
+// spills every argument register into the SysV save area at entry - 6
+// GPR eightbytes then 8 sixteen-byte XMM slots. The spill ignores the
+// caller's AL count: saving unused XMM registers is always sound.
+void FunctionLowering::PlanVarargSaveArea()
+{
+	if(function_.metadata.find("arity") != "variadic")
+		return;
+	bool fills_cursor = false;
+	for(size_t p = 0; p < linear_.size() && !fills_cursor; p++) {
+		const LowIRInstruction & ins = *linear_[p];
+		if(ins.opcode != LOWIR_INS_CALL || ins.callee_is_temp)
+			continue;
+		std::map<std::string, const LowIRFunction *>::const_iterator
+			fn = facts_.info->functions.find(ins.callee);
+		if(fn != facts_.info->functions.end() &&
+		   fn->second->metadata.find("role") == "va_start")
+			fills_cursor = true;
+	}
+	if(!fills_cursor)
+		return;
+	LowIRType area;
+	area.kind = LOWIR_TYPE_OBJ;
+	area.obj_bytes = 176;
+	area.obj_align = 16;
+	va_save_offset_ = alloc_frame_home(
+		"__va_save_area", area, mir_model::FrameBinding::FB_TEMP);
+	va_save_planned_ = true;
+	for(int g = 0; g < 6; g++) {
+		mir_model::Instruction & store =
+			emit(mir_model::Instruction::MI_STORE);
+		store.type = "i64";
+		store.operands.push_back(
+			frame_operand(va_save_offset_ + 8 * g));
+		store.operands.push_back(MakeReg(kArgRegs[g]));
+	}
+	for(int x = 0; x < 8; x++) {
+		mir_model::Instruction & store =
+			emit(mir_model::Instruction::MI_FMOV);
+		store.type = "f64";
+		store.operands.push_back(
+			frame_operand(va_save_offset_ + 48 + 16 * x));
+		store.operands.push_back(MakeXmm((XmmRegister)x));
+	}
+}
+
+// The va_start role call: fill the pointed-at cursor record from the
+// entry facts - both u32 offsets in one eightbyte store, then the
+// overflow-area and save-area addresses.
+void FunctionLowering::ExpandVaStart(const LowIRInstruction & ins)
+{
+	if(!va_save_planned_)
+		throw std::runtime_error("va_start outside a variadic body");
+	mir_model::Operand list;
+	if(operand_is_pending(ins.operands[0])) {
+		// a deferred single-use load folds into the r10 staging seat
+		const LowIRInstruction * load =
+			pending_loads_[ins.operands[0].name];
+		mir_model::Operand address =
+			address_operand(load->operands[0], XR_RCX);
+		take_pending(ins.operands[0]);
+		release_after_use(*load);
+		mir_model::Instruction & fill =
+			emit(mir_model::Instruction::MI_LOAD);
+		fill.type = "i64";
+		fill.operands.push_back(MakeReg(XR_R10));
+		fill.operands.push_back(address);
+		list = MakeReg(XR_R10);
+	}
+	else
+		list = gpr_read(ins.operands[0]);
+	// The staging pair r10/r11 may hold the list pointer; rax is free.
+	invalidate_rax();
+	long long cursors = (long long)va_named_gpr_ * 8 |
+		((48 + (long long)va_named_xmm_ * 16) << 32);
+	emit_mov(MakeReg(XR_RAX), MakeImm(cursors));
+	mir_model::Instruction & store_cursors =
+		emit(mir_model::Instruction::MI_STORE);
+	store_cursors.type = "i64";
+	store_cursors.operands.push_back(MakeDeref(list.reg, 0));
+	store_cursors.operands.push_back(MakeReg(XR_RAX));
+	mir_model::Instruction & overflow =
+		emit(mir_model::Instruction::MI_LEA);
+	overflow.operands.push_back(MakeReg(XR_RAX));
+	overflow.operands.push_back(frame_operand(va_named_stack_end_));
+	mir_model::Instruction & store_overflow =
+		emit(mir_model::Instruction::MI_STORE);
+	store_overflow.type = "i64";
+	store_overflow.operands.push_back(MakeDeref(list.reg, 8));
+	store_overflow.operands.push_back(MakeReg(XR_RAX));
+	mir_model::Instruction & save = emit(mir_model::Instruction::MI_LEA);
+	save.operands.push_back(MakeReg(XR_RAX));
+	save.operands.push_back(frame_operand(va_save_offset_));
+	mir_model::Instruction & store_save =
+		emit(mir_model::Instruction::MI_STORE);
+	store_save.type = "i64";
+	store_save.operands.push_back(MakeDeref(list.reg, 16));
+	store_save.operands.push_back(MakeReg(XR_RAX));
+}
+
+// The alloca role call: 16-align the size, open the stack, and hand
+// back the new stack pointer. The frame is rbp-based and the epilogue
+// restores rsp from rbp, so the allocation frees at every exit.
+void FunctionLowering::ExpandAlloca(const LowIRInstruction & ins)
+{
+	const LowIROperand & size = ins.operands[0];
+	invalidate_rax();
+	if(size.kind == LOWIR_OPERAND_LITERAL)
+		emit_mov(MakeReg(XR_RAX), MakeImm(ParseIntLiteral(size)));
+	else if(operand_is_pending(size)) {
+		const LowIRInstruction * load = pending_loads_[size.name];
+		mir_model::Operand address =
+			address_operand(load->operands[0], XR_RCX);
+		take_pending(size);
+		release_after_use(*load);
+		mir_model::Instruction & fill =
+			emit(mir_model::Instruction::MI_LOAD);
+		fill.type = SpellType(load->type);
+		fill.operands.push_back(MakeReg(XR_RAX));
+		fill.operands.push_back(address);
+	}
+	else
+		emit_mov(MakeReg(XR_RAX), gpr_read(size));
+	mir_model::Instruction & round = emit(mir_model::Instruction::MI_ADD);
+	round.operands.push_back(MakeReg(XR_RAX));
+	round.operands.push_back(MakeImm(15));
+	mir_model::Instruction & mask = emit(mir_model::Instruction::MI_AND);
+	mask.type = "i64";
+	mask.operands.push_back(MakeReg(XR_RAX));
+	mask.operands.push_back(MakeImm(-16));
+	mir_model::Instruction & open = emit(mir_model::Instruction::MI_SUB);
+	open.type = "i64";
+	open.operands.push_back(MakeReg(XR_RSP));
+	open.operands.push_back(MakeReg(XR_RAX));
+	if(ins.result.empty())
+		return;
+	X64Register reg = alloc_gpr(ins.result);
+	if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
+		emit_mov(MakeReg(XR_RAX), MakeReg(XR_RSP));
+		commit_frame_result(ins.result);
+		return;
+	}
+	emit_mov(MakeReg(reg), MakeReg(XR_RSP));
 }
 
 // Classifies a register parameter's uses: late compare/binary operands
@@ -664,6 +812,7 @@ void FunctionLowering::Lower()
 	if(!out_.blocks.empty())
 		mir_block_ = &out_.blocks[0];
 	PlanParams();
+	PlanVarargSaveArea();
 	for(size_t s = 0; s < function_.slots.size(); s++) {
 		SlotInfo & slot = slots_[function_.slots[s].name];
 		if(slot.promoted)

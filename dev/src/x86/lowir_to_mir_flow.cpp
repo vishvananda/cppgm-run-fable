@@ -125,16 +125,31 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	bool indirect = ins.callee_is_temp;
 	const std::vector<LowIRParam> * params = 0;
 	LowIRType return_type;
+	bool callee_variadic = false;
 	if(!indirect && facts_.info->is_function(ins.callee)) {
 		const LowIRFunction * callee =
 			facts_.info->functions.find(ins.callee)->second;
+		// PA33: the vararg-cursor fill and dynamic stack allocation
+		// expand in place - the frame facts they need live here.
+		std::string role = callee->metadata.find("role");
+		if(role == "va_start") {
+			ExpandVaStart(ins);
+			return;
+		}
+		if(role == "alloca") {
+			ExpandAlloca(ins);
+			return;
+		}
 		params = &callee->params;
 		return_type = callee->return_type;
+		callee_variadic = callee->metadata.find("arity") == "variadic";
 	}
 	else if(ins.signature.present) {
 		indirect = true;
 		params = &ins.signature.params;
 		return_type = ins.signature.return_type;
+		callee_variadic =
+			ins.signature.metadata.find("arity") == "variadic";
 	}
 	else {
 		throw std::runtime_error("call to unknown callee @" + ins.callee);
@@ -595,6 +610,15 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		}
 	}
 
+	if(callee_variadic) {
+		// SysV: a variadic callee reads AL as the XMM argument count.
+		int xmm_args = 0;
+		for(size_t i = 0; i < slots.size(); i++)
+			if(slots[i].kind == ArgSlot::AS_XMM)
+				xmm_args++;
+		invalidate_rax();
+		emit_mov(MakeReg(XR_RAX), MakeImm(xmm_args));
+	}
 	if(indirect) {
 		mir_model::Instruction & call =
 			emit(mir_model::Instruction::MI_CALL_INDIRECT);

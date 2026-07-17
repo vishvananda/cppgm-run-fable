@@ -341,6 +341,17 @@ TypePtr DeclBinder::ResolveBuiltinTypeName(const AstName& name)
 			return MakeFundamentalType(FT_INT128);
 		if (name.parts[0].identifier == "__uint128_t")
 			return MakeFundamentalType(FT_UINT128);
+		// The SysV va_list: one 24-byte register-cursor record
+		// ({u32 gp_offset, u32 fp_offset, ptr overflow, ptr save}),
+		// spelled as an array so it decays on call like the host's
+		// __va_list_tag[1]. The va_start/va_arg expansions address the
+		// fields by byte offset, so the element spelling only fixes
+		// size and alignment (the tag-class mangled spelling of
+		// va_list-typed C++ signatures is a hosted-stage concern; see
+		// pa33/plan.md).
+		if (name.parts[0].identifier == "__builtin_va_list")
+			return MakeArrayType(
+				MakeFundamentalType(FT_UNSIGNED_LONG_INT), true, 3);
 	}
 	return TypePtr();
 }

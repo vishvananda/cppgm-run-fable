@@ -820,6 +820,28 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 			break;
 		}
 	}
+	// __builtin_va_arg ( assignment-expression , type-id ): the SysV
+	// vararg fetch takes a type operand, so it cannot parse as an
+	// ordinary call.
+	if (AtIdentifierSpelled("__builtin_va_arg"))
+	{
+		State state = Save();
+		Advance();
+		if (MatchSimple(OP_LPAREN))
+		{
+			AstExprPtr list = ParseAssignmentExpression();
+			AstTypeIdPtr type;
+			if (list && MatchSimple(OP_COMMA) && ParseTypeId(type) &&
+			    MatchSimple(OP_RPAREN))
+			{
+				AstExprPtr node = MakeExpr(EK_VA_ARG);
+				node->operands.push_back(move(list));
+				node->type = move(type);
+				return node;
+			}
+		}
+		Restore(state);
+	}
 	AstName name;
 	if (!ParseIdExpressionName(name))
 		return AstExprPtr();

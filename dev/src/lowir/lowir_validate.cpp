@@ -25,7 +25,7 @@ const char * const kFunctionRoles[] = {
 	"entry", "init", "fini", "eh_unhandled", "eh_allocate_exception",
 	"eh_begin_catch", "eh_call_unexpected", "eh_current_exception_type",
 	"eh_end_catch", "eh_rethrow", "eh_throw", "eh_personality",
-	"eh_resume", nullptr};
+	"eh_resume", "va_start", "alloca", nullptr};
 const char * const kGlobalRoles[] = {"eh_top", "eh_value", "eh_type",
 	nullptr};
 const char * const kLinkages[] = {"c", "cpp", nullptr};

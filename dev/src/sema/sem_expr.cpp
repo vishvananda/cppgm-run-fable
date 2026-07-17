@@ -176,9 +176,37 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return host_.AnalyzeLambda(expr);
 	case EK_STATEMENT_EXPR:
 		return host_.AnalyzeStatementExpression(expr);
+	case EK_VA_ARG:
+		return AnalyzeVaArg(expr);
 	default:
 		throw OutsideBoundary("expression form");
 	}
+}
+
+// PA33 __builtin_va_arg(list, T): the list operand decays to the
+// register-cursor pointer; the fetch produces a prvalue T. The
+// supported subset is the scalar classes (INTEGER, SSE f64, and the
+// memory-class f80); class-typed fetches are later hosted-stage work.
+SemValue SemExprAnalyzer::AnalyzeVaArg(const AstExpr& expr)
+{
+	// The operand stays in its analyzed form: an array-typed va_list
+	// lvalue addresses directly at the lowering, a pointer-typed one
+	// (a decayed parameter) loads its value there.
+	SemValue list = Analyze(*expr.operands[0]);
+	TypePtr type = host_.ResolveCastTypeId(*expr.type);
+	TypePtr bare = RemoveTopCv(type);
+	if (bare->kind != TK_FUNDAMENTAL && bare->kind != TK_POINTER &&
+	    bare->kind != TK_ENUM)
+		throw OutsideBoundary("va_arg type class");
+	SemValue value;
+	value.type = bare;
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_VA_ARG);
+	value.node->type = bare;
+	value.node->category = VC_PRVALUE;
+	value.node->typeid_operand = bare;
+	value.node->children.push_back(std::move(list.node));
+	return value;
 }
 
 SemValue SemExprAnalyzer::AnalyzeLiteral(const AstExpr& expr)

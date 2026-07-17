@@ -53,6 +53,28 @@ const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
 		type = MakeFunctionType(MakeFundamentalType(FT_LONG_DOUBLE),
 		                        params, false);
 	}
+	else if (name == "__builtin_va_start")
+	{
+		// PA33: the va_list argument arrives decayed to its element
+		// pointer; the second (last-named-parameter) argument only
+		// evaluates. The backend expands the register-cursor fill.
+		params.push_back(MakePointerType(
+			MakeFundamentalType(FT_UNSIGNED_LONG_INT), false, false));
+		type = MakeFunctionType(void_type, params, true);
+	}
+	else if (name == "__builtin_va_end")
+	{
+		// PA33: no cleanup work on this ABI; the lowering drops it.
+		params.push_back(MakePointerType(
+			MakeFundamentalType(FT_UNSIGNED_LONG_INT), false, false));
+		type = MakeFunctionType(void_type, params, false);
+	}
+	else if (name == "__builtin_alloca")
+	{
+		// PA33: dynamic stack allocation; the backend opens the frame.
+		params.push_back(size_type);
+		type = MakeFunctionType(byte_ptr, params, false);
+	}
 	else
 		return 0;
 	if (const ScopeBinding* existing =
