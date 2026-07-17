@@ -33,7 +33,8 @@ enum EExprKind
 	EK_THROW,            // throw-expression (15.1)
 	EK_STATEMENT_EXPR,   // GNU ( compound-statement ) expression
 	EK_VA_ARG,           // __builtin_va_arg ( expr , type-id )
-	EK_BUILTIN_TRAIT     // PA34 __is_*/__has_* ( type-id-list )
+	EK_BUILTIN_TRAIT,    // PA34 __is_*/__has_* ( type-id-list )
+	EK_FOLD              // PA34 ( pack op ... [op init] ) fold forms
 };
 
 struct AstExpr
@@ -64,6 +65,11 @@ struct AstExpr
 	// EK_BUILTIN_TRAIT operands: type-id arguments in source order,
 	// each optionally pack-expanded (`Args...`).
 	std::vector<AstTemplateArgument> trait_args;
+	// EK_FOLD: operands holds the written (non-...) sides in source
+	// order; fold_pack_first marks `( pattern op ... )` (the pattern
+	// wrote first). Binary folds carry two operands and the sema finds
+	// the pack side.
+	bool fold_pack_first;
 	bool is_type_operand;      // EK_TYPE_TRAIT operand is a type-id
 	bool sizeof_paren;         // sizeof ( expression ) form
 	bool global_scope;         // EK_NEW / EK_DELETE leading ::

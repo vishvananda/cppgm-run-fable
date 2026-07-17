@@ -169,6 +169,10 @@ struct ISemExprHost
 	// list; false when the pattern mentions no expandable pack.
 	virtual bool ExpandPackExpression(const AstExpr& pattern,
 	                                  vector<SemValue>& out) = 0;
+	// PA34: a pack-expanded type-id pattern (builtin trait arguments);
+	// false when the pattern mentions no expandable pack.
+	virtual bool ExpandPackTypeId(const AstTypeId& pattern,
+	                              vector<TypePtr>& out) = 0;
 	// PA24 lambdas (sem_lambda.cpp): analyzes a lambda-expression (the
 	// binder owns closure/function synthesis).
 	virtual SemValue AnalyzeLambda(const AstExpr& expr) = 0;
@@ -336,6 +340,8 @@ public:
 	                          bool& no_throw, bool& trivial);
 	bool ProbeTraitDestructible(const TypePtr& target, bool& no_throw,
 	                            bool& trivial);
+	// PA34 fold-expressions over constant operands (sem_trait.cpp).
+	SemValue AnalyzeFold(const AstExpr& expr);
 	// A constructed (or aggregate-initialized) temporary of a class
 	// type from an argument/braced-init list (5.2.3, 8.5.4); the
 	// binder's braced-return path builds through it too. `braced_list`

@@ -211,11 +211,21 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinTrait(const AstExpr& expr)
 	for (size_t i = 0; i < expr.trait_args.size(); i++)
 	{
 		if (expr.trait_args[i].pack)
-			throw runtime_error("pack-expanded builtin trait argument "
-			                    "is not supported yet: " +
-			                    expr.op_spelling);
+		{
+			vector<TypePtr> expanded;
+			if (!host_.ExpandPackTypeId(*expr.trait_args[i].type,
+			                            expanded))
+				throw runtime_error("pack-expanded trait argument "
+				                    "names no expandable pack: " +
+				                    expr.op_spelling);
+			types.insert(types.end(), expanded.begin(), expanded.end());
+			continue;
+		}
 		types.push_back(host_.ResolveCastTypeId(*expr.trait_args[i].type));
 	}
+	if (types.empty())
+		throw runtime_error("builtin trait needs at least one operand: " +
+		                    expr.op_spelling);
 	ISemExprHost& host = host_;
 	bool value = IsSemaProbeTraitName(expr.op_spelling)
 		? EvaluateSemaProbeTrait(expr.op_spelling, types)
@@ -611,4 +621,79 @@ bool SemExprAnalyzer::ProbeTraitDestructible(const TypePtr& target,
 	no_throw = trivial || cls->dtor_unwind_no ||
 		(!cls->dtor_definition && cls->implicit_dtor_unwind_no);
 	return true;
+}
+
+// PA34 fold-expressions, constant subset: the pattern expands over its
+// packs and the elements combine as compile-time constants (the hosted
+// sources use folds inside static_assert/enable_if conditions). A
+// non-constant element is outside this stage's fold boundary.
+SemValue SemExprAnalyzer::AnalyzeFold(const AstExpr& expr)
+{
+	const AstExpr* pattern = expr.operands[0].get();
+	const AstExpr* init = 0;
+	vector<SemValue> elements;
+	if (expr.operands.size() == 2)
+	{
+		// Binary fold: exactly one side mentions the pack.
+		if (host_.ExpandPackExpression(*expr.operands[0], elements))
+			init = expr.operands[1].get();
+		else
+		{
+			pattern = expr.operands[1].get();
+			init = expr.operands[0].get();
+			if (!host_.ExpandPackExpression(*pattern, elements))
+				throw runtime_error("fold pattern names no expandable "
+				                    "pack");
+		}
+	}
+	else if (!host_.ExpandPackExpression(*pattern, elements))
+		throw runtime_error("fold pattern names no expandable pack");
+
+	if (expr.op != OP_LAND && expr.op != OP_LOR)
+		throw runtime_error("fold operator " + expr.op_spelling +
+		                    " is outside the constant fold subset");
+	bool conjunction = expr.op == OP_LAND;
+	bool result = conjunction;  // 14.5.3p9 empty-pack identity
+	bool have_nonconstant = false;
+	if (init)
+	{
+		SemValue value = Analyze(*init);
+		RequireContextualBool(value, "fold operand");
+		if (!value.node || !value.node->has_value)
+			have_nonconstant = true;
+		else if (conjunction)
+			result = result && value.node->value.bits != 0;
+		else
+			result = result || value.node->value.bits != 0;
+	}
+	for (size_t i = 0; i < elements.size(); i++)
+	{
+		SemValue& value = elements[i];
+		RequireContextualBool(value, "fold operand");
+		if (!value.node || !value.node->has_value)
+		{
+			have_nonconstant = true;
+			continue;
+		}
+		if (conjunction)
+			result = result && value.node->value.bits != 0;
+		else
+			result = result || value.node->value.bits != 0;
+	}
+	// Short-circuit rescue: a non-constant element only matters when
+	// the constant elements have not already decided the result.
+	if (have_nonconstant && result == conjunction)
+		throw runtime_error("non-constant fold element is outside the "
+		                    "constant fold subset");
+	SemValue out;
+	out.type = MakeFundamentalType(FT_BOOL);
+	out.category = VC_PRVALUE;
+	out.node = MakeSemNode(SN_LITERAL);
+	out.node->type = out.type;
+	out.node->category = VC_PRVALUE;
+	out.node->has_value = true;
+	out.node->value = ConstValue(FT_BOOL, result ? 1 : 0);
+	out.node->token = RenderConstValue(out.node->value);
+	out.node->materialize_const = true;
+	return out;
 }

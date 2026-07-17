@@ -659,6 +659,80 @@ AstExprPtr AstParser::ParsePostfixSuffixes(AstExprPtr expr)
 // function-style cast (dumped with a paren-argument-list); everything
 // else is a primary-expression. The sequence form (`unsigned long(e)`)
 // keeps every keyword in `cast_keywords` for the semantic passes.
+// PA34 fold-operator: the binary operator token between a fold's
+// pattern and its ... (assignment operators and pointer-to-member
+// forms stay outside this stage's fold subset).
+bool AstParser::MatchFoldOperator(ETokenType& op, string& spelling)
+{
+	const ParseToken& token = Peek();
+	if (token.kind != PTOK_SIMPLE)
+		return false;
+	switch (token.simple_type)
+	{
+	case OP_LAND: case OP_LOR: case OP_COMMA:
+	case OP_PLUS: case OP_MINUS: case OP_STAR: case OP_DIV: case OP_MOD:
+	case OP_AMP: case OP_BOR: case OP_XOR: case OP_LSHIFT:
+	case OP_EQ: case OP_NE:
+		break;
+	default:
+		return false;
+	}
+	op = token.simple_type;
+	spelling = token.spelling;
+	Advance();
+	return true;
+}
+
+// PA34 fold-expression body after the opening paren: `... op pattern )`
+// (left fold), `pattern op ... )` (unary right fold), or
+// `a op ... op b )` (binary fold). Null with the position restored when
+// the span is not a fold.
+AstExprPtr AstParser::ParseFoldExpressionTail()
+{
+	State state = Save();
+	ETokenType op;
+	string spelling;
+	if (MatchSimple(OP_DOTS))
+	{
+		AstExprPtr pattern;
+		if (MatchFoldOperator(op, spelling) &&
+		    (pattern = ParseAssignmentExpression()) &&
+		    MatchSimple(OP_RPAREN))
+		{
+			AstExprPtr node = MakeExpr(EK_FOLD);
+			node->op = op;
+			node->op_spelling = spelling;
+			node->operands.push_back(move(pattern));
+			return node;
+		}
+		Restore(state);
+		return AstExprPtr();
+	}
+	AstExprPtr first = ParseAssignmentExpression();
+	if (first && MatchFoldOperator(op, spelling) && MatchSimple(OP_DOTS))
+	{
+		AstExprPtr node = MakeExpr(EK_FOLD);
+		node->op = op;
+		node->op_spelling = spelling;
+		node->fold_pack_first = true;
+		node->operands.push_back(move(first));
+		if (MatchSimple(OP_RPAREN))
+			return node;
+		ETokenType op2;
+		string spelling2;
+		AstExprPtr init;
+		if (MatchFoldOperator(op2, spelling2) && op2 == op &&
+		    (init = ParseAssignmentExpression()) &&
+		    MatchSimple(OP_RPAREN))
+		{
+			node->operands.push_back(move(init));
+			return node;
+		}
+	}
+	Restore(state);
+	return AstExprPtr();
+}
+
 // PA34 builtin trait: __is_*/__has_* ( type-id-list ), evaluated by
 // the sema to a bool constant. Argument type-ids may be pack-expanded
 // (`Args...`). Returns null (state restored) when the operand list
@@ -683,6 +757,15 @@ AstExprPtr AstParser::ParseBuiltinTraitExpression()
 		{
 			argument.pack = true;
 			Advance();
+		}
+		else if (argument.type->declarator)
+		{
+			// The abstract declarator may have consumed `Args...`'s
+			// ellipsis as its DI_PACK marker.
+			const AstDeclarator& declarator = *argument.type->declarator;
+			for (size_t i = 0; i < declarator.items.size(); i++)
+				if (declarator.items[i].kind == DI_PACK)
+					argument.pack = true;
 		}
 		node->trait_args.push_back(move(argument));
 		if (!MatchSimple(OP_COMMA))
@@ -850,6 +933,18 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 				Restore(state);
 				return AstExprPtr();
 			}
+			// PA34 fold-expression (14.5.3-style): ( ... op pattern ),
+			// ( pattern op ... ), ( a op ... op b ).
+			if (AtSimple(OP_DOTS))
+			{
+				AstExprPtr fold = ParseFoldExpressionTail();
+				if (fold)
+					return fold;
+				Restore(state);
+				return AstExprPtr();
+			}
+			if (AstExprPtr fold = ParseFoldExpressionTail())
+				return fold;
 			AstExprPtr inner = ParseExpression();
 			if (!inner || !MatchSimple(OP_RPAREN))
 			{

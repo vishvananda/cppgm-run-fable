@@ -178,6 +178,8 @@ private:
 	AstExprPtr ParsePostfixExpression();
 	AstExprPtr ParsePostfixRoot();
 	AstExprPtr ParseBuiltinTraitExpression();  // PA34 __is_* ( types )
+	AstExprPtr ParseFoldExpressionTail();      // PA34 ( pack op ... )
+	bool MatchFoldOperator(ETokenType& op, std::string& spelling);
 	// The trailing call/subscript/member/++/-- suffixes over `expr`.
 	AstExprPtr ParsePostfixSuffixes(AstExprPtr expr);
 	AstExprPtr ParsePrimaryExpression();

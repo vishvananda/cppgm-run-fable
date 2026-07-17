@@ -143,6 +143,11 @@ void CollectFromExpr(const AstExpr& expr, Scope* scope, PackMentions& out)
 		CollectFromName(expr.name, scope, out);
 	if (expr.type)
 		CollectFromTypeId(*expr.type, scope, out);
+	// PA34 builtin traits: a trait argument with its own `...` marker
+	// expands its packs at its own level (14.5.3p4).
+	for (size_t i = 0; i < expr.trait_args.size(); i++)
+		if (expr.trait_args[i].type && !expr.trait_args[i].pack)
+			CollectFromTypeId(*expr.trait_args[i].type, scope, out);
 	for (size_t i = 0; i < expr.operands.size(); i++)
 		if (expr.operands[i])
 			CollectFromExpr(*expr.operands[i], scope, out);
@@ -545,6 +550,39 @@ bool SemBinder::ExpandPackExpression(const AstExpr& pattern,
 		try
 		{
 			out.push_back(analyzer_.Analyze(pattern));
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
+	}
+	return true;
+}
+
+// PA34: a pack-expanded type-id pattern (builtin trait arguments):
+// one resolved type per element, through the same per-element scope
+// the expression expansion uses.
+bool SemBinder::ExpandPackTypeId(const AstTypeId& pattern,
+                                 vector<TypePtr>& out)
+{
+	PackMentions mentions;
+	CollectFromTypeId(pattern, current_, mentions);
+	if (mentions.packs.empty())
+		return false;
+	if (PacksAreAbstract(mentions))
+		throw runtime_error("pack expansion in a non-instantiated "
+		                    "template context");
+	size_t length = PackExpansionLength(mentions.packs);
+	for (size_t k = 0; k < length; k++)
+	{
+		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		Scope* saved = current_;
+		current_ = element_scope;
+		try
+		{
+			out.push_back(builder_.ResolveTypeId(pattern));
 		}
 		catch (...)
 		{

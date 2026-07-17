@@ -130,11 +130,15 @@ Next clusters, in leverage order:
    SemExprAnalyzer::EvaluateSemaProbeTrait (declval surrogates through
    CopyInitialize / ResolveClassCtorHost / ResolveOperatorCall with
    SemTreeMayThrow for the nothrow variants and the ClassHasTrivial*
-   facts, including the new ClassHasTrivialDefaultCtor). Remaining
-   holes: pack-expanded trait arguments (`__is_nothrow_constructible(T,
-   Args...)`) need a type-id pack-expansion host API mirroring
-   ExpandPackExpression; `__is_nothrow_invocable` and the
-   standard-layout member-position corner cases are still open.
+   facts, including the new ClassHasTrivialDefaultCtor). Pack-expanded
+   trait arguments expand through the new ExpandPackTypeId host API
+   (per-element scopes shared with ExpandPackExpression); a trait
+   argument's ellipsis may arrive as the abstract declarator's DI_PACK
+   marker. Fold-expressions parse as EK_FOLD and evaluate in the
+   constant subset (&&/|| with empty-pack identities and short-circuit
+   rescue); runtime folds and the remaining fold operators are a
+   documented boundary. `__is_nothrow_invocable` and standard-layout
+   member-position corners are still open.
 2. **Statement/declaration attribute positions** (~10):
    `[[...]]` before block-scope declarations, in conditions,
    for-init, range-for; attributed null statement

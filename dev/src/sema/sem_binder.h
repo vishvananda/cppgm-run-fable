@@ -641,6 +641,9 @@ private:
 	// `pattern...` in an argument/initializer list (ISemExprHost).
 	virtual bool ExpandPackExpression(const AstExpr& pattern,
 	                                  vector<SemValue>& out);
+	// PA34: a pack-expanded type-id pattern (ISemExprHost).
+	virtual bool ExpandPackTypeId(const AstTypeId& pattern,
+	                              vector<TypePtr>& out);
 	// `Args... args` in a parameter clause (ITypeBuilderHost).
 	virtual bool ExpandPackParameter(const AstParameter& parameter,
 	                                 std::vector<ParameterInfo>& out);

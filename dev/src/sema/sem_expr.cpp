@@ -151,6 +151,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeSizeof(expr);
 	case EK_BUILTIN_TRAIT:
 		return AnalyzeBuiltinTrait(expr);
+	case EK_FOLD:
+		return AnalyzeFold(expr);
 	case EK_SIZEOF_PACK:
 	{
 		// 5.3.3p5: the number of elements of the named pack; the value

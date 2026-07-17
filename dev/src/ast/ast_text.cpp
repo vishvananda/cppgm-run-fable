@@ -370,6 +370,18 @@ string FlattenExpr(const AstExpr& expr)
 		if (expr.is_type_operand)
 			return expr.op_spelling + "(" + FlattenTypeId(*expr.type) + ")";
 		return expr.op_spelling + "(" + FlattenExpr(*expr.operands[0]) + ")";
+	case EK_FOLD:
+	{
+		string text = "(";
+		if (expr.fold_pack_first || expr.operands.size() == 2)
+			text += FlattenExpr(*expr.operands[0]) + " " +
+				expr.op_spelling + " ";
+		text += "...";
+		if (!expr.fold_pack_first || expr.operands.size() == 2)
+			text += " " + expr.op_spelling + " " +
+				FlattenExpr(*expr.operands[expr.operands.size() - 1]);
+		return text + ")";
+	}
 	case EK_BUILTIN_TRAIT:
 	{
 		string text = expr.op_spelling + "(";
