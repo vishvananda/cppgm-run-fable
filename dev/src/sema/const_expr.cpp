@@ -686,6 +686,10 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 				                    "argument");
 			types.push_back(
 				context.ResolveTypeId(*expr.trait_args[i].type));
+			// A dependent operand defers: the argument slot re-reads
+			// concretely at instantiation.
+			if (TypeIsDependent(types.back()))
+				throw OutsideSubset("dependent builtin trait operand");
 		}
 		bool value = EvaluateBuiltinTraitOnTypes(
 			expr.op_spelling, types,

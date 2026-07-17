@@ -159,6 +159,12 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		Restore(state);
 		return false;
 	}
+	// A builtin trait name followed by ( is always the PA34 trait
+	// expression, never an unknown type-name (`X<__is_function(T)>`
+	// must not re-read as a functional cast).
+	if (token.kind == PTOK_IDENTIFIER &&
+	    HostedBuiltinTraitName(token.spelling) && AtSimple(OP_LPAREN, 1))
+		return false;
 	if ((token.kind == PTOK_IDENTIFIER || AtSimple(OP_COLON2)) &&
 	    type_state == kNoType)
 	{

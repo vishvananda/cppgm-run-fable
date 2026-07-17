@@ -102,11 +102,79 @@ passes.
 
 ## Staging
 
-1. Hosted env + driver `-E`/query + hosted preprocessor operators →
-   preproc bucket green.
-2. Hosted compile plumbing (`-c` sees host macros/system dirs/flags) →
-   host-macro compile tests green.
-3. Parser concessions and builtin traits/transforms in clusters, easiest
-   first, running the through gate between clusters.
+1. [done] Hosted env + driver `-E`/query + hosted preprocessor operators →
+   preproc bucket green (42/42).
+2. [done] Hosted compile plumbing (`-c` sees host macros/system dirs/flags)
+   → host-macro compile tests green.
+3. [in progress] Parser concessions and builtin traits/transforms in
+   clusters, running the through gate between clusters.
 4. Run-suite builtins (link+execute against host libstdc++) last; they
    reuse the PA33 host-ABI object path.
+
+## Progress and next steps (updated after the trait-core landing)
+
+Done beyond staging 1-2: builtin transform family (SPEC_TRANSFORM
+dispatch in type_builder.cpp), EK_BUILTIN_TRAIT structural traits
+(sema/sem_trait.cpp shared by SemExprAnalyzer and the PA11 const-expr
+walker), class-head `final`, trait-vs-functional-cast template-argument
+disambiguation. ~133 compile + 24 run failures remain.
+
+Next clusters, in leverage order:
+
+1. **Would-it-compile trait family** (~40 tests):
+   `__is_constructible` / `__is_trivially_constructible` /
+   `__is_nothrow_constructible` (+ pack-expanded args),
+   `__is_convertible`, `__is_assignable` / nothrow / trivially,
+   `__is_destructible` / trivially, `__is_pod` / `__is_trivial` /
+   `__is_trivially_copyable` / `__is_standard_layout` /
+   `__is_literal_type`, `__has_trivial_constructor`,
+   `__reference_constructs_from_temporary` / `__reference_binds_to_
+   temporary`, `__is_nothrow_invocable`, `__is_identifier`.
+   Implementation route: extend sem_trait.cpp evaluation but move the
+   would-it-compile probes into SemExprAnalyzer (they need
+   ResolveClassCtorHost / conversion / assignment analysis wrapped in
+   try/catch over synthesized declval operands, plus ClassInfo
+   triviality bits). Add each name to hosted_probes kBuiltinTraits only
+   when its evaluation lands.
+2. **Statement/declaration attribute positions** (~10):
+   `[[...]]` before block-scope declarations, in conditions,
+   for-init, range-for; attributed null statement
+   (`[[__fallthrough__]];`); GNU `__attribute__` declaration prefix
+   (500-gnu-attribute-declarations); namespace prefix/suffix/alias
+   attributes (`namespace X __attribute__((...)) {`, `inline namespace
+   Y [[...]] {`).
+3. **GNU alias keywords** (~6): `__signed`, `__const`, `__volatile`,
+   `__inline`/`__inline__`, `__thread` (→ thread_local), `__decltype`,
+   `__typeof__`/`typeof`, `__restrict`(ignore), `__extension__`
+   (ignore), `__complex__`/`_Complex`, asm statement forms
+   (`__asm__ __volatile__ (...)` with operands, statement position).
+4. **Builtin function families** (compile+run suites): bswap, clz/ctz/
+   popcount (+g/l/ll variants), overflow family, mem*/str* extensions
+   (memchr/strchr/strcmp/memcmp/bzero), inf/nan/nans/huge families,
+   expect, prefetch, assume_aligned, addressof, fpclassify,
+   flt_rounds, is_constant_evaluated, operator_new/delete, complex,
+   offsetof direct form, `__func__`. Extend
+   SemBinder::ResolveBuiltinFunction + lowering (lower_arg_bind
+   expands the inline-able ones); register each in hosted_probes.
+5. **Builtin types**: `__int128`/`unsigned __int128` (+ postfix sign
+   specifier forms), `__float128`/`_Float16`/`_Float128`, `_BitInt`,
+   `_Atomic` specifier, block pointers (`^` declarator) + Clang
+   nullability qualifiers (`_Nonnull` etc.) parsed-and-dropped,
+   `__builtin_va_list`.
+6. **Atomic builtin families**: `__atomic_*` (memorder tail arg),
+   `__c11_atomic_*` over `_Atomic` types, `__sync_lock_*`,
+   `__atomic_always/is_lock_free`; lowering to the existing atomic or
+   locked instruction shapes.
+7. **Language features**: structured bindings (class member
+   decomposition with real reference semantics), fold expressions
+   (all four forms over `&&`/`||`/`,` at least), templated lambdas
+   (`[]<class T>` with/without parameter clause), deduction-guide
+   declarations (parse/accept under -std=gnu++17 sidecar),
+   designated initializers, `__integer_pack` /
+   `__type_pack_element<I, Ts...>`, `__builtin_invoke`,
+   `using ... __attribute__((using_if_exists))` missing-target
+   tolerance, `__is_identifier` detection idiom.
+8. **Run suite** (24): mostly builtin lowerings from cluster 4/6 plus
+   hosted headers (cstdio/cstring/cmath/csignal/cassert) compiling
+   through the system include chain; the PA32/33 object path links
+   them with the host toolchain.
