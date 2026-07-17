@@ -265,6 +265,13 @@ private:
 	bool ParseTypeParameter(AstTemplateParameter& parameter);
 	bool ParseNonTypeParameter(AstTemplateParameter& parameter);
 
+	// PA34: GNU alias keywords (__signed, __const, __inline__, __thread,
+	// __decltype, ...) normalize to their standard keyword tokens in an
+	// owned copy; without aliases the parser reads the caller's vector.
+	static const std::vector<ParseToken>& NormalizeGnuAliasTokens(
+		const std::vector<ParseToken>& tokens,
+		std::vector<ParseToken>& storage);
+	std::vector<ParseToken> gnu_normalized_;
 	const std::vector<ParseToken>& tokens_;
 	size_t pos_;
 	std::vector<char> brackets_;

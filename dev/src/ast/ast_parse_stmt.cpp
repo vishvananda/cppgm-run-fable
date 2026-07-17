@@ -557,6 +557,23 @@ AstStmtPtr AstParser::ParseExpressionStatement()
 
 AstStmtPtr AstParser::ParseStatement()
 {
+	// PA34: statement attribute-specifier-seq (6p1), accepted and
+	// discarded (`[[__fallthrough__]];` is an attributed null
+	// statement).
+	if (AtSimple(OP_LSQUARE) && AtSimple(OP_LSQUARE, 1))
+	{
+		State state = Save();
+		bool skipped = false;
+		while (SkipSquareAttribute())
+			skipped = true;
+		if (skipped)
+		{
+			AstStmtPtr attributed = ParseStatement();
+			if (attributed)
+				return attributed;
+		}
+		Restore(state);
+	}
 	if (AtSimple(OP_LBRACE))
 		return ParseCompoundStatement();
 	AstStmtPtr stmt = ParseLabeledStatement();
@@ -571,5 +588,21 @@ AstStmtPtr AstParser::ParseStatement()
 		return ParseJumpStatement();
 	if (AtSimple(KW_TRY))
 		return ParseTryBlock();
+	// PA34 GNU asm statement: `asm/__asm/__asm__ qualifiers? ( ... ) ;`
+	// accepted and discarded for hosted compile acceptance (inline
+	// assembly codegen is outside this stage; see pa34/plan.md).
+	if (AtSimple(KW_ASM) || AtIdentifierSpelled("__asm") ||
+	    AtIdentifierSpelled("__asm__"))
+	{
+		State state = Save();
+		Advance();
+		while (AtSimple(KW_VOLATILE) || AtSimple(KW_GOTO) ||
+		       AtSimple(KW_INLINE))
+			Advance();
+		if (AtSimple(OP_LPAREN) && SkipBalancedParens() &&
+		    MatchSimple(OP_SEMICOLON))
+			return MakeStmt(SK_EXPRESSION);
+		Restore(state);
+	}
 	return ParseExpressionStatement();
 }

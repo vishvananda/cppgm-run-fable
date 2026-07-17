@@ -53,6 +53,12 @@ AstDeclPtr AstParser::ParseNamespaceDefinition()
 		Restore(state);
 		return AstDeclPtr();
 	}
+	// PA34 hosted headers adorn namespaces on both sides of the name;
+	// the attributes are accepted and discarded.
+	while (SkipSquareAttribute())
+	{
+	}
+	SkipDeclAdornments();
 	if (AtIdentifier())
 	{
 		decl->name = Peek().spelling;
@@ -60,6 +66,10 @@ AstDeclPtr AstParser::ParseNamespaceDefinition()
 	}
 	else
 		decl->unnamed = true;
+	while (SkipSquareAttribute())
+	{
+	}
+	SkipDeclAdornments();
 	if (!MatchSimple(OP_LBRACE))
 	{
 		Restore(state);

@@ -117,7 +117,12 @@ Done beyond staging 1-2: builtin transform family (SPEC_TRANSFORM
 dispatch in type_builder.cpp), EK_BUILTIN_TRAIT structural traits
 (sema/sem_trait.cpp shared by SemExprAnalyzer and the PA11 const-expr
 walker), class-head `final`, trait-vs-functional-cast template-argument
-disambiguation. ~133 compile + 24 run failures remain.
+disambiguation, GNU alias keywords (normalized in the AstParser token
+copy), namespace prefix/suffix attributes, statement/specifier-position
+[[...]] attributes, GNU asm statements and asm labels (parse-and-discard
+for compile acceptance: inline-assembly codegen and asm-label symbol
+renaming are documented boundaries for PA36 to revisit). ~115 compile +
+24 run failures remain.
 
 Next clusters, in leverage order:
 

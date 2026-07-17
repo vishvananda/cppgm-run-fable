@@ -51,6 +51,11 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
                                   int& type_state)
 {
 	SkipDeclAdornments();
+	// PA34: [[...]] attributes in specifier positions (leading
+	// attribute-specifier-seq of hosted declarations), discarded. The
+	// enclosing sequence restores if no real specifier follows.
+	while (SkipSquareAttribute())
+		SkipDeclAdornments();
 	const ParseToken& token = Peek();
 	if (token.kind == PTOK_SIMPLE)
 	{

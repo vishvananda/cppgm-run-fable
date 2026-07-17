@@ -4,13 +4,83 @@ using std::string;
 using std::vector;
 
 AstParser::AstParser(const vector<ParseToken>& tokens)
-	: tokens_(tokens), pos_(0), template_decl_scope_depth_(0)
+	: tokens_(NormalizeGnuAliasTokens(tokens, gnu_normalized_)), pos_(0),
+	  template_decl_scope_depth_(0)
 {
 	table_pool_.push_back(NameTable());
 	ScopeRef root;
 	root.table = &table_pool_.back();
 	root.param_scope = false;
 	scopes_.push_back(root);
+}
+
+// The GNU alias-keyword spellings hosted sources use, mapped to their
+// standard keyword identities.
+static bool GnuAliasKeyword(const string& spelling, ETokenType& type,
+                            const char*& canonical)
+{
+	if (spelling == "__signed" || spelling == "__signed__")
+	{
+		type = KW_SIGNED;
+		canonical = "signed";
+	}
+	else if (spelling == "__const" || spelling == "__const__")
+	{
+		type = KW_CONST;
+		canonical = "const";
+	}
+	else if (spelling == "__volatile" || spelling == "__volatile__")
+	{
+		type = KW_VOLATILE;
+		canonical = "volatile";
+	}
+	else if (spelling == "__inline" || spelling == "__inline__")
+	{
+		type = KW_INLINE;
+		canonical = "inline";
+	}
+	else if (spelling == "__thread")
+	{
+		type = KW_THREAD_LOCAL;
+		canonical = "thread_local";
+	}
+	else if (spelling == "__decltype")
+	{
+		type = KW_DECLTYPE;
+		canonical = "decltype";
+	}
+	else
+		return false;
+	return true;
+}
+
+const vector<ParseToken>& AstParser::NormalizeGnuAliasTokens(
+	const vector<ParseToken>& tokens, vector<ParseToken>& storage)
+{
+	ETokenType type;
+	const char* canonical;
+	size_t first = tokens.size();
+	for (size_t i = 0; i < tokens.size(); i++)
+	{
+		if (tokens[i].kind == PTOK_IDENTIFIER &&
+		    GnuAliasKeyword(tokens[i].spelling, type, canonical))
+		{
+			first = i;
+			break;
+		}
+	}
+	if (first == tokens.size())
+		return tokens;
+	storage = tokens;
+	for (size_t i = first; i < storage.size(); i++)
+	{
+		if (storage[i].kind != PTOK_IDENTIFIER ||
+		    !GnuAliasKeyword(storage[i].spelling, type, canonical))
+			continue;
+		storage[i] = ParseToken(PTOK_SIMPLE, type, canonical,
+		                        storage[i].flags);
+	}
+	return storage;
 }
 
 // --- name table --------------------------------------------------------
@@ -509,6 +579,19 @@ void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags)
 			return;
 		}
 		if (AtSimple(KW_ALIGNAS))
+		{
+			Advance();
+			if (SkipBalancedParens())
+				continue;
+			Restore(state);
+			return;
+		}
+		// PA34 GNU asm label (`declarator __asm("name")`), accepted and
+		// discarded for hosted compile acceptance (host symbol renaming
+		// is a PA36 boundary; see pa34/plan.md).
+		if ((AtSimple(KW_ASM) || AtIdentifierSpelled("__asm") ||
+		     AtIdentifierSpelled("__asm__")) &&
+		    AtSimple(OP_LPAREN, 1))
 		{
 			Advance();
 			if (SkipBalancedParens())
