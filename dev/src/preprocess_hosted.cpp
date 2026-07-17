@@ -26,6 +26,7 @@ const char* const kHostedProbeNames[] = {
 	"__has_attribute",
 	"__has_cpp_attribute",
 	"__building_module",
+	"__is_identifier",
 	0
 };
 
@@ -248,6 +249,14 @@ long Preprocessor::EvaluateHasIncludeOperand(const string& op,
 long Preprocessor::EvaluateNamedProbeOperand(const string& op,
                                              const vector<PPToken>& operand)
 {
+	if (op == "__is_identifier")
+	{
+		// clang: 1 when the operand is an ordinary identifier, 0 when
+		// it names a builtin/trait/keyword the compiler reserves.
+		return operand.size() == 1 &&
+			operand[0].kind == PPT_IDENTIFIER &&
+			!HostedProbeHasBuiltin(operand[0].data) ? 1 : 0;
+	}
 	if (operand.size() != 1 || operand[0].kind != PPT_IDENTIFIER)
 		return 0;
 	const string& name = operand[0].data;

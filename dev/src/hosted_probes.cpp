@@ -61,6 +61,7 @@ const char * const kSupportedFeatures[] = {
 	"cxx_defaulted_functions",
 	"cxx_delegating_constructors",
 	"cxx_deleted_functions",
+	"cxx_exceptions",
 	"cxx_explicit_conversions",
 	"cxx_generalized_initializers",
 	"cxx_implicit_moves",
@@ -75,6 +76,7 @@ const char * const kSupportedFeatures[] = {
 	"cxx_range_for",
 	"cxx_raw_string_literals",
 	"cxx_reference_qualified_functions",
+	"cxx_rtti",
 	"cxx_rvalue_references",
 	"cxx_static_assert",
 	"cxx_strong_enums",
@@ -177,7 +179,15 @@ bool HostedBuiltinTraitName(const string & name)
 bool HostedProbeHasFeature(const string & name)
 {
 	static const set<string> features = MakeNameSet(kSupportedFeatures);
-	return features.count(StripUnderscoreDecoration(name)) != 0;
+	const string stripped = StripUnderscoreDecoration(name);
+	if (features.count(stripped) != 0)
+		return true;
+	// Trait-primitive availability queries (`__has_extension(is_pod)`)
+	// answer from the trait registry, so they track implementation.
+	if (stripped.compare(0, 3, "is_") == 0 ||
+	    stripped.compare(0, 4, "has_") == 0)
+		return HostedBuiltinTraitName("__" + stripped);
+	return false;
 }
 
 bool HostedProbeHasAttribute(const string & name)
