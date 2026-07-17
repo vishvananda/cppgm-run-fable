@@ -5,6 +5,7 @@
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
+using std::to_string;
 
 // PA16 copy/move special members: the implicit declarations appended
 // at class completion (12.8) and the demand-driven synthesis of
@@ -905,4 +906,77 @@ int SemBinder::ResolveClassCtorHost(const ClassInfo& cls,
                                     const char* what)
 {
 	return ResolveClassConstructor(cls, args, copy_init, what);
+}
+
+// 9.5 anonymous aggregates: the unnamed object's storage row and
+// the injected member rows (bound at class completion like the
+// implicit special members this unit owns).
+void SemBinder::BindAnonymousUnionMembers(const AstDecl& decl,
+                                          const TypePtr& type,
+                                          const Scope& union_scope)
+{
+	// 9.5p5 with the PA12 dump: the unnamed object gets a deterministic
+	// storage variable, and the injected members remember it so their
+	// uses dump as member accesses.
+	string storage_name = "__anonymous_union_storage__" +
+		to_string(decl.begin_token) + "_" + to_string(decl.end_token);
+	ScopeBinding storage;
+	storage.kind = SB_VARIABLE;
+	storage.name = storage_name;
+	storage.type = type;
+	AddBinding(*current_, storage);
+
+	if (current_->kind != SCOPE_CLASS)
+	{
+		SemNode* item = AppendItem(SN_VARIABLE);
+		item->name = storage_name;
+		item->type = type;
+		EmitConstructorAction(*item, storage_name, type);
+	}
+	ClassInfo* enclosing = OpenClass();
+	const ClassField* anon_row = 0;
+	if (current_->kind == SCOPE_CLASS && enclosing &&
+	    current_ == enclosing->members)
+	{
+		// The anonymous object occupies one field row; its members
+		// inject at absolute offsets so every access addresses the
+		// enclosing object directly.
+		ClassField anon_field;
+		anon_field.name = storage_name;
+		anon_field.type = type;
+		anon_field.access = current_access_;
+		anon_field.anonymous_storage = true;
+		anon_row = &LayoutField(*enclosing, anon_field);
+	}
+	const ClassInfo* anon_cls =
+		anon_row ? unit_.classes.Find(type->named) : 0;
+	for (size_t i = 0; i < union_scope.bindings.size(); i++)
+	{
+		const ScopeBinding& member = union_scope.bindings[i];
+		// The implicitly declared assignment operators live in the
+		// union's member scope but are not data members.
+		if (member.kind == SB_FUNCTION && member.name == "operator =")
+			continue;
+		if (member.kind != SB_VARIABLE)
+			throw runtime_error("anonymous union member is not a "
+			                    "non-static data member");
+		ScopeBinding injected = member;
+		injected.owner = 0;  // re-stamped by AddBinding
+		injected.anon_storage_name = storage_name;
+		injected.anon_storage_type = type;
+		AddBinding(*current_, injected);
+		if (anon_cls)
+		{
+			const ClassField* inner =
+				FindClassField(*anon_cls, member.name);
+			if (inner)
+			{
+				ClassField row = *inner;
+				row.offset += anon_row->offset;
+				row.access = current_access_;
+				row.from_union = true;
+				enclosing->fields.push_back(row);
+			}
+		}
+	}
 }

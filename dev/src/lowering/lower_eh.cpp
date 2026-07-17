@@ -916,3 +916,82 @@ void FunctionLowerer::LowerThrow(const SemNode& node)
 		Emit("eh_end");
 	EmitZeroValueReturn();
 }
+
+// --- goto scope exits (6.6p2/15.1) --------------------------------
+// Lives beside the EH-region machinery: a goto crossing try/catch
+// contexts closes them like a return does.
+
+// Mirrors the lowering's scope structure over the statement tree: a
+// compound statement and a for-init scope each push one cleanup
+// scope; a try body and each handler body run inside one EH context.
+void FunctionLowerer::ScanLabelContexts(const SemNode& node,
+                                        size_t cleanups, size_t ehs)
+{
+	switch (node.kind)
+	{
+	case SN_LABEL_STATEMENT:
+	{
+		LabelContext context;
+		context.cleanup_depth = cleanups;
+		context.eh_depth = ehs;
+		label_contexts_[node.name] = context;
+		if (!node.children.empty())
+			ScanLabelContexts(*node.children[0], cleanups, ehs);
+		return;
+	}
+	case SN_COMPOUND_STATEMENT:
+		for (size_t i = 0; i < node.children.size(); i++)
+			ScanLabelContexts(*node.children[i], cleanups + 1, ehs);
+		return;
+	case SN_TRY:
+		// The try body and every handler body run inside one pushed
+		// EH context (the try's, then each catch's).
+		for (size_t i = 0; i < node.children.size(); i++)
+			ScanLabelContexts(*node.children[i], cleanups, ehs + 1);
+		return;
+	default:
+	{
+		size_t inner = cleanups;
+		for (size_t i = 0; i < node.children.size(); i++)
+			if (node.children[i]->kind == SN_FOR_INIT)
+				inner = cleanups + 1;   // 6.5.3 for-init scope
+		for (size_t i = 0; i < node.children.size(); i++)
+			ScanLabelContexts(*node.children[i], inner, ehs);
+		return;
+	}
+	}
+}
+
+void FunctionLowerer::LowerGoto(const SemNode& node)
+{
+	// 6.6p2/15.1: leaving scopes destroys their automatic objects and
+	// closes the try/catch regions the jump crosses; a jump into a
+	// try block or handler is ill-formed.
+	map<string, LabelContext>::const_iterator target =
+		label_contexts_.find(node.name);
+	if (target == label_contexts_.end())
+		throw runtime_error("goto names no label: " + node.name);
+	size_t cleanup_target = goto_cleanup_base_ +
+		target->second.cleanup_depth;
+	size_t eh_target = goto_eh_base_ + target->second.eh_depth;
+	if (eh_target > eh_contexts_.size())
+		throw runtime_error("goto into a try block or handler");
+	for (size_t i = eh_contexts_.size(); i-- > eh_target;)
+		if (eh_contexts_[i].is_catch)
+		{
+			Emit("eh_end");
+			Emit("call void " +
+			     program_.ExternalRuntimeFnRef(
+					"__cxa_end_catch",
+					"() -> void [role=eh_end_catch, linkage=c, "
+					"binding=strong, object=__cxa_end_catch]") + "()");
+		}
+	if (cleanup_target < cleanup_scopes_.size())
+		EmitCleanupsFrom(cleanup_target);
+	for (size_t i = eh_contexts_.size(); i-- > eh_target;)
+		if (!eh_contexts_[i].is_catch)
+			Emit("eh_end");
+	string label = GotoLabel(node.name);
+	ReferenceLabel(label);
+	Terminate("jump ^" + label);
+}

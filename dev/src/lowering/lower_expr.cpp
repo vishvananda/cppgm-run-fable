@@ -1083,6 +1083,21 @@ TypePtr FunctionLowerer::CalleeFnType(const SemNode& callee)
 	throw OutsideBoundary("call form");
 }
 
+// PA32 host parity: a fully implicit trivial default construction
+// performs no work, so separate-compilation objects emit neither the
+// call nor the demanded symbol (the object address still evaluates).
+// The whole-program presentation keeps the reference's explicit call.
+bool FunctionLowerer::SkipTrivialDefaultConstruction(const SemNode& node,
+                                                     const SemNode& callee)
+{
+	if (!program_.SeparateCompilation() ||
+	    !program_.TrivialDefaultConstruction(callee))
+		return false;
+	if (node.children.size() > 1)
+		LowerAddressExpr(*node.children[1]);
+	return true;
+}
+
 LowerValue FunctionLowerer::LowerCall(const SemNode& node,
                                       const string& result_address)
 {
@@ -1093,17 +1108,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// address identity - no runtime call.
 	if (IsTypeInfoComparison(node))
 		return LowerTypeInfoComparison(node, callee);
-	// PA32 host parity: a fully implicit trivial default construction
-	// performs no work, so separate-compilation objects emit neither
-	// the call nor the demanded symbol. The whole-program
-	// presentation keeps the reference's explicit call.
-	if (direct && program_.SeparateCompilation() &&
-	    program_.TrivialDefaultConstruction(callee))
-	{
-		if (node.children.size() > 1)
-			LowerAddressExpr(*node.children[1]);
+	if (direct && SkipTrivialDefaultConstruction(node, callee))
 		return LowerValue();
-	}
 	// PA29: the float-classification builtins expand inline - no
 	// runtime definition exists, and no eh region is needed.
 	if (IsFloatBuiltinCall(node))

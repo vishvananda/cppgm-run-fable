@@ -78,22 +78,7 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 	// member definitions arrive through unit.deferred.
 	for (size_t i = 0; i < unit.deferred.size(); i++)
 		RegisterDeferred(*unit.deferred[i]);
-	// PA32: an effect-free destructor invocation emits no cleanup
-	// code, but the selected destructor stays odr-used (3.2p3). Host
-	// objects must carry the vague-linkage definition for cross-TU
-	// coalescing; the whole-program presentation keeps the reference's
-	// fully elided shape.
-	if (separate_compilation_)
-	{
-		for (size_t i = 0; i < unit.elided_dtor_uses.size(); i++)
-		{
-			const SemNode& action = *unit.elided_dtor_uses[i];
-			const SemNode& callee = *action.children[0]->children[0];
-			DemandFunction(MemberFunctionEntry(callee.entity_scope,
-			                                   callee.entity_name,
-			                                   callee.type, "D1"));
-		}
-	}
+	DemandElidedDtorUses(unit);
 	// PA18 14.7.2p8: an explicit instantiation definition emits every
 	// member definition its class had instantiated by that point
 	// unconditionally (later-registered definitions stay on-demand,

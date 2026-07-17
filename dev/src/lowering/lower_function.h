@@ -234,6 +234,8 @@ private:
 	// the consumer).
 	LowerValue LowerCall(const SemNode& node,
 	                     const string& result_address = "");
+	bool SkipTrivialDefaultConstruction(const SemNode& node,
+	                                    const SemNode& callee);
 	// PA29 float-classification builtins (lower_expand.cpp): a direct
 	// call to the global-scope __builtin_isnan / __builtin_nanl
 	// expands inline (an f80 storage-image bit test / a `const f80

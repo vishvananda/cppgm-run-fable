@@ -23,6 +23,25 @@ const ClassInfo* LowerProgram::MethodClass(const TypePtr& adjusted) const
 	return target->kind == TK_CLASS ? target->named->class_record : 0;
 }
 
+// PA32: an effect-free destructor invocation emits no cleanup code,
+// but the selected destructor stays odr-used (3.2p3). Host objects
+// must carry the vague-linkage definition for cross-TU coalescing;
+// the whole-program presentation keeps the reference's fully elided
+// shape.
+void LowerProgram::DemandElidedDtorUses(const SemUnit& unit)
+{
+	if (!separate_compilation_)
+		return;
+	for (size_t i = 0; i < unit.elided_dtor_uses.size(); i++)
+	{
+		const SemNode& action = *unit.elided_dtor_uses[i];
+		const SemNode& callee = *action.children[0]->children[0];
+		DemandFunction(MemberFunctionEntry(callee.entity_scope,
+		                                   callee.entity_name,
+		                                   callee.type, "D1"));
+	}
+}
+
 bool LowerProgram::TrivialDefaultConstruction(const SemNode& callee) const
 {
 	if (callee.special != SF_CONSTRUCTOR &&
@@ -32,6 +51,13 @@ bool LowerProgram::TrivialDefaultConstruction(const SemNode& callee) const
 		return false;
 	const ClassInfo* cls = MethodClass(callee.type);
 	if (!cls || cls->has_user_ctor)
+		return false;
+	// Only instantiated specializations prune: their vague-linkage
+	// constructors are the host-parity surface, while non-template
+	// code keeps the reference presentation's explicit call (the
+	// PA31 object-fact fixtures pin it).
+	if (!cls->entity || !cls->entity->spec_template ||
+	    cls->entity->is_template_anchor)
 		return false;
 	for (size_t u = 0; u < units_.size(); u++)
 		if (units_[u]->classes.Find(cls->entity) == cls)

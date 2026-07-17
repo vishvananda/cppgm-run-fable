@@ -148,6 +148,11 @@ bool DeduceFromArg(const TemplateArg& pattern, const TemplateArg& arg,
 		return true;
 	if (!pattern.is_value && TypeIsDependentAliasUse(pattern.type))
 		return true;
+	// A deferred dependent-typed default (an elided default whose
+	// declared type needs instantiation-time facts) is a non-deduced
+	// context: substitution re-resolves and checks it (14.8.2.5p5).
+	if (pattern.is_value && pattern.deferred_default)
+		return true;
 	if (!pattern.is_value && !arg.is_value)
 		return DeduceFromType(pattern.type, arg.type, bound);
 	if (!pattern.is_value || !arg.is_value)

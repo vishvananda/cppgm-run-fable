@@ -81,6 +81,10 @@ struct TemplateArg
 	unsigned long long value_bits;
 	int value_param;
 	const AstExpr* dependent_value;
+	// PA32: a defaulted argument whose declared parameter type needs
+	// instantiation-time facts (deferred inside abstract patterns);
+	// deduction treats only these as non-deduced value slots.
+	bool deferred_default = false;
 	// Pattern slot only: an unexpanded `...` expansion inside a
 	// dependent template-id (`tuple<T&&...>` in a pattern); the
 	// carried type/expression is the expansion pattern. Instantiation

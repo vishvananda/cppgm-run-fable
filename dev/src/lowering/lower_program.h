@@ -208,6 +208,9 @@ public:
 
 	// Registers one bound translation unit's namespace-scope items.
 	void AddUnit(const SemUnit& unit);
+	// PA32: demand-marks destructors whose effect-free invocations
+	// emitted no cleanup code (separate compilation only).
+	void DemandElidedDtorUses(const SemUnit& unit);
 
 	// Renders globals, lowers function bodies, and writes the
 	// canonical LowIR program.

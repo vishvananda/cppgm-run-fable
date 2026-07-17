@@ -106,6 +106,44 @@ Baseline at plan time: 31 pa32 tests fail; everything through pa31 passes.
   time, using the declared language linkage on the entity, not name-string
   probing.
 
+## Outcome notes
+
+All eight clusters landed; `make test-report-through-pa32` is clean and
+the file audit passes. Design points settled during implementation:
+
+- Mode boundaries: three host-parity behaviors apply on the
+  separate-compilation path only, because whole-program fixtures pin
+  the reference presentation: the Itanium allocation-function
+  spellings, the odr-use demand for elided effect-free destructor
+  invocations, and the trivial-default-construction pruning (the last
+  additionally restricted to instantiated specializations - the PA31
+  object-fact fixtures pin the explicit call for non-template code).
+- TLS: LowIR and MIR shapes are unchanged (pa13/pa18/pa28 fixtures pin
+  them). The `-c` path sets `MirProgram::host_tls`; the native encoder
+  then routes every `tls_addr` through the per-TU `_ZTW` wrapper and
+  synthesizes its body (guarded-init call when the module defines one,
+  else the weak `_ZTH` probe, then local-exec `R_X86_64_TPOFF32`
+  access). The ELF writer adds `.tdata` (SHF_TLS), STT_TLS symbols
+  (defined and undefined), and weak-undefined binding for the probe.
+  Boundaries: dynamic-init TLS interop relies on the module-local
+  guarded init only (no `_ZTH` export yet), and the wrapper carries no
+  CFI/FDE - both PA33+ work.
+- Mangler: alias transparency expands through a written-argument
+  binding frame; `Tn` applies to function-template arguments whose
+  NTTP's written declared type mentions the template's own parameters;
+  deferred dependent-typed defaults keep their written literal
+  spelling. `Sa`/`Sb`/`Ss`/`Si`/`So`/`Sd` abbreviations apply to
+  direct members of `::std`; abbreviation-as-prefix (e.g. `_ZNSaIcE…`)
+  is out of scope until hosted headers (PA34).
+- Deduction: an elided default whose declared parameter type needs
+  instantiation-time facts defers as a marked `deferred_default`
+  argument - deduction treats only those as non-deduced value slots so
+  partial-specialization SFINAE shapes keep failing structurally.
+- Latent fixes surfaced by newly-running fixtures: register-class
+  object slots passed by value now load their container bytes (caller
+  and callee agreed on content-in-register everywhere else), and i128
+  loads/stores accept global operands.
+
 ## Validation
 
 - Per-cluster: `make -C pa32 check TEST=tests/general/<case>.t` plus targeted

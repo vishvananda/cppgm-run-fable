@@ -977,8 +977,25 @@ void SemBinder::FillDefaultedTail(TemplateInfo& tmpl, size_t cursor,
 				if (!param.default_expr)
 					throw runtime_error("too few template arguments "
 					                    "for " + tmpl.name);
-				arg = ResolveDefaultValueExpr(
-					*param.default_expr, ValueParamType(param, partial));
+				try
+				{
+					arg = ResolveDefaultValueExpr(
+						*param.default_expr,
+						ValueParamType(param, partial));
+				}
+				catch (...)
+				{
+					// A default whose declared type needs
+					// instantiation-time facts defers inside an
+					// abstract pattern; the use re-resolves
+					// concretely when its context instantiates.
+					if (!InAbstractTemplateContext())
+						throw;
+					arg = TemplateArg();
+					arg.is_value = true;
+					arg.dependent_value = param.default_expr;
+					arg.deferred_default = true;
+				}
 			}
 		}
 		catch (...)
