@@ -171,6 +171,47 @@ bool TransferTrivial(const ClassInfo& member, bool is_move, bool assign)
 
 // --- implicit declaration at class completion --------------------------------
 
+// 5.1.2p19: a closure type has a deleted default constructor and a
+// deleted copy assignment operator, an implicitly-declared copy
+// constructor, and an implicitly-declared move constructor. Only the
+// constructors are declared here; the absent assignment entries and
+// the empty-args path of ResolveClassConstructor keep the deleted
+// members unusable.
+void SemBinder::DeclareClosureSpecialMembers(ClassInfo& cls)
+{
+	if (cls.specials_declared)
+		return;
+	cls.specials_declared = true;
+	TypePtr class_type = MakeNamedType(TK_CLASS, cls.entity);
+	TypePtr void_type = MakeFundamentalType(FT_VOID);
+	{
+		TypePtr referee = SubobjectsConstCopy(cls)
+			? MakeCvQualifiedType(class_type, true, false) : class_type;
+		vector<TypePtr> params;
+		params.push_back(MakeReferenceType(referee, false, true));
+		ClassCtor copy;
+		copy.type = MakeFunctionType(void_type, params, false);
+		copy.kind = CK_COPY;
+		copy.implicit = true;
+		copy.param_names.push_back("");
+		copy.defaults.push_back(0);
+		copy.deleted = SubobjectCopyUnavailable(cls);
+		cls.ctors.push_back(copy);
+	}
+	if (!SubobjectMoveUnavailable(cls))
+	{
+		vector<TypePtr> params;
+		params.push_back(MakeReferenceType(class_type, true, true));
+		ClassCtor move;
+		move.type = MakeFunctionType(void_type, params, false);
+		move.kind = CK_MOVE;
+		move.implicit = true;
+		move.param_names.push_back("");
+		move.defaults.push_back(0);
+		cls.ctors.push_back(move);
+	}
+}
+
 void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 {
 	if (cls.specials_declared)
@@ -634,6 +675,22 @@ void SemBinder::AppendTransferActions(const ClassInfo& cls, bool is_move,
 		{
 			AppendMemberArrayTransfer(*member, field, source_proto,
 			                          category, out);
+			continue;
+		}
+		if (!member && bare->kind == TK_ARRAY)
+		{
+			// A non-class array member after a non-trivial prefix
+			// transfers as raw storage (its elements are trivially
+			// copyable scalars).
+			SemNodePtr action = MakeSemNode(SN_STORAGE_COPY);
+			action->has_value = true;
+			action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+			                           TypeSize(bare));
+			action->bit_width = TypeAlignment(bare);
+			action->children.push_back(ThisFieldExpr(field));
+			action->children.push_back(
+				SourceFieldExpr(source_proto, field, category));
+			out.push_back(std::move(action));
 			continue;
 		}
 		if (member && !assign_form)

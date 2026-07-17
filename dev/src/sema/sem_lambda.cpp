@@ -754,6 +754,7 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	lambda_frames_.pop_back();
 	FinishClassLayout(cls, *model_.MutableInfo(entity), 0);
 	model_.MutableInfo(entity)->complete = true;
+	DeclareClosureSpecialMembers(cls);
 	if (TypeContainsAutoPlaceholder(ret))
 	{
 		member_type = MakeFunctionType(deduced, param_types, false);

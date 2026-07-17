@@ -275,13 +275,29 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 		host_.CheckMemberAccess(cls->members, fn.access, fn.name);
 		int hops = 0;
 		unsigned long long base_offset = 0;
+		int vbase_index = -1;
 		// The conversion set was collected along the base DAG, so the
-		// owning class resolves; a non-unique path means the inherited
-		// conversion's subobject is ambiguous (10.2).
-		if (BaseSubobjectPath(RemoveTopCv(value.type)->named,
-		                      conv.conv_class, hops,
-		                      base_offset) != BP_UNIQUE)
-			throw runtime_error("ambiguous base class subobject");
+		// owning class resolves; a non-unique non-virtual path means the
+		// inherited conversion's subobject is ambiguous (10.2). A shared
+		// virtual-base owner is one subobject behind a virtual edge.
+		const NamedTypeInfo* source = RemoveTopCv(value.type)->named;
+		EBasePath path = BaseSubobjectPath(source, conv.conv_class, hops,
+		                                   base_offset);
+		if (path != BP_UNIQUE)
+		{
+			size_t carrier = 0;
+			unsigned long long remainder = 0;
+			if (path == BP_NONE && source && source->class_record &&
+			    VirtualBasePath(*source->class_record, conv.conv_class,
+			                    carrier, remainder))
+			{
+				hops = 1;
+				base_offset = remainder;
+				vbase_index = (int)carrier;
+			}
+			else
+				throw runtime_error("ambiguous base class subobject");
+		}
 		if (hops > 0)
 		{
 			SemNodePtr adjusted = MakeSemNode(SN_MEMBER_EXPRESSION);
@@ -289,6 +305,7 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 			adjusted->category = VC_LVALUE;
 			adjusted->base_hops = hops;
 			adjusted->base_offset = base_offset;
+			adjusted->vbase_index = vbase_index;
 			adjusted->children.push_back(std::move(value.node));
 			value.node = std::move(adjusted);
 		}

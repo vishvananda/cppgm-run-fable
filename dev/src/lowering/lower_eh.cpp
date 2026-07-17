@@ -665,10 +665,27 @@ void FunctionLowerer::EmitCatchParamInit(const SemNode& handler_node,
 			          LowerSlotType(bare));
 		string address = NewTemp();
 		Emit(address + " = addr $" + param_slot);
-		string ctor = program_.MemberFunctionRef(
-			*handler_node.handler_ctor->children[0]->children[0]);
-		Emit("call void " + ctor + "(" + address + ", " + object +
-		     ")");
+		if (handler_node.handler_ctor->trivial_copy)
+		{
+			// A trivially-copyable parameter object takes the exception
+			// object's bytes directly (the ctor call would name a body
+			// the host toolchain never emits); the selected trivial
+			// member still synthesizes on its ordinary demand terms.
+			program_.DemandTrivialCtorBody(
+				*handler_node.handler_ctor->children[0]->children[0]);
+			const ClassInfo* record = bare->named->class_record;
+			if (!record || !record->is_empty)
+				Emit("copyobj " + to_string(TypeSize(bare)) + "x" +
+				     to_string(TypeAlignment(bare)) + " " + object +
+				     ", " + address);
+		}
+		else
+		{
+			string ctor = program_.MemberFunctionRef(
+				*handler_node.handler_ctor->children[0]->children[0]);
+			Emit("call void " + ctor + "(" + address + ", " + object +
+			     ")");
+		}
 		if (handler_node.subobject_dtor)
 			param_dtor = program_.MemberFunctionRef(
 				*handler_node.subobject_dtor
