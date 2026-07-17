@@ -328,6 +328,11 @@ struct SemNode
 	// instantiation, so its references are not definition-time demand
 	// (14.7.1: an unused instantiated body is never required).
 	bool from_instantiation = false;
+	// PA33 SN_STATIC_GUARD: set the guard before running the guarded
+	// actions (the host `__tls_init` shape - a re-entrant TLS wrapper
+	// call during initialization must not recurse). Local statics keep
+	// the guard-after-init order.
+	bool guard_first = false;
 	// SN_CALL_EXPRESSION: the call came from overloaded-operator
 	// syntax (the checked references drop such calls when they
 	// initialize an empty class object).

@@ -59,10 +59,13 @@ std::vector<int> MeetStacks(const std::vector<int> & a,
 }  // namespace
 
 // The catch clauses a landing pad publishes: its leading eh_catch /
-// eh_catch_all classification markers. Filter markers and bare
-// eh_cleanup markers carry no host-EH action.
+// eh_catch_all classification markers. Filter markers carry no
+// host-EH action; a bare eh_cleanup marker means the pad also runs
+// cleanup work, so the region's action chain needs a cleanup record
+// (or the host personality skips the frame in phase 2 when no catch
+// clause matches).
 std::vector<mir_model::HostEhClause> FunctionLowering::CollectEhClauses(
-	const std::string & label) const
+	const std::string & label, bool & has_cleanup) const
 {
 	std::map<std::string, size_t>::const_iterator found =
 		block_index_of_.find(label);
@@ -87,6 +90,8 @@ std::vector<mir_model::HostEhClause> FunctionLowering::CollectEhClauses(
 			clause.selector = ins.eh_selector;
 		}
 		else {
+			if(ins.operation == "eh_cleanup")
+				has_cleanup = true;
 			continue;   // eh_filter / bare eh_cleanup markers
 		}
 		clauses.push_back(clause);
@@ -115,8 +120,11 @@ int FunctionLowering::EhRegionForArming(int position,
 	}
 	else {
 		region.landing_label = ins.block_targets[0];
-		region.cleanup = ins.opcode == LOWIR_INS_EH_CLEANUP;
-		region.clauses = CollectEhClauses(region.landing_label);
+		bool marker_cleanup = false;
+		region.clauses = CollectEhClauses(region.landing_label,
+		                                  marker_cleanup);
+		region.cleanup = ins.opcode == LOWIR_INS_EH_CLEANUP ||
+		                 marker_cleanup;
 		eh_landing_blocks_.insert(region.landing_label);
 	}
 	eh_regions_.push_back(region);

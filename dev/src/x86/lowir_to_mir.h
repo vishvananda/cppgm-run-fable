@@ -166,7 +166,7 @@ private:
 	int EhRegionForArming(int position, const LowIRInstruction & ins,
 	                      int parent);
 	std::vector<mir_model::HostEhClause> CollectEhClauses(
-		const std::string & label) const;
+		const std::string & label, bool & has_cleanup) const;
 	int eh_region_for(int position) const;
 	void EmitEhLandingEntry();
 	void AppendEhAbandonPads();

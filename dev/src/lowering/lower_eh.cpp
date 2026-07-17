@@ -788,6 +788,9 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 			EmitCatchParamDtor(param_slot, param_dtor);
 			Emit("call void " + end_catch_ref + "()");
 			Emit("eh_end");
+			// 15.2p1: the enclosing scopes' locals destroy as the
+			// rethrown (or escaping) exception leaves the function.
+			EmitCleanupsFrom(0);
 			EmitCtorUnwindCleanups();
 			Terminate("resume");
 		}

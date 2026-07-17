@@ -562,6 +562,21 @@ void FunctionLowering::LowerStore(const LowIRInstruction & ins)
 			if(source.kind == LOWIR_OPERAND_LITERAL)
 				emit_mov(MakeReg(staged),
 				         MakeImm(ParseIntLiteral(source)));
+			else if(operand_is_pending(source)) {
+				// a deferred single-use load folds into the staging
+				// register (it must survive the wrapper call below)
+				const LowIRInstruction * load =
+					pending_loads_[source.name];
+				mir_model::Operand address =
+					address_operand(load->operands[0], XR_RCX);
+				take_pending(source);
+				release_after_use(*load);
+				mir_model::Instruction & fill =
+					emit(mir_model::Instruction::MI_LOAD);
+				fill.type = SpellType(load->type);
+				fill.operands.push_back(MakeReg(staged));
+				fill.operands.push_back(address);
+			}
 			else
 				emit_mov(MakeReg(staged), gpr_read(source));
 		}

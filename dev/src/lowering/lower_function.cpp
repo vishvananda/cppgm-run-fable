@@ -878,9 +878,12 @@ void FunctionLowerer::LowerStaticGuard(const SemNode& node)
 	ReferenceLabel(done_label);
 	Terminate("branch " + set + ", ^" + done_label + ", ^" + run_label);
 	OpenBlock(run_label);
+	if (node.guard_first)
+		Emit("store i64 1, " + guard);
 	for (size_t i = 0; i < node.children.size(); i++)
 		LowerStatement(*node.children[i]);
-	Emit("store i64 1, " + guard);
+	if (!node.guard_first)
+		Emit("store i64 1, " + guard);
 	Terminate("jump ^" + done_label);
 	OpenBlock(done_label);
 }

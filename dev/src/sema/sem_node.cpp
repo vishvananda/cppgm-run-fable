@@ -236,6 +236,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.captured_this = node.captured_this;
 	out.synth_copy = node.synth_copy;
 	out.trivial_copy = node.trivial_copy;
+	out.guard_first = node.guard_first;
 	out.ctor_addressed = node.ctor_addressed;
 	out.synthesized = node.synthesized;
 	out.is_constexpr_fn = node.is_constexpr_fn;
