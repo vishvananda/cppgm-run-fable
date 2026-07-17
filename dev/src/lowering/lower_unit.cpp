@@ -492,11 +492,24 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 	if (!builtin.empty())
 	{
 		info.low_name = UniqueSymbol(builtin);
-		info.object_name = "cppgm_builtin_" +
-			(builtin == "operator_new" ? string("operator_new")
-			 : builtin == "operator_new__" ? string("operator_new_array")
-			 : builtin == "operator_delete" ? string("operator_delete")
-			 : string("operator_delete_array"));
+		// PA32: separate-compilation objects carry the Itanium ABI
+		// spellings so host links bind the host C++ runtime (and
+		// replacements interpose it). The whole-program presentation
+		// keeps the private builtin spellings its fixtures pin.
+		if (separate_compilation_)
+			info.object_name =
+				builtin == "operator_new" ? string("_Znwm")
+				: builtin == "operator_new__" ? string("_Znam")
+				: builtin == "operator_delete" ? string("_ZdlPv")
+				: string("_ZdaPv");
+		else
+			info.object_name = "cppgm_builtin_" +
+				(builtin == "operator_new" ? string("operator_new")
+				 : builtin == "operator_new__"
+					? string("operator_new_array")
+				 : builtin == "operator_delete"
+					? string("operator_delete")
+				 : string("operator_delete_array"));
 		info.unwind_no = builtin.compare(0, 15, "operator_delete") == 0;
 		info.index = functions_.size();
 		function_index_[key] = functions_.size();
