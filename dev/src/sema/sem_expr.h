@@ -323,6 +323,19 @@ public:
 	// PA34 builtin type trait ( type-id-list ) -> bool constant
 	// (sem_trait.cpp).
 	SemValue AnalyzeBuiltinTrait(const AstExpr& expr);
+	// PA34 would-it-compile traits (__is_constructible family):
+	// evaluated by probing the initialization/conversion/assignment
+	// machinery over declval surrogates (sem_trait.cpp).
+	bool EvaluateSemaProbeTrait(const std::string& name,
+	                            const vector<TypePtr>& types);
+	bool ProbeTraitConstructible(const TypePtr& target,
+	                             const vector<TypePtr>& arg_types,
+	                             bool& no_throw, bool& trivial);
+	bool ProbeTraitConvertible(const TypePtr& from, const TypePtr& to);
+	bool ProbeTraitAssignable(const TypePtr& lhs, const TypePtr& rhs,
+	                          bool& no_throw, bool& trivial);
+	bool ProbeTraitDestructible(const TypePtr& target, bool& no_throw,
+	                            bool& trivial);
 	// A constructed (or aggregate-initialized) temporary of a class
 	// type from an argument/braced-init list (5.2.3, 8.5.4); the
 	// binder's braced-return path builds through it too. `braced_list`

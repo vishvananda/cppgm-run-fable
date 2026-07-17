@@ -137,6 +137,26 @@ const char * const kBuiltinTraits[] = {
 	"__is_abstract",
 	"__is_base_of",
 	"__has_virtual_destructor",
+	// would-it-compile probes (sema/sem_trait.cpp EvaluateSemaProbeTrait)
+	"__is_constructible",
+	"__is_nothrow_constructible",
+	"__is_trivially_constructible",
+	"__is_convertible",
+	"__is_convertible_to",
+	"__is_assignable",
+	"__is_nothrow_assignable",
+	"__is_trivially_assignable",
+	"__is_destructible",
+	"__is_nothrow_destructible",
+	"__is_trivially_destructible",
+	"__has_trivial_constructor",
+	"__is_pod",
+	"__is_trivial",
+	"__is_trivially_copyable",
+	"__is_standard_layout",
+	"__is_literal_type",
+	"__reference_constructs_from_temporary",
+	"__reference_binds_to_temporary",
 	0
 };
 

@@ -25,7 +25,8 @@ enum EClassFact
 	CF_TRIVIAL_MOVE_CTOR,
 	CF_TRIVIAL_COPY_ASSIGN,
 	CF_TRIVIAL_MOVE_ASSIGN,
-	CF_DEFAULT_CTOR_EFFECTS_SYNTAX
+	CF_DEFAULT_CTOR_EFFECTS_SYNTAX,
+	CF_TRIVIAL_DEFAULT_CTOR
 };
 
 unsigned long long g_class_facts_version = 1;
@@ -1238,6 +1239,39 @@ bool ClassHasTrivialDtor(const ClassInfo& info)
 		!info.dtor_virtual &&
 		SubobjectsSatisfy<ClassHasTrivialDtor>(info);
 	return FactStore(info, CF_TRIVIAL_DTOR, value);
+}
+
+// 12.1p5 (PA34): the default constructor is trivial when it is not
+// user-provided, the class has no virtual members or virtual bases, no
+// member carries a brace-or-equal-initializer, and every subobject
+// default-constructs trivially.
+bool ClassHasTrivialDefaultCtor(const ClassInfo& info)
+{
+	bool value;
+	if (FactCached(info, CF_TRIVIAL_DEFAULT_CTOR, value))
+		return value;
+	bool user_default = false;
+	for (size_t i = 0; i < info.ctors.size(); i++)
+	{
+		const ClassCtor& ctor = info.ctors[i];
+		if (ctor.implicit || ctor.defaulted || ctor.deleted)
+			continue;
+		bool callable_empty = true;
+		const vector<TypePtr>& params = ctor.type->parameters;
+		for (size_t p = 0; p < params.size(); p++)
+			if (p >= ctor.defaults.size() || !ctor.defaults[p])
+				callable_empty = false;
+		if (callable_empty)
+			user_default = true;
+	}
+	bool nsdmi = false;
+	for (size_t i = 0; i < info.fields.size(); i++)
+		if (info.fields[i].default_init)
+			nsdmi = true;
+	value = !user_default && !info.is_polymorphic &&
+		!ClassHasVBases(info) && !nsdmi &&
+		SubobjectsSatisfy<ClassHasTrivialDefaultCtor>(info);
+	return FactStore(info, CF_TRIVIAL_DEFAULT_CTOR, value);
 }
 
 bool ClassHasTrivialCopyCtor(const ClassInfo& info)

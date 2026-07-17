@@ -554,6 +554,8 @@ void InvalidateClassFacts();
 const ClassInfo* SubobjectClass(const TypePtr& type);
 
 bool ClassHasTrivialDtor(const ClassInfo& info);
+// PA34 12.1p5 (__is_trivially_constructible / __has_trivial_constructor).
+bool ClassHasTrivialDefaultCtor(const ClassInfo& info);
 bool ClassHasTrivialCopyCtor(const ClassInfo& info);
 bool ClassHasTrivialMoveCtor(const ClassInfo& info);
 bool ClassHasTrivialCopyAssign(const ClassInfo& info);

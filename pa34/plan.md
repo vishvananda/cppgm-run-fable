@@ -126,21 +126,15 @@ renaming are documented boundaries for PA36 to revisit). ~115 compile +
 
 Next clusters, in leverage order:
 
-1. **Would-it-compile trait family** (~40 tests):
-   `__is_constructible` / `__is_trivially_constructible` /
-   `__is_nothrow_constructible` (+ pack-expanded args),
-   `__is_convertible`, `__is_assignable` / nothrow / trivially,
-   `__is_destructible` / trivially, `__is_pod` / `__is_trivial` /
-   `__is_trivially_copyable` / `__is_standard_layout` /
-   `__is_literal_type`, `__has_trivial_constructor`,
-   `__reference_constructs_from_temporary` / `__reference_binds_to_
-   temporary`, `__is_nothrow_invocable`, `__is_identifier`.
-   Implementation route: extend sem_trait.cpp evaluation but move the
-   would-it-compile probes into SemExprAnalyzer (they need
-   ResolveClassCtorHost / conversion / assignment analysis wrapped in
-   try/catch over synthesized declval operands, plus ClassInfo
-   triviality bits). Add each name to hosted_probes kBuiltinTraits only
-   when its evaluation lands.
+1. **Would-it-compile trait family** — landed via
+   SemExprAnalyzer::EvaluateSemaProbeTrait (declval surrogates through
+   CopyInitialize / ResolveClassCtorHost / ResolveOperatorCall with
+   SemTreeMayThrow for the nothrow variants and the ClassHasTrivial*
+   facts, including the new ClassHasTrivialDefaultCtor). Remaining
+   holes: pack-expanded trait arguments (`__is_nothrow_constructible(T,
+   Args...)`) need a type-id pack-expansion host API mirroring
+   ExpandPackExpression; `__is_nothrow_invocable` and the
+   standard-layout member-position corner cases are still open.
 2. **Statement/declaration attribute positions** (~10):
    `[[...]]` before block-scope declarations, in conditions,
    for-init, range-for; attributed null statement
