@@ -48,35 +48,6 @@ void RegisterDroppedLiterals(LowerProgram& program, const SemNode& node)
 		RegisterDroppedLiterals(program, *node.children[i]);
 }
 
-// Whether evaluating this expression can have observable effects
-// (calls, stores, allocation); pure address chains are elidable.
-bool ExprHasSideEffects(const SemNode& node)
-{
-	switch (node.kind)
-	{
-	case SN_CALL_EXPRESSION:
-	case SN_ASSIGNMENT_EXPRESSION:
-	case SN_CONSTRUCTOR_ACTION:
-	case SN_DESTRUCTOR_ACTION:
-	case SN_NEW_INIT:
-	case SN_NEW_ARRAY:
-	case SN_DELETE_EXPRESSION:
-	case SN_DELETE_ARRAY:
-	case SN_POSTFIX_EXPRESSION:
-		return true;
-	case SN_UNARY_EXPRESSION:
-		if (node.op == OP_INC || node.op == OP_DEC)
-			return true;
-		break;
-	default:
-		break;
-	}
-	for (size_t i = 0; i < node.children.size(); i++)
-		if (ExprHasSideEffects(*node.children[i]))
-			return true;
-	return false;
-}
-
 // The unsigned mask of `width` bits.
 unsigned long long BitMask(unsigned long long width)
 {
@@ -1085,9 +1056,17 @@ void FunctionLowerer::CloseEhRegion()
 	else
 	{
 		EmitTempCleanups(0);
-		EmitCleanupsFrom(0);
-		EmitCtorUnwindCleanups();
-		Terminate("resume");
+		// In host mode a skipped catch context's own pad runs the
+		// scope slice and ctor cleanups it owns after this pad
+		// resumes into it, so nothing destroys twice.
+		if (program_.SeparateCompilation() && !eh_contexts_.empty())
+			EmitCleanupsFrom(eh_contexts_.back().cleanup_depth);
+		else
+		{
+			EmitCleanupsFrom(0);
+			EmitCtorUnwindCleanups();
+		}
+		EmitUnwindLeave();
 	}
 	OpenBlock(eh_end_);
 }

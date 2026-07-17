@@ -546,9 +546,13 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition,
 	AstDeclPtr decl = MakeDecl(require_definition
 	                           ? DK_SPECIAL_MEMBER_DEFINITION
 	                           : DK_SPECIAL_MEMBER_DECLARATION);
+	// Leading abi_tag adornments appertain to the special member; the
+	// local vector rides into the declarator built below (fresh per
+	// tentative attempt).
+	std::vector<std::string> leading_tags;
 	for (;;)
 	{
-		SkipDeclAdornments();
+		SkipDeclAdornments(&leading_tags);
 		if (Peek().kind == PTOK_SIMPLE &&
 		    IsMemberFunctionSpecifier(Peek().simple_type))
 		{
@@ -569,6 +573,7 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition,
 	}
 	bool qualified = name.parts.size() > 1;
 	decl->declarator = AstDeclaratorPtr(new AstDeclarator());
+	decl->declarator->abi_tags = move(leading_tags);
 	AstDeclaratorItem id_item;
 	id_item.kind = DI_ID;
 	id_item.name = move(name);

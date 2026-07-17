@@ -8,10 +8,12 @@ using std::to_string;
 
 // Compiler-expanded expression forms: shapes with no direct call or
 // single-instruction lowering. The float-classification builtins fold
-// to inline bit tests (no runtime definition exists), GNU statement
-// expressions run their bound compound in place, and 128-bit division
-// expands to a restoring shift-subtract loop so separately compiled
-// units need no support library.
+// to inline bit tests (no runtime definition exists), the PA33
+// vararg-cursor/alloca builtins expand to cursor walks and
+// role-annotated backend ops, GNU statement expressions run their
+// bound compound in place, and 128-bit division expands to a
+// restoring shift-subtract loop so separately compiled units need no
+// support library.
 
 namespace {
 

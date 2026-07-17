@@ -611,6 +611,57 @@ void BeginClassLayout(ClassInfo& info)
 	}
 }
 
+namespace {
+
+// PA33 [[no_unique_address]] 9.2: distinct subobjects of one class
+// type keep distinct addresses. Only the overlap machinery consults
+// these probes; base rows keep the pre-existing shared-offset
+// convention, so classes without overlapped members lay out as before.
+bool NuaSlotTaken(const ClassInfo& info, const NamedTypeInfo* entity,
+                  unsigned long long offset)
+{
+	for (size_t i = 0; i < info.nua_slots.size(); i++)
+		if (info.nua_slots[i].first == entity &&
+		    info.nua_slots[i].second == offset)
+			return true;
+	return false;
+}
+
+bool PlacedFieldOfTypeAt(const ClassInfo& info,
+                         const NamedTypeInfo* entity,
+                         unsigned long long offset)
+{
+	for (size_t i = 0; i < info.fields.size(); i++)
+	{
+		TypePtr bare = RemoveTopCv(info.fields[i].type);
+		if (bare->kind == TK_CLASS && bare->named == entity &&
+		    !info.fields[i].is_bit_field &&
+		    info.fields[i].offset == offset)
+			return true;
+	}
+	return false;
+}
+
+bool BaseTreeHasEmptyAt(const ClassInfo& info,
+                        const NamedTypeInfo* entity,
+                        unsigned long long offset)
+{
+	for (size_t i = 0; i < info.direct_bases.size(); i++)
+	{
+		const ClassDirectBase& row = info.direct_bases[i];
+		if (row.is_virtual || row.offset > offset)
+			continue;
+		unsigned long long rel = offset - row.offset;
+		if (rel == 0 && row.cls->entity == entity && row.cls->is_empty)
+			return true;
+		if (BaseTreeHasEmptyAt(*row.cls, entity, rel))
+			return true;
+	}
+	return false;
+}
+
+}  // namespace
+
 ClassField& LayoutField(ClassInfo& info, const ClassField& field)
 {
 	unsigned long long field_size = TypeSize(field.type);
@@ -618,13 +669,30 @@ ClassField& LayoutField(ClassInfo& info, const ClassField& field)
 	ClassField row = field;
 	row.is_bit_field = false;
 	// PA33 [[no_unique_address]]: an empty-class member occupies no
-	// storage - the empty-base convention (offset 0, no cursor
-	// advance); its alignment still contributes.
+	// storage - the empty-base convention (no cursor advance); its
+	// alignment still contributes. The placement starts at offset 0
+	// and bumps past same-type empty subobjects (9.2 distinct
+	// addresses); union members share storage and never bump.
 	TypePtr bare = RemoveTopCv(field.type);
 	if (row.no_unique_address && bare->kind == TK_CLASS &&
 	    bare->named->class_record && bare->named->class_record->is_empty)
 	{
-		row.offset = 0;
+		unsigned long long at = 0;
+		unsigned long long step = field_alignment ? field_alignment : 1;
+		if (!info.is_union)
+		{
+			while (NuaSlotTaken(info, bare->named, at) ||
+			       PlacedFieldOfTypeAt(info, bare->named, at) ||
+			       BaseTreeHasEmptyAt(info, bare->named, at))
+				at += step;
+			info.nua_slots.push_back(
+				std::make_pair(bare->named, at));
+			if (at + field_size > info.nua_extent)
+				info.nua_extent = at + field_size;
+		}
+		row.offset = at;
+		if (at > 0)
+			info.is_empty = false;
 		if (field_alignment > info.alignment)
 			info.alignment = field_alignment;
 		info.fields.push_back(row);
@@ -640,6 +708,12 @@ ClassField& LayoutField(ClassInfo& info, const ClassField& field)
 	{
 		unsigned long long bytes = (info.bit_cursor + 7) / 8;
 		row.offset = RoundUpBits(bytes, field_alignment);
+		// An overlapped same-type placement at this offset moves the
+		// allocation up (nua_slots is empty without [[nua]] members,
+		// so pre-PA33 layouts cannot shift).
+		if (bare->kind == TK_CLASS && !info.nua_slots.empty())
+			while (NuaSlotTaken(info, bare->named, row.offset))
+				row.offset += field_alignment ? field_alignment : 1;
 		info.bit_cursor = (row.offset + field_size) * 8;
 	}
 	if (field_alignment > info.alignment)
@@ -771,6 +845,10 @@ void FinishClassLayout(ClassInfo& info, NamedTypeInfo& entity,
 	// alignment, spanning its non-virtual bytes).
 	ComputeVirtualBaseTable(info);
 	info.nv_dsize = (info.bit_cursor + 7) / 8;
+	// PA33: overlapped [[no_unique_address]] placements bumped past
+	// the storage cursor still need their bytes inside the object.
+	if (info.nua_extent > info.nv_dsize)
+		info.nv_dsize = info.nua_extent;
 	if (!info.vbases.empty() && info.nv_dsize == 0)
 		info.nv_dsize = 1;  // the identity byte ahead of the shared region
 	info.nv_alignment = info.alignment;

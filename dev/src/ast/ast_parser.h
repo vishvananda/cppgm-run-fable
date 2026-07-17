@@ -132,17 +132,17 @@ private:
 	bool MatchOpenAngle();
 	bool AtCloseAngle() const;
 	bool MatchCloseAngle();
-	void SkipDeclAdornments();   // __attribute__((...)) and alignas(...)
+	// __attribute__((...)) and alignas(...) adornments. abi_tag string
+	// arguments record into `abi_tags` when the caller owns a
+	// consuming declaration position; recorded nowhere else, so a
+	// tag never leaks across declarations or tentative re-parses.
+	void SkipDeclAdornments(std::vector<std::string>* abi_tags = 0);
 	// Class-head adornments: __attribute__ forms are discarded,
 	// alignas(...) specifiers are captured into the class declaration.
 	void ParseClassAdornments(AstDecl& decl);
 	bool SkipSquareAttribute();  // [[ ... ]]
 	bool SkipBalancedParens();
-	// __attribute__ argument list: balanced skip that records abi_tag
-	// string arguments into last_abi_tags_ (harvested by the
-	// function-qualifier parse).
-	bool SkipAttributeParens();
-	std::vector<std::string> last_abi_tags_;
+	bool SkipAttributeParens(std::vector<std::string>* abi_tags);
 	// [[no_unique_address]] seen by the last SkipSquareAttribute.
 	bool last_no_unique_address_ = false;
 

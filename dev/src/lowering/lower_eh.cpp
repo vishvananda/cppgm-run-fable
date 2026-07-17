@@ -566,6 +566,15 @@ void FunctionLowerer::LowerTry(const SemNode& node)
 	// selector comparison chain.
 	OpenBlock(context.dispatch_label);
 	EmitTryMarkers(context);
+	// Host mode: when the unmatched-selector route has cleanup work,
+	// the region's action chain needs a cleanup record too, or the
+	// host personality skips this frame in phase 2 and the enclosing
+	// locals leak (15.2p1). An enclosing catch context's own cleanup
+	// region already provides the record.
+	if (program_.SeparateCompilation() &&
+	    !(!eh_contexts_.empty() && eh_contexts_.back().is_catch) &&
+	    (HaveCleanupsAboveEhBoundary() || !ctor_cleanups_.empty()))
+		Emit("eh_cleanup");
 	ReferenceLabel(context.entry_label);
 	Terminate("jump ^" + context.entry_label);
 	OpenBlock(context.entry_label);
@@ -787,14 +796,48 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 		{
 			EmitCatchParamDtor(param_slot, param_dtor);
 			Emit("call void " + end_catch_ref + "()");
-			Emit("eh_end");
+			// The frame-record pop is whole-program bookkeeping: the
+			// host region dataflow enters this pad without its own
+			// region, so a pop here would drop the *enclosing* region
+			// and uncover the resume below.
+			if (!program_.SeparateCompilation())
+				Emit("eh_end");
 			// 15.2p1: the enclosing scopes' locals destroy as the
 			// rethrown (or escaping) exception leaves the function.
-			EmitCleanupsFrom(0);
-			EmitCtorUnwindCleanups();
-			Terminate("resume");
+			// In host mode a skipped catch context's own pad runs the
+			// slice it owns after this pad resumes, so nothing
+			// destroys twice.
+			if (program_.SeparateCompilation() && !eh_contexts_.empty())
+				EmitCleanupsFrom(eh_contexts_.back().cleanup_depth);
+			else
+			{
+				EmitCleanupsFrom(0);
+				EmitCtorUnwindCleanups();
+			}
+			EmitUnwindLeave();
 		}
 	}
+}
+
+// The unwind leaves this frame. Under the armed whole-body noexcept
+// region (15.4p9) the escape terminates in place: the host unwinder
+// re-enters the frame's cached landing pad on a bare resume (the
+// terminate catch-all made this the handler frame in phase 1), which
+// would loop forever - and a landing pad cannot double as a jump
+// target, so the terminate route inlines rather than jumping to the
+// dispatch block.
+void FunctionLowerer::EmitUnwindLeave()
+{
+	if (!terminate_dispatch_.empty())
+	{
+		string exc = NewTemp();
+		Emit(exc + " = exception ptr");
+		Emit("call void " + program_.TerminateHelperRef() + "(" + exc +
+		     ")");
+		EmitZeroValueReturn();
+	}
+	else
+		Terminate("resume");
 }
 
 // The selector missed every handler of this try: continue to the
@@ -819,8 +862,23 @@ void FunctionLowerer::EmitCatchNext(EhContext& context)
 	}
 	else
 	{
-		EmitCtorUnwindCleanups();
-		Terminate("resume");
+		// 15.2p1 host mode: the enclosing scopes' locals destroy as
+		// the unmatched exception leaves the frame (a skipped catch
+		// context's pad owns its own slice); the whole-program branch
+		// keeps the pinned reference presentation.
+		if (program_.SeparateCompilation())
+		{
+			if (!eh_contexts_.empty())
+				EmitCleanupsFrom(eh_contexts_.back().cleanup_depth);
+			else
+			{
+				EmitCleanupsFrom(0);
+				EmitCtorUnwindCleanups();
+			}
+		}
+		else
+			EmitCtorUnwindCleanups();
+		EmitUnwindLeave();
 	}
 }
 

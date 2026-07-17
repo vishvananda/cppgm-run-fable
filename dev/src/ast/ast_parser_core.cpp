@@ -494,8 +494,8 @@ bool AstParser::SkipBalancedParens()
 
 // GNU __attribute__((...)) and alignas(...) adornments are accepted
 // where specifiers can appear and discarded (the references omit
-// them).
-void AstParser::SkipDeclAdornments()
+// them); abi_tag strings record into `abi_tags` when provided.
+void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags)
 {
 	for (;;)
 	{
@@ -503,7 +503,7 @@ void AstParser::SkipDeclAdornments()
 		if (AtIdentifierSpelled("__attribute__"))
 		{
 			Advance();
-			if (SkipAttributeParens())
+			if (SkipAttributeParens(abi_tags))
 				continue;
 			Restore(state);
 			return;
@@ -523,7 +523,7 @@ void AstParser::SkipDeclAdornments()
 // __attribute__ argument list: the balanced skip of
 // SkipBalancedParens, additionally recording abi_tag string
 // arguments (5.1: they spell B<len><tag> after the unqualified name).
-bool AstParser::SkipAttributeParens()
+bool AstParser::SkipAttributeParens(std::vector<std::string>* abi_tags)
 {
 	if (!AtSimple(OP_LPAREN))
 		return false;
@@ -554,6 +554,9 @@ bool AstParser::SkipAttributeParens()
 			Advance();
 			Advance();
 			depth++;
+			// 2.14.5: adjacent string literals form one tag; a comma
+			// separates tags.
+			string pending;
 			while (!AtEof() && !AtSimple(OP_RPAREN))
 			{
 				const ParseToken& token = Peek();
@@ -562,11 +565,18 @@ bool AstParser::SkipAttributeParens()
 					string chars = token.literal_data;
 					while (!chars.empty() && chars.back() == '\0')
 						chars.pop_back();
-					if (!chars.empty())
-						last_abi_tags_.push_back(chars);
+					pending += chars;
+				}
+				else if (AtSimple(OP_COMMA))
+				{
+					if (abi_tags && !pending.empty())
+						abi_tags->push_back(pending);
+					pending.clear();
 				}
 				Advance();
 			}
+			if (abi_tags && !pending.empty())
+				abi_tags->push_back(pending);
 			continue;
 		}
 		Advance();

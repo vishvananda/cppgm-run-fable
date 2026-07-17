@@ -625,7 +625,11 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 				}
 				else if (special_code[0] == 'D')
 					tags = cls->dtor_abi_tags;
+				// sorted and unique: a tag repeated across positions
+				// still spells one B<len><tag>
 				std::sort(tags.begin(), tags.end());
+				tags.erase(std::unique(tags.begin(), tags.end()),
+				           tags.end());
 				for (size_t i = 0; i < tags.size(); i++)
 					tag_suffix += "B" + to_string(tags[i].size()) +
 						tags[i];

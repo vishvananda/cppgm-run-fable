@@ -363,11 +363,11 @@ private:
 	                            const SemNode& child);
 	void LowerConstructorCall(const SemNode& action,
 	                          const string& this_text);
-	// PA16: a trivial copy/move construction lowers as a raw object
-	// copy (`copyobj`) instead of a synthesized helper call. The
-	// destination is `this_text` when non-empty, else the action's own
-	// address child.
-	// PA33 -O1 (lower_member.cpp): call-site expansion of a simple
+	// PA16 (lower_transfer.cpp): a trivial copy/move construction
+	// lowers as a raw object copy (`copyobj`) instead of a synthesized
+	// helper call. The destination is `this_text` when non-empty, else
+	// the action's own address child.
+	// PA33 -O1 (lower_transfer.cpp): call-site expansion of a simple
 	// inline constructor (literal member stores only).
 	bool LowerSimpleInlineConstruction(const SemNode& action,
 	                                   const SemNode& callee,
@@ -628,6 +628,10 @@ private:
 	// PA33: the noexcept whole-body terminate dispatch label ("" when
 	// this body arms none).
 	string terminate_dispatch_;
+	// The unwind leaves this frame: routes to the terminate dispatch
+	// under the armed noexcept region (the host unwinder would re-land
+	// the same pad forever on a bare resume), else resumes.
+	void EmitUnwindLeave();
 	// Class return-value construction into the result object never
 	// opens unwind regions (the reference's final-action form).
 	bool suppress_eh_regions_;

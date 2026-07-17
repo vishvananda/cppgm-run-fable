@@ -877,8 +877,10 @@ string MangleTemplateSpecPattern(const TypePtr& type, Substitutions& subs,
 					*type->named->spec_template, type->targs, subs,
 					key_out);
 			}
-			catch (const std::exception&)
+			catch (const std::runtime_error&)
 			{
+				// only the boundary discipline degrades to the
+				// component spelling; anything else propagates
 				subs = saved_state;
 			}
 		}

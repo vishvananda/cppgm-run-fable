@@ -60,6 +60,10 @@ bool FunctionLowering::storage_is_tls(const LowIROperand & operand) const
 
 void FunctionLowering::emit_tls_addr(const std::string & global_name)
 {
+	// The address materialization is a call boundary (the host model
+	// calls the per-TU wrapper): a value mirrored in rax is stale on
+	// the far side and must re-read its frame home.
+	invalidate_rax();
 	std::map<std::string, std::string>::const_iterator it =
 		facts_.tls_wrapper_of_global.find(global_name);
 	mir_model::Instruction & tls = emit(mir_model::Instruction::MI_TLS_ADDR);
@@ -501,6 +505,10 @@ void FunctionLowering::LowerLoad(const LowIRInstruction & ins)
 		load.operands.push_back(MakeReg(reg));
 		load.operands.push_back(MakeDeref(XR_R11, 0));
 		emit_narrow_normalize(ins.type, reg);
+		// a pool-exhausted result is frame-homed and rax only stages
+		// it; the home must hold the value like every rax-staged load
+		if(locations_[ins.result].kind == ValueLocation::VL_FRAME)
+			commit_frame_result(ins.result);
 		return;
 	}
 	if(try_defer_load(ins, current_position_))
@@ -589,7 +597,29 @@ void FunctionLowering::LowerStore(const LowIRInstruction & ins)
 			mir_model::Operand value = stage_store_value(source, ins.type);
 			staged = value.reg;
 		}
+		// The address materialization below is a call boundary: a
+		// value staged outside the callee-saved pool rides an
+		// anonymous spill across it.
+		bool survives_call = staged == XR_RBX || staged == XR_R12 ||
+			staged == XR_R13 || staged == XR_R14 || staged == XR_R15;
+		long long spill = 0;
+		if(!survives_call) {
+			spill = alloc_anonymous_spill();
+			mir_model::Instruction & save =
+				emit(mir_model::Instruction::MI_STORE);
+			save.type = "i64";
+			save.operands.push_back(frame_operand(spill));
+			save.operands.push_back(MakeReg(staged));
+		}
 		emit_tls_addr(target.name);
+		if(!survives_call) {
+			mir_model::Instruction & reload =
+				emit(mir_model::Instruction::MI_LOAD);
+			reload.type = "i64";
+			reload.operands.push_back(MakeReg(XR_RAX));
+			reload.operands.push_back(frame_operand(spill));
+			staged = XR_RAX;
+		}
 		mir_model::Instruction & store =
 			emit(mir_model::Instruction::MI_STORE);
 		store.type = SpellType(ins.type);
