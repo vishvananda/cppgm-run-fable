@@ -64,34 +64,34 @@ std::vector<int> MeetStacks(const std::vector<int> & a,
 std::vector<mir_model::HostEhClause> FunctionLowering::CollectEhClauses(
 	const std::string & label) const
 {
+	std::map<std::string, size_t>::const_iterator found =
+		block_index_of_.find(label);
+	if(found == block_index_of_.end())
+		throw std::runtime_error(
+			"eh region targets unknown block: " + label);
 	std::vector<mir_model::HostEhClause> clauses;
-	for(size_t b = 0; b < function_.blocks.size(); b++) {
-		if(function_.blocks[b].label != label)
-			continue;
-		const LowIRBlock & block = function_.blocks[b];
-		for(size_t i = 0; i < block.instructions.size(); i++) {
-			const LowIRInstruction & ins = block.instructions[i];
-			if(ins.opcode != LOWIR_INS_EH_MARKER)
-				break;
-			mir_model::HostEhClause clause;
-			if(ins.operation == "eh_catch") {
-				clause.kind = mir_model::HostEhClause::HC_CATCH;
-				clause.selector = ins.eh_selector;
-				clause.type_symbol = ins.eh_types[0];
-			}
-			else if(ins.operation == "eh_catch_all") {
-				clause.kind = mir_model::HostEhClause::HC_CATCH;
-				clause.catch_all = true;
-				clause.selector = ins.eh_selector;
-			}
-			else {
-				continue;   // eh_filter / bare eh_cleanup markers
-			}
-			clauses.push_back(clause);
+	const LowIRBlock & block = function_.blocks[found->second];
+	for(size_t i = 0; i < block.instructions.size(); i++) {
+		const LowIRInstruction & ins = block.instructions[i];
+		if(ins.opcode != LOWIR_INS_EH_MARKER)
+			break;
+		mir_model::HostEhClause clause;
+		if(ins.operation == "eh_catch") {
+			clause.kind = mir_model::HostEhClause::HC_CATCH;
+			clause.selector = ins.eh_selector;
+			clause.type_symbol = ins.eh_types[0];
 		}
-		return clauses;
+		else if(ins.operation == "eh_catch_all") {
+			clause.kind = mir_model::HostEhClause::HC_CATCH;
+			clause.catch_all = true;
+			clause.selector = ins.eh_selector;
+		}
+		else {
+			continue;   // eh_filter / bare eh_cleanup markers
+		}
+		clauses.push_back(clause);
 	}
-	throw std::runtime_error("eh region targets unknown block: " + label);
+	return clauses;
 }
 
 int FunctionLowering::EhRegionForArming(int position,
@@ -191,23 +191,23 @@ void FunctionLowering::MergeEhBlockState(
 	std::vector<std::vector<int> > & in, std::vector<bool> & known,
 	std::vector<size_t> & worklist)
 {
-	for(size_t b = 0; b < function_.blocks.size(); b++) {
-		if(function_.blocks[b].label != label)
-			continue;
-		if(!known[b]) {
-			known[b] = true;
-			in[b] = stack;
-			worklist.push_back(b);
-			return;
-		}
-		std::vector<int> met = MeetStacks(in[b], stack);
-		if(met != in[b]) {
-			in[b] = met;
-			worklist.push_back(b);
-		}
+	std::map<std::string, size_t>::const_iterator found =
+		block_index_of_.find(label);
+	if(found == block_index_of_.end())
+		throw std::runtime_error(
+			"eh state flows to unknown block: " + label);
+	size_t b = found->second;
+	if(!known[b]) {
+		known[b] = true;
+		in[b] = stack;
+		worklist.push_back(b);
 		return;
 	}
-	throw std::runtime_error("eh state flows to unknown block: " + label);
+	std::vector<int> met = MeetStacks(in[b], stack);
+	if(met != in[b]) {
+		in[b] = met;
+		worklist.push_back(b);
+	}
 }
 
 // Region dataflow over the function. Landing-pad blocks enter with the
@@ -217,6 +217,8 @@ void FunctionLowering::AnalyzeEhRegions()
 {
 	if(function_.blocks.empty())
 		return;
+	for(size_t b = 0; b < function_.blocks.size(); b++)
+		block_index_of_[function_.blocks[b].label] = b;
 	std::vector<std::vector<int> > in(function_.blocks.size());
 	std::vector<bool> known(function_.blocks.size(), false);
 	std::vector<size_t> worklist;

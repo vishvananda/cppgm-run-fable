@@ -239,6 +239,7 @@ private:
 	std::map<int, int> eh_region_of_position_;  // arming site -> region
 	std::map<int, int> eh_region_at_;   // call site -> innermost region
 	std::set<std::string> eh_landing_blocks_;
+	std::map<std::string, size_t> block_index_of_;  // label -> block
 	// PA29: known-constant i128 temps (shift counts arrive as widened
 	// literals).
 	std::map<std::string, long long> wide_consts_;
