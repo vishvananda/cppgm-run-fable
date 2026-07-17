@@ -39,7 +39,7 @@ const char * const kEffects[] = {"readnone", "readonly", "readwrite",
 const char * const kUnwinds[] = {"may", "no", nullptr};
 const char * const kReturns[] = {"returns", "noreturn", nullptr};
 const char * const kPasses[] = {"direct", "indirect_result", "by_address",
-	"reference", "decay", nullptr};
+	"reference", "decay", "gpr_pair", nullptr};
 const char * const kCaptures[] = {"nocapture", "maycapture", nullptr};
 const char * const kAccesses[] = {"none", "read", "write", "readwrite",
 	nullptr};
@@ -128,7 +128,8 @@ void check_parameter_metadata(const LowIRParam & param, size_t position,
 		{
 			if(!value_in(value, kPasses))
 				fail("unknown pass value: " + value);
-			needs_ptr = value != "direct";
+			// gpr_pair rides a direct 9..16-byte object parameter.
+			needs_ptr = value != "direct" && value != "gpr_pair";
 			if(value == "indirect_result")
 			{
 				if(position != 0)
@@ -136,6 +137,10 @@ void check_parameter_metadata(const LowIRParam & param, size_t position,
 				if(!return_type.is_void())
 					fail("indirect_result requires a void return type");
 			}
+			if(value == "gpr_pair" &&
+			   (param.type.kind != LOWIR_TYPE_OBJ ||
+			    param.type.obj_bytes <= 8 || param.type.obj_bytes > 16))
+				fail("gpr_pair requires a 9..16-byte object parameter");
 		}
 		else if(key == "capture")
 		{

@@ -70,7 +70,8 @@ string FunctionLowerer::Lower()
 		ParamInfo param;
 		param.low_name = child.name.empty()
 			? "__param" + to_string(i) : child.name;
-		LowerAbiParameter(child.type, param.type_text, param.pass);
+		LowerAbiParameter(child.type, param.type_text, param.pass,
+		                  program_.SeparateCompilation());
 		// The named slot keeps the object's storage spelling even when
 		// the value arrives by address.
 		if (param.pass == "by_address")
@@ -1398,7 +1399,8 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 		const TypePtr& param = info.type->parameters[i];
 		string param_text;
 		string pass;
-		LowerAbiParameter(param, param_text, pass);
+		LowerAbiParameter(param, param_text, pass,
+		                  SeparateCompilation());
 		// The explicit arguments number from %arg0; the indirect
 		// result slot keeps its %ret spelling outside the count.
 		params += (at ? ", " : "") + string("%arg") + to_string(i) +

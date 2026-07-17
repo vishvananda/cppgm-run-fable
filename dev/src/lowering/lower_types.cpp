@@ -206,8 +206,41 @@ string LowerObjSpan(const TypePtr& bare)
 	return to_string(TypeSize(bare)) + "x" + to_string(TypeAlignment(bare));
 }
 
+namespace {
+
+bool ClassFieldsAllInteger(const ClassInfo& record);
+
+// SysV AMD64 3.2.3: whether this leaf type classifies INTEGER (no
+// float/double/long-double anywhere below it). Pointers, enums, and
+// member pointers are INTEGER.
+bool TypeIsIntegerClass(const TypePtr& type)
+{
+	TypePtr bare = RemoveTopCv(type);
+	while (bare->kind == TK_ARRAY)
+		bare = RemoveTopCv(bare->target);
+	if (LowerFloatType(bare))
+		return false;
+	if (bare->kind == TK_CLASS)
+		return bare->named && bare->named->class_record &&
+			ClassFieldsAllInteger(*bare->named->class_record);
+	return true;
+}
+
+bool ClassFieldsAllInteger(const ClassInfo& record)
+{
+	for (size_t b = 0; b < record.direct_bases.size(); b++)
+		if (!ClassFieldsAllInteger(*record.direct_bases[b].cls))
+			return false;
+	for (size_t f = 0; f < record.fields.size(); f++)
+		if (!TypeIsIntegerClass(record.fields[f].type))
+			return false;
+	return true;
+}
+
+}  // namespace
+
 void LowerAbiParameter(const TypePtr& param, string& type_text,
-                       string& pass)
+                       string& pass, bool host_abi)
 {
 	pass.clear();
 	if (IsReferenceType(param))
@@ -220,7 +253,19 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 	if (bare->kind == TK_CLASS)
 	{
 		if (LowerClassDirect(bare))
+		{
 			type_text = LowerSlotType(bare);
+			// PA33 host ABI: a 9..16-byte all-INTEGER object passes in
+			// two GPRs (SysV two-eightbyte classification). Mode-gated
+			// so whole-program LowIR shapes stay pinned; SSE-classified
+			// eightbytes stay on the current memory path (no fixture
+			// exercises them yet - see pa33/plan.md).
+			unsigned long long size = TypeSize(bare);
+			if (host_abi && size > 8 && size <= 16 &&
+			    bare->named && bare->named->class_record &&
+			    ClassFieldsAllInteger(*bare->named->class_record))
+				pass = "gpr_pair";
+		}
 		else
 		{
 			type_text = "ptr";

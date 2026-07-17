@@ -1476,7 +1476,8 @@ string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type,
 	{
 		string param_text;
 		string pass;
-		LowerAbiParameter(fn_type->parameters[i], param_text, pass);
+		LowerAbiParameter(fn_type->parameters[i], param_text, pass,
+		                  program_.SeparateCompilation());
 		signature += (at ? ", " : "") + string("%arg") + to_string(at) +
 			" : " + param_text;
 		if (!pass.empty())

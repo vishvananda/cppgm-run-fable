@@ -63,10 +63,19 @@ std::vector<ArgSlot> ClassifyCallArgs(
 			stack += slot.stack_bytes;
 		}
 		else if(type.kind == LOWIR_TYPE_OBJ && type.obj_bytes > 8) {
-			slot.kind = ArgSlot::AS_STACK;
-			slot.stack_offset = stack;
-			slot.stack_bytes = (type.obj_bytes + 7) / 8 * 8;
-			stack += slot.stack_bytes;
+			bool pair = a < params.size() &&
+				params[a].metadata.find("pass") == "gpr_pair";
+			if(pair && gpr <= 4) {
+				slot.kind = ArgSlot::AS_GPR_PAIR;
+				slot.ordinal = gpr;
+				gpr += 2;
+			}
+			else {
+				slot.kind = ArgSlot::AS_STACK;
+				slot.stack_offset = stack;
+				slot.stack_bytes = (type.obj_bytes + 7) / 8 * 8;
+				stack += slot.stack_bytes;
+			}
 		}
 		else if(gpr < 6) {
 			slot.kind = ArgSlot::AS_GPR;
@@ -136,6 +145,8 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	for(size_t i = 0; i < slots.size(); i++)
 		if(slots[i].kind == ArgSlot::AS_GPR)
 			gpr_count++;
+		else if(slots[i].kind == ArgSlot::AS_GPR_PAIR)
+			gpr_count += 2;
 
 	// Integer results claim their landing spot while the arguments are
 	// still live, so high-pressure call sites keep the fixture shape of a
@@ -337,10 +348,42 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	for(size_t a = 0; a < ins.operands.size(); a++) {
 		const ArgSlot & slot = slots[a];
 		const LowIROperand & arg = ins.operands[a];
-		int slot_phase = slot.kind == ArgSlot::AS_GPR ? 0
+		int slot_phase = slot.kind == ArgSlot::AS_GPR ||
+			slot.kind == ArgSlot::AS_GPR_PAIR ? 0
 			: slot.kind == ArgSlot::AS_XMM ? 1 : 2;
 		if(slot_phase != phase)
 			continue;
+		if(slot.kind == ArgSlot::AS_GPR_PAIR) {
+			// Both eightbytes of the object's frame home load into the
+			// pair's consecutive argument registers.
+			long long offset = 0;
+			if(arg.kind == LOWIR_OPERAND_SLOT)
+				offset = slots_[arg.name].frame_offset;
+			else if(arg.kind == LOWIR_OPERAND_TEMP) {
+				const ValueLocation & location =
+					resolve_location(arg.name);
+				if(location.kind == ValueLocation::VL_SLOT_ADDR)
+					offset = slots_[location.slot_name].frame_offset;
+				else if(location.kind == ValueLocation::VL_FRAME)
+					offset = location.frame_offset;
+				else
+					throw std::runtime_error(
+						"gpr-pair argument without a frame home");
+			}
+			else
+				throw std::runtime_error(
+					"gpr-pair argument operand form");
+			for(int half = 0; half < 2; half++) {
+				mir_model::Instruction & fill =
+					emit(mir_model::Instruction::MI_LOAD);
+				fill.type = "i64";
+				fill.operands.push_back(
+					MakeReg(kArgRegs[slot.ordinal + half]));
+				fill.operands.push_back(
+					frame_operand(offset + 8 * half));
+			}
+			continue;
+		}
 		if(slot.kind == ArgSlot::AS_GPR) {
 			X64Register target = kArgRegs[slot.ordinal];
 			if(arg.kind == LOWIR_OPERAND_LITERAL) {

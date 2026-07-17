@@ -145,6 +145,32 @@ void FunctionLowering::PlanParams()
 		mir_model::ParamBinding binding;
 		binding.name = param.name;
 		binding.type = SpellType(param.type);
+		// SysV two-eightbyte object parameter (pass=gpr_pair): both
+		// argument registers spill into the object's frame home.
+		if(param.type.kind == LOWIR_TYPE_OBJ && param.type.obj_bytes > 8 &&
+		   param.metadata.find("pass") == "gpr_pair" && gpr <= 4) {
+			binding.location = mir_model::ParamBinding::PL_REG;
+			binding.reg = kArgRegs[gpr];
+			out_.params.push_back(binding);
+			long long home = alloc_frame_home(
+				param.name, param.type,
+				mir_model::FrameBinding::FB_PARAM_SLOT);
+			for(int half = 0; half < 2; half++) {
+				mir_model::Instruction & store =
+					emit(mir_model::Instruction::MI_STORE);
+				store.type = "i64";
+				store.operands.push_back(
+					frame_operand(home + 8 * half));
+				store.operands.push_back(
+					MakeReg(kArgRegs[gpr + half]));
+			}
+			ValueLocation location;
+			location.kind = ValueLocation::VL_FRAME;
+			location.frame_offset = home;
+			locations_[param.name] = location;
+			gpr += 2;
+			continue;
+		}
 		if(PlanWideParam(param, binding, xmm, gpr, stack_offset))
 			continue;
 		// GPR-class parameter

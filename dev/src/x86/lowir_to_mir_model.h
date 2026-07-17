@@ -122,7 +122,10 @@ const std::vector<LowIRParam> * FindCalleeParams(const LowIRInstruction & call,
 // analysis (CallArgTargetsHome) consume it so they can never disagree.
 struct ArgSlot
 {
-	enum Kind { AS_GPR, AS_XMM, AS_STACK } kind = AS_GPR;
+	// AS_GPR_PAIR: a 9..16-byte all-INTEGER object in two consecutive
+	// argument registers (SysV two-eightbyte classification; only for
+	// params annotated pass=gpr_pair by the host-mode lowering).
+	enum Kind { AS_GPR, AS_XMM, AS_STACK, AS_GPR_PAIR } kind = AS_GPR;
 	int ordinal = 0;
 	long long stack_offset = 0;
 	long long stack_bytes = 8;   // stack slots only: padded region size

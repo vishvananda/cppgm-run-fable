@@ -49,9 +49,10 @@ bool LowerClassReturnDirect(const TypePtr& bare);
 string LowerObjSpan(const TypePtr& bare);
 
 // The ABI-lowered parameter spelling and pass metadata of one declared
-// parameter type ("" when no pass metadata applies).
+// parameter type ("" when no pass metadata applies). `host_abi` adds
+// the separate-compilation SysV facts (two-GPR small objects).
 void LowerAbiParameter(const TypePtr& param, string& type_text,
-                       string& pass);
+                       string& pass, bool host_abi);
 
 // The ABI-lowered return facts of a function type: `ret_text` is the
 // emitted return spelling; true when the function carries a leading

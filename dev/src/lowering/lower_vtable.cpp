@@ -14,6 +14,42 @@ using std::to_string;
 // functions (including the deleting destructor entries) and the RTTI
 // chain of the class and its bases.
 
+namespace {
+
+// 10.3p7/p8: the byte shift from a covariant overrider's returned
+// pointer (or reference) to the slot's declared return class, or 0
+// when the slot needs no result adjustment. Virtual-base covariant
+// paths are outside the supported subset (they need a runtime load).
+long long CovariantReturnAdjust(const TypePtr& slot_fn,
+                                const TypePtr& over_fn)
+{
+	if (!slot_fn || !over_fn || slot_fn->kind != TK_FUNCTION ||
+	    over_fn->kind != TK_FUNCTION)
+		return 0;
+	TypePtr to = slot_fn->target;
+	TypePtr from = over_fn->target;
+	if (!to || !from)
+		return 0;
+	bool to_indirect = to->kind == TK_POINTER || IsReferenceType(to);
+	bool from_indirect = from->kind == TK_POINTER ||
+		IsReferenceType(from);
+	if (!to_indirect || !from_indirect)
+		return 0;
+	TypePtr to_cls = RemoveTopCv(to->target);
+	TypePtr from_cls = RemoveTopCv(from->target);
+	if (to_cls->kind != TK_CLASS || from_cls->kind != TK_CLASS ||
+	    to_cls->named == from_cls->named)
+		return 0;
+	int hops = 0;
+	unsigned long long offset = 0;
+	if (BaseSubobjectPath(from_cls->named, to_cls->named, hops,
+	                      offset) != BP_UNIQUE)
+		return 0;
+	return (long long)offset;
+}
+
+}  // namespace
+
 const ClassInfo* LowerProgram::MethodClass(const TypePtr& adjusted) const
 {
 	if (adjusted->parameters.empty() ||
@@ -387,7 +423,8 @@ void LowerProgram::EnsurePureVirtualDeclare(const TypePtr& adjusted)
 	{
 		string param_text;
 		string pass;
-		LowerAbiParameter(adjusted->parameters[i], param_text, pass);
+		LowerAbiParameter(adjusted->parameters[i], param_text, pass,
+		                  SeparateCompilation());
 		params += (at ? ", " : "") + string("%arg") + to_string(at) +
 			" : " + param_text;
 		if (!pass.empty())
@@ -659,9 +696,12 @@ string LowerProgram::MemberPointerThunkRef(const SemNode& member)
 
 string LowerProgram::VTableThunkRef(LowFunctionInfo& target,
                                     long long adjust,
-                                    const TypePtr& adjusted)
+                                    const TypePtr& adjusted,
+                                    long long ret_adjust)
 {
-	std::pair<string, long long> key(target.low_name, adjust);
+	std::pair<string, long long> key(
+		target.low_name + (ret_adjust
+			? "#r" + to_string(ret_adjust) : string()), adjust);
 	map<std::pair<string, long long>, string>::iterator found =
 		thunk_names_.find(key);
 	if (found != thunk_names_.end())
@@ -685,23 +725,40 @@ string LowerProgram::VTableThunkRef(LowFunctionInfo& target,
 	{
 		string param_text;
 		string pass;
-		LowerAbiParameter(adjusted->parameters[i], param_text, pass);
+		LowerAbiParameter(adjusted->parameters[i], param_text, pass,
+		                  SeparateCompilation());
 		string arg = "%arg" + to_string(at);
 		params += (at ? ", " : "") + arg + " : " + param_text;
 		if (!pass.empty())
 			params += " [pass=" + pass + "]";
 		arg_names.push_back(arg);
 	}
+	// Itanium <call-offset>: h <nv-offset> _ with 'n' spelling the sign.
+	string this_offset = (adjust < 0 ? "n" + to_string(-adjust)
+	                                 : to_string(adjust)) + "_";
+	string object;
+	if (!target.internal && !target.object_name.empty())
+	{
+		if (ret_adjust)
+			// A covariant thunk also adjusts the returned pointer:
+			// T c <this call-offset> <result call-offset> <encoding>.
+			object = ", object=_ZTch" + this_offset + "h" +
+				(ret_adjust < 0 ? "n" + to_string(-ret_adjust)
+				                : to_string(ret_adjust)) + "_" +
+				target.object_name.substr(2);
+		else
+			object = ", object=_ZThn" +
+				to_string(adjust < 0 ? -adjust : adjust) + "_" +
+				target.object_name.substr(2);
+	}
 	string meta = target.internal
 		? " [binding=internal]"
-		: " [binding=weak" +
-			(target.object_name.empty()
-				? string()
-				: ", object=_ZThn" +
-					to_string(adjust < 0 ? -adjust : adjust) + "_" +
-					target.object_name.substr(2)) + "]";
+		: " [binding=weak" + object + "]";
 	string body = "function @" + name + "(" + params + ") -> " +
-		ret_text + meta + " {\n  block ^entry:\n";
+		ret_text + meta + " {\n";
+	if (ret_adjust)
+		body += "  slot $ret : ptr\n\n";
+	body += "  block ^entry:\n";
 	size_t this_at = indirect_result ? 1 : 0;
 	body += "    %t1 = index i8 " + arg_names[this_at] + ", " +
 		to_string(adjust) + "\n";
@@ -709,7 +766,24 @@ string LowerProgram::VTableThunkRef(LowFunctionInfo& target,
 	string call_args;
 	for (size_t i = 0; i < arg_names.size(); i++)
 		call_args += (i ? ", " : "") + arg_names[i];
-	if (ret_text == "void")
+	if (ret_adjust)
+	{
+		// 10.3p8: the covariant result converts to the slot's declared
+		// return class; a null pointer stays null across the shift.
+		body += "    %t2 = call ptr @" + target.low_name + "(" +
+			call_args + ")\n" +
+			"    store ptr %t2, $ret\n" +
+			"    %t3 = cmp ne ptr %t2, 0\n" +
+			"    branch %t3, ^shift, ^done\n\n" +
+			"  block ^shift:\n" +
+			"    %t4 = index i8 %t2, " + to_string(ret_adjust) + "\n" +
+			"    store ptr %t4, $ret\n" +
+			"    jump ^done\n\n" +
+			"  block ^done:\n" +
+			"    %t5 = load ptr $ret\n" +
+			"    return ptr %t5\n}";
+	}
+	else if (ret_text == "void")
 		body += "    call void @" + target.low_name + "(" + call_args +
 			")\n    return void\n}";
 	else
@@ -767,8 +841,15 @@ string LowerProgram::RenderVTableSlots(const ClassInfo& derived,
 			LowFunctionInfo& fn =
 				MemberFunctionEntry(owner, name, type, code);
 			DemandFunction(fn);
-			if (!paired && adjust != 0)
-				target = VTableThunkRef(fn, adjust, type);
+			// 10.3p7: a covariant overrider returns its own class; this
+			// slot's callers expect the base slot's declared return, so
+			// the entry thunk also shifts the result (VS_METHOD only -
+			// destructor slots never adjust results).
+			long long ret_adjust = 0;
+			if (view && slot.kind == VS_METHOD && !pure)
+				ret_adjust = CovariantReturnAdjust(slot.type, type);
+			if (!paired && (adjust != 0 || ret_adjust != 0))
+				target = VTableThunkRef(fn, adjust, type, ret_adjust);
 			else
 				target = "@" + fn.low_name;
 		}

@@ -402,9 +402,12 @@ private:
 
 	// --- PA17 vtable/RTTI emission (lower_vtable.cpp) ---
 	LowVTableInfo& VTableEntry(const ClassInfo* cls);
-	// A this-adjusting entry thunk toward `target` ("@name").
+	// A this-adjusting entry thunk toward `target` ("@name"); a
+	// non-zero `ret_adjust` makes it a covariant (_ZTc) thunk that
+	// also shifts the returned pointer.
 	string VTableThunkRef(LowFunctionInfo& target, long long adjust,
-	                      const TypePtr& adjusted);
+	                      const TypePtr& adjusted,
+	                      long long ret_adjust = 0);
 	// One slot list rendered into vtable items (`view` null for the
 	// primary list; `level` resolves overriders for construction
 	// vtables).
