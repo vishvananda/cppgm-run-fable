@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "toolchain/eh_table.h"
+
 using std::map;
 using std::runtime_error;
 using std::string;
@@ -121,8 +123,9 @@ struct GotBuilder
 	}
 };
 
-// Unwind tables, notes, and comments carry no program semantics for
-// the PA29 runtime model.
+// Unwind tables, notes, and comments contribute no items; .eh_frame
+// is instead parsed back into typed host-EH facts (below) when it
+// matches our own emission fingerprint.
 bool SectionContributes(const ElfSection & section)
 {
 	if ((section.flags & kFlagAlloc) == 0)
@@ -134,6 +137,306 @@ bool SectionContributes(const ElfSection & section)
 	if (section.name.compare(0, 5, ".note") == 0)
 		return false;
 	return true;
+}
+
+// One raw relocation, independent of the item/patch conversion.
+struct RawReloc
+{
+	size_t symbol = 0;
+	unsigned kind = 0;
+	long long addend = 0;
+};
+
+// offset -> relocation for one target section.
+map<unsigned long long, RawReloc> CollectSectionRelocs(
+	const ElfFile & elf, const vector<ElfSection> & sections,
+	unsigned target)
+{
+	map<unsigned long long, RawReloc> out;
+	for (unsigned i = 0; i < sections.size(); i++)
+	{
+		if (sections[i].type != kSectionRela ||
+		    sections[i].info != target || sections[i].entsize < 24)
+			continue;
+		size_t count =
+			static_cast<size_t>(sections[i].size / sections[i].entsize);
+		for (size_t r = 0; r < count; r++)
+		{
+			unsigned long long at =
+				sections[i].offset + r * sections[i].entsize;
+			RawReloc reloc;
+			unsigned long long info = elf.field(at + 8, 8);
+			reloc.symbol = static_cast<size_t>(info >> 32);
+			reloc.kind = static_cast<unsigned>(info & 0xFFFFFFFF);
+			reloc.addend = static_cast<long long>(elf.field(at + 16, 8));
+			out[elf.field(at, 8)] = reloc;
+		}
+	}
+	return out;
+}
+
+unsigned FindSectionByName(const vector<ElfSection> & sections,
+                           const string & name)
+{
+	for (unsigned i = 0; i < sections.size(); i++)
+		if (sections[i].name == name)
+			return i;
+	return 0;
+}
+
+// Standard role recovery: the entry is the defined `main`; init/fini
+// hooks are the .init_array/.fini_array entries. Array targets
+// relocated through a section symbol get a synthesized internal
+// symbol at the resolved location.
+void RecoverProgramRoles(ObjectModule & module, const ElfFile & elf,
+                         const vector<ElfSection> & sections,
+                         const vector<int> & section_items)
+{
+	for (size_t s = 0; s < module.symbols.size(); s++)
+	{
+		const ObjectSymbol & symbol = module.symbols[s];
+		if (symbol.item >= 0 && symbol.external_name == "main" &&
+		    (symbol.binding == ObjectSymbol::SB_STRONG ||
+		     symbol.binding == ObjectSymbol::SB_WEAK))
+		{
+			module.entry_symbol = static_cast<int>(s);
+			break;
+		}
+	}
+
+	const char * const names[2] = { ".init_array", ".fini_array" };
+	int * roles[2] = { &module.init_symbol, &module.fini_symbol };
+	for (int r = 0; r < 2; r++)
+	{
+		unsigned index = FindSectionByName(sections, names[r]);
+		if (index == 0)
+			continue;
+		map<unsigned long long, RawReloc> relocs =
+			CollectSectionRelocs(elf, sections, index);
+		if (relocs.empty())
+			continue;
+		const RawReloc & reloc = relocs.begin()->second;
+		if (reloc.symbol >= module.symbols.size())
+			continue;
+		const ObjectSymbol & target = module.symbols[reloc.symbol];
+		if (target.item < 0)
+			continue;
+		long long offset = target.offset + reloc.addend;
+		int found = -1;
+		for (size_t s = 0; s < module.symbols.size() && found < 0; s++)
+			if (module.symbols[s].item == target.item &&
+			    module.symbols[s].offset == offset &&
+			    !module.symbols[s].low_name.empty())
+				found = static_cast<int>(s);
+		if (found < 0)
+		{
+			ObjectSymbol hook;
+			hook.low_name = "__cppgm_role_hook";
+			hook.binding = ObjectSymbol::SB_INTERNAL;
+			hook.item = target.item;
+			hook.offset = offset;
+			module.symbols.push_back(hook);
+			found = static_cast<int>(module.symbols.size()) - 1;
+		}
+		*roles[r] = found;
+	}
+}
+
+// One parsed CIE: whether it carries our landing-pad profile (zPLR
+// with a direct pcrel-sdata4 personality; host compilers use the
+// indirect 0x9b form, which the private toolchain does not model).
+struct CieProfile
+{
+	bool has_lsda = false;
+	bool ours = false;
+};
+
+CieProfile ParseCieProfile(const vector<unsigned char> & frame,
+                           size_t at, size_t end)
+{
+	CieProfile profile;
+	size_t pos = at + 9;   // length, id, version
+	string augmentation;
+	while (pos < end && frame[pos] != 0)
+		augmentation += static_cast<char>(frame[pos++]);
+	pos++;
+	if (augmentation.empty() || augmentation[0] != 'z')
+		return profile;
+	// code alignment, data alignment, return address column
+	while (pos < end && (frame[pos] & 0x80))
+		pos++;
+	pos++;
+	while (pos < end && (frame[pos] & 0x80))
+		pos++;
+	pos++;
+	while (pos < end && (frame[pos] & 0x80))
+		pos++;
+	pos++;
+	while (pos < end && (frame[pos] & 0x80))
+		pos++;
+	pos++;   // augmentation data length
+	profile.has_lsda = augmentation.find('L') != string::npos;
+	if (augmentation.find('P') != string::npos)
+	{
+		if (pos >= end)
+			return profile;
+		profile.ours = profile.has_lsda && frame[pos] == 0x1b;
+	}
+	return profile;
+}
+
+// Parses .eh_frame + .gcc_except_table back into typed host-EH facts
+// for FDEs matching our emission profile. Foreign unwind data (host
+// helper objects) is skipped, exactly like the pre-PA31 reader.
+void RecoverEhFacts(ObjectModule & module, const ElfFile & elf,
+                    const vector<ElfSection> & sections,
+                    const vector<int> & section_items)
+{
+	unsigned frame_index = FindSectionByName(sections, ".eh_frame");
+	unsigned except_index =
+		FindSectionByName(sections, ".gcc_except_table");
+	if (frame_index == 0 || except_index == 0)
+		return;
+	int except_item = section_items[except_index];
+	if (except_item < 0)
+		return;
+	const ElfSection & frame_section = sections[frame_index];
+	if (frame_section.offset + frame_section.size > elf.bytes.size())
+		return;
+	vector<unsigned char> frame(
+		elf.bytes.begin() + static_cast<long>(frame_section.offset),
+		elf.bytes.begin() +
+			static_cast<long>(frame_section.offset +
+			                  frame_section.size));
+	map<unsigned long long, RawReloc> frame_relocs =
+		CollectSectionRelocs(elf, sections, frame_index);
+	map<unsigned long long, RawReloc> except_relocs =
+		CollectSectionRelocs(elf, sections, except_index);
+	const vector<unsigned char> & except_bytes =
+		module.items[static_cast<size_t>(except_item)].bytes;
+
+	map<size_t, CieProfile> cies;
+	size_t pos = 0;
+	while (pos + 8 <= frame.size())
+	{
+		unsigned long long length = 0;
+		for (int b = 0; b < 4; b++)
+			length |= static_cast<unsigned long long>(frame[pos + b])
+				<< (8 * b);
+		if (length == 0 || pos + 4 + length > frame.size())
+			break;
+		size_t end = pos + 4 + static_cast<size_t>(length);
+		unsigned long long id = 0;
+		for (int b = 0; b < 4; b++)
+			id |= static_cast<unsigned long long>(frame[pos + 4 + b])
+				<< (8 * b);
+		if (id == 0)
+		{
+			cies[pos] = ParseCieProfile(frame, pos, end);
+			pos = end;
+			continue;
+		}
+		size_t cie_at = pos + 4 - static_cast<size_t>(id);
+		map<size_t, CieProfile>::const_iterator cie = cies.find(cie_at);
+		if (cie == cies.end() || !cie->second.ours)
+		{
+			pos = end;
+			continue;
+		}
+
+		// our FDE shape: pc begin reloc at +8, range at +12,
+		// augmentation length (1 byte, value 4), LSDA reloc at +17
+		map<unsigned long long, RawReloc>::const_iterator begin =
+			frame_relocs.find(pos + 8);
+		map<unsigned long long, RawReloc>::const_iterator lsda =
+			frame_relocs.find(pos + 17);
+		if (begin == frame_relocs.end() || lsda == frame_relocs.end() ||
+		    begin->second.symbol >= module.symbols.size() ||
+		    lsda->second.symbol >= module.symbols.size() ||
+		    pos + 17 + 4 > frame.size() || frame[pos + 16] != 4)
+		{
+			pos = end;
+			continue;
+		}
+		const ObjectSymbol & code =
+			module.symbols[begin->second.symbol];
+		const ObjectSymbol & table =
+			module.symbols[lsda->second.symbol];
+		if (code.item < 0 || table.item != except_item)
+		{
+			pos = end;
+			continue;
+		}
+
+		EhFunctionInfo eh;
+		eh.item = code.item;
+		eh.item_offset = static_cast<unsigned long long>(
+			code.offset + begin->second.addend);
+		unsigned long long range = 0;
+		for (int b = 0; b < 4; b++)
+			range |= static_cast<unsigned long long>(frame[pos + 12 + b])
+				<< (8 * b);
+		eh.code_size = range;
+		unsigned long long lsda_offset = static_cast<unsigned long long>(
+			table.offset + lsda->second.addend);
+		vector<EhTypeRef> type_refs;
+		if (!DecodeEhTable(except_bytes, lsda_offset, eh, type_refs))
+		{
+			pos = end;
+			continue;
+		}
+
+		// ttype entries: pcrel to an 8-byte slot holding the abs64
+		// _ZTI address; a relocation-less entry is a catch-all.
+		map<long long, int> filter_symbol;
+		for (size_t t = 0; t < type_refs.size(); t++)
+		{
+			map<unsigned long long, RawReloc>::const_iterator entry =
+				except_relocs.find(lsda_offset +
+				                   type_refs[t].lsda_offset);
+			if (entry == except_relocs.end())
+				continue;
+			if (entry->second.symbol >= module.symbols.size())
+				continue;
+			const ObjectSymbol & slot_base =
+				module.symbols[entry->second.symbol];
+			if (slot_base.item < 0)
+				continue;
+			const ImageItem & slot_item =
+				module.items[static_cast<size_t>(slot_base.item)];
+			unsigned long long slot_offset =
+				static_cast<unsigned long long>(slot_base.offset +
+				                                entry->second.addend);
+			for (size_t p = 0; p < slot_item.patches.size(); p++)
+			{
+				const X86Patch & patch = slot_item.patches[p];
+				if (patch.offset == slot_offset &&
+				    patch.kind == X86_PATCH_ABS && patch.size == 8 &&
+				    patch.imm.has_label)
+				{
+					filter_symbol[type_refs[t].value] = patch.imm.label;
+					break;
+				}
+			}
+		}
+		for (size_t c = 0; c < eh.chains.size(); c++)
+		{
+			for (size_t a = 0; a < eh.chains[c].size(); a++)
+			{
+				EhAction & action = eh.chains[c][a];
+				if (action.kind != EhAction::EH_CATCH)
+					continue;
+				map<long long, int>::const_iterator known =
+					filter_symbol.find(action.filter);
+				if (known == filter_symbol.end())
+					action.kind = EhAction::EH_CATCH_ALL;
+				else
+					action.type_symbol = known->second;
+			}
+		}
+		module.eh_functions.push_back(eh);
+		pos = end;
+	}
 }
 
 }  // namespace
@@ -382,6 +685,9 @@ ObjectModule ParseElfObjectBytes(const string & bytes,
 			item.patches.push_back(patch);
 		}
 	}
+
+	RecoverProgramRoles(module, elf, sections, section_items);
+	RecoverEhFacts(module, elf, sections, section_items);
 	return module;
 }
 

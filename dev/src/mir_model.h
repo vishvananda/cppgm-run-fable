@@ -192,10 +192,7 @@ struct Instruction
     MI_CALL_INDIRECT,
     MI_COPY_BYTES,
     MI_ZERO_BYTES,
-    MI_EH_PUSH,
-    MI_EH_POP,
-    MI_LOAD_EXCEPTION,
-    MI_LOAD_EXCEPTION_SELECTOR,
+    MI_EH_LANDING,
     MI_JMP,
     MI_JMP_INDIRECT,
     MI_JNE,
@@ -216,6 +213,10 @@ struct Instruction
   bool call_variadic = false;
   bool has_source_position = false;
   std::size_t source_position = 0;
+  // Innermost host-EH region armed at this call site (index into the
+  // function's host_eh_regions; -1 outside every region). Native
+  // emission turns annotated call ranges into LSDA call-site rows.
+  int eh_region = -1;
   InstructionDebugLocation debug_location;
   std::vector<Operand> operands;
 };
@@ -264,6 +265,18 @@ struct HostEhClause
   std::vector<std::string> filter_type_symbols;
 };
 
+// One armed exception region: its landing-pad block, whether it is a
+// cleanup arming (eh_cleanup / synthesized throw-payload window), the
+// region armed beneath it, and the catch clauses its landing pad's
+// classification markers publish.
+struct HostEhRegion
+{
+  std::string landing_label;
+  bool cleanup = false;
+  int parent = -1;
+  std::vector<HostEhClause> clauses;
+};
+
 struct Function
 {
   std::string name;
@@ -275,11 +288,14 @@ struct Function
   bool host_eh_enabled = false;
   long long host_eh_exception_offset = 0;
   long long host_eh_selector_offset = 0;
+  // Process entry only: zero rbp before the prologue so the frame
+  // chain the private unwinder walks has a terminating sentinel.
+  bool zero_frame_pointer = false;
   InstructionDebugLocation debug_location;
   std::vector<X64Register> callee_saved_regs;
   std::vector<FrameBinding> frame_bindings;
   std::vector<DebugVariable> debug_variables;
-  std::map<std::string, std::vector<HostEhClause> > host_eh_clauses;
+  std::vector<HostEhRegion> host_eh_regions;
   std::vector<Block> blocks;
 };
 
@@ -311,6 +327,7 @@ using MirInstruction = Instruction;
 using MirDebugVariable = DebugVariable;
 using MirBlock = Block;
 using MirHostEhClause = HostEhClause;
+using MirHostEhRegion = HostEhRegion;
 using MirFunction = Function;
 using MirObjectAlias = ObjectAlias;
 using MirProgram = Program;

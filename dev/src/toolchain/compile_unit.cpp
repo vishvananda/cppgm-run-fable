@@ -21,6 +21,8 @@
 #include "sema/scope.h"
 #include "sema/sem_binder.h"
 #include "sema/sem_node.h"
+#include "toolchain/runtime_library.h"
+#include "x86/frame_cfi.h"
 #include "x86/lowir_to_mir.h"
 #include "x86/mir_to_native.h"
 
@@ -167,6 +169,146 @@ int FindDefinedSymbol(const std::map<string, int> & index,
 	return found == index.end() ? -1 : found->second;
 }
 
+// Catch-clause type symbols may be referenced only by classification
+// markers (no code), so they can be missing from the encoder's label
+// space; append them to the symbol table on demand with their declared
+// binding and external name.
+int FindOrAddTypeSymbol(ObjectModule & module,
+                        std::map<string, int> & by_low_name,
+                        const LowIRProgramInfo & info,
+                        const string & low_name)
+{
+	std::map<string, int>::const_iterator found =
+		by_low_name.find(low_name);
+	if (found != by_low_name.end())
+		return found->second;
+	std::map<string, const LowIRGlobal *>::const_iterator global =
+		info.globals.find(low_name);
+	if (global == info.globals.end())
+		throw runtime_error("eh catch type is not a global: " + low_name);
+	ObjectSymbol symbol;
+	symbol.low_name = low_name;
+	symbol.binding = BindingFromMetadata(global->second->metadata,
+	                                     global->second->is_definition);
+	symbol.external_name =
+		symbol.binding == ObjectSymbol::SB_INTERNAL
+			? string()
+			: ExternalNameFromMetadata(global->second->metadata, low_name);
+	module.symbols.push_back(symbol);
+	by_low_name[low_name] = static_cast<int>(module.symbols.size()) - 1;
+	return static_cast<int>(module.symbols.size()) - 1;
+}
+
+// The action chain of one region: its landing pad's catch clauses,
+// a cleanup record for eh_cleanup armings, then the enclosing
+// regions' actions (innermost-first personality scan order).
+vector<EhAction> BuildEhChain(ObjectModule & module,
+                              std::map<string, int> & by_low_name,
+                              const LowIRProgramInfo & info,
+                              const NativeFunctionEh & fn, int region)
+{
+	vector<EhAction> chain;
+	for (int r = region; r >= 0; r = fn.regions[static_cast<size_t>(r)].parent)
+	{
+		const NativeEhRegion & q = fn.regions[static_cast<size_t>(r)];
+		for (size_t c = 0; c < q.clauses.size(); c++)
+		{
+			const mir_model::HostEhClause & clause = q.clauses[c];
+			EhAction action;
+			action.filter = clause.selector;
+			if (clause.catch_all)
+			{
+				action.kind = EhAction::EH_CATCH_ALL;
+			}
+			else
+			{
+				action.kind = EhAction::EH_CATCH;
+				action.type_symbol = FindOrAddTypeSymbol(
+					module, by_low_name, info, clause.type_symbol);
+			}
+			chain.push_back(action);
+		}
+		if (q.cleanup)
+		{
+			EhAction action;
+			action.kind = EhAction::EH_CLEANUP;
+			chain.push_back(action);
+		}
+	}
+	return chain;
+}
+
+// PA31: the host runtime owns fundamental typeinfo (libstdc++ exports
+// it; the private runtime module defines the same set), so weak
+// fundamental _ZTI/_ZTS definitions demote to undefined references
+// and their data items vanish from the emitted object.
+void DemoteRuntimeOwnedTypeinfo(ObjectModule & module)
+{
+	for (size_t s = 0; s < module.symbols.size(); s++)
+	{
+		ObjectSymbol & symbol = module.symbols[s];
+		if (symbol.item < 0 ||
+		    symbol.binding != ObjectSymbol::SB_WEAK ||
+		    !IsRuntimeOwnedTypeinfoName(symbol.external_name))
+			continue;
+		ImageItem & item =
+			module.items[static_cast<size_t>(symbol.item)];
+		item.bytes.clear();
+		item.patches.clear();
+		symbol.item = -1;
+		symbol.offset = 0;
+		symbol.binding = ObjectSymbol::SB_UNDEFINED;
+	}
+}
+
+// Converts the encoder's per-function EH facts into the module's typed
+// form: call-site rows, memoized action chains, and the CFI stream.
+void AppendEhFunctionFacts(ObjectModule & module,
+                           const LowIRProgramInfo & info,
+                           const NativeModule & native)
+{
+	std::map<string, int> by_low_name;
+	for (size_t i = 0; i < module.symbols.size(); i++)
+		if (!module.symbols[i].low_name.empty())
+			by_low_name.insert(std::make_pair(module.symbols[i].low_name,
+			                                  static_cast<int>(i)));
+	for (size_t f = 0; f < native.function_eh.size(); f++)
+	{
+		const NativeFunctionEh & fn = native.function_eh[f];
+		EhFunctionInfo eh;
+		eh.item = fn.item;
+		eh.code_size = fn.code_size;
+		eh.cfi_ops = BuildFrameCfiOps(fn);
+		std::map<int, int> chain_of_region;
+		for (size_t s = 0; s < fn.call_sites.size(); s++)
+		{
+			const NativeEhCallSite & site = fn.call_sites[s];
+			std::map<int, int>::const_iterator known =
+				chain_of_region.find(site.region);
+			int chain;
+			if (known != chain_of_region.end())
+			{
+				chain = known->second;
+			}
+			else
+			{
+				eh.chains.push_back(BuildEhChain(module, by_low_name,
+				                                 info, fn, site.region));
+				chain = static_cast<int>(eh.chains.size()) - 1;
+				chain_of_region[site.region] = chain;
+			}
+			EhCallSite row;
+			row.start = site.start;
+			row.length = site.end - site.start;
+			row.landing_pad =
+				fn.regions[static_cast<size_t>(site.region)].landing_offset;
+			row.chain = chain;
+			eh.call_sites.push_back(row);
+		}
+		module.eh_functions.push_back(eh);
+	}
+}
+
 // Builds the object symbol table over the encoder's label space (one
 // symbol per label, indices preserved so patches stay valid), then
 // appends alias names and resolves the role hooks.
@@ -253,6 +395,8 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 	module.entry_symbol = FindDefinedSymbol(defined, info.entry_function);
 	module.init_symbol = FindDefinedSymbol(defined, info.init_function);
 	module.fini_symbol = FindDefinedSymbol(defined, info.fini_function);
+	AppendEhFunctionFacts(module, info, native);
+	DemoteRuntimeOwnedTypeinfo(module);
 	return module;
 }
 

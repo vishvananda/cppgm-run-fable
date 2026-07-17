@@ -94,6 +94,21 @@ long long stack_bytes_of(const std::vector<ArgSlot> & slots)
 	return (total + 15) / 16 * 16;
 }
 
+// The scalar width of a 9..16-byte by-value object's second eightbyte
+// (returned in rdx). Class padding keeps the tail a scalar width in
+// the supported subset.
+std::string ObjTailType(long long bytes)
+{
+	switch(bytes - 8) {
+		case 8: return "i64";
+		case 4: return "i32";
+		case 2: return "i16";
+		case 1: return "i8";
+	}
+	throw std::runtime_error(
+		"unsupported by-value object return width");
+}
+
 }  // namespace
 
 void FunctionLowering::LowerCall(const LowIRInstruction & ins)
@@ -529,10 +544,12 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	if(indirect) {
 		mir_model::Instruction & call =
 			emit(mir_model::Instruction::MI_CALL_INDIRECT);
+		call.eh_region = eh_region_for(current_position_);
 		call.operands.push_back(MakeReg(XR_R10));
 	}
 	else {
 		mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
+		call.eh_region = eh_region_for(current_position_);
 		call.operands.push_back(MakeSymbol(ins.callee, false));
 	}
 
@@ -610,6 +627,13 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		store.type = ContainerSpelling(return_type.obj_bytes);
 		store.operands.push_back(MakeDeref(XR_R11, 0));
 		store.operands.push_back(MakeReg(XR_RAX));
+		if(return_type.obj_bytes > 8) {
+			mir_model::Instruction & high =
+				emit(mir_model::Instruction::MI_STORE);
+			high.type = ObjTailType(return_type.obj_bytes);
+			high.operands.push_back(MakeDeref(XR_R11, 8));
+			high.operands.push_back(MakeReg(XR_RDX));
+		}
 		ValueLocation location;
 		location.kind = ValueLocation::VL_FRAME;
 		location.frame_offset = offset;
@@ -657,6 +681,26 @@ void FunctionLowering::LowerCopyObj(const LowIRInstruction & ins)
 		store.type = ContainerSpelling((long long)ins.span_bytes);
 		store.operands.push_back(address);
 		store.operands.push_back(MakeReg(XR_RAX));
+		if(ins.span_bytes > 8) {
+			// the value's second eightbyte rides in rdx
+			mir_model::Operand high = address;
+			if(high.kind == mir_model::Operand::OP_FRAME ||
+			   high.kind == mir_model::Operand::OP_DEREF) {
+				high.offset += 8;
+			}
+			else {
+				mir_model::Instruction & lea =
+					emit(mir_model::Instruction::MI_LEA);
+				lea.operands.push_back(MakeReg(XR_R11));
+				lea.operands.push_back(address);
+				high = MakeDeref(XR_R11, 8);
+			}
+			mir_model::Instruction & tail =
+				emit(mir_model::Instruction::MI_STORE);
+			tail.type = ObjTailType((long long)ins.span_bytes);
+			tail.operands.push_back(high);
+			tail.operands.push_back(MakeReg(XR_RDX));
+		}
 		return;
 	}
 	// destination first into rdi, then source into rsi
@@ -1274,6 +1318,14 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 		load.type = ContainerSpelling(ins.type.obj_bytes);
 		load.operands.push_back(MakeReg(XR_RAX));
 		load.operands.push_back(MakeDeref(XR_R11, 0));
+		if(ins.type.obj_bytes > 8) {
+			// second eightbyte of a 9..16-byte value rides in rdx
+			mir_model::Instruction & high =
+				emit(mir_model::Instruction::MI_LOAD);
+			high.type = ObjTailType(ins.type.obj_bytes);
+			high.operands.push_back(MakeReg(XR_RDX));
+			high.operands.push_back(MakeDeref(XR_R11, 8));
+		}
 		emit(mir_model::Instruction::MI_RET);
 		return;
 	}
@@ -1317,86 +1369,54 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 	ret.operands.push_back(MakeReg(XR_RAX));
 }
 
-// -- exception regions ---------------------------------------------------
+// -- exception lowering ----------------------------------------------------
 //
-// eh_try/eh_cleanup install a 32-byte frame-resident handler record
-// {prev, dispatch address, rbp, rsp} at the head of the global chain;
-// eh_end pops the head. __cppgm_unwind_raise (synthesized at link)
-// jumps to the innermost record's dispatch block without popping - the
-// emitted dispatch blocks pop the still-installed regions themselves
-// with explicit eh_end markers before joining the catch path.
-
-void FunctionLowering::LowerEhPush(const LowIRInstruction & ins,
-                                   int position)
-{
-	LowIRType record_type;
-	record_type.kind = LOWIR_TYPE_OBJ;
-	record_type.obj_bytes = 32;
-	record_type.obj_align = 8;
-	std::ostringstream name;
-	name << "__eh_record_" << position;
-	long long offset = alloc_frame_home(
-		name.str(), record_type, mir_model::FrameBinding::FB_TEMP);
-	mir_model::Instruction & push =
-		emit(mir_model::Instruction::MI_EH_PUSH);
-	push.operands.push_back(frame_operand(offset));
-	push.operands.push_back(MakeLabel(ins.block_targets[0]));
-}
-
-void FunctionLowering::LowerEhPop()
-{
-	emit(mir_model::Instruction::MI_EH_POP);
-}
-
-// eh_catch/eh_catch_all markers classify the in-flight exception: the
-// first matching marker claims the selector and the adjusted pointer
-// (both runtime globals). Cleanup/filter markers emit no code.
-void FunctionLowering::LowerEhMarker(const LowIRInstruction & ins)
-{
-	if(ins.operation != "eh_catch" && ins.operation != "eh_catch_all")
-		return;
-	invalidate_rax();
-	arg_homes_clobbered_ = true;
-	if(ins.operation == "eh_catch")
-		emit_mov(MakeReg(XR_RDI), MakeSymbol(ins.eh_types[0], true));
-	else
-		emit_mov(MakeReg(XR_RDI), MakeImm(0));
-	emit_mov(MakeReg(XR_RSI), MakeImm(ins.eh_selector));
-	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
-	call.operands.push_back(MakeSymbol("__cppgm_eh_match", false));
-}
+// Regions are static facts (lowir_to_mir_eh.cpp): eh_try/eh_cleanup/
+// eh_end and the classification markers emit no code. Landing pads
+// spill the unwinder's cookie/selector registers into per-frame
+// host-EH slots at entry (MI_EH_LANDING), and the exception /
+// exception_selector reads consume those slots - dispatch entry
+// blocks are also reached by intra-frame catch-miss routing, where
+// the landing registers are long gone.
 
 void FunctionLowering::LowerException(const LowIRInstruction & ins)
 {
 	invalidate_rax();
-	emit(ins.operation == "exception_selector"
-	         ? mir_model::Instruction::MI_LOAD_EXCEPTION_SELECTOR
-	         : mir_model::Instruction::MI_LOAD_EXCEPTION);
+	bool selector = ins.operation == "exception_selector";
+	mir_model::Instruction & load = emit(mir_model::Instruction::MI_LOAD);
+	load.type = selector ? "i32" : "i64";
+	load.operands.push_back(MakeReg(XR_RAX));
+	load.operands.push_back(frame_operand(
+		selector ? out_.host_eh_selector_offset
+		         : out_.host_eh_exception_offset));
 	assign_result_from_rax(ins.result, ins.type, false);
 }
 
-// The PA13 plain-throw form: publish the payload as the current
-// exception and enter the unwinder.
+// The PA13 plain-throw form: raise the payload value itself as the
+// exception cookie. Only catch-all and cleanup actions can match it
+// (there is no type_info), which is all the plain form ever carried.
 void FunctionLowering::LowerThrow(const LowIRInstruction & ins)
 {
 	invalidate_rax();
 	arg_homes_clobbered_ = true;
 	mir_model::Operand value = gpr_read(ins.operands[0]);
-	emit_mov(MakeReg(XR_RAX), value);
-	mir_model::Instruction & store = emit(mir_model::Instruction::MI_STORE);
-	store.type = "i64";
-	store.operands.push_back(MakeSymbol("__cppgm_eh_exception", true));
-	store.operands.push_back(MakeReg(XR_RAX));
+	emit_mov(MakeReg(XR_RDI), value);
 	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
-	call.operands.push_back(MakeSymbol("__cppgm_unwind_raise", false));
+	call.eh_region = eh_region_for(current_position_);
+	call.operands.push_back(MakeSymbol("__cppgm_throw_value", false));
 }
 
-void FunctionLowering::LowerResume()
+void FunctionLowering::LowerResume(int position)
 {
 	invalidate_rax();
 	arg_homes_clobbered_ = true;
+	mir_model::Instruction & load = emit(mir_model::Instruction::MI_LOAD);
+	load.type = "i64";
+	load.operands.push_back(MakeReg(XR_RDI));
+	load.operands.push_back(frame_operand(out_.host_eh_exception_offset));
 	mir_model::Instruction & call = emit(mir_model::Instruction::MI_CALL);
-	call.operands.push_back(MakeSymbol("__cppgm_unwind_raise", false));
+	call.eh_region = eh_region_for(position);
+	call.operands.push_back(MakeSymbol("_Unwind_Resume", false));
 }
 
 }  // namespace lowir_to_mir

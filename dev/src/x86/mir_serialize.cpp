@@ -234,14 +234,8 @@ void write_instruction(std::ostream & out, const Instruction & ins)
     case Instruction::MI_FRET: return write_operands(out, ins, "fret." + ty);
     case Instruction::MI_RET: return write_operands(out, ins, "ret");
     case Instruction::MI_EXIT: return write_operands(out, ins, "exit");
-    case Instruction::MI_EH_PUSH:
-      return write_operands(out, ins, "eh_push");
-    case Instruction::MI_EH_POP:
-      return write_operands(out, ins, "eh_pop");
-    case Instruction::MI_LOAD_EXCEPTION:
-      return write_operands(out, ins, "load_exception");
-    case Instruction::MI_LOAD_EXCEPTION_SELECTOR:
-      return write_operands(out, ins, "load_exception_selector");
+    case Instruction::MI_EH_LANDING:
+      return write_operands(out, ins, "eh_landing");
     default: break;
   }
   throw std::logic_error("unknown instruction in mir serialization");

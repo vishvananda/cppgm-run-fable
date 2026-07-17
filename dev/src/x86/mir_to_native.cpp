@@ -270,6 +270,7 @@ public:
 
 	void EncodeFunction(ImageItem & item);
 	void EncodeStartup(ImageItem & item);
+	void FinishEhFacts(NativeFunctionEh & eh) const;
 
 private:
 	struct BlockFixup
@@ -290,9 +291,7 @@ private:
 	void EmitCompareImmLhs(const Ins & ins, int width, bool is_test);
 	void EmitBranch(const Ins & ins);
 	void EmitTlsAddr(const Ins & ins);
-	void EmitEhPush(const Ins & ins);
-	void EmitEhPop();
-	X86Mem RuntimeGlobalMem(const char * name);
+	void EmitEhLanding();
 	void Finish(ImageItem & item);
 	X86Mem SavedRegSlot(std::size_t index) const;
 	X86Mem MemOperand(const Op & op, long long extra);
@@ -329,9 +328,11 @@ private:
 	X86CodeBuffer code_;
 	std::map<std::string, std::size_t> block_offsets_;
 	std::vector<BlockFixup> fixups_;
-	// EH dispatch addresses: (patch index, block) pairs whose imm64
-	// addend receives the block's final intra-item offset in Finish.
-	std::vector<std::pair<std::size_t, std::string> > address_fixups_;
+	// host-EH facts recorded while encoding (see FinishEhFacts)
+	std::vector<NativeEhCallSite> eh_call_sites_;
+	std::size_t prologue_push_end_ = 0;
+	std::size_t prologue_frame_end_ = 0;
+	std::size_t prologue_end_ = 0;
 };
 
 FunctionEncoder::FunctionEncoder(ProgramEnv & env,
@@ -372,15 +373,6 @@ void FunctionEncoder::Finish(ImageItem & item)
 	item.is_code = true;
 	item.bytes = code_.bytes();
 	std::vector<X86Patch> patches = code_.patches();
-	for (std::size_t i = 0; i < address_fixups_.size(); i++)
-	{
-		std::map<std::string, std::size_t>::const_iterator it =
-			block_offsets_.find(address_fixups_[i].second);
-		if (it == block_offsets_.end())
-			throw runtime_error("machine IR EH dispatch to unknown block: " +
-			                    address_fixups_[i].second);
-		patches[address_fixups_[i].first].imm.addend += it->second;
-	}
 	for (std::size_t i = 0; i < patches.size(); i++)
 	{
 		// Label-less fields are fully resolved while encoding (the
@@ -405,6 +397,42 @@ void FunctionEncoder::Finish(ImageItem & item)
 	}
 }
 
+// The typed host-EH and frame facts of the just-encoded function:
+// resolved landing-pad offsets, recorded call-site ranges, and the
+// prologue/callee-save shape CFI generation consumes.
+void FunctionEncoder::FinishEhFacts(NativeFunctionEh & eh) const
+{
+	eh.name = fn_->name;
+	eh.code_size = code_.bytes().size();
+	eh.prologue_push_end = prologue_push_end_;
+	eh.prologue_frame_end = prologue_frame_end_;
+	eh.prologue_end = prologue_end_;
+	eh.stack_size = fn_->stack_size;
+	for (std::size_t i = 0; i < fn_->callee_saved_regs.size(); i++)
+	{
+		X86Mem slot = SavedRegSlot(i);
+		eh.saved_regs.push_back(std::make_pair(
+			fn_->callee_saved_regs[i],
+			static_cast<long long>(slot.disp)));
+	}
+	for (std::size_t r = 0; r < fn_->host_eh_regions.size(); r++)
+	{
+		const mir_model::HostEhRegion & plan = fn_->host_eh_regions[r];
+		std::map<std::string, std::size_t>::const_iterator it =
+			block_offsets_.find(plan.landing_label);
+		if (it == block_offsets_.end())
+			throw runtime_error("host-EH landing pad has no block: " +
+			                    plan.landing_label);
+		NativeEhRegion region;
+		region.landing_offset = it->second;
+		region.cleanup = plan.cleanup;
+		region.parent = plan.parent;
+		region.clauses = plan.clauses;
+		eh.regions.push_back(region);
+	}
+	eh.call_sites = eh_call_sites_;
+}
+
 X86Mem FunctionEncoder::SavedRegSlot(std::size_t index) const
 {
 	long long offset =
@@ -416,8 +444,12 @@ X86Mem FunctionEncoder::SavedRegSlot(std::size_t index) const
 
 void FunctionEncoder::EmitPrologue()
 {
+	if (fn_->zero_frame_pointer)
+		code_.Alu(X86_XOR, 32, X86_RBP, X86_RBP);
 	code_.Push(X86_RBP);
+	prologue_push_end_ = code_.bytes().size();
 	code_.MovRegReg(64, X86_RBP, X86_RSP);
+	prologue_frame_end_ = code_.bytes().size();
 	if (fn_->stack_size != 0)
 		code_.AluRegImm(X86_SUB_RI, 64, X86_RSP,
 		                CheckedImm32(
@@ -425,6 +457,7 @@ void FunctionEncoder::EmitPrologue()
 	for (std::size_t i = 0; i < fn_->callee_saved_regs.size(); i++)
 		code_.MovMemReg(64, SavedRegSlot(i),
 		                static_cast<int>(fn_->callee_saved_regs[i]));
+	prologue_end_ = code_.bytes().size();
 }
 
 void FunctionEncoder::EmitEpilogue()
@@ -652,55 +685,29 @@ void FunctionEncoder::EmitTlsAddr(const Ins & ins)
 		env_.SymbolLabel(env_.TlsBackingGlobal(wrapper)), 0));
 }
 
-X86Mem FunctionEncoder::RuntimeGlobalMem(const char * name)
+// Landing-pad entry. Both unwinders arrive with the exception cookie
+// in rax and the selector in edx, and only rbp reliably restored:
+// re-establish the frame's steady-state rsp (a no-op under the host
+// unwinder except after stack-argument call sites, the whole context
+// under the private frame-chain walker), then spill the landing
+// registers into the per-frame host-EH slots.
+void FunctionEncoder::EmitEhLanding()
 {
-	return X86Mem::Absolute(X86Imm::Label(env_.SymbolLabel(name), 0));
-}
-
-// Installs a handler record {prev, dispatch, rbp, rsp} at the head of
-// the __cppgm_eh_top chain. The dispatch address is this function's
-// own entry plus the block offset (back-filled in Finish); r10/r11 are
-// staging registers the register discipline never assigns to values.
-void FunctionEncoder::EmitEhPush(const Ins & ins)
-{
-	X86Mem record = MemOperand(ins.operands[0], 0);
-	code_.MovRegMem(64, X86_R10, RuntimeGlobalMem("__cppgm_eh_top"));
-	code_.MovMemReg(64, MemOperand(ins.operands[0], 0), X86_R10);
-	code_.MovRegImm(X86_R11,
-	                X86Imm::Label(env_.SymbolLabel(fn_->name), 0));
-	address_fixups_.push_back(std::make_pair(code_.patches().size() - 1,
-	                                         ins.operands[1].text));
-	code_.MovMemReg(64, MemOperand(ins.operands[0], 8), X86_R11);
-	code_.MovMemReg(64, MemOperand(ins.operands[0], 16), X86_RBP);
-	code_.MovRegReg(64, X86_R11, X86_RSP);
-	code_.MovMemReg(64, MemOperand(ins.operands[0], 24), X86_R11);
-	code_.Lea(X86_R10, record);
-	code_.MovMemReg(64, RuntimeGlobalMem("__cppgm_eh_top"), X86_R10);
-}
-
-// eh_end pops the chain head only when it belongs to this frame
-// (rsp <= record < rbp): dispatch blocks may run more eh_end markers
-// than regions remain, and the extras must not consume an ancestor
-// frame's records. Built back-to-front so each jcc rel8 is exact.
-void FunctionEncoder::EmitEhPop()
-{
-	X86CodeBuffer pop;
-	pop.MovRegMem(64, X86_R10, X86Mem(X86_R10, 0));
-	pop.MovMemReg(64, RuntimeGlobalMem("__cppgm_eh_top"), X86_R10);
-
-	X86CodeBuffer upper;
-	upper.Alu(X86_CMP, 64, X86_R10, X86_RBP);
-	upper.JccRel8(X86_CC_AE, static_cast<int>(pop.bytes().size()));
-
-	X86CodeBuffer lower;
-	lower.Alu(X86_CMP, 64, X86_R10, X86_RSP);
-	lower.JccRel8(X86_CC_B, static_cast<int>(upper.bytes().size() +
-	                                         pop.bytes().size()));
-
-	code_.MovRegMem(64, X86_R10, RuntimeGlobalMem("__cppgm_eh_top"));
-	code_.AppendBuffer(lower);
-	code_.AppendBuffer(upper);
-	code_.AppendBuffer(pop);
+	if (!fn_->host_eh_enabled)
+		throw logic_error("eh_landing outside a host-EH function");
+	code_.Lea(X86_RSP,
+	          X86Mem(X86_RBP,
+	                 -static_cast<int>(fn_->stack_size)));
+	code_.MovMemReg(64,
+	                X86Mem(X86_RBP,
+	                       static_cast<int>(
+	                           fn_->host_eh_exception_offset)),
+	                X86_RAX);
+	code_.MovMemReg(32,
+	                X86Mem(X86_RBP,
+	                       static_cast<int>(
+	                           fn_->host_eh_selector_offset)),
+	                X86_RDX);
 }
 
 void FunctionEncoder::EmitInstruction(const Ins & ins)
@@ -762,21 +769,36 @@ void FunctionEncoder::EmitInstruction(const Ins & ins)
 		code_.ShiftRegCl(X86_SAR, 64, Reg(ins.operands[0]));
 		return;
 	case Ins::MI_CALL:
+	{
+		std::size_t start = code_.bytes().size();
 		code_.CallRel32(X86Imm::Label(
 			env_.SymbolLabel(ins.operands[0].text), 0));
+		if (ins.eh_region >= 0)
+		{
+			NativeEhCallSite site;
+			site.start = start;
+			site.end = code_.bytes().size();
+			site.region = ins.eh_region;
+			eh_call_sites_.push_back(site);
+		}
 		return;
-	case Ins::MI_CALL_INDIRECT: code_.CallReg(Reg(ins.operands[0])); return;
+	}
+	case Ins::MI_CALL_INDIRECT:
+	{
+		std::size_t start = code_.bytes().size();
+		code_.CallReg(Reg(ins.operands[0]));
+		if (ins.eh_region >= 0)
+		{
+			NativeEhCallSite site;
+			site.start = start;
+			site.end = code_.bytes().size();
+			site.region = ins.eh_region;
+			eh_call_sites_.push_back(site);
+		}
+		return;
+	}
 	case Ins::MI_JMP_INDIRECT: code_.JmpReg(Reg(ins.operands[0])); return;
-	case Ins::MI_EH_PUSH: EmitEhPush(ins); return;
-	case Ins::MI_EH_POP: EmitEhPop(); return;
-	case Ins::MI_LOAD_EXCEPTION:
-		code_.MovRegMem(64, X86_RAX,
-		                RuntimeGlobalMem("__cppgm_eh_exception"));
-		return;
-	case Ins::MI_LOAD_EXCEPTION_SELECTOR:
-		code_.MovRegMem(32, X86_RAX,
-		                RuntimeGlobalMem("__cppgm_eh_selector"));
-		return;
+	case Ins::MI_EH_LANDING: EmitEhLanding(); return;
 	case Ins::MI_RET:
 		EmitEpilogue();
 		code_.Ret();
@@ -1357,7 +1379,11 @@ NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
 		ImageItem item;
 		FunctionEncoder encoder(env, &program.functions[i]);
 		encoder.EncodeFunction(item);
+		NativeFunctionEh eh;
+		eh.item = static_cast<int>(module.items.size());
+		encoder.FinishEhFacts(eh);
 		module.items.push_back(item);
+		module.function_eh.push_back(eh);
 	}
 	std::size_t global_base = module.items.size();
 	for (std::size_t i = 0; i < program.globals.size(); i++)

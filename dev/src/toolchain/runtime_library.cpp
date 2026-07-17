@@ -1,5 +1,8 @@
 #include "toolchain/runtime_library.h"
 
+#include <stdexcept>
+#include <vector>
+
 // The runtime source is C++ in the compiler's own supported subset.
 // Layout contracts (all fixed by the Itanium ABI or by this
 // implementation's backend):
@@ -16,9 +19,10 @@
 //   public base.
 // - Vtables: the address point is preceded by offset-to-top (-16)
 //   and the RTTI pointer (-8), which __dynamic_cast reads.
-// - The linker's support module owns __cppgm_eh_top /
-//   __cppgm_eh_selector / __cppgm_eh_exception and the
-//   __cppgm_unwind_raise / __cppgm_exit primitives.
+// - The linker's support module owns the __cppgm_get_frame /
+//   __cppgm_land / __cppgm_exit primitives and the
+//   __cppgm_eh_region_table pointer slot; the linker synthesizes the
+//   region table itself from the modules' typed host-EH facts.
 
 namespace toolchain {
 
@@ -28,10 +32,10 @@ const char * const kRuntimeLines[] = {
 	"typedef unsigned long cppgm_usize;",
 	"typedef void (*cppgm_dtor)(void *);",
 	"",
-	"extern \"C\" { extern void * __cppgm_eh_top; }",
-	"extern \"C\" { extern long __cppgm_eh_selector; }",
-	"extern \"C\" { extern void * __cppgm_eh_exception; }",
-	"extern \"C\" void __cppgm_unwind_raise();",
+	"extern \"C\" { extern unsigned long * __cppgm_eh_region_table; }",
+	"extern \"C\" unsigned long __cppgm_get_frame();",
+	"extern \"C\" void __cppgm_land(unsigned long lp, unsigned long rbp,",
+	"                              void * cookie, long selector);",
 	"extern \"C\" void __cppgm_exit(long status);",
 	"",
 	"extern \"C\" unsigned long",
@@ -68,6 +72,11 @@ const char * const kRuntimeLines[] = {
 	"char * cppgm_eh_payload(CppgmEhRecord * record)",
 	"{",
 	"  return (char *)record + sizeof(CppgmEhRecord);",
+	"}",
+	"",
+	"CppgmEhRecord * cppgm_eh_record_of(void * payload)",
+	"{",
+	"  return (CppgmEhRecord *)((char *)payload - sizeof(CppgmEhRecord));",
 	"}",
 	"",
 	"void * cppgm_anchor_point(unsigned long * anchor)",
@@ -173,6 +182,67 @@ const char * const kRuntimeLines[] = {
 	"  return false;",
 	"}",
 	"",
+	"// One matched region row: land at its pad when an action applies.",
+	"// Records are {kind, filter, type_info}: 1 typed catch, 2 catch-",
+	"// all, 3 cleanup, 0 end. A null record list is a pure cleanup row.",
+	"// Landing installs the Itanium contract (cookie in rax, selector",
+	"// in edx) and never returns.",
+	"void cppgm_eh_dispatch_row(unsigned long * row, unsigned long rbp,",
+	"                           void * cookie, CppgmEhRecord * record)",
+	"{",
+	"  unsigned long lp = row[2];",
+	"  unsigned long * action = (unsigned long *)row[3];",
+	"  if (action == 0)",
+	"    __cppgm_land(lp, rbp, cookie, 0);",
+	"  bool cleanup = false;",
+	"  while (action[0] != 0)",
+	"  {",
+	"    if (action[0] == 3)",
+	"      cleanup = true;",
+	"    else if (action[0] == 2)",
+	"      __cppgm_land(lp, rbp, cookie, (long)action[1]);",
+	"    else if (record != 0)",
+	"    {",
+	"      void * adjusted = cppgm_eh_payload(record);",
+	"      if (cppgm_eh_type_matches((void *)action[2], record->tinfo,",
+	"                                cppgm_eh_payload(record), &adjusted))",
+	"      {",
+	"        record->adjusted = adjusted;",
+	"        __cppgm_land(lp, rbp, cookie, (long)action[1]);",
+	"      }",
+	"    }",
+	"    action = action + 3;",
+	"  }",
+	"  if (cleanup)",
+	"    __cppgm_land(lp, rbp, cookie, 0);",
+	"}",
+	"",
+	"// The private unwinder: walk the rbp frame chain from `fp` and",
+	"// dispatch the first region row covering each frame's call site.",
+	"// The linker synthesizes the region table from the same typed",
+	"// host-EH facts object emission renders into .eh_frame/LSDA data;",
+	"// generated frames are uniformly rbp-based, so no CFI is needed.",
+	"// The chain ends at the start sentinel: unhandled exits 134.",
+	"void cppgm_eh_raise_from(unsigned long fp, void * cookie,",
+	"                         CppgmEhRecord * record)",
+	"{",
+	"  unsigned long * table = __cppgm_eh_region_table;",
+	"  unsigned long count = table == 0 ? 0 : table[0];",
+	"  while (fp != 0)",
+	"  {",
+	"    unsigned long ra = ((unsigned long *)fp)[1];",
+	"    unsigned long caller_rbp = ((unsigned long *)fp)[0];",
+	"    for (unsigned long i = 0; i < count; i++)",
+	"    {",
+	"      unsigned long * row = table + 1 + 4 * i;",
+	"      if (ra - 1 >= row[0] && ra - 1 < row[1])",
+	"        cppgm_eh_dispatch_row(row, caller_rbp, cookie, record);",
+	"    }",
+	"    fp = caller_rbp;",
+	"  }",
+	"  __cppgm_exit(134);",
+	"}",
+	"",
 	"}  // namespace",
 	"",
 	"extern \"C\" void * __cxa_allocate_exception(cppgm_usize size)",
@@ -201,39 +271,25 @@ const char * const kRuntimeLines[] = {
 	"",
 	"extern \"C\" void __cxa_free_exception(void * payload)",
 	"{",
-	"  CppgmEhRecord * record =",
-	"      (CppgmEhRecord *)((char *)payload - sizeof(CppgmEhRecord));",
+	"  CppgmEhRecord * record = cppgm_eh_record_of(payload);",
 	"  cppgm_eh_arena_used[record->slot] = 0;",
 	"}",
 	"",
 	"extern \"C\" void __cxa_throw(void * payload, void * tinfo,",
 	"                             cppgm_dtor dtor)",
 	"{",
-	"  CppgmEhRecord * record =",
-	"      (CppgmEhRecord *)((char *)payload - sizeof(CppgmEhRecord));",
+	"  CppgmEhRecord * record = cppgm_eh_record_of(payload);",
 	"  record->tinfo = tinfo;",
 	"  record->dtor = dtor;",
 	"  record->adjusted = payload;",
-	"  __cppgm_eh_exception = record;",
-	"  __cppgm_unwind_raise();",
+	"  cppgm_eh_raise_from(__cppgm_get_frame(), record, record);",
 	"}",
 	"",
-	"// Handler-classification markers call this in dispatch order; the",
-	"// first match claims the selector and the adjusted object pointer.",
-	"extern \"C\" void __cppgm_eh_match(void * catch_ti, long selector)",
+	"// The PA13 plain-throw form: the raw payload value is the cookie;",
+	"// only catch-all and cleanup actions can apply (no type_info).",
+	"extern \"C\" void __cppgm_throw_value(void * value)",
 	"{",
-	"  if (__cppgm_eh_selector != 0)",
-	"    return;",
-	"  CppgmEhRecord * record = (CppgmEhRecord *)__cppgm_eh_exception;",
-	"  if (record == 0)",
-	"    return;",
-	"  void * adjusted = cppgm_eh_payload(record);",
-	"  if (catch_ti != 0 &&",
-	"      !cppgm_eh_type_matches(catch_ti, record->tinfo,",
-	"                             cppgm_eh_payload(record), &adjusted))",
-	"    return;",
-	"  record->adjusted = adjusted;",
-	"  __cppgm_eh_selector = selector;",
+	"  cppgm_eh_raise_from(__cppgm_get_frame(), value, 0);",
 	"}",
 	"",
 	"extern \"C\" void * __cxa_begin_catch(void * cookie)",
@@ -273,17 +329,16 @@ const char * const kRuntimeLines[] = {
 	"  if (record == 0)",
 	"    __cppgm_exit(134);",
 	"  record->rethrown = 1;",
-	"  __cppgm_eh_exception = record;",
-	"  __cppgm_unwind_raise();",
+	"  cppgm_eh_raise_from(__cppgm_get_frame(), record, record);",
 	"}",
 	"",
-	"extern \"C\" void _Unwind_Resume(void *)",
+	"// Cleanup landing pads resume with the cookie they landed with;",
+	"// the walk continues at the resuming frame's own call-site row",
+	"// (outer regions only - the landed region is statically gone).",
+	"extern \"C\" void _Unwind_Resume(void * cookie)",
 	"{",
-	"  __cppgm_unwind_raise();",
-	"}",
-	"",
-	"extern \"C\" void __gxx_personality_v0()",
-	"{",
+	"  cppgm_eh_raise_from(__cppgm_get_frame(), cookie,",
+	"                      (CppgmEhRecord *)cookie);",
 	"}",
 	"",
 	"// __dynamic_cast helpers: subobject searches over the RTTI graph.",
@@ -457,6 +512,131 @@ const std::string & RuntimeLibrarySource()
 const char * RuntimeLibraryName()
 {
 	return "<cppgm++ runtime>";
+}
+
+namespace {
+
+// The Itanium builtin-type encodings whose typeinfo the runtime owns
+// (mirroring the libstdc++ fundamental_type_info exports).
+const char * const kFundamentalEncodings[] = {
+	"v", "w", "b", "c", "a", "h", "s", "t", "i", "j", "l", "m",
+	"x", "y", "n", "o", "f", "d", "e", "Dn", "Di", "Ds",
+};
+const size_t kFundamentalCount =
+	sizeof(kFundamentalEncodings) / sizeof(kFundamentalEncodings[0]);
+
+bool IsFundamentalEncoding(const std::string & encoding)
+{
+	for (size_t i = 0; i < kFundamentalCount; i++)
+		if (encoding == kFundamentalEncodings[i])
+			return true;
+	return false;
+}
+
+// Appends one defined typeinfo data item + weak symbol.
+int AppendTypeinfoItem(ObjectModule & module, const std::string & name,
+                       const std::vector<unsigned char> & bytes,
+                       const std::vector<X86Patch> & patches)
+{
+	ImageItem item;
+	item.align = 8;
+	item.bytes = bytes;
+	item.patches = patches;
+	module.items.push_back(item);
+	ObjectSymbol symbol;
+	symbol.low_name = name;
+	symbol.external_name = name;
+	symbol.binding = ObjectSymbol::SB_WEAK;
+	symbol.item = static_cast<int>(module.items.size()) - 1;
+	module.symbols.push_back(symbol);
+	return static_cast<int>(module.symbols.size()) - 1;
+}
+
+X86Patch MakeAbsPatch(size_t offset, int symbol, long long addend)
+{
+	X86Patch patch;
+	patch.offset = offset;
+	patch.size = 8;
+	patch.kind = X86_PATCH_ABS;
+	patch.imm = X86Imm::Label(symbol,
+	                          static_cast<unsigned long long>(addend));
+	return patch;
+}
+
+int FindModuleSymbol(const ObjectModule & module, const std::string & name)
+{
+	for (size_t s = 0; s < module.symbols.size(); s++)
+		if (module.symbols[s].external_name == name &&
+		    module.symbols[s].item >= 0)
+			return static_cast<int>(s);
+	throw std::runtime_error("runtime module lost anchor: " + name);
+}
+
+int AppendTypeinfoName(ObjectModule & module, const std::string & encoding)
+{
+	std::vector<unsigned char> bytes;
+	for (size_t c = 0; c < encoding.size(); c++)
+		bytes.push_back(static_cast<unsigned char>(encoding[c]));
+	bytes.push_back(0);
+	return AppendTypeinfoItem(module, "_ZTS" + encoding, bytes,
+	                          std::vector<X86Patch>());
+}
+
+}  // namespace
+
+bool IsRuntimeOwnedTypeinfoName(const std::string & name)
+{
+	if (name.size() < 5 || name.compare(0, 3, "_ZT") != 0 ||
+	    (name[3] != 'I' && name[3] != 'S'))
+		return false;
+	std::string encoding = name.substr(4);
+	if (!encoding.empty() && encoding[0] == 'P')
+	{
+		encoding = encoding.substr(1);
+		if (!encoding.empty() && encoding[0] == 'K')
+			encoding = encoding.substr(1);
+	}
+	return IsFundamentalEncoding(encoding);
+}
+
+// The Itanium records: fundamentals are {vptr, name}; pointer variants
+// are __pointer_type_info {vptr, name, u32 flags, pad, pointee} - the
+// layouts the private matcher in this file's runtime source reads.
+void AppendRuntimeTypeinfo(ObjectModule & module)
+{
+	int fundamental_vtable = FindModuleSymbol(
+		module, "_ZTVN10__cxxabiv123__fundamental_type_infoE");
+	int pointer_vtable = FindModuleSymbol(
+		module, "_ZTVN10__cxxabiv119__pointer_type_infoE");
+	for (size_t i = 0; i < kFundamentalCount; i++)
+	{
+		const std::string encoding = kFundamentalEncodings[i];
+		int name_symbol = AppendTypeinfoName(module, encoding);
+		std::vector<unsigned char> record(16, 0);
+		std::vector<X86Patch> patches;
+		patches.push_back(MakeAbsPatch(0, fundamental_vtable, 16));
+		patches.push_back(MakeAbsPatch(8, name_symbol, 0));
+		int record_symbol = AppendTypeinfoItem(module, "_ZTI" + encoding,
+		                                       record, patches);
+		const char * const prefixes[2] = { "P", "PK" };
+		const unsigned flags[2] = { 0, 1 };   // __const_mask pointee
+		for (int p = 0; p < 2; p++)
+		{
+			std::string pointer_encoding = prefixes[p] + encoding;
+			int pointer_name =
+				AppendTypeinfoName(module, pointer_encoding);
+			std::vector<unsigned char> pointer_record(32, 0);
+			pointer_record[16] = static_cast<unsigned char>(flags[p]);
+			std::vector<X86Patch> pointer_patches;
+			pointer_patches.push_back(
+				MakeAbsPatch(0, pointer_vtable, 16));
+			pointer_patches.push_back(MakeAbsPatch(8, pointer_name, 0));
+			pointer_patches.push_back(
+				MakeAbsPatch(24, record_symbol, 0));
+			AppendTypeinfoItem(module, "_ZTI" + pointer_encoding,
+			                   pointer_record, pointer_patches);
+		}
+	}
 }
 
 }  // namespace toolchain

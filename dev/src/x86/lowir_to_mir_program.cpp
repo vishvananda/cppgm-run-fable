@@ -472,6 +472,8 @@ void FunctionLowering::LowerBlock(size_t block_index)
 		invalidate_rax();
 		arg_homes_clobbered_ = true;
 	}
+	if(eh_landing_blocks_.count(function_.blocks[block_index].label))
+		EmitEhLandingEntry();
 	int begin = block_first_position_[block_index];
 	int end = block_first_position_[block_index + 1];
 	for(int p = begin; p < end; p++) {
@@ -576,17 +578,16 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
 		case LOWIR_INS_BRANCH: LowerBranch(ins); break;
 		case LOWIR_INS_SWITCH: LowerSwitch(ins); break;
 		case LOWIR_INS_RETURN: LowerReturn(ins); break;
-		case LOWIR_INS_EH_TRY: LowerEhPush(ins, position); break;
-		case LOWIR_INS_EH_CLEANUP:
-			if(ins.block_targets.empty())
-				break;   // dispatch-block cleanup marker: no code
-			LowerEhPush(ins, position);
-			break;
-		case LOWIR_INS_EH_END: LowerEhPop(); break;
-		case LOWIR_INS_EH_MARKER: LowerEhMarker(ins); break;
+		// Region arming/ending and classification markers are static
+		// facts consumed by the host-EH region dataflow; they emit no
+		// code of their own.
+		case LOWIR_INS_EH_TRY: break;
+		case LOWIR_INS_EH_CLEANUP: break;
+		case LOWIR_INS_EH_END: break;
+		case LOWIR_INS_EH_MARKER: break;
 		case LOWIR_INS_EXCEPTION: LowerException(ins); break;
 		case LOWIR_INS_THROW: LowerThrow(ins); break;
-		case LOWIR_INS_RESUME: LowerResume(); break;
+		case LOWIR_INS_RESUME: LowerResume(position); break;
 		default:
 			throw std::runtime_error(
 				"PA28 does not lower exception constructs");
@@ -642,8 +643,23 @@ void FunctionLowering::Lower()
 			function_.slots[s].name, slot.type,
 			mir_model::FrameBinding::FB_SLOT);
 	}
+	// Host-EH regions exist independently of eh_mode_: a function with
+	// a plain `throw X(...)` carries a synthesized payload window but
+	// no LowIR EH opcode.
+	AnalyzeEhRegions();
+	if(!eh_regions_.empty()) {
+		out_.host_eh_enabled = true;
+		LowIRType word;
+		word.kind = LOWIR_TYPE_I64;
+		out_.host_eh_exception_offset = alloc_frame_home(
+			"__eh_exception", word, mir_model::FrameBinding::FB_TEMP);
+		out_.host_eh_selector_offset = alloc_frame_home(
+			"__eh_selector", word, mir_model::FrameBinding::FB_TEMP);
+	}
 	for(size_t b = 0; b < function_.blocks.size(); b++)
 		LowerBlock(b);
+	AppendEhAbandonPads();
+	FinishEhRegions();
 	FinishFrame();
 }
 

@@ -13,8 +13,12 @@
 // definitions and undefined references participate in link-time
 // resolution - internal symbols are module-private.
 //
-// The on-disk encoding is an internal cppgm++ contract (PA31/PA32
-// replace it with host-linker-compatible objects).
+// PA31: the on-disk `-c` artifact is a host ET_REL ELF object. The
+// module additionally carries typed host-EH facts per function; the
+// ELF writer renders them into .eh_frame/.gcc_except_table, the ELF
+// reader parses them back, and the private linker renders them into
+// its flat region table. Host sections are the boundary encoding;
+// this typed model is the source of truth.
 
 namespace toolchain {
 
@@ -35,11 +39,55 @@ struct ObjectSymbol
 	long long offset = 0;       // symbol offset inside the item
 };
 
+// One LSDA action-chain record: a typed catch (type_symbol indexes the
+// module symbols), a catch-all, or a cleanup marker. A call site's
+// chain lists the actions of every region armed around it,
+// innermost-first.
+struct EhAction
+{
+	enum Kind
+	{
+		EH_CATCH,
+		EH_CATCH_ALL,
+		EH_CLEANUP
+	};
+
+	Kind kind = EH_CATCH;
+	long long filter = 0;   // ttype index for catch/catch-all
+	int type_symbol = -1;   // module symbol of the _ZTI record
+};
+
+// One call-site row with a landing pad. Offsets are relative to the
+// function start; rows without landing pads are gaps the LSDA encoder
+// fills in.
+struct EhCallSite
+{
+	unsigned long long start = 0;
+	unsigned long long length = 0;
+	unsigned long long landing_pad = 0;
+	int chain = -1;   // index into EhFunctionInfo::chains, -1 for none
+};
+
+// Typed host-EH facts of one function: where its code lives, its
+// call-site rows and action chains, and the DWARF CFI instruction
+// stream describing its frame (present on freshly compiled modules;
+// modules re-read from ELF drop it - only object emission needs CFI).
+struct EhFunctionInfo
+{
+	int item = -1;
+	unsigned long long item_offset = 0;
+	unsigned long long code_size = 0;
+	std::vector<EhCallSite> call_sites;
+	std::vector<std::vector<EhAction> > chains;
+	std::vector<unsigned char> cfi_ops;
+};
+
 struct ObjectModule
 {
 	std::string target;  // normalized backend target name
 	std::vector<ImageItem> items;
 	std::vector<ObjectSymbol> symbols;
+	std::vector<EhFunctionInfo> eh_functions;
 	int entry_symbol = -1;  // role=entry definition
 	int init_symbol = -1;   // role=init definition
 	int fini_symbol = -1;   // role=fini definition
@@ -52,13 +100,12 @@ std::string NormalizeTargetName(const std::string & target);
 // Whole-file reads and input classification by content magic.
 std::string ReadFileBytes(const std::string & path);
 bool IsElfObjectBytes(const std::string & bytes);
-bool IsCppgmObjectBytes(const std::string & bytes);
 
 // Object-like input filenames accepted by link mode (.o / .obj).
 bool HasObjectFileName(const std::string & path);
 
-// One link-mode object input, classified by content: cppgm compiler
-// objects and host ELF relocatables are both accepted.
+// One link-mode object input: an x86-64 ET_REL ELF relocatable (our
+// own -c output or a host-compiled helper object).
 ObjectModule LoadObjectModuleFile(const std::string & path,
                                   const std::string & target);
 
@@ -66,10 +113,5 @@ ObjectModule LoadObjectModuleFile(const std::string & path,
 // in command order; the first existing candidate wins.
 std::string FindLibraryObject(const std::vector<std::string> & lib_dirs,
                               const std::string & name);
-
-void WriteObjectModuleFile(const std::string & path,
-                           const ObjectModule & module);
-ObjectModule ParseObjectModuleBytes(const std::string & bytes,
-                                    const std::string & input_name);
 
 }  // namespace toolchain

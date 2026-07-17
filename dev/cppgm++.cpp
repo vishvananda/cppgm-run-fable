@@ -22,6 +22,7 @@
 #include "sema/sem_binder.h"
 #include "sema/sem_node.h"
 #include "toolchain/compile_unit.h"
+#include "toolchain/elf_object.h"
 #include "toolchain/link_executable.h"
 #include "toolchain/object_module.h"
 #include "toolchain/runtime_library.h"
@@ -473,7 +474,7 @@ int run_compile_mode(const DriverInvocation & invocation)
   const string outfile = invocation.explicit_outfile
       ? invocation.outfile
       : default_object_outfile(invocation.inputs[0]);
-  toolchain::WriteObjectModuleFile(outfile, module);
+  toolchain::WriteElfObjectFile(outfile, module);
   return EXIT_SUCCESS;
 }
 
@@ -489,6 +490,7 @@ toolchain::LinkInput compile_runtime_module(const string & target)
   runtime.module = toolchain::CompileSourceTextToModule(
       toolchain::RuntimeLibraryName(), toolchain::RuntimeLibrarySource(),
       options);
+  toolchain::AppendRuntimeTypeinfo(runtime.module);
   return runtime;
 }
 

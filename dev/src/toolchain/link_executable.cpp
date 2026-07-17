@@ -101,7 +101,9 @@ Ins MakeMovRegReg(X64Register dst, X64Register src)
 
 // The program startup: run every unit's dynamic initializers in link
 // order, run the entry, carry its result across the finalizers (r12 is
-// callee-saved), and exit with it.
+// callee-saved), and exit with it. rbp is zeroed before the prologue
+// so the frame chain the private unwinder walks has a terminating
+// sentinel.
 mir_model::MirFunction BuildStartFunction(const vector<string> & inits,
                                           const string & entry,
                                           const vector<string> & finis)
@@ -109,6 +111,7 @@ mir_model::MirFunction BuildStartFunction(const vector<string> & inits,
 	mir_model::MirFunction start;
 	start.name = "__cppgm_start";
 	start.return_type = "void";
+	start.zero_frame_pointer = true;
 	mir_model::MirBlock block;
 	block.label = "entry";
 	for (size_t i = 0; i < inits.size(); i++)
@@ -130,88 +133,46 @@ mir_model::MirFunction BuildStartFunction(const vector<string> & inits,
 	return start;
 }
 
-// The unwind entry: pop the innermost handler record {prev, dispatch,
-// rbp, rsp}, reset the handler selector, restore the recorded frame,
-// and jump into the record's dispatch block. Dispatch blocks pop any
-// further same-frame regions themselves with frame-bounded eh_end
-// markers. With no installed handler the exception is unhandled and
-// the program exits with status 134.
-mir_model::MirFunction BuildUnwindRaiseFunction()
+// The frame-chain primitive: returns the caller's rbp (its own [rbp]
+// after the standard prologue), the runtime walker's starting frame.
+mir_model::MirFunction BuildGetFrameFunction()
 {
-	mir_model::MirFunction raise;
-	raise.name = "__cppgm_unwind_raise";
-	raise.return_type = "void";
+	mir_model::MirFunction get_frame;
+	get_frame.name = "__cppgm_get_frame";
+	get_frame.return_type = "i64";
+	mir_model::MirBlock block;
+	block.label = "entry";
+	Ins load = MakeIns(Ins::MI_LOAD);
+	load.type = "i64";
+	load.operands.push_back(MakeRegOp(XR_RAX));
+	load.operands.push_back(MakeDerefOp(XR_RBP, 0));
+	block.instructions.push_back(load);
+	Ins ret = MakeIns(Ins::MI_RET);
+	ret.operands.push_back(MakeRegOp(XR_RAX));
+	block.instructions.push_back(ret);
+	get_frame.blocks.push_back(block);
+	return get_frame;
+}
 
-	mir_model::MirBlock entry;
-	entry.label = "entry";
-	Ins load_top = MakeIns(Ins::MI_LOAD);
-	load_top.type = "i64";
-	load_top.operands.push_back(MakeRegOp(XR_RAX));
-	load_top.operands.push_back(MakeGlobalOp("__cppgm_eh_top"));
-	entry.instructions.push_back(load_top);
-	Ins compare = MakeIns(Ins::MI_CMP);
-	compare.type = "i64";
-	compare.operands.push_back(MakeRegOp(XR_RAX));
-	compare.operands.push_back(MakeImmOp(0));
-	entry.instructions.push_back(compare);
-	Ins branch = MakeIns(Ins::MI_JCC);
-	branch.condition = XC_E;
-	branch.operands.push_back(MakeLabelOp("unhandled"));
-	entry.instructions.push_back(branch);
-
-	// selector = 0 (the dispatch markers fill it in)
-	Ins zero = MakeIns(Ins::MI_MOV);
-	zero.operands.push_back(MakeRegOp(XR_RCX));
-	zero.operands.push_back(MakeImmOp(0));
-	entry.instructions.push_back(zero);
-	Ins reset = MakeIns(Ins::MI_STORE);
-	reset.type = "i64";
-	reset.operands.push_back(MakeGlobalOp("__cppgm_eh_selector"));
-	reset.operands.push_back(MakeRegOp(XR_RCX));
-	entry.instructions.push_back(reset);
-
-	// top = record.prev (the landed record leaves the chain)
-	Ins prev = MakeIns(Ins::MI_LOAD);
-	prev.type = "i64";
-	prev.operands.push_back(MakeRegOp(XR_RDX));
-	prev.operands.push_back(MakeDerefOp(XR_RAX, 0));
-	entry.instructions.push_back(prev);
-	Ins store_top = MakeIns(Ins::MI_STORE);
-	store_top.type = "i64";
-	store_top.operands.push_back(MakeGlobalOp("__cppgm_eh_top"));
-	store_top.operands.push_back(MakeRegOp(XR_RDX));
-	entry.instructions.push_back(store_top);
-
-	// dispatch target, then the recorded rbp/rsp, then the jump
-	Ins dispatch = MakeIns(Ins::MI_LOAD);
-	dispatch.type = "i64";
-	dispatch.operands.push_back(MakeRegOp(XR_RCX));
-	dispatch.operands.push_back(MakeDerefOp(XR_RAX, 8));
-	entry.instructions.push_back(dispatch);
-	Ins frame = MakeIns(Ins::MI_LOAD);
-	frame.type = "i64";
-	frame.operands.push_back(MakeRegOp(XR_RBP));
-	frame.operands.push_back(MakeDerefOp(XR_RAX, 16));
-	entry.instructions.push_back(frame);
-	Ins stack = MakeIns(Ins::MI_LOAD);
-	stack.type = "i64";
-	stack.operands.push_back(MakeRegOp(XR_RSP));
-	stack.operands.push_back(MakeDerefOp(XR_RAX, 24));
-	entry.instructions.push_back(stack);
+// The landing primitive: __cppgm_land(lp, rbp, cookie, selector)
+// installs the Itanium landing contract (cookie in rax, selector in
+// edx), restores the target frame's rbp, and jumps to the landing
+// pad, whose entry re-establishes rsp itself.
+mir_model::MirFunction BuildLandFunction()
+{
+	mir_model::MirFunction land;
+	land.name = "__cppgm_land";
+	land.return_type = "void";
+	mir_model::MirBlock block;
+	block.label = "entry";
+	block.instructions.push_back(MakeMovRegReg(XR_RAX, XR_RDX));
+	block.instructions.push_back(MakeMovRegReg(XR_RDX, XR_RCX));
+	block.instructions.push_back(MakeMovRegReg(XR_RBP, XR_RSI));
 	Ins jump = MakeIns(Ins::MI_JMP_INDIRECT);
-	jump.operands.push_back(MakeRegOp(XR_RCX));
-	entry.instructions.push_back(jump);
-	raise.blocks.push_back(entry);
-
-	mir_model::MirBlock unhandled;
-	unhandled.label = "unhandled";
-	Ins status = MakeIns(Ins::MI_MOV);
-	status.operands.push_back(MakeRegOp(XR_RDI));
-	status.operands.push_back(MakeImmOp(134));
-	unhandled.instructions.push_back(status);
-	unhandled.instructions.push_back(MakeIns(Ins::MI_EXIT));
-	raise.blocks.push_back(unhandled);
-	return raise;
+	jump.operands.push_back(MakeRegOp(XR_RDI));
+	block.instructions.push_back(jump);
+	land.blocks.push_back(block);
+	return land;
 }
 
 // exit(status): the C-callable process-exit primitive the runtime
@@ -238,12 +199,12 @@ mir_model::GlobalDefinition MakeZeroGlobal(const string & name)
 	return global;
 }
 
-// Encodes the synthesized start/unwind module. Its first item is the
+// Encodes the synthesized start/land module. Its first item is the
 // start function, which the layout places at image item 0 (the entry
-// point). It owns the exception-chain globals the generated EH code
-// and the runtime library share, so cleanup-only programs link without
-// the runtime library. External references (init/fini hooks by
-// module-qualified name) resolve like any other undefined symbols.
+// point). It owns the landing/frame primitives and the pointer slot
+// the linker later aims at the synthesized region table. External
+// references (init/fini hooks by module-qualified name) resolve like
+// any other undefined symbols.
 ObjectModule BuildSupportModule(const vector<string> & inits,
                                 const string & entry,
                                 const vector<string> & finis,
@@ -253,11 +214,10 @@ ObjectModule BuildSupportModule(const vector<string> & inits,
 	program.target = target;
 	program.functions.push_back(
 		BuildStartFunction(inits, entry, finis));
-	program.functions.push_back(BuildUnwindRaiseFunction());
+	program.functions.push_back(BuildGetFrameFunction());
+	program.functions.push_back(BuildLandFunction());
 	program.functions.push_back(BuildExitFunction());
-	program.globals.push_back(MakeZeroGlobal("__cppgm_eh_top"));
-	program.globals.push_back(MakeZeroGlobal("__cppgm_eh_selector"));
-	program.globals.push_back(MakeZeroGlobal("__cppgm_eh_exception"));
+	program.globals.push_back(MakeZeroGlobal("__cppgm_eh_region_table"));
 
 	NativeModule native = EncodeMirProgramModule(program);
 	ObjectModule module;
@@ -348,23 +308,214 @@ void CollectReferencedUndefined(const ObjectModule & module,
 	}
 }
 
-// True when any module's patches reference an external name the
-// definition table cannot satisfy; the trigger for the on-demand
+// True when any module's patches - or its typed catch-clause type
+// references, which carry no patches of their own - name an external
+// the definition table cannot satisfy; the trigger for the on-demand
 // runtime-library module.
 bool HasUnresolvedReference(const vector<LinkInput> & linked,
                             const map<string, Definition> & definitions)
 {
 	for (size_t m = 0; m < linked.size(); m++)
 	{
+		const ObjectModule & module = linked[m].module;
 		set<size_t> referenced;
-		CollectReferencedUndefined(linked[m].module, referenced);
+		CollectReferencedUndefined(module, referenced);
+		for (size_t f = 0; f < module.eh_functions.size(); f++)
+		{
+			const EhFunctionInfo & eh = module.eh_functions[f];
+			for (size_t c = 0; c < eh.chains.size(); c++)
+				for (size_t a = 0; a < eh.chains[c].size(); a++)
+					if (eh.chains[c][a].kind == EhAction::EH_CATCH)
+						referenced.insert(static_cast<size_t>(
+							eh.chains[c][a].type_symbol));
+		}
 		for (set<size_t>::const_iterator it = referenced.begin();
 		     it != referenced.end(); ++it)
-			if (!definitions.count(
-					linked[m].module.symbols[*it].external_name))
+			if (module.symbols[*it].item < 0 &&
+			    !definitions.count(module.symbols[*it].external_name))
 				return true;
 	}
 	return false;
+}
+
+// Resolves one module symbol to a (global item label, offset) pair,
+// following undefined externals through the definition table.
+void ResolveSymbolTarget(const vector<LinkInput> & linked,
+                         const vector<size_t> & item_base,
+                         const map<string, Definition> & definitions,
+                         size_t module_index, int symbol_index,
+                         int & out_label, long long & out_offset)
+{
+	const ObjectSymbol * symbol =
+		&linked[module_index].module.symbols[
+			static_cast<size_t>(symbol_index)];
+	size_t target_module = module_index;
+	if (symbol->item < 0)
+	{
+		map<string, Definition>::const_iterator found =
+			definitions.find(symbol->external_name);
+		if (found == definitions.end())
+			throw runtime_error("unresolved external symbol: " +
+			                    symbol->external_name + " (" +
+			                    linked[module_index].name + ")");
+		target_module = found->second.module;
+		symbol = &linked[target_module].module
+			.symbols[found->second.symbol];
+	}
+	out_label = static_cast<int>(item_base[target_module] +
+	                             static_cast<size_t>(symbol->item));
+	out_offset = symbol->offset;
+}
+
+void AppendTableWord(ImageItem & item, unsigned long long value)
+{
+	for (int b = 0; b < 8; b++)
+		item.bytes.push_back(static_cast<unsigned char>(value >> (8 * b)));
+}
+
+void AppendTableAddress(ImageItem & item, int label, long long offset)
+{
+	X86Patch patch;
+	patch.offset = item.bytes.size();
+	patch.size = 8;
+	patch.kind = X86_PATCH_ABS;
+	patch.imm = X86Imm::Label(label,
+	                          static_cast<unsigned long long>(offset));
+	item.patches.push_back(patch);
+	AppendTableWord(item, 0);
+}
+
+// True when a chain carries no catch actions - the row is a pure
+// cleanup and its action pointer is null, mirroring an LSDA call-site
+// row with action 0.
+bool ChainIsPureCleanup(const vector<EhAction> & chain)
+{
+	for (size_t a = 0; a < chain.size(); a++)
+		if (chain[a].kind != EhAction::EH_CLEANUP)
+			return false;
+	return true;
+}
+
+// The private unwinder's flat region table, synthesized in global
+// label space after patch rewriting: [row count][rows {start, end,
+// landing pad, action pointer}][action records {kind, filter,
+// type_info} terminated by a zero kind]. Rows come straight from the
+// modules' typed host-EH facts - the same facts object emission
+// renders into .eh_frame/.gcc_except_table.
+ImageItem BuildEhRegionTable(const vector<LinkInput> & linked,
+                             const vector<size_t> & item_base,
+                             const map<string, Definition> & definitions,
+                             int self_label)
+{
+	size_t row_count = 0;
+	for (size_t m = 0; m < linked.size(); m++)
+	{
+		const ObjectModule & module = linked[m].module;
+		for (size_t f = 0; f < module.eh_functions.size(); f++)
+			row_count += module.eh_functions[f].call_sites.size();
+	}
+
+	ImageItem item;
+	item.align = 8;
+	AppendTableWord(item, row_count);
+	size_t record_cursor = (1 + 4 * row_count) * 8;
+
+	// Rows first; chains get record offsets in first-reference order
+	// and are emitted in exactly that order afterwards.
+	struct ChainRef
+	{
+		size_t module;
+		const vector<EhAction> * chain;
+	};
+	std::map<std::pair<size_t, std::pair<size_t, size_t> >, size_t>
+		chain_offsets;
+	vector<ChainRef> record_layout;
+	for (size_t m = 0; m < linked.size(); m++)
+	{
+		const ObjectModule & module = linked[m].module;
+		for (size_t f = 0; f < module.eh_functions.size(); f++)
+		{
+			const EhFunctionInfo & eh = module.eh_functions[f];
+			int code_label = static_cast<int>(
+				item_base[m] + static_cast<size_t>(eh.item));
+			for (size_t s = 0; s < eh.call_sites.size(); s++)
+			{
+				const EhCallSite & site = eh.call_sites[s];
+				long long base = static_cast<long long>(eh.item_offset);
+				AppendTableAddress(item, code_label,
+				                   base +
+				                   static_cast<long long>(site.start));
+				AppendTableAddress(item, code_label,
+				                   base +
+				                   static_cast<long long>(site.start +
+				                                          site.length));
+				AppendTableAddress(item, code_label,
+				                   base +
+				                   static_cast<long long>(
+				                       site.landing_pad));
+				size_t chain = static_cast<size_t>(site.chain);
+				if (site.chain < 0 ||
+				    ChainIsPureCleanup(eh.chains[chain]))
+				{
+					AppendTableWord(item, 0);
+					continue;
+				}
+				std::pair<size_t, std::pair<size_t, size_t> > key(
+					m, std::make_pair(f, chain));
+				if (!chain_offsets.count(key))
+				{
+					chain_offsets[key] = record_cursor;
+					record_cursor +=
+						3 * 8 * (eh.chains[chain].size() + 1);
+					ChainRef ref;
+					ref.module = m;
+					ref.chain = &eh.chains[chain];
+					record_layout.push_back(ref);
+				}
+				AppendTableAddress(
+					item, self_label,
+					static_cast<long long>(chain_offsets[key]));
+			}
+		}
+	}
+	for (size_t r = 0; r < record_layout.size(); r++)
+	{
+		const vector<EhAction> & chain = *record_layout[r].chain;
+		for (size_t a = 0; a < chain.size(); a++)
+		{
+			const EhAction & action = chain[a];
+			if (action.kind == EhAction::EH_CLEANUP)
+			{
+				AppendTableWord(item, 3);
+				AppendTableWord(item, 0);
+				AppendTableWord(item, 0);
+				continue;
+			}
+			AppendTableWord(
+				item, action.kind == EhAction::EH_CATCH_ALL ? 2 : 1);
+			AppendTableWord(item, static_cast<unsigned long long>(
+				action.filter));
+			if (action.kind == EhAction::EH_CATCH)
+			{
+				int label = 0;
+				long long offset = 0;
+				ResolveSymbolTarget(linked, item_base, definitions,
+				                    record_layout[r].module,
+				                    action.type_symbol, label, offset);
+				AppendTableAddress(item, label, offset);
+			}
+			else
+			{
+				AppendTableWord(item, 0);
+			}
+		}
+		AppendTableWord(item, 0);
+		AppendTableWord(item, 0);
+		AppendTableWord(item, 0);
+	}
+	if (item.bytes.size() != record_cursor)
+		throw runtime_error("eh region table layout mismatch");
+	return item;
 }
 
 // The program hooks: entry (exactly one), init/fini per module.
@@ -450,9 +601,9 @@ void LinkExecutable(vector<LinkInput> linked, const string & outfile,
 		definitions = BuildDefinitionTable(linked);
 	}
 
-	// Global item order: module order, items in module order. Code
-	// items align to cache lines so no entry sleds are inserted and
-	// symbol+offset patches land exactly.
+	// Global item order: module order, items in module order, then the
+	// synthesized region table. Code items align to cache lines so no
+	// entry sleds are inserted and symbol+offset patches land exactly.
 	vector<size_t> item_base(linked.size(), 0);
 	size_t total_items = 0;
 	for (size_t m = 0; m < linked.size(); m++)
@@ -461,8 +612,6 @@ void LinkExecutable(vector<LinkInput> linked, const string & outfile,
 		total_items += linked[m].module.items.size();
 	}
 
-	ProgramImage image;
-	image.SetLabelCount(static_cast<int>(total_items));
 	for (size_t m = 0; m < linked.size(); m++)
 	{
 		ObjectModule & module = linked[m].module;
@@ -478,33 +627,53 @@ void LinkExecutable(vector<LinkInput> linked, const string & outfile,
 				X86Patch & patch = item.patches[p];
 				if (!patch.imm.has_label)
 					continue;
-				const ObjectSymbol * symbol =
-					&module.symbols[static_cast<size_t>(
-						patch.imm.label)];
-				size_t target_module = m;
-				if (symbol->item < 0)
-				{
-					map<string, Definition>::const_iterator found =
-						definitions.find(symbol->external_name);
-					if (found == definitions.end())
-						throw runtime_error(
-							"unresolved external symbol: " +
-							symbol->external_name + " (" +
-							linked[m].name + ")");
-					target_module = found->second.module;
-					symbol = &linked[target_module].module
-						.symbols[found->second.symbol];
-				}
-				patch.imm.label = static_cast<int>(
-					item_base[target_module] +
-					static_cast<size_t>(symbol->item));
-				patch.imm.addend += static_cast<unsigned long long>(
-					symbol->offset);
+				int label = 0;
+				long long offset = 0;
+				ResolveSymbolTarget(linked, item_base, definitions, m,
+				                    patch.imm.label, label, offset);
+				patch.imm.label = label;
+				patch.imm.addend +=
+					static_cast<unsigned long long>(offset);
 			}
-			image.AddItem(item);
 		}
 	}
-	for (size_t i = 0; i < total_items; i++)
+
+	// The private unwinder's region table, plus the support module's
+	// pointer slot aimed at it (both already in global label space).
+	int table_label = static_cast<int>(total_items);
+	ImageItem region_table =
+		BuildEhRegionTable(linked, item_base, definitions, table_label);
+	{
+		ObjectModule & support = linked[0].module;
+		bool found = false;
+		for (size_t s = 0; s < support.symbols.size(); s++)
+		{
+			const ObjectSymbol & symbol = support.symbols[s];
+			if (symbol.external_name != "__cppgm_eh_region_table" ||
+			    symbol.item < 0)
+				continue;
+			X86Patch patch;
+			patch.offset = static_cast<size_t>(symbol.offset);
+			patch.size = 8;
+			patch.kind = X86_PATCH_ABS;
+			patch.imm = X86Imm::Label(table_label, 0);
+			support.items[static_cast<size_t>(symbol.item)]
+				.patches.push_back(patch);
+			found = true;
+			break;
+		}
+		if (!found)
+			throw runtime_error(
+				"support module lost the eh region table slot");
+	}
+
+	ProgramImage image;
+	image.SetLabelCount(static_cast<int>(total_items) + 1);
+	for (size_t m = 0; m < linked.size(); m++)
+		for (size_t i = 0; i < linked[m].module.items.size(); i++)
+			image.AddItem(linked[m].module.items[i]);
+	image.AddItem(region_table);
+	for (size_t i = 0; i <= total_items; i++)
 		image.BindLabel(static_cast<int>(i), i);
 	image.WriteExecutable(outfile);
 }

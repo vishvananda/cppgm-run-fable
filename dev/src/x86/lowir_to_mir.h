@@ -23,6 +23,19 @@ mir_model::MirProgram LowerLowIRProgramToMir(const LowIRProgram & program,
 
 namespace lowir_to_mir {
 
+// One armed host-EH region discovered by the PA31 region dataflow
+// (lowir_to_mir_eh.cpp): the landing-pad label (a dispatch/cleanup
+// block, or a synthesized throw-payload abandon pad), the arming kind,
+// the region armed beneath it, and the landing pad's catch clauses.
+struct EhRegionPlan
+{
+	std::string landing_label;
+	bool cleanup = false;
+	bool synthetic = false;
+	int parent = -1;
+	std::vector<mir_model::HostEhClause> clauses;
+};
+
 class FunctionLowering
 {
 public:
@@ -129,17 +142,35 @@ private:
 	void LowerFloatBinary(const LowIRInstruction & ins);
 	void LowerFloatCmpValue(const LowIRInstruction & ins);
 
-	// -- exception regions (lowir_to_mir_flow.cpp). Functions with EH
+	// -- exception lowering (lowir_to_mir_flow.cpp). Functions with EH
 	// ops compile in a conservative mode (eh_mode_): values keep frame
 	// homes and never ride pool registers across instructions, because
-	// the unwinder restores only rbp/rsp when it enters a dispatch
-	// block, so register state from before the throw is unreliable.
-	void LowerEhPush(const LowIRInstruction & ins, int position);
-	void LowerEhPop();
-	void LowerEhMarker(const LowIRInstruction & ins);
+	// the unwinder restores only rbp (plus the landing pad's own rsp
+	// re-establishment) when it enters a landing pad, so register
+	// state from before the throw is unreliable.
 	void LowerException(const LowIRInstruction & ins);
 	void LowerThrow(const LowIRInstruction & ins);
-	void LowerResume();
+	void LowerResume(int position);
+
+	// -- host-EH region dataflow (lowir_to_mir_eh.cpp)
+	void AnalyzeEhRegions();
+	void SimulateEhBlock(size_t block_index, std::vector<int> stack,
+	                     std::vector<std::vector<int> > & in,
+	                     std::vector<bool> & known,
+	                     std::vector<size_t> & worklist);
+	void MergeEhBlockState(const std::string & label,
+	                       const std::vector<int> & stack,
+	                       std::vector<std::vector<int> > & in,
+	                       std::vector<bool> & known,
+	                       std::vector<size_t> & worklist);
+	int EhRegionForArming(int position, const LowIRInstruction & ins,
+	                      int parent);
+	std::vector<mir_model::HostEhClause> CollectEhClauses(
+		const std::string & label) const;
+	int eh_region_for(int position) const;
+	void EmitEhLandingEntry();
+	void AppendEhAbandonPads();
+	void FinishEhRegions();
 
 	// -- PA29 128-bit integers (lowir_to_mir_wide.cpp): frame-resident
 	// pairs staged through rax:rdx.
@@ -203,6 +234,11 @@ private:
 	bool touches_float_ = false;
 	bool eh_mode_ = false;   // function contains exception constructs
 	bool gpr_read_staging_flip_ = false;   // r11/r10 spill-read rotation
+	// host-EH region analysis results (lowir_to_mir_eh.cpp)
+	std::vector<EhRegionPlan> eh_regions_;
+	std::map<int, int> eh_region_of_position_;  // arming site -> region
+	std::map<int, int> eh_region_at_;   // call site -> innermost region
+	std::set<std::string> eh_landing_blocks_;
 	// PA29: known-constant i128 temps (shift counts arrive as widened
 	// literals).
 	std::map<std::string, long long> wide_consts_;
