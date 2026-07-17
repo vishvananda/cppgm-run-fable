@@ -110,6 +110,25 @@ Baseline at plan time: 24 pa33 tests fail; everything through pa32 passes.
   per the PA32 convention so pa13–pa29 fixtures pinning whole-program
   shapes do not move.
 
+## Outcome and remaining boundaries
+
+All 24 baseline failures are fixed; `make test-report-through-pa33` is
+clean (2917/2917) and the pa33 file audit passes. Boundaries left for
+later hosted stages:
+
+- SysV small-aggregate passing covers the all-INTEGER two-eightbyte
+  class (`pass=gpr_pair`); SSE-classified eightbytes ({double,double}
+  and mixed) stay on the memory path until a fixture exercises them.
+- `__builtin_va_list` models the 24-byte cursor as `unsigned long[3]`;
+  the `__va_list_tag` class spelling only matters for the mangling of
+  va_list-typed C++ (non-extern-"C") signatures - a hosted-header
+  (PA34+) concern.
+- The -O1 call-site expansion covers constructors whose whole effect
+  is literal member stores; a general inliner is later work.
+- The pool-exhausted TLS store still stages through rax ahead of the
+  wrapper call (a latent host-mode hazard no fixture reaches; the
+  callee-saved staging path covers every tested shape).
+
 ## Validation
 
 - Iterate per cluster with `make -C pa33 check TEST=tests/general/<t>.t`
