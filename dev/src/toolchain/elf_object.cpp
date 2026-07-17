@@ -71,6 +71,22 @@ struct SectionData
 	int symbol = 0;         // section symbol (ELF symtab index)
 };
 
+// One section header record under assembly (payload bound later for
+// relocation sections).
+struct SectionHeader
+{
+	string name;
+	unsigned type = 0;
+	unsigned long long flags = 0;
+	unsigned long long offset = 0;
+	unsigned long long size = 0;
+	unsigned link = 0;
+	unsigned info = 0;
+	unsigned long long align = 1;
+	unsigned long long entsize = 0;
+	const vector<unsigned char> * payload = 0;
+};
+
 void AppendPadding(vector<unsigned char> & bytes, unsigned long long align)
 {
 	while (align > 1 && bytes.size() % align != 0)
@@ -109,6 +125,9 @@ private:
 	void BuildRoleSections();
 	void EmitSymbolRecord(const ElfSymbolEntry & entry);
 	void EmitSymtab();
+	vector<SectionHeader> BuildSectionHeaders(
+		vector<vector<unsigned char> > & rela_payloads,
+		size_t & shstrtab_index);
 	void EmitFile(const string & path);
 
 	const ObjectModule & module_;
@@ -568,27 +587,18 @@ void ElfObjectWriter::EmitSymtab()
 		EmitSymbolRecord(globals_[g]);
 }
 
-void ElfObjectWriter::EmitFile(const string & path)
+// The section header table: null, the layout sections, their .rela
+// pairs, then .symtab/.strtab/.shstrtab.
+vector<SectionHeader> ElfObjectWriter::BuildSectionHeaders(
+	vector<vector<unsigned char> > & rela_payloads,
+	size_t & shstrtab_index)
 {
-	struct Header
-	{
-		string name;
-		unsigned type = 0;
-		unsigned long long flags = 0;
-		unsigned long long offset = 0;
-		unsigned long long size = 0;
-		unsigned link = 0;
-		unsigned info = 0;
-		unsigned long long align = 1;
-		unsigned long long entsize = 0;
-		const vector<unsigned char> * payload = 0;
-	};
-	vector<Header> headers;
-	headers.push_back(Header());
+	vector<SectionHeader> headers;
+	headers.push_back(SectionHeader());
 	for (size_t s = 0; s < layout_.size(); s++)
 	{
 		const SectionData & section = *layout_[s];
-		Header header;
+		SectionHeader header;
 		header.name = section.name;
 		header.type = section.type;
 		header.flags = section.flags;
@@ -599,7 +609,6 @@ void ElfObjectWriter::EmitFile(const string & path)
 		headers.push_back(header);
 	}
 
-	vector<vector<unsigned char> > rela_payloads;
 	vector<size_t> rela_headers;
 	for (size_t s = 0; s < layout_.size(); s++)
 	{
@@ -619,7 +628,7 @@ void ElfObjectWriter::EmitFile(const string & path)
 			           static_cast<unsigned long long>(reloc.addend), 8);
 		}
 		rela_payloads.push_back(payload);
-		Header header;
+		SectionHeader header;
 		header.name = ".rela" + section.name;
 		header.type = kSectionRela;
 		header.flags = kFlagInfoLink;
@@ -635,7 +644,7 @@ void ElfObjectWriter::EmitFile(const string & path)
 
 	size_t symtab_index = headers.size();
 	{
-		Header header;
+		SectionHeader header;
 		header.name = ".symtab";
 		header.type = kSectionSymtab;
 		header.size = symtab_.size();
@@ -647,16 +656,16 @@ void ElfObjectWriter::EmitFile(const string & path)
 		headers.push_back(header);
 	}
 	{
-		Header header;
+		SectionHeader header;
 		header.name = ".strtab";
 		header.type = kSectionStrtab;
 		header.size = strtab_.size();
 		header.payload = &strtab_;
 		headers.push_back(header);
 	}
-	size_t shstrtab_index = headers.size();
+	shstrtab_index = headers.size();
 	{
-		Header header;
+		SectionHeader header;
 		header.name = ".shstrtab";
 		header.type = kSectionStrtab;
 		header.payload = &shstrtab_;
@@ -665,6 +674,15 @@ void ElfObjectWriter::EmitFile(const string & path)
 	for (size_t r = 0; r < rela_headers.size(); r++)
 		headers[rela_headers[r]].link =
 			static_cast<unsigned>(symtab_index);
+	return headers;
+}
+
+void ElfObjectWriter::EmitFile(const string & path)
+{
+	vector<vector<unsigned char> > rela_payloads;
+	size_t shstrtab_index = 0;
+	vector<SectionHeader> headers =
+		BuildSectionHeaders(rela_payloads, shstrtab_index);
 
 	shstrtab_.push_back(0);
 	vector<unsigned long long> name_offsets(headers.size(), 0);
