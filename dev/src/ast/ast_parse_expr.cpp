@@ -1,5 +1,7 @@
 #include "ast/ast_parser.h"
 
+#include "hosted_probes.h"
+
 using std::string;
 using std::vector;
 using std::move;
@@ -657,9 +659,53 @@ AstExprPtr AstParser::ParsePostfixSuffixes(AstExprPtr expr)
 // function-style cast (dumped with a paren-argument-list); everything
 // else is a primary-expression. The sequence form (`unsigned long(e)`)
 // keeps every keyword in `cast_keywords` for the semantic passes.
+// PA34 builtin trait: __is_*/__has_* ( type-id-list ), evaluated by
+// the sema to a bool constant. Argument type-ids may be pack-expanded
+// (`Args...`). Returns null (state restored) when the operand list
+// does not parse, so the name can fall back to an id-expression.
+AstExprPtr AstParser::ParseBuiltinTraitExpression()
+{
+	State entry = Save();
+	AstExprPtr node = MakeExpr(EK_BUILTIN_TRAIT);
+	node->op_spelling = Peek().spelling;
+	Advance();
+	Advance();  // the ( after the trait name
+	for (;;)
+	{
+		AstTemplateArgument argument;
+		argument.is_type = true;
+		if (!ParseTypeId(argument.type))
+		{
+			Restore(entry);
+			return AstExprPtr();
+		}
+		if (AtSimple(OP_DOTS))
+		{
+			argument.pack = true;
+			Advance();
+		}
+		node->trait_args.push_back(move(argument));
+		if (!MatchSimple(OP_COMMA))
+			break;
+	}
+	if (!MatchSimple(OP_RPAREN))
+	{
+		Restore(entry);
+		return AstExprPtr();
+	}
+	return node;
+}
+
 AstExprPtr AstParser::ParsePostfixRoot()
 {
 	const ParseToken& token = Peek();
+	if (token.kind == PTOK_IDENTIFIER &&
+	    HostedBuiltinTraitName(token.spelling) && AtSimple(OP_LPAREN, 1))
+	{
+		AstExprPtr trait = ParseBuiltinTraitExpression();
+		if (trait)
+			return trait;
+	}
 	if (token.kind == PTOK_SIMPLE && IsSimpleTypeKeyword(token.simple_type))
 	{
 		size_t keywords = 1;

@@ -398,6 +398,11 @@ void PrintExprTail(const AstExpr& expr, ostream& out, int depth)
 		else
 			PrintExpr(*expr.operands[0], out, depth + 1);
 		break;
+	case EK_BUILTIN_TRAIT:
+		Line(out, depth, "builtin-trait-expression " + expr.op_spelling);
+		for (size_t i = 0; i < expr.trait_args.size(); i++)
+			PrintTypeId(*expr.trait_args[i].type, out, depth + 1);
+		break;
 	case EK_NEW:
 		PrintNewExpr(expr, out, depth);
 		break;

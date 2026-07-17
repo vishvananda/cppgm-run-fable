@@ -370,6 +370,19 @@ string FlattenExpr(const AstExpr& expr)
 		if (expr.is_type_operand)
 			return expr.op_spelling + "(" + FlattenTypeId(*expr.type) + ")";
 		return expr.op_spelling + "(" + FlattenExpr(*expr.operands[0]) + ")";
+	case EK_BUILTIN_TRAIT:
+	{
+		string text = expr.op_spelling + "(";
+		for (size_t i = 0; i < expr.trait_args.size(); i++)
+		{
+			if (i)
+				text += ", ";
+			text += FlattenTypeId(*expr.trait_args[i].type);
+			if (expr.trait_args[i].pack)
+				text += "...";
+		}
+		return text + ")";
+	}
 	case EK_NEW:
 		return FlattenNewExpr(expr);
 	case EK_DELETE:

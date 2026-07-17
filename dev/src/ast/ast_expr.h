@@ -32,7 +32,8 @@ enum EExprKind
 	EK_BRACED,           // braced-init-list
 	EK_THROW,            // throw-expression (15.1)
 	EK_STATEMENT_EXPR,   // GNU ( compound-statement ) expression
-	EK_VA_ARG            // __builtin_va_arg ( expr , type-id )
+	EK_VA_ARG,           // __builtin_va_arg ( expr , type-id )
+	EK_BUILTIN_TRAIT     // PA34 __is_*/__has_* ( type-id-list )
 };
 
 struct AstExpr
@@ -60,6 +61,9 @@ struct AstExpr
 	// multi-keyword form such as `unsigned long(e)`).
 	std::vector<ETokenType> cast_keywords;
 	AstTypeIdPtr type;         // casts, sizeof(type), traits, new
+	// EK_BUILTIN_TRAIT operands: type-id arguments in source order,
+	// each optionally pack-expanded (`Args...`).
+	std::vector<AstTemplateArgument> trait_args;
 	bool is_type_operand;      // EK_TYPE_TRAIT operand is a type-id
 	bool sizeof_paren;         // sizeof ( expression ) form
 	bool global_scope;         // EK_NEW / EK_DELETE leading ::

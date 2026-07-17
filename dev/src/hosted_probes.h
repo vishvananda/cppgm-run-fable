@@ -30,3 +30,8 @@ bool HostedProbeHasCppAttribute(const std::string & name);
 // parsed as type specifiers, evaluated by the sema type builder. The
 // __has_builtin answer for these names follows this same table.
 bool HostedBuiltinTransformName(const std::string & name);
+
+// Builtin type-trait identifiers (`__is_same(T, U)` and family):
+// parsed as EK_BUILTIN_TRAIT expressions, evaluated by the sema to
+// bool constants. The __has_builtin answer follows this same table.
+bool HostedBuiltinTraitName(const std::string & name);

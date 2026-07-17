@@ -152,6 +152,9 @@ struct AstDecl
 	AstName class_name;    // DK_CLASS / DK_CLASS_FORWARD
 	ETokenType class_key;
 	std::string class_key_spelling;
+	// 9p3 class-virt-specifier: `class X final { ... }` (PA34
+	// __is_final reads it off the class record).
+	bool class_final = false;
 	// class-head alignment-specifiers (7.6.2): alignas(type-id) entries
 	// carry the type, alignas(constant-expression) entries the
 	// expression; the strictest one applies.

@@ -47,6 +47,7 @@ void SemBinder::OnClassOpened(const AstDecl& decl, NamedTypeInfo* info,
 	ClassInfo& cls = unit_.classes.Create(info);
 	cls.members = scope;
 	cls.is_union = info->is_union;
+	cls.is_final = decl.class_final;
 	model_.MutableInfo(info)->class_record = &cls;
 	// PA17: pre-scan the body so the vpointer reserves offset 0 before
 	// any field lays out (10.3p1: introducing a virtual member spells

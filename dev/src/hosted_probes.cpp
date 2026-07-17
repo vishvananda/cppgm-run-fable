@@ -107,6 +107,37 @@ const char * const kBuiltinTransforms[] = {
 	0
 };
 
+// Builtin type traits the sema evaluates (sema/sem_trait.cpp).
+const char * const kBuiltinTraits[] = {
+	"__is_same",
+	"__is_void",
+	"__is_integral",
+	"__is_floating_point",
+	"__is_arithmetic",
+	"__is_signed",
+	"__is_unsigned",
+	"__is_array",
+	"__is_pointer",
+	"__is_reference",
+	"__is_lvalue_reference",
+	"__is_rvalue_reference",
+	"__is_function",
+	"__is_member_pointer",
+	"__is_member_object_pointer",
+	"__is_member_function_pointer",
+	"__is_enum",
+	"__is_union",
+	"__is_class",
+	"__is_scalar",
+	"__is_empty",
+	"__is_final",
+	"__is_polymorphic",
+	"__is_abstract",
+	"__is_base_of",
+	"__has_virtual_destructor",
+	0
+};
+
 const char * const kSupportedAttributes[] = {
 	// using_if_exists: a using-declaration whose target may be missing
 	// binds nothing instead of erroring (hosted libc++-style headers).
@@ -127,13 +158,20 @@ set<string> MakeNameSet(const char * const * names)
 bool HostedProbeHasBuiltin(const string & name)
 {
 	static const set<string> builtins = MakeNameSet(kSupportedBuiltins);
-	return builtins.count(name) != 0 || HostedBuiltinTransformName(name);
+	return builtins.count(name) != 0 || HostedBuiltinTransformName(name) ||
+		HostedBuiltinTraitName(name);
 }
 
 bool HostedBuiltinTransformName(const string & name)
 {
 	static const set<string> transforms = MakeNameSet(kBuiltinTransforms);
 	return transforms.count(name) != 0;
+}
+
+bool HostedBuiltinTraitName(const string & name)
+{
+	static const set<string> traits = MakeNameSet(kBuiltinTraits);
+	return traits.count(name) != 0;
 }
 
 bool HostedProbeHasFeature(const string & name)

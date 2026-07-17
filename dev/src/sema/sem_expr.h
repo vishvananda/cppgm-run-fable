@@ -320,6 +320,9 @@ public:
 	SemValue AnalyzeThrow(const AstExpr* operand);
 	// PA33 __builtin_va_arg(list, T): the SysV vararg fetch.
 	SemValue AnalyzeVaArg(const AstExpr& expr);
+	// PA34 builtin type trait ( type-id-list ) -> bool constant
+	// (sem_trait.cpp).
+	SemValue AnalyzeBuiltinTrait(const AstExpr& expr);
 	// A constructed (or aggregate-initialized) temporary of a class
 	// type from an argument/braced-init list (5.2.3, 8.5.4); the
 	// binder's braced-return path builds through it too. `braced_list`

@@ -240,6 +240,7 @@ struct ClassInfo
 	vector<ClassField> fields;  // declaration order
 	bool is_union = false;
 	bool is_empty = true;  // no fields, no non-empty base, no virtual base
+	bool is_final = false;  // 9p3 class-virt-specifier (PA34 __is_final)
 	// dsize/size/alignment span the complete object (9p4 rounding);
 	// nv_* cover the non-virtual region (a base subobject's span).
 	unsigned long long dsize = 0;

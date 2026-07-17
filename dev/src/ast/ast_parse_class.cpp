@@ -150,6 +150,14 @@ AstDeclPtr AstParser::ParseClassSpecifier()
 	if (decl->has_name && decl->class_name.IsPlainIdentifier())
 		RegisterInDeclScope(decl->class_name.parts[0].identifier,
 		                    NF_TYPE | TemplatedFlag());
+	// 9p3 class-virt-specifier: contextual `final` before the base
+	// clause or the body.
+	if (AtIdentifierSpelled("final") &&
+	    (AtSimple(OP_COLON, 1) || AtSimple(OP_LBRACE, 1)))
+	{
+		decl->class_final = true;
+		Advance();
+	}
 	if (AtSimple(OP_COLON))
 	{
 		if (!ParseBaseClause(*decl))

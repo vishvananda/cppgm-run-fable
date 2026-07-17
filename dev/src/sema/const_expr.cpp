@@ -1,5 +1,7 @@
 #include "sema/const_expr.h"
 
+#include "sema/sem_trait.h"
+
 #include <stdexcept>
 
 #include "numeric_literals.h"
@@ -673,6 +675,25 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 		return EvaluateCall(expr, context);
 	case EK_TYPE_TRAIT:
 		return EvaluateTypeTrait(expr, context);
+	case EK_BUILTIN_TRAIT:
+	{
+		// PA34 builtin type trait over resolved operand types.
+		std::vector<TypePtr> types;
+		for (size_t i = 0; i < expr.trait_args.size(); i++)
+		{
+			if (expr.trait_args[i].pack)
+				throw OutsideSubset("pack-expanded builtin trait "
+				                    "argument");
+			types.push_back(
+				context.ResolveTypeId(*expr.trait_args[i].type));
+		}
+		bool value = EvaluateBuiltinTraitOnTypes(
+			expr.op_spelling, types,
+			[&context](const TypePtr& type) {
+				context.RequireCompleteForLayout(type);
+			});
+		return MakeBool(value);
+	}
 	default:
 		throw OutsideSubset("expression form");
 	}
