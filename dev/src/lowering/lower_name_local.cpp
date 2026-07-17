@@ -160,43 +160,4 @@ string MangleLocalName(const NamedTypeInfo& info, const Scope* fn_scope,
 }
 
 
-// The position of `id` among the active alias frame's parameters,
-// -1 when the frame does not bind it.
-int AliasParamIndex(const Substitutions& subs, const string& id)
-{
-	if (!subs.alias_frame || !subs.alias_frame->alias)
-		return -1;
-	const vector<TemplateParam>& params =
-		subs.alias_frame->alias->params;
-	for (size_t p = 0; p < params.size(); p++)
-		if (!params[p].name.empty() && params[p].name == id)
-			return (int)p;
-	return -1;
-}
-
-// 5.1.5: the builtin code of a written simple-type keyword sequence
-// (space-joined source order).
-string FundamentalKeywordCode(const string& keywords)
-{
-	struct Entry { const char* text; const char* code; };
-	static const Entry table[] = {
-		{"void", "v"}, {"bool", "b"}, {"char", "c"},
-		{"signed char", "a"}, {"unsigned char", "h"},
-		{"short", "s"}, {"short int", "s"},
-		{"unsigned short", "t"}, {"unsigned short int", "t"},
-		{"int", "i"}, {"signed", "i"}, {"signed int", "i"},
-		{"unsigned", "j"}, {"unsigned int", "j"},
-		{"long", "l"}, {"long int", "l"},
-		{"unsigned long", "m"}, {"unsigned long int", "m"},
-		{"long long", "x"}, {"long long int", "x"},
-		{"unsigned long long", "y"}, {"unsigned long long int", "y"},
-		{"wchar_t", "w"}, {"char16_t", "Ds"}, {"char32_t", "Di"},
-		{"float", "f"}, {"double", "d"}, {"long double", "e"},
-	};
-	for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
-		if (keywords == table[i].text)
-			return table[i].code;
-	throw OutsideBoundary("mangled dependent type form");
-}
-
 }  // namespace lower_mangle

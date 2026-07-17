@@ -4,16 +4,20 @@
 #include <string>
 #include <vector>
 
+#include "ast/ast_names.h"
 #include "sema/scope.h"
 #include "sema/template_info.h"
 #include "sema/type.h"
 
 // Shared internals of the Itanium object-name mangler, split between
-// lower_name.cpp (scope/type spellings) and lower_name_template.cpp
-// (function-template signatures and written dependent forms). These
-// are implementation details of the lowering name layer; public entry
+// lower_name.cpp (scope/type spellings), lower_name_template.cpp
+// (written dependent forms and alias transparency),
+// lower_name_signature.cpp (function-template signature encodings),
+// and lower_name_local.cpp (5.1.7 local-entity manglings). These are
+// implementation details of the lowering name layer; public entry
 // points stay in lower_name.h.
 
+struct AstDecl;
 struct AstTypeId;
 struct AstTemplateArgument;
 
@@ -197,9 +201,29 @@ string MangleTerminalName(const string& name, size_t arity);
 
 // The position of `id` among the active alias frame's parameters
 // (-1 when the frame does not bind it), and the builtin code of a
-// written simple-type keyword run (lower_name_local.cpp).
+// written simple-type keyword run (lower_name_template.cpp).
 int AliasParamIndex(const Substitutions& subs, const string& id);
 string FundamentalKeywordCode(const string& keywords);
+
+// Written-form services of lower_name_template.cpp consumed by the
+// signature speller (lower_name_signature.cpp): the pattern
+// declaration's declarator/parameter-clause accessors, the 5.1.5.10
+// parameter-mention scan, and the written base/declarator-op/
+// parameter/return spellings.
+const AstDeclarator* WrittenDeclarator(const AstDecl& inner);
+const AstParameterClause* WrittenParameterClause(
+	const AstDeclarator& declarator);
+bool WrittenSpecifiersMentionParam(const AstSpecifierSeq& seq,
+                                   const vector<TemplateParam>& params);
+vector<const AstSpecifier*> TypeSpecifiers(const AstSpecifierSeq& seq);
+string MangleWrittenBase(const vector<const AstSpecifier*>& specifiers,
+                         bool keep_cv, Substitutions& subs, string& key);
+vector<string> WrittenOps(const AstDeclarator& declarator);
+void ApplyWrittenOps(const vector<string>& ops, Substitutions& subs,
+                     string& body, string& key);
+string MangleWrittenParameter(const AstParameter& parameter, bool is_pack,
+                              Substitutions& subs, string* key_out = 0);
+string MangleWrittenReturn(const AstDecl& inner, Substitutions& subs);
 
 // 5.1.7 local-entity manglings (lower_name_local.cpp): the enclosing
 // function scope of a local entity (null for non-local), the

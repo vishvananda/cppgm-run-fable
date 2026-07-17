@@ -114,20 +114,101 @@ Baseline at plan time: 24 pa33 tests fail; everything through pa32 passes.
 
 All 24 baseline failures are fixed; `make test-report-through-pa33` is
 clean (2917/2917) and the pa33 file audit passes. Boundaries left for
-later hosted stages:
+later hosted stages (each is scope, not deferred breakage - see
+`audit.md` for what the audit fixed instead of deferring):
 
 - SysV small-aggregate passing covers the all-INTEGER two-eightbyte
   class (`pass=gpr_pair`); SSE-classified eightbytes ({double,double}
-  and mixed) stay on the memory path until a fixture exercises them.
+  and mixed) stay on the memory path until a fixture exercises them
+  (own-to-own calls stay self-consistent; only an untested
+  our-object/host-object by-value crossing would notice).
 - `__builtin_va_list` models the 24-byte cursor as `unsigned long[3]`;
   the `__va_list_tag` class spelling only matters for the mangling of
   va_list-typed C++ (non-extern-"C") signatures - a hosted-header
-  (PA34+) concern.
+  (PA34+) concern. `__builtin_va_start` does not validate its
+  last-named-parameter argument (it evaluates and is ignored, matching
+  the cursor model); a non-va_list `va_arg` operand is rejected.
 - The -O1 call-site expansion covers constructors whose whole effect
   is literal member stores; a general inliner is later work.
-- The pool-exhausted TLS store still stages through rax ahead of the
-  wrapper call (a latent host-mode hazard no fixture reaches; the
-  callee-saved staging path covers every tested shape).
+- `abi_tag` applies to the special members the stage tests (C1/C2/D1/
+  D2 spellings); tags on ordinary functions, variables, and types
+  parse and are dropped by their own declaration - they never
+  contaminate other symbols - until a later stage makes those
+  spellings observable.
+- `[[no_unique_address]]` is consumed in the leading member position
+  (the fixture and primary position); the after-declarator spelling
+  parses and is dropped. Overlap conflict probes cover nua-vs-nua,
+  nua-vs-member, and nua-vs-base-tree same-type collisions; empty
+  bases keep the pre-existing shared-offset convention for non-nua
+  code, and tail-padding reuse for non-empty nua members is later
+  work.
+- TLS dynamic init is per-variable (guarded `_ZTW` wrappers, matching
+  the course reference); the TU-wide `__tls_init`/`_ZTH` trigger of
+  [basic.start.dynamic]p5 - first odr-use of one TLS variable running
+  the whole TU's dynamic inits - is a hosted-runtime (PA34+) surface
+  no fixture exercises.
+- A closure type re-encountered inside its own enclosing-function
+  encoding re-spells in full rather than compressing to `S<n>_`; no
+  fixture (or host link) reaches that shape, and the compressed form
+  is not derivable without a host oracle.
+
+## Architecture Review
+
+Where each PA33 fact lives, from the audit pass:
+
+- **Semantic facts are typed and single-owner.** abi_tag rides the
+  AST declarator being built (never parser-global state), then
+  `ClassCtor.abi_tags`/`dtor_abi_tags`; `[[no_unique_address]]` rides
+  `ClassField`; TT-param/dependent-name/alias facts ride the
+  written AST and `TemplateInfo`. The mangler consumes typed facts
+  only - the audit found no demangled-text probing, no fixture-shaped
+  gates, and no second name builder in object code (the PA30
+  `abimangle` tool's encoder is a separate fact-file-driven program,
+  not linked into the compiler).
+- **Mode gating follows the PA32 convention.** Host-only behaviors
+  (gpr_pair classification, -O1 ctor expansion, noexcept terminate
+  regions, EH pad slice partitioning, guard-first TLS init) gate on
+  `SeparateCompilation()`; whole-program LowIR/MIR shapes pinned by
+  pa13-pa29 fixtures are byte-stable.
+- **EH ownership.** Region arming and pad routing are lowering-owned
+  (`lower_eh.cpp`/`lower_member.cpp`); the x86 layer derives static
+  region facts by dataflow (`lowir_to_mir_eh.cpp`) and the toolchain
+  builds LSDA chains from the region parent tree. In-frame handler
+  routing is by code jumps; `resume` is reserved for leaving the
+  frame (or chaining cleanup pads whose coverage the dataflow
+  proves). The `eh_end` frame-record pops in catch pads are
+  whole-program bookkeeping and are suppressed on the host path,
+  where they would corrupt the pad's dataflow coverage.
+- **Backend boundaries.** LowIR grew only role-annotated calls
+  (`va_start`, `alloca`) plus the `gpr_pair` pass annotation - shapes
+  LowIR cannot express - all validated by `lowir_validate.cpp`. The
+  x86 layer owns the register save area, cursor seeding, dynamic
+  stack adjust, and the SysV AL count. TLS address materialization is
+  a call boundary in the backend's register discipline (rax alias
+  invalidation, callee-saved or spilled staging).
+- **File organization.** The mangler is four cohesive units:
+  `lower_name.cpp` (scope/type spellings), `lower_name_template.cpp`
+  (written dependent forms + alias transparency),
+  `lower_name_signature.cpp` (function-template signature assembly),
+  `lower_name_local.cpp` (5.1.7 local entities), sharing internals
+  through `lower_name_parts.h` declarations only.
+
+## Final Architecture Review
+
+Post-audit state: the audit removed the one latent wrong-code boundary
+the plan had documented (TLS rax staging across the wrapper call) and
+three undocumented ones it found (noexcept unwind loop, handler-local
+rethrow double-destruction, unmatched-catch enclosing-local leak - the
+last matching the course reference but not the host runtime), plus
+parser-state abi_tag contamination and unconditional nua overlap. Each
+fix was verified against host g++ behavior directly and the full
+2917-test suite. No interpreter/VM/trampoline/templated-binary
+substitutes exist anywhere in the stage; every artifact is compiled
+from the module's own facts. Remaining boundaries (above) are scope
+choices with no silent-wrong-code path inside the tested contract:
+unsupported shapes either compile correctly by other means, reject
+loudly (`OutsideBoundary`, virtual-base covariant returns, non-va_list
+cursors), or sit outside what any host link in the suite can observe.
 
 ## Validation
 

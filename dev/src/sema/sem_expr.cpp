@@ -193,6 +193,17 @@ SemValue SemExprAnalyzer::AnalyzeVaArg(const AstExpr& expr)
 	// lvalue addresses directly at the lowering, a pointer-typed one
 	// (a decayed parameter) loads its value there.
 	SemValue list = Analyze(*expr.operands[0]);
+	// The operand must be the va_list cursor (the unsigned-long-array
+	// model or its decayed pointer); the lowering would read anything
+	// else as a register cursor.
+	TypePtr cursor = RemoveTopCv(
+		IsReferenceType(list.type) ? list.type->target : list.type);
+	TypePtr element;
+	if (cursor && (cursor->kind == TK_ARRAY || cursor->kind == TK_POINTER))
+		element = RemoveTopCv(cursor->target);
+	if (!element || element->kind != TK_FUNDAMENTAL ||
+	    element->fundamental != FT_UNSIGNED_LONG_INT)
+		throw OutsideBoundary("va_arg cursor operand");
 	TypePtr type = host_.ResolveCastTypeId(*expr.type);
 	TypePtr bare = RemoveTopCv(type);
 	if (bare->kind != TK_FUNDAMENTAL && bare->kind != TK_POINTER &&
