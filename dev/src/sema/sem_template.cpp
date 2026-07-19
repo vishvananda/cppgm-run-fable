@@ -1,4 +1,4 @@
-#include "sema/sem_binder.h"
+#include "sema/sem_instantiation.h"
 
 #include <set>
 #include <stdexcept>

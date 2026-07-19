@@ -184,11 +184,14 @@ Also landed: deduction-guide declarations (template-head/explicit/
 plain forms parse and are accepted; guides only affect class template
 argument deduction, a later hosted stage), __is_identifier answering
 0 for language keywords, and [[...]] attributes between an alias
-name and `=`. 32 failures remain (trait corners landed:
+name and `=` (trait corners landed:
 implicit-default triviality, defaulted-assign triviality, the
 implicit ctor's computed noexcept specification, and the
-is_nothrow_*_constructible shorthand). The largest remaining
-clusters, with what each needs:
+is_nothrow_*_constructible shorthand).
+
+The final clusters all landed; `make test-report-through-pa34` is
+green (see the closing summary at the end of this file). The
+historical cluster notes below record what each needed:
 
 1. **Templated lambdas** (6): `[]<class U>(...)` — parse the template
    head into AstLambda; the three instantiated tests are all
@@ -279,3 +282,74 @@ Next clusters, in leverage order:
    hosted headers (cstdio/cstring/cmath/csignal/cassert) compiling
    through the system include chain; the PA32/33 object path links
    them with the host toolchain.
+
+## Closing summary (stage complete)
+
+All 272 pa34 tests and the root `make test-report-through-pa34` gate
+pass. The final clusters landed as:
+
+1. **C++17 statement forms**: `if constexpr` binds only the taken
+   branch (SemBinder::BindConstexprIfStatement; the discarded branch
+   never instantiates), if/switch init-statements desugar as a
+   wrapping compound (the init-statement parser is shared with for
+   and also accepts alias-declarations), and `explicit(expr)` rides
+   AstMemberSpecifier::explicit_expr, evaluated per instantiation
+   (SemBinder::ExplicitSpecifierValue); deduction guides accept the
+   conditional form too.
+2. **Templated lambdas**: the `[]<...>` head parses into a DK_TEMPLATE
+   shell on AstLambda; an immediate invocation deduces the head from
+   the analyzed call arguments (AnalyzeTemplatedLambdaInvoke reuses
+   MakePatternParamScope/DeduceFixedParameter/MakeArgumentAliasScope)
+   and binds the closure under the argument aliases. Lambda parameter
+   default arguments ride ScopeBinding::fn_defaults. An uninvoked
+   templated lambda stays a documented boundary.
+3. **Structured bindings**: `auto [a, b]` (block and range-for forms)
+   desugars to a hidden `__sbN` object plus per-name `auto&` bindings
+   onto the members in declaration order, giving real reference
+   semantics; the definition-time template check knows the introduced
+   names.
+4. **Designated initializers**: `.name = value` elements bind to their
+   named fields with value-initialized holes in the aggregate
+   consumers and in MakeAggregateTemporary (compound literals
+   `(T){...}` route through the functional-cast shape); braced lists
+   now also convert to aggregate parameters field-wise
+   (ImplicitConversion::aggregate_list), unions select the designated
+   member, and the nested-union one-member rule counts only the
+   current nesting level's actions.
+5. **GNU complex**: `_Complex`/`__complex__` build a synthesized
+   two-field record ({__real, __imag}) bound at global scope on first
+   use (SysV complex ABI matches the pair layout); __builtin_complex
+   constructs it field-wise and __real__/__imag__ select parts.
+   Complex arithmetic stays a boundary.
+6. **Pack corners**: `__integer_pack(N)` expands to its value run in
+   ExpandTemplateArgumentPack (dependent operands keep the pattern
+   carry); `__type_pack_element` is a builtin alias template resolved
+   through a shadow TemplateInfo (dependent uses defer like alias
+   uses); special-member scopes publish the expanded pack parameter's
+   umbrella binding; mem-initializer arguments expand `u...` items;
+   the leading-pack sealing in DeduceFunctionTemplate keeps packs
+   open when a fixed template-spec parameter can deduce them.
+7. **Trait corners**: ProbeTraitInvocable implements
+   __is_invocable/__is_nothrow_invocable over declval surrogates
+   (class callables resolve operator() via ResolveOperatorCall);
+   `__is_nothrow_invocable<...>` template-ids resolve to the builtin
+   (GCC-13 behavior the refs pin) unless a namespace-scoped user
+   declaration exists (the pa19 fixture's std::__is_nothrow_invocable
+   keeps priority); __array_rank is a value trait;
+   ProbeTraitConvertible completes pointee classes so derived-to-base
+   over uninstantiated specializations answers correctly;
+   __builtin_invoke expands pack arguments before dispatch and
+   resolves class callables over analyzed values.
+8. **Misc**: co_await/co_yield/co_return parse as contextual
+   operators only inside template scopes (the pa10 negative fixture
+   keeps rejecting them in plain functions; instantiation throws);
+   `= {}` on an empty-aggregate constexpr variable evaluates its own
+   zero image (has_explicit_init).
+
+File-audit splits at stage close: statement binders moved to
+sema/sem_stmt.cpp, aggregate-constructor synthesis (with the PA34
+designated realignment) to sema/sem_aggregate.cpp, the PA34 builtin
+templates and the GNU complex record to sema/sem_builtin_template.cpp,
+the InstantiationContext RAII definition to sema/sem_instantiation.h,
+array braced-init to sem_apply.cpp, and redeclaration signature
+agreement to template_order.cpp.

@@ -6,6 +6,16 @@
 
 using std::runtime_error;
 
+namespace {
+
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA12 assignment boundary");
+}
+
+}  // namespace
+
 // Conversion application, split from sem_expr.cpp: constructor and
 // conversion-function calls, target-directed overload selection
 // (13.4), copy-initialization, and the operand adjustment helpers the
@@ -530,3 +540,51 @@ void SemExprAnalyzer::RequireModifiableLvalue(const SemValue& value,
 		throw runtime_error(string(what) + " requires a modifiable lvalue");
 }
 
+// 8.5.1 array list-initialization (split from sem_expr.cpp):
+// braced arrays complete their bounds and convert element-wise.
+SemNodePtr SemExprAnalyzer::AnalyzeBracedInit(
+	const vector<AstExprPtr>& items, TypePtr& dest)
+{
+	if (dest->kind != TK_ARRAY)
+		throw OutsideBoundary("braced initialization form");
+	// PA20: a multi-dimensional array initializes element-wise from
+	// fully braced sub-lists (8.5.1p11 without brace elision).
+	if (RemoveTopCv(dest->target)->kind == TK_ARRAY)
+	{
+		if (!dest->bound_known)
+			dest = MakeArrayType(dest->target, true, items.size());
+		if (items.size() > dest->bound)
+			throw runtime_error("too many braced initializers");
+		SemNodePtr node = MakeSemNode(SN_BRACED_INIT_LIST);
+		node->type = dest;
+		node->category = VC_LVALUE;
+		for (size_t i = 0; i < items.size(); i++)
+		{
+			const AstExpr& element = *items[i];
+			if (element.kind != EK_BRACED)
+				throw OutsideBoundary("array-of-array element form");
+			TypePtr element_type = dest->target;
+			node->children.push_back(
+				AnalyzeBracedInit(element.arguments, element_type));
+		}
+		return node;
+	}
+	// Pack expansions among the elements resolve before the bound
+	// completes (8.5.1p4 over the expanded list).
+	vector<SemValue> elements;
+	AnalyzeArgumentList(items, elements);
+	if (dest->bound_known && elements.size() > dest->bound)
+		throw runtime_error("too many braced initializers");
+	if (!dest->bound_known)
+		// 8.5.1p4: the array bound completes from the initializer list.
+		dest = MakeArrayType(dest->target, true, elements.size());
+	SemNodePtr node = MakeSemNode(SN_BRACED_INIT_LIST);
+	node->type = dest;
+	node->category = VC_LVALUE;
+	for (size_t i = 0; i < elements.size(); i++)
+	{
+		CopyInitialize(elements[i], dest->target, "array element");
+		node->children.push_back(std::move(elements[i].node));
+	}
+	return node;
+}

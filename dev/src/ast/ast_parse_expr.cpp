@@ -527,6 +527,7 @@ AstExprPtr AstParser::ParseUnaryExpression()
 	// operator following they stay ordinary identifiers.
 	if (token.kind == PTOK_IDENTIFIER &&
 	    (token.spelling == "co_await" || token.spelling == "co_yield") &&
+	    InTemplateScope() &&
 	    (Peek(1).kind == PTOK_IDENTIFIER ||
 	     Peek(1).kind == PTOK_LITERAL ||
 	     AtSimple(KW_THIS, 1) || AtSimple(KW_TRUE, 1) ||

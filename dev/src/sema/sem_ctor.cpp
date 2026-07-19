@@ -253,7 +253,22 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 		                                 std::move(value)));
 		return;
 	}
-	if (args.empty())
+	// PA34: argument-level `pattern...` items expand in place before
+	// the arity checks (`t(u...)` over a scalar member).
+	vector<SemValue> values;
+	for (size_t i = 0; i < args.size(); i++)
+	{
+		if (args[i]->kind == EK_PACK_EXPANSION)
+		{
+			if (!ExpandPackExpression(*args[i]->operands[0], values))
+				throw runtime_error("member initializer pack "
+				                    "expansion names no expandable "
+				                    "pack");
+			continue;
+		}
+		values.push_back(analyzer_.Analyze(*args[i]));
+	}
+	if (values.empty())
 	{
 		// 8.5p10 `x()` value-initialization of a scalar member.
 		if (IsReferenceType(field.type))
@@ -262,11 +277,10 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 		                                 ZeroValue(bare)));
 		return;
 	}
-	if (args.size() != 1)
+	if (values.size() != 1)
 		throw runtime_error("too many initializers for " + field.name);
-	SemValue value = analyzer_.Analyze(*args[0]);
 	out.push_back(MemberAssignAction(field, ThisFieldExpr(field),
-	                                 std::move(value)));
+	                                 std::move(values[0])));
 }
 
 // A zero-valued prvalue of the scalar type (value-initialization).

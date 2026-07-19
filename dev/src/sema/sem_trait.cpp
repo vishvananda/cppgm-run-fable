@@ -532,6 +532,26 @@ bool SemExprAnalyzer::ProbeTraitConvertible(const TypePtr& from,
 	TypePtr bare_to = RemoveTopCv(to);
 	if (bare_to->kind == TK_ARRAY || bare_to->kind == TK_FUNCTION)
 		return false;
+	// A derived-to-base conversion is visible only once the pointee
+	// class instantiates; incompleteness stays tolerated (identical
+	// pointers convert regardless).
+	for (int side = 0; side < 2; side++)
+	{
+		TypePtr pointee = RemoveTopCv(side ? to : from);
+		while (pointee && (pointee->kind == TK_POINTER ||
+		                   IsReferenceType(pointee)))
+			pointee = RemoveTopCv(pointee->target);
+		if (pointee && pointee->named &&
+		    (pointee->kind == TK_CLASS ||
+		     pointee->kind == TK_TEMPLATE_SPEC))
+			try
+			{
+				host_.RequireCompleteType(pointee->named);
+			}
+			catch (const std::exception&)
+			{
+			}
+	}
 	bool saved = host_.SwapUnevaluatedOperand(true);
 	try
 	{

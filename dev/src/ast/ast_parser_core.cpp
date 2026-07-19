@@ -114,6 +114,18 @@ void AstParser::RecordClauseOutcome(size_t clause_pos, bool success)
 	clause_memo_[clause_pos] = memo;
 }
 
+// Whether any open scope is a template-parameter scope: the PA34
+// contextual coroutine concessions apply only inside template bodies
+// (whose statements may never instantiate); plain functions keep the
+// C++11 rejection the earlier-stage fixtures pin.
+bool AstParser::InTemplateScope() const
+{
+	for (size_t i = 0; i < scopes_.size(); i++)
+		if (scopes_[i].param_scope)
+			return true;
+	return false;
+}
+
 void AstParser::PushScope(NameTable* table, bool param_scope)
 {
 	ScopeRef scope;

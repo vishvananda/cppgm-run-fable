@@ -81,6 +81,7 @@ private:
 
 	NameTable* NewTable();
 	void PushScope(NameTable* table, bool param_scope);
+	bool InTemplateScope() const;
 	void PushTransientScope();
 	void PopScope();
 	void Register(const std::string& name, unsigned flags);

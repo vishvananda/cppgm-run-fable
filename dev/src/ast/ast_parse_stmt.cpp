@@ -628,7 +628,7 @@ AstStmtPtr AstParser::ParseStatement()
 	// PA34 hosted coroutine concession: `co_return expr;` reads as a
 	// contextual return statement when an operand follows; the
 	// identifier reading (`co_return = x;`) keeps priority otherwise.
-	if (AtIdentifierSpelled("co_return") &&
+	if (AtIdentifierSpelled("co_return") && InTemplateScope() &&
 	    (Peek(1).kind == PTOK_IDENTIFIER ||
 	     Peek(1).kind == PTOK_LITERAL))
 	{

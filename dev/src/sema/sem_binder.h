@@ -68,6 +68,9 @@ public:
 	                                 size_t overload_index);
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
 	                                          vector<SemValue> args);
+	// PA34 (sem_aggregate.cpp): designated args realign to fields.
+	void RealignDesignatedArguments(const ClassInfo& cls,
+	                                vector<SemValue>& args);
 	virtual SemValue AnalyzeLambda(const AstExpr& expr);  // PA24
 	virtual SemValue AnalyzeTemplatedLambdaInvoke(
 		const AstExpr& expr, const vector<SemValue>& args);  // PA34
@@ -80,6 +83,9 @@ public:
 
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);  // decltype
 	virtual TypePtr ResolveTypeName(const AstName& name);  // 11.8
+	// PA34 C++20 explicit(expr): evaluated per instantiation (public
+	// for the special-member specifier reader in sem_class.cpp).
+	bool ExplicitSpecifierValue(const AstMemberSpecifier& spec);
 
 protected:
 	// DeclBinder seams
@@ -146,7 +152,6 @@ private:
 	                              bool for_switch);
 	void BindIfStatement(const AstStmt& stmt);
 	void BindConstexprIfStatement(const AstStmt& stmt);
-	bool ExplicitSpecifierValue(const AstMemberSpecifier& spec);
 	void BindWhileStatement(const AstStmt& stmt);
 	void BindDoStatement(const AstStmt& stmt);
 	void BindForStatement(const AstStmt& stmt);
@@ -574,6 +579,13 @@ private:
 	                                const AstTemplateArgument& argument,
 	                                vector<TemplateArg>& args,
 	                                Scope*& partial);
+	// PA34 GCC __integer_pack(N): expands the value run 0..N-1; false
+	// for other arguments or a not-yet-constant operand.
+	bool TryExpandIntegerPack(TemplateInfo& tmpl,
+	                          const TemplateParam& param,
+	                          const AstTemplateArgument& argument,
+	                          vector<TemplateArg>& args,
+	                          Scope*& partial);
 	// `Base...` in a base clause: per-element base types.
 	void ExpandPackBases(const AstBaseSpecifier& base,
 	                     std::vector<TypePtr>& out);
@@ -1186,37 +1198,3 @@ public:
 	virtual void OnParameterComposed(const string& name,
 	                                 const TypePtr& type);
 };
-
-// Saved-and-cleared binder state around one instantiation: the
-// instantiated declarations bind in their own context (the template's
-// lexical scope), never into the open class/function/dump state of the
-// use site. `instantiating` marks a body/definition instantiation
-// (weak emission); signature composition passes false and inherits
-// the surrounding mode. The destructor restores everything
-// (exception-safe); bodies live in sem_template.cpp.
-struct SemBinder::InstantiationContext
-{
-	InstantiationContext(SemBinder& binder, Scope* scope,
-	                     bool instantiating = false);
-	~InstantiationContext();
-
-private:
-	SemBinder& binder_;
-	Scope* saved_scope_;
-	std::vector<TypePtr>* saved_fields_;
-	EMemberAccess saved_access_;
-	bool saved_c_linkage_;
-	MethodContext saved_method_;
-	TypePtr saved_return_;
-	TypePtr saved_return_pattern_;
-	int saved_hidden_names_;
-	bool saved_bit_field_;
-	bool saved_instantiating_;
-	bool saved_unevaluated_;
-	Scope* saved_param_capture_;
-	std::map<unsigned long long, bool> saved_bf_units_;
-	vector<SemNode*> saved_parents_;
-	vector<ClassInfo*> saved_open_classes_;
-	vector<DeferredBody> saved_deferred_;
-};
-

@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -520,3 +521,109 @@ void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
 	cls.conversions.push_back(conv);
 }
 
+// --- redeclaration signature agreement (split from template_deduce.cpp) ---
+
+// The flattened return spelling for signature identity: `friend` and
+// `inline` are not part of the signature (11.3, 7.1.2), so their
+// specifiers drop before flattening.
+// The declared (or first) declarator of a pattern declaration.
+static const AstDeclarator* PatternDeclarator(const AstDecl& inner)
+{
+	if (inner.kind == DK_SIMPLE)
+		return inner.declarators.empty()
+			? 0 : inner.declarators[0].declarator.get();
+	return inner.declarator.get();
+}
+
+static string SignatureReturnSpelling(const AstSpecifierSeq& specifiers)
+{
+	string text;
+	for (size_t i = 0; i < specifiers.size(); i++)
+	{
+		if (specifiers[i].kind == SPEC_KEYWORD &&
+		    (specifiers[i].keyword == KW_FRIEND ||
+		     specifiers[i].keyword == KW_INLINE))
+			continue;
+		if (!text.empty())
+			text += " ";
+		text += FlattenSpecifier(specifiers[i]);
+	}
+	return text;
+}
+
+bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
+                                              const AstDecl& decl,
+                                              const AstDecl& inner,
+                                              bool match_head_spelling)
+{
+	EnsureFunctionPattern(tmpl);
+	vector<TemplateParam> params;
+	CollectTemplateParams(decl, params);
+	if (!SameTemplateParameterKinds(params, tmpl.params))
+		return false;
+	// 14.5.6.1p6: differing template heads (non-type parameter types
+	// included) declare distinct templates that overload. An
+	// out-of-class definition pairing skips the spelling comparison:
+	// its head may spell the same type through the class's own
+	// typedefs (`value_type` vs `T`), and pairing tolerance is safe
+	// because the declaration it completes already exists.
+	if (match_head_spelling &&
+	    !SameTemplateParameterLists(params, tmpl.params))
+		return false;
+	TypePtr full;
+	vector<TypePtr> param_patterns;
+	vector<bool> pattern_packs;
+	bool composed = ComposeFunctionPattern(params,
+	                                       TemplateLookupScope(tmpl), inner,
+	                                       full, param_patterns,
+	                                       pattern_packs);
+	if (composed != bool(tmpl.pattern))
+		return false;
+	if (composed)
+		return TypeEquals(full, tmpl.pattern);
+	// Neither signature composes abstractly: compare the composable
+	// parameter patterns positionally as a conservative identity.
+	if (param_patterns.size() != tmpl.param_patterns.size())
+		return false;
+	for (size_t i = 0; i < param_patterns.size(); i++)
+	{
+		if (bool(param_patterns[i]) != bool(tmpl.param_patterns[i]))
+			return false;
+		if (param_patterns[i] &&
+		    !TypeEquals(param_patterns[i], tmpl.param_patterns[i]))
+			return false;
+	}
+	// The dependent parameter spelling distinguishes overloads whose
+	// non-composing patterns compare equal as nulls
+	// (`remove_reference<T>::type&` vs `...type&&`).
+	const AstDeclarator* decl_declarator = PatternDeclarator(inner);
+	const AstDeclarator* tmpl_declarator =
+		PatternDeclarator(*tmpl.pattern_decl);
+	if (bool(decl_declarator) != bool(tmpl_declarator))
+		return false;
+	if (decl_declarator &&
+	    CanonicalDeclaratorParams(*decl_declarator, params) !=
+	        CanonicalDeclaratorParams(*tmpl_declarator, tmpl.params))
+		return false;
+	// The dependent return spelling distinguishes overloads the
+	// abstract composition cannot see (`typename T::A f(T)` vs
+	// `typename T::B f(T)` are distinct templates).
+	if (PositionalizeTemplateNames(
+	        SignatureReturnSpelling(inner.specifiers), params) !=
+	    PositionalizeTemplateNames(
+	        SignatureReturnSpelling(tmpl.pattern_decl->specifiers),
+	        tmpl.params))
+		return false;
+	return true;
+}
+
+bool SemBinder::SameImportedTemplateSignature(TemplateInfo& own,
+                                              TemplateInfo& other)
+{
+	if (own.params.size() != other.params.size())
+		return false;
+	if (!other.pattern_decl)
+		return false;
+	return SameFunctionTemplateSignature(own, *other.decl,
+	                                     *other.pattern_decl);
+}

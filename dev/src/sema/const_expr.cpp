@@ -678,6 +678,9 @@ bool ConstValueIsNonZero(const ConstValue& value)
 	return value.bits != 0 || value.high != 0;
 }
 
+static ConstValue EvaluateBuiltinTraitExpr(const AstExpr& expr,
+                                           IConstExprContext& context);
+
 ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 {
 	switch (expr.kind)
@@ -762,41 +765,47 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	case EK_TYPE_TRAIT:
 		return EvaluateTypeTrait(expr, context);
 	case EK_BUILTIN_TRAIT:
-	{
-		// PA34 builtin type trait over resolved operand types.
-		std::vector<TypePtr> types;
-		for (size_t i = 0; i < expr.trait_args.size(); i++)
-		{
-			if (expr.trait_args[i].pack)
-				throw OutsideSubset("pack-expanded builtin trait "
-				                    "argument");
-			types.push_back(
-				context.ResolveTypeId(*expr.trait_args[i].type));
-			// A dependent operand defers: the argument slot re-reads
-			// concretely at instantiation.
-			if (TypeIsDependent(types.back()))
-				throw OutsideSubset("dependent builtin trait operand");
-		}
-		// PA34 value trait: __array_rank(T) counts array dimensions.
-		if (expr.op_spelling == "__array_rank")
-		{
-			TypePtr bare = RemoveTopCv(types[0]);
-			unsigned long long rank = 0;
-			while (bare->kind == TK_ARRAY)
-			{
-				rank++;
-				bare = RemoveTopCv(bare->target);
-			}
-			return ConstValue(FT_UNSIGNED_LONG_INT, rank);
-		}
-		bool value = EvaluateBuiltinTraitOnTypes(
-			expr.op_spelling, types,
-			[&context](const TypePtr& type) {
-				context.RequireCompleteForLayout(type);
-			});
-		return MakeBool(value);
-	}
+		return EvaluateBuiltinTraitExpr(expr, context);
 	default:
 		throw OutsideSubset("expression form");
 	}
+}
+
+// PA34 builtin type trait over resolved operand types (the PA11
+// walker's slice; the analyzer's sem_trait.cpp path handles probe
+// traits and pack-expanded arguments).
+static ConstValue EvaluateBuiltinTraitExpr(const AstExpr& expr,
+                                           IConstExprContext& context)
+{
+	std::vector<TypePtr> types;
+	for (size_t i = 0; i < expr.trait_args.size(); i++)
+	{
+		if (expr.trait_args[i].pack)
+			throw OutsideSubset("pack-expanded builtin trait "
+			                    "argument");
+		types.push_back(
+			context.ResolveTypeId(*expr.trait_args[i].type));
+		// A dependent operand defers: the argument slot re-reads
+		// concretely at instantiation.
+		if (TypeIsDependent(types.back()))
+			throw OutsideSubset("dependent builtin trait operand");
+	}
+	// PA34 value trait: __array_rank(T) counts array dimensions.
+	if (expr.op_spelling == "__array_rank")
+	{
+		TypePtr bare = RemoveTopCv(types[0]);
+		unsigned long long rank = 0;
+		while (bare->kind == TK_ARRAY)
+		{
+			rank++;
+			bare = RemoveTopCv(bare->target);
+		}
+		return ConstValue(FT_UNSIGNED_LONG_INT, rank);
+	}
+	bool value = EvaluateBuiltinTraitOnTypes(
+		expr.op_spelling, types,
+		[&context](const TypePtr& type) {
+			context.RequireCompleteForLayout(type);
+		});
+	return MakeBool(value);
 }

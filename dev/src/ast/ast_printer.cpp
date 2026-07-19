@@ -452,6 +452,15 @@ void PrintExprTail(const AstExpr& expr, ostream& out, int depth)
 	}
 }
 
+// PA34: the C++17 init-statement of an if/switch, when present.
+void PrintInitStatement(const AstStmt& stmt, ostream& out, int depth)
+{
+	if (!stmt.for_init)
+		return;
+	Line(out, depth + 1, "init-statement");
+	PrintStmt(*stmt.for_init, out, depth + 2);
+}
+
 void PrintStmt(const AstStmt& stmt, ostream& out, int depth)
 {
 	switch (stmt.kind)
@@ -472,11 +481,7 @@ void PrintStmt(const AstStmt& stmt, ostream& out, int depth)
 	case SK_IF:
 		Line(out, depth, stmt.constexpr_if ? "constexpr-if-statement"
 		                                   : "if-statement");
-		if (stmt.for_init)
-		{
-			Line(out, depth + 1, "init-statement");
-			PrintStmt(*stmt.for_init, out, depth + 2);
-		}
+		PrintInitStatement(stmt, out, depth);
 		PrintCondition(*stmt.condition, out, depth + 1);
 		Line(out, depth + 1, "then");
 		PrintStmt(*stmt.then_branch, out, depth + 2);
@@ -488,11 +493,7 @@ void PrintStmt(const AstStmt& stmt, ostream& out, int depth)
 		break;
 	case SK_SWITCH:
 		Line(out, depth, "switch-statement");
-		if (stmt.for_init)
-		{
-			Line(out, depth + 1, "init-statement");
-			PrintStmt(*stmt.for_init, out, depth + 2);
-		}
+		PrintInitStatement(stmt, out, depth);
 		PrintCondition(*stmt.condition, out, depth + 1);
 		PrintStmt(*stmt.body, out, depth + 1);
 		break;
