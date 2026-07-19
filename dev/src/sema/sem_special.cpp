@@ -250,9 +250,15 @@ void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 			    assign->fn_defaulted[i])
 			{
 				if (is_move)
+				{
 					cls.move_assign_index = (int)i;
+					cls.move_assign_defaulted = true;
+				}
 				else
+				{
 					cls.copy_assign_index = (int)i;
+					cls.copy_assign_defaulted = true;
+				}
 				if (AssignBlockedByMembers(cls, is_move))
 				{
 					assign->fn_deleted.resize(count, false);

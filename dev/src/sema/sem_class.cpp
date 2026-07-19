@@ -1383,12 +1383,16 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	// implicit (computed) specification.
 	bool user_provided = false;
 	bool declared_noexcept = false;
+	bool computed_spec = false;
+	bool have_computed_spec = false;
 	if (ctor_index < 0)
 	{
 		EnsureImplicitDefaultCtor(cls);
 		ctor_type = MakeFunctionType(MakeFundamentalType(FT_VOID),
 		                             vector<TypePtr>(), false);
 		callee_unwind_no = cls.implicit_ctor_unwind_no;
+		computed_spec = cls.implicit_ctor_noexcept;
+		have_computed_spec = true;
 	}
 	else
 	{
@@ -1407,6 +1411,9 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 			EnsureImplicitDefaultCtor(cls);
 			callee_unwind_no = callee_unwind_no ||
 				cls.implicit_ctor_unwind_no;
+			computed_spec = declared_noexcept ||
+				cls.implicit_ctor_noexcept;
+			have_computed_spec = true;
 		}
 		if (selected.inherited_base)
 			EnsureInheritedCtor(cls, ctor_index);
@@ -1447,8 +1454,9 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	callee->is_method = true;
 	callee->special = action->special;
 	callee->unwind_no = callee_unwind_no;
-	callee->noexcept_decl = user_provided ? declared_noexcept
-	                                      : callee_unwind_no;
+	callee->noexcept_decl = user_provided
+		? declared_noexcept
+		: have_computed_spec ? computed_spec : callee_unwind_no;
 	call->children.push_back(std::move(callee));
 	if (address)
 	{

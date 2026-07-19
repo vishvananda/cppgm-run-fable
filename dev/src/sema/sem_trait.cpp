@@ -465,13 +465,15 @@ bool SemExprAnalyzer::ProbeTraitConstructible(const TypePtr& target,
 		SemNodePtr call = host_.MakeConstructorCall(
 			*cls, winner, false, SemNodePtr(), std::move(arg_nodes));
 		no_throw = !SemTreeMayThrow(*call);
-		if (winner >= 0)
+		// The implicitly declared default constructor resolves as
+		// winner -1; triviality follows the class facts either way.
+		if (arg_types.empty())
+			trivial = ClassHasTrivialDefaultCtor(*cls);
+		else if (winner >= 0)
 		{
 			const ClassCtor& ctor = cls->ctors[(size_t)winner];
 			ECtorKind kind = ClassifyCtorKind(bare->named, ctor);
-			if (arg_types.empty())
-				trivial = ClassHasTrivialDefaultCtor(*cls);
-			else if (kind == CK_COPY)
+			if (kind == CK_COPY)
 				trivial = ClassHasTrivialCopyCtor(*cls);
 			else if (kind == CK_MOVE)
 				trivial = ClassHasTrivialMoveCtor(*cls);

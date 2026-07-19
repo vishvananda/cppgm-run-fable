@@ -227,17 +227,66 @@ bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 // instantiated bodies (14.6.4.1) like the analyzer's reads.
 ConstValue SemBinder::LookupConstant(const AstName& name)
 {
-	const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
-	if (!found)
-		throw runtime_error("undeclared name " + TerminalName(name));
-	if (found->kind == SB_VARIABLE && found->owner &&
-	    found->owner->kind == SCOPE_CLASS)
-		OnStaticMemberReferenced(*found, found->has_value);
-	if (!found->has_value ||
-	    (found->value_from_def && !instantiating_))
-		throw runtime_error(found->name +
-		                    " is not a constant of the PA11 subset");
-	return found->value;
+	try
+	{
+		const ScopeBinding* found = ResolveTerminal(name, SLF_ANY);
+		if (!found)
+			throw runtime_error("undeclared name " +
+			                    TerminalName(name));
+		if (found->kind == SB_VARIABLE && found->owner &&
+		    found->owner->kind == SCOPE_CLASS)
+			OnStaticMemberReferenced(*found, found->has_value);
+		if (!found->has_value ||
+		    (found->value_from_def && !instantiating_))
+			throw runtime_error(found->name +
+			                    " is not a constant of the PA11 "
+			                    "subset");
+		return found->value;
+	}
+	catch (const std::exception&)
+	{
+		// Hosted shorthand: a declared-but-undefined
+		// std::is_nothrow_*_constructible<T>::value answers as the
+		// builtin trait (libstdc++-intrinsic style).
+		ConstValue shorthand;
+		if (NothrowTraitShorthand(name, shorthand))
+			return shorthand;
+		throw;
+	}
+}
+
+// The nothrow-constructible trait shorthand: default/copy/move forms
+// map onto __is_nothrow_constructible over the named type.
+bool SemBinder::NothrowTraitShorthand(const AstName& name,
+                                      ConstValue& out)
+{
+	if (name.parts.size() < 2)
+		return false;
+	const AstNamePart& last = name.parts.back();
+	if (last.kind != NP_IDENTIFIER || last.tilde ||
+	    last.identifier != "value")
+		return false;
+	const AstNamePart& id = name.parts[name.parts.size() - 2];
+	if (id.kind != NP_TEMPLATE_ID || id.arguments.size() != 1 ||
+	    !id.arguments[0].is_type || !id.arguments[0].type)
+		return false;
+	bool is_default = id.identifier == "is_nothrow_default_constructible";
+	bool is_copy = id.identifier == "is_nothrow_copy_constructible";
+	bool is_move = id.identifier == "is_nothrow_move_constructible";
+	if (!is_default && !is_copy && !is_move)
+		return false;
+	TypePtr type = builder_.ResolveTypeId(*id.arguments[0].type);
+	vector<TypePtr> types;
+	types.push_back(type);
+	if (is_copy)
+		types.push_back(MakeReferenceType(
+			MakeCvQualifiedType(type, true, false), false, true));
+	else if (is_move)
+		types.push_back(MakeReferenceType(type, true, true));
+	bool value = analyzer_.EvaluateSemaProbeTrait(
+		"__is_nothrow_constructible", types);
+	out = ConstValue(FT_BOOL, value ? 1 : 0);
+	return true;
 }
 
 bool SemBinder::TryFullConstant(const AstExpr& expr, ConstValue& out)

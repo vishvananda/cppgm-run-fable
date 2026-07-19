@@ -1046,11 +1046,20 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 	for (size_t i = 0; i < actions.size(); i++)
 		node->children.push_back(std::move(actions[i]));
 	bool may_throw = false;
+	bool spec_may_throw = false;
 	for (size_t i = 0; i < node->children.size(); i++)
+	{
 		if (NodeMayThrow(*node->children[i]))
 			may_throw = true;
+		// 15.4p14: the computed specification reads the subobject
+		// constructors' declared specifications (the 5.3.7 noexcept
+		// walk), not their body facts.
+		if (SemTreeMayThrow(*node->children[i]))
+			spec_may_throw = true;
+	}
 	node->unwind_no = !may_throw;
 	cls.implicit_ctor_unwind_no = !may_throw;
+	cls.implicit_ctor_noexcept = !spec_may_throw;
 	unit_.deferred.push_back(std::move(item));
 }
 

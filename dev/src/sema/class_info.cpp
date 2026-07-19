@@ -1304,9 +1304,10 @@ bool ClassHasTrivialCopyAssign(const ClassInfo& info)
 	if (FactCached(info, CF_TRIVIAL_COPY_ASSIGN, value))
 		return value;
 	// 12.8p25: virtual functions and virtual bases make copy assignment
-	// non-trivial.
-	value = !info.has_user_copy_assign && !info.is_polymorphic &&
-		!ClassHasVBases(info) &&
+	// non-trivial; an in-class `= default` declaration is not
+	// user-provided.
+	value = (!info.has_user_copy_assign || info.copy_assign_defaulted) &&
+		!info.is_polymorphic && !ClassHasVBases(info) &&
 		SubobjectsSatisfy<ClassHasTrivialCopyAssign>(info);
 	return FactStore(info, CF_TRIVIAL_COPY_ASSIGN, value);
 }
@@ -1316,7 +1317,8 @@ bool ClassHasTrivialMoveAssign(const ClassInfo& info)
 	bool value;
 	if (FactCached(info, CF_TRIVIAL_MOVE_ASSIGN, value))
 		return value;
-	value = !info.has_user_move_assign && !info.is_polymorphic &&
+	value = (!info.has_user_move_assign ||
+	         info.move_assign_defaulted) && !info.is_polymorphic &&
 		!ClassHasVBases(info) &&
 		SubobjectsSatisfy<ClassHasTrivialMoveAssign>(info);
 	return FactStore(info, CF_TRIVIAL_MOVE_ASSIGN, value);

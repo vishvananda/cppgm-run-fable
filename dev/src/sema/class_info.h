@@ -288,6 +288,14 @@ struct ClassInfo
 	bool has_user_copy_ctor = false;
 	bool has_user_move_ctor = false;
 	bool has_user_copy_assign = false;
+	// 12.8p25: an in-class `= default` assignment is user-declared
+	// but not user-provided; triviality follows the implicit rules.
+	bool copy_assign_defaulted = false;
+	// 15.4p14: the implicit default constructor's computed exception
+	// specification (declared-spec walk over the subobject inits),
+	// distinct from the body-derived unwind fact.
+	bool implicit_ctor_noexcept = false;
+	bool move_assign_defaulted = false;
 	bool has_user_move_assign = false;
 	bool specials_declared = false;
 	// Implicit assignment operators' overload positions (-1 absent).

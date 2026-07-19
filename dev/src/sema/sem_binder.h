@@ -1040,6 +1040,7 @@ public:
 		return method_.fn_name;
 	}
 private:
+	bool NothrowTraitShorthand(const AstName& name, ConstValue& out);
 	// Saved method contexts around member-signature composition.
 	vector<MethodContext> signature_contexts_;
 	bool in_bit_field_;
