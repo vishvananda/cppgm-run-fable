@@ -249,6 +249,21 @@ AstExprPtr AstParser::ParseCastExpression()
 		AstTypeIdPtr type;
 		if (ParseTypeId(type) && MatchSimple(OP_RPAREN))
 		{
+			// PA34 C compound literal: `( type-id ) { ... }` carries
+			// the braced list as the cast operand.
+			if (AtSimple(OP_LBRACE))
+			{
+				AstExprPtr braced = ParseBracedInitList();
+				if (braced)
+				{
+					AstExprPtr node = MakeExpr(EK_CSTYLE_CAST);
+					node->type = move(type);
+					node->operands.push_back(move(braced));
+					return node;
+				}
+				Restore(state);
+				return ParseUnaryExpression();
+			}
 			AstExprPtr operand = ParseCastExpression();
 			if (operand)
 			{
@@ -1212,6 +1227,24 @@ AstExprPtr AstParser::ParseLambdaExpression()
 
 AstExprPtr AstParser::ParseInitializerClause()
 {
+	// PA34 hosted designated element: `.name = initializer-clause`
+	// (single-level designators; only aggregate consumers accept it).
+	if (AtSimple(OP_DOT) && AtIdentifier(1) && AtSimple(OP_ASS, 2))
+	{
+		Advance();
+		AstExprPtr node = MakeExpr(EK_DESIGNATED);
+		AstNamePart part;
+		part.kind = NP_IDENTIFIER;
+		part.identifier = Peek().spelling;
+		node->name.parts.push_back(move(part));
+		Advance();
+		Advance();  // OP_ASS
+		AstExprPtr value = ParseInitializerClause();
+		if (!value)
+			return AstExprPtr();
+		node->operands.push_back(move(value));
+		return node;
+	}
 	if (AtSimple(OP_LBRACE))
 		return ParseBracedInitList();
 	return ParseAssignmentExpression();

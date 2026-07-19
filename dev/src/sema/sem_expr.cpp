@@ -121,7 +121,21 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 	case EK_THROW:
 		return AnalyzeThrow(expr.operands.empty()
 		                        ? 0 : expr.operands[0].get());
+	case EK_DESIGNATED:
+	{
+		// PA34 `.name = value`: the value analyzes normally and
+		// carries its member designator to the aggregate consumer.
+		SemValue value = Analyze(*expr.operands[0]);
+		value.designator = expr.name.parts[0].identifier;
+		return value;
+	}
 	case EK_CSTYLE_CAST:
+		// PA34 C compound literal `(T){...}`: the braced operand
+		// list-initializes a temporary of T (the functional shape).
+		if (expr.operands[0]->kind == EK_BRACED)
+			return AnalyzeFunctionalCast(
+				host_.ResolveCastTypeId(*expr.type),
+				expr.operands[0]->arguments);
 		return AnalyzeCastTo(host_.ResolveCastTypeId(*expr.type),
 		                     *expr.operands[0], true, OP_LPAREN, "");
 	case EK_KEYWORD_CAST:
@@ -1420,6 +1434,19 @@ void SemExprAnalyzer::AnalyzeArgumentList(const vector<AstExprPtr>& items,
 			SemValue value;
 			value.braced_list = true;
 			AnalyzeArgumentList(items[i]->arguments, value.list_values);
+			out.push_back(std::move(value));
+			continue;
+		}
+		// PA34: a designated braced element (`.m = {...}`) defers like
+		// a plain braced element, keeping its designator.
+		if (allow_braced && items[i]->kind == EK_DESIGNATED &&
+		    items[i]->operands[0]->kind == EK_BRACED)
+		{
+			SemValue value;
+			value.braced_list = true;
+			value.designator = items[i]->name.parts[0].identifier;
+			AnalyzeArgumentList(items[i]->operands[0]->arguments,
+			                    value.list_values);
 			out.push_back(std::move(value));
 			continue;
 		}

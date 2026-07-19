@@ -281,6 +281,9 @@ struct SemValue
 	// parameter from the analyzed elements.
 	bool braced_list = false;
 	vector<SemValue> list_values;
+	// PA34 designated element (`.name = value`): the named member the
+	// value binds to inside an aggregate initializer list.
+	string designator;
 };
 
 // One composed member-call candidate set (sem_member.cpp): ordinary

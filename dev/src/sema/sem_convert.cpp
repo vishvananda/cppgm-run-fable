@@ -884,6 +884,25 @@ ImplicitConversion ClassifyListInitClass(const ConversionSource& source,
 		result.user_ctor = (int)i;
 		return result;
 	}
+	// PA34 8.5.1: an aggregate destination without a matching
+	// constructor list-initializes field-wise (reached only after the
+	// constructor forms failed, so existing ranking is undisturbed).
+	if (cls.is_aggregate && !cls.has_user_ctor)
+	{
+		size_t named = 0;
+		for (size_t i = 0; i < cls.fields.size(); i++)
+			if (!cls.fields[i].name.empty())
+				named++;
+		if (source.list_items.size() <= named &&
+		    (!cls.is_union || source.list_items.size() <= 1))
+		{
+			result.viable = true;
+			result.rank = CR_USER;
+			result.user_class = dest->named;
+			result.aggregate_list = true;
+			return result;
+		}
+	}
 	return result;
 }
 

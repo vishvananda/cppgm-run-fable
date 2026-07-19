@@ -101,6 +101,10 @@ struct ImplicitConversion
 	// constructor (12.3.1).
 	const NamedTypeInfo* user_class;
 	int user_ctor;
+	// PA34 8.5.1: a braced list initializing an aggregate destination
+	// field-wise (no constructor is selected; the apply stage builds
+	// the field-wise temporary, designated elements included).
+	bool aggregate_list = false;
 	// CR_USER through a conversion function (12.3.2): the declaring
 	// class and its conversion-set index, plus the rank of the second
 	// standard conversion (13.3.3.2p3 ranking between user sequences).

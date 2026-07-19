@@ -96,6 +96,19 @@ size_t SemBinder::ConsumeAggregateClassItem(const ClassInfo& member_cls,
                                             vector<SemNodePtr>& out)
 {
 	const AstExpr* element = at < items.size() ? items[at].get() : 0;
+	// PA34 designated element: `.name = value` binds only its named
+	// field; a mismatch value-initializes this member as a hole.
+	bool designated_hole = false;
+	if (element && element->kind == EK_DESIGNATED)
+	{
+		if (element->name.parts[0].identifier == field.name)
+			element = element->operands[0].get();
+		else
+		{
+			element = 0;
+			designated_hole = true;
+		}
+	}
 	if (element && element->kind == EK_BRACED)
 	{
 		at++;
@@ -167,6 +180,15 @@ size_t SemBinder::ConsumeAggregateClassItem(const ClassInfo& member_cls,
 	}
 	if (member_cls.is_aggregate)
 	{
+		if (designated_hole)
+		{
+			// The skipped member value-initializes field-wise; the
+			// designated item stays for a later field.
+			static const vector<AstExprPtr> kNoItems;
+			ConsumeAggregateItems(member_cls, *member, kNoItems, 0,
+			                      false, out);
+			return at;
+		}
 		// Brace elision: the nested aggregate consumes the
 		// following items in place.
 		at = ConsumeAggregateItems(member_cls, *member, items,
@@ -215,6 +237,9 @@ size_t SemBinder::ConsumeAggregateItems(const ClassInfo& cls,
                                         size_t at, bool top_braced,
                                         vector<SemNodePtr>& out)
 {
+	// `out` accumulates across nesting levels, so a union's one-member
+	// rule counts only the actions this call appended.
+	size_t entry_actions = out.size();
 	for (size_t i = 0; i < cls.fields.size(); i++)
 	{
 		const ClassField& field = cls.fields[i];
@@ -222,8 +247,14 @@ size_t SemBinder::ConsumeAggregateItems(const ClassInfo& cls,
 			continue;
 		// 8.5.1p15: a braced union initializer initializes the first
 		// non-static data member only.
-		if (cls.is_union && !out.empty())
+		if (cls.is_union && out.size() > entry_actions)
 			break;
+		// PA34: `{.m = v}` over a union selects the named member
+		// instead of the first.
+		if (cls.is_union && at < items.size() &&
+		    items[at]->kind == EK_DESIGNATED &&
+		    items[at]->name.parts[0].identifier != field.name)
+			continue;
 		SemNodePtr member = MakeSemNode(SN_MEMBER_EXPRESSION);
 		member->name = field.name;
 		member->type = IsReferenceType(field.type) ? field.type->target
@@ -236,6 +267,16 @@ size_t SemBinder::ConsumeAggregateItems(const ClassInfo& cls,
 		member->bit_width = field.bit_width;
 		member->children.push_back(CloneSemNode(target_proto));
 		const AstExpr* element = at < items.size() ? items[at].get() : 0;
+		// PA34 designated element: `.name = value` binds only its
+		// named field; a mismatch value-initializes this field as a
+		// hole (the class/array consumers below re-check themselves).
+		if (element && element->kind == EK_DESIGNATED)
+		{
+			if (element->name.parts[0].identifier == field.name)
+				element = element->operands[0].get();
+			else
+				element = 0;
+		}
 		TypePtr bare = RemoveTopCv(field.type);
 		const ClassInfo* member_cls = bare->kind == TK_CLASS
 			? unit_.classes.Find(bare->named) : 0;
@@ -287,6 +328,15 @@ size_t SemBinder::ConsumeArrayItems(const ClassField& field,
 	if (element_type->kind == TK_CLASS)
 		throw OutsideBoundary("aggregate class array member");
 	const AstExpr* element = at < items.size() ? items[at].get() : 0;
+	// PA34: a designated item binds only its named field; a mismatch
+	// zero-fills this array as a hole (the item stays for its field).
+	if (element && element->kind == EK_DESIGNATED)
+	{
+		if (element->name.parts[0].identifier == field.name)
+			element = element->operands[0].get();
+		else
+			element = 0;
+	}
 	if (element && element->kind == EK_LITERAL &&
 	    element->literal_kind == PTK_LITERAL_ARRAY &&
 	    IsIntegralType(element_type))
@@ -340,6 +390,11 @@ size_t SemBinder::ConsumeArrayItems(const ClassField& field,
 			SubscriptNode(CloneSemNode(member_proto), j);
 		const AstExpr* item_expr = inner_at < source->size()
 			? (*source)[inner_at].get() : 0;
+		// PA34: a designated item belongs to a later field, ending an
+		// elided element run.
+		if (item_expr && !own_braces &&
+		    item_expr->kind == EK_DESIGNATED)
+			item_expr = 0;
 		if (item_expr && (own_braces || inner_at < source->size()))
 		{
 			if (!own_braces && item_expr->kind == EK_BRACED)
@@ -474,6 +529,10 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 	vector<SemNodePtr> actions;
 	for (size_t i = 0; i < named.size(); i++)
 	{
+		// 8.5.1p15: a union initializes exactly one member (the
+		// covered one, or the first when nothing is provided).
+		if (cls.is_union && i >= (cover ? cover : 1))
+			break;
 		const ClassField& field = *named[i];
 		SemValue value;
 		if (i < cover)
@@ -527,6 +586,71 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
                                              vector<SemValue> args)
 {
+	// PA34: designated arguments realign to their named fields, with
+	// explicitly value-initialized holes between them.
+	bool designated = false;
+	for (size_t i = 0; i < args.size(); i++)
+		if (!args[i].designator.empty())
+			designated = true;
+	if (designated)
+	{
+		const ClassInfo* cls0 = unit_.classes.Find(cls_in.entity);
+		if (!cls0)
+			throw runtime_error("aggregate class record missing");
+		if (cls0->is_union)
+		{
+			// 8.5.1p15: one member initializes; the synthesized union
+			// constructor covers only the leading member.
+			string first;
+			for (size_t f = 0; f < cls0->fields.size(); f++)
+				if (!cls0->fields[f].name.empty())
+				{
+					first = cls0->fields[f].name;
+					break;
+				}
+			if (args.size() != 1 || args[0].designator != first)
+				throw OutsideBoundary("designated union member form");
+			args[0].designator.clear();
+		}
+		else
+		{
+			vector<SemValue> aligned;
+			size_t at = 0;
+			for (size_t f = 0; f < cls0->fields.size() &&
+			     at < args.size(); f++)
+			{
+				const ClassField& field = cls0->fields[f];
+				if (field.name.empty())
+					continue;
+				SemValue& next = args[at];
+				if (!next.designator.empty() &&
+				    next.designator != field.name)
+				{
+					// A hole: the field value-initializes in place.
+					if (IsReferenceType(field.type))
+						throw runtime_error("reference member is not "
+						                    "initialized");
+					TypePtr bare = RemoveTopCv(field.type);
+					if (bare->kind == TK_CLASS)
+					{
+						vector<AstExprPtr> no_args;
+						aligned.push_back(analyzer_.MakeTemporaryObject(
+							bare, no_args, false));
+					}
+					else
+						aligned.push_back(ZeroValue(bare));
+					continue;
+				}
+				next.designator.clear();
+				aligned.push_back(std::move(next));
+				at++;
+			}
+			if (at < args.size())
+				throw runtime_error("designated initializer order does "
+				                    "not match the member order");
+			args.swap(aligned);
+		}
+	}
 	TypePtr adjusted = EnsureAggregateCtor(cls_in, args.size());
 	const ClassInfo& cls = *unit_.classes.Find(cls_in.entity);
 	const string& base_name = cls.members->name;

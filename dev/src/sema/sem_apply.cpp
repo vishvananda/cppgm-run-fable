@@ -167,6 +167,23 @@ void SemExprAnalyzer::ApplyListInitConversion(SemValue& value,
 		value.node = std::move(list);
 		return;
 	}
+	// PA34 8.5.1: an aggregate destination takes the field-wise
+	// temporary (designated elements realign inside).
+	if (conv.aggregate_list && conv.user_class)
+	{
+		const ClassInfo* cls = host_.Classes().Find(conv.user_class);
+		if (!cls)
+			throw runtime_error("aggregate class record missing");
+		SemNodePtr action =
+			host_.MakeAggregateTemporary(*cls, std::move(items));
+		TypePtr class_type = MakeNamedType(TK_CLASS, conv.user_class);
+		action->type = class_type;
+		action->category = VC_PRVALUE;
+		value.node = std::move(action);
+		value.type = class_type;
+		value.category = VC_PRVALUE;
+		return;
+	}
 	if (conv.user_ctor >= 0 && conv.user_class)
 	{
 		const ClassInfo* cls = host_.Classes().Find(conv.user_class);
