@@ -184,8 +184,11 @@ Also landed: deduction-guide declarations (template-head/explicit/
 plain forms parse and are accepted; guides only affect class template
 argument deduction, a later hosted stage), __is_identifier answering
 0 for language keywords, and [[...]] attributes between an alias
-name and `=`. 36 failures remain. The largest remaining clusters,
-with what each needs:
+name and `=`. 32 failures remain (trait corners landed:
+implicit-default triviality, defaulted-assign triviality, the
+implicit ctor's computed noexcept specification, and the
+is_nothrow_*_constructible shorthand). The largest remaining
+clusters, with what each needs:
 
 1. **Templated lambdas** (6): `[]<class U>(...)` — parse the template
    head into AstLambda; the three instantiated tests are all
