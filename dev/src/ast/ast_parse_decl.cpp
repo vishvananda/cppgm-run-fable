@@ -200,11 +200,77 @@ AstDeclPtr AstParser::ParseUsingDeclarationOrDirective()
 	return decl;
 }
 
+// deduction-guide: template-head? explicit? template-name
+// ( parameter-clause ) -> simple-template-id ; -- parsed and
+// discarded (guides only affect class template argument deduction).
+AstDeclPtr AstParser::ParseDeductionGuide()
+{
+	State state = Save();
+	if (AtSimple(KW_TEMPLATE))
+	{
+		Advance();
+		if (!MatchOpenAngle())
+		{
+			Restore(state);
+			return AstDeclPtr();
+		}
+		PushScope(NewTable(), true);
+		std::vector<AstTemplateParameter> params;
+		bool ok = AtCloseAngle() || ParseTemplateParameterList(params);
+		ok = ok && MatchCloseAngle();
+		if (!ok)
+		{
+			PopScope();
+			Restore(state);
+			return AstDeclPtr();
+		}
+		MatchSimple(KW_EXPLICIT);
+		if (!AtIdentifier() || !AtSimple(OP_LPAREN, 1))
+		{
+			PopScope();
+			Restore(state);
+			return AstDeclPtr();
+		}
+		Advance();
+		AstParameterClausePtr clause;
+		AstTypeIdPtr type;
+		if (!ParseParameterClause(clause) || !MatchSimple(OP_ARROW) ||
+		    !ParseTypeId(type) || !MatchSimple(OP_SEMICOLON))
+		{
+			PopScope();
+			Restore(state);
+			return AstDeclPtr();
+		}
+		PopScope();
+		return MakeDecl(DK_EMPTY);
+	}
+	MatchSimple(KW_EXPLICIT);
+	if (!AtIdentifier() || !AtSimple(OP_LPAREN, 1))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
+	Advance();
+	AstParameterClausePtr clause;
+	if (!ParseParameterClause(clause) || !MatchSimple(OP_ARROW))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
+	AstTypeIdPtr type;
+	if (!ParseTypeId(type) || !MatchSimple(OP_SEMICOLON))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
+	return MakeDecl(DK_EMPTY);
+}
+
 // alias-declaration: KW_USING TT_IDENTIFIER OP_ASS type-id ;
 AstDeclPtr AstParser::ParseAliasDeclaration()
 {
 	State state = Save();
-	if (!MatchSimple(KW_USING) || !AtIdentifier() || !AtSimple(OP_ASS, 1))
+	if (!MatchSimple(KW_USING) || !AtIdentifier())
 	{
 		Restore(state);
 		return AstDeclPtr();
@@ -212,7 +278,15 @@ AstDeclPtr AstParser::ParseAliasDeclaration()
 	AstDeclPtr decl = MakeDecl(DK_ALIAS);
 	decl->name = Peek().spelling;
 	Advance();
-	Advance();  // OP_ASS
+	// PA34: [[...]] attributes between the alias name and `=`.
+	while (SkipSquareAttribute())
+	{
+	}
+	if (!MatchSimple(OP_ASS))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
 	if (!ParseTypeId(decl->type) || !MatchSimple(OP_SEMICOLON))
 	{
 		Restore(state);
@@ -503,8 +577,18 @@ AstDeclPtr AstParser::ParseDeclarationForms()
 			if (instantiation)
 				return instantiation;
 		}
+		// PA34: a deduction-guide under a template head parses and
+		// is accepted (class template argument deduction is a later
+		// hosted stage; no guide is consulted yet).
+		if (AstDeclPtr guide = ParseDeductionGuide())
+			return guide;
 		return ParseTemplateDeclaration();
 	}
+	// PA34: non-template deduction guides (`box(const char*) ->
+	// box<int>;`), optionally explicit.
+	if (AtIdentifier() || (AtSimple(KW_EXPLICIT) && AtIdentifier(1)))
+		if (AstDeclPtr guide = ParseDeductionGuide())
+			return guide;
 	if (AtSimple(KW_STATIC_ASSERT))
 		return ParseStaticAssertDeclaration();
 	AstDeclPtr decl = ParseClassDeclaration();

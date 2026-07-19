@@ -264,6 +264,7 @@ private:
 	AstDeclPtr ParseEnumSpecifier();
 	AstDeclPtr ParseTemplateDeclaration();
 	bool ParseTemplateParameterList(std::vector<AstTemplateParameter>& params);
+	AstDeclPtr ParseDeductionGuide();
 	bool ParseTemplateParameter(AstTemplateParameter& parameter);
 	bool ParseTypeParameter(AstTemplateParameter& parameter);
 	bool ParseNonTypeParameter(AstTemplateParameter& parameter);

@@ -180,6 +180,45 @@ designated initializers (3), deduction guides (3), trait/invocable
 corners (~8), integer_pack/type_pack_element corners (~6),
 __complex__ (2), and misc parser/sema items.
 
+Also landed: deduction-guide declarations (template-head/explicit/
+plain forms parse and are accepted; guides only affect class template
+argument deduction, a later hosted stage), __is_identifier answering
+0 for language keywords, and [[...]] attributes between an alias
+name and `=`. 36 failures remain. The largest remaining clusters,
+with what each needs:
+
+1. **Templated lambdas** (6): `[]<class U>(...)` — parse the template
+   head into AstLambda; the three instantiated tests are all
+   immediately-invoked, so deduce the lambda's template arguments at
+   the call site and bind the closure with them in scope (the
+   parse-only tests never instantiate their enclosing templates).
+2. **Structured bindings** (4): `auto [a, b] = expr` over class
+   members with real reference semantics.
+3. **Designated initializers** (3): `.name = value` braced elements
+   (reorder against the aggregate's fields with value-initialized
+   holes at the braced-to-class conversion points) plus C compound
+   literals `(T){...}`.
+4. **C++17 statement forms** (2-3): if constexpr (discarded branches
+   must not instantiate), if/if-constexpr init-statements including
+   the alias form `if constexpr (using A = ...; A::value)`,
+   conditional explicit(bool) on constructors (store the expr on
+   AstMemberSpecifier; evaluate per instantiation), pack-expanded
+   base-specifier lists `Base<Args>...`.
+5. **Trait corners** (~8): __is_trivially_assignable/constructible
+   truthiness gaps (600/700 static_assert failures), nothrow
+   shorthand via std::is_nothrow_default_constructible member,
+   __is_nothrow_invocable caching, enable_if-gated constructor
+   selection in partial specializations, converting-ctor alias
+   compatibility.
+6. **Pack corners** (~6): __integer_pack/__type_pack_element nested
+   uses, sizeof...(pack) in enable_if, multiple pack ctor params.
+7. **__complex__** (2): `__complex__ long double` type +
+   __builtin_complex; likely model as a two-element aggregate with
+   real/imag halves (compile acceptance).
+8. **Misc**: libstdcxx-uninitialized-copy parse (read the namespace
+   body error context), nonprimary-embedded-class inline-var
+   constexpr image, lambda invoke_result pack run test.
+
 Next clusters, in leverage order:
 
 1. **Would-it-compile trait family** — landed via

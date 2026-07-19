@@ -291,9 +291,12 @@ long Preprocessor::EvaluateNamedProbeOperand(const string& op,
 	{
 		// clang: 1 when the operand is an ordinary identifier, 0 when
 		// it names a builtin/trait/keyword the compiler reserves.
-		return operand.size() == 1 &&
-			operand[0].kind == PPT_IDENTIFIER &&
-			!HostedProbeHasBuiltin(operand[0].data) ? 1 : 0;
+		if (operand.size() != 1 || operand[0].kind != PPT_IDENTIFIER)
+			return 0;
+		ETokenType keyword;
+		if (LookupSimpleTokenType(operand[0].data, keyword))
+			return 0;
+		return HostedProbeHasBuiltin(operand[0].data) ? 0 : 1;
 	}
 	if (operand.size() != 1 || operand[0].kind != PPT_IDENTIFIER)
 		return 0;
