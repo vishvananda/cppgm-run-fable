@@ -316,6 +316,9 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 				ExplicitSpecifierValue(decl.member_specifiers[i]);
 	// Composing the declarator over void yields exactly the
 	// constructor/destructor function type over the declared parameters.
+	// A pack-expanded parameter records its umbrella binding for the
+	// member scope below; a stale record must not leak in.
+	last_pack_param_ = PackParamRecord();
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
 		decl.declarator.get(), MakeFundamentalType(FT_VOID));
 	if (composed.type->kind != TK_FUNCTION)
@@ -470,6 +473,10 @@ Scope* SemBinder::MakeSpecialMemberScope(const string& name,
 		param_binding.type = parameter.type;
 		AddBinding(*fn_scope, param_binding);
 	}
+	// PA34: the composed declarator's pack-expanded parameter (if
+	// any) publishes its umbrella binding, so `a...` expansions in
+	// the ctor-initializer and body read it.
+	BindCapturedPackParameter(fn_scope);
 	return fn_scope;
 }
 

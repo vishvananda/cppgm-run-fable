@@ -273,6 +273,12 @@ bool SemExprAnalyzer::EvaluateSemaProbeTrait(const string& name,
 	}
 	if (name == "__is_convertible" || name == "__is_convertible_to")
 		return ProbeTraitConvertible(types[0], types[1]);
+	if (name == "__is_invocable" || name == "__is_nothrow_invocable")
+	{
+		bool can = ProbeTraitInvocable(types, no_throw);
+		return name == "__is_nothrow_invocable" ? can && no_throw
+		                                        : can;
+	}
 	if (name == "__is_assignable" ||
 	    name == "__is_nothrow_assignable" ||
 	    name == "__is_trivially_assignable")
@@ -509,6 +515,70 @@ bool SemExprAnalyzer::ProbeTraitConvertible(const TypePtr& from,
 	{
 		SemValue value = DeclvalSurrogate(from);
 		CopyInitialize(value, to, "trait probe");
+		host_.SwapUnevaluatedOperand(saved);
+		return true;
+	}
+	catch (const std::exception&)
+	{
+		host_.SwapUnevaluatedOperand(saved);
+		return false;
+	}
+}
+
+// 20.14 hosted invocable probe: would INVOKE(declval<F>(),
+// declval<Args>()...) compile; `no_throw` reports the selected
+// path's non-throwing specification.
+bool SemExprAnalyzer::ProbeTraitInvocable(const vector<TypePtr>& types,
+                                          bool& no_throw)
+{
+	no_throw = false;
+	if (types.empty())
+		return false;
+	TypePtr bare = types[0];
+	if (IsReferenceType(bare))
+		bare = bare->target;
+	bare = RemoveTopCv(bare);
+	bool saved = host_.SwapUnevaluatedOperand(true);
+	try
+	{
+		if (bare->kind == TK_CLASS)
+		{
+			host_.RequireCompleteType(bare->named);
+			vector<SemValue> operands;
+			for (size_t i = 0; i < types.size(); i++)
+				operands.push_back(DeclvalSurrogate(types[i]));
+			SemValue result;
+			if (!ResolveOperatorCall("()", operands, true, result))
+			{
+				host_.SwapUnevaluatedOperand(saved);
+				return false;
+			}
+			no_throw = !SemTreeMayThrow(*result.node);
+			host_.SwapUnevaluatedOperand(saved);
+			return true;
+		}
+		TypePtr fn;
+		if (bare->kind == TK_FUNCTION)
+			fn = bare;
+		else if (bare->kind == TK_POINTER &&
+		         bare->target->kind == TK_FUNCTION)
+			fn = bare->target;
+		if (!fn ||
+		    types.size() - 1 < fn->parameters.size() ||
+		    (types.size() - 1 > fn->parameters.size() &&
+		     !fn->variadic))
+		{
+			// Member pointers stay a documented boundary.
+			host_.SwapUnevaluatedOperand(saved);
+			return false;
+		}
+		for (size_t i = 0; i + 1 < types.size(); i++)
+			if (i < fn->parameters.size())
+			{
+				SemValue value = DeclvalSurrogate(types[i + 1]);
+				CopyInitialize(value, fn->parameters[i],
+				               "trait probe");
+			}
 		host_.SwapUnevaluatedOperand(saved);
 		return true;
 	}

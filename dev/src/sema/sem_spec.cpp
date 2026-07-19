@@ -167,13 +167,104 @@ const ScopeBinding* SemBinder::ResolveTypePackElementUse(
 	return slot.get();
 }
 
+// PA34 hosted __is_nothrow_invocable<F, Args...>: the checked-in
+// reference pins the GCC-13 behavior where the builtin trait wins
+// over a user class template of the same name; the use resolves to a
+// synthesized record whose `value` member carries the probe result.
+TemplateInfo& SemBinder::NothrowInvocableTemplate()
+{
+	if (!nothrow_invocable_tmpl_)
+	{
+		nothrow_invocable_tmpl_.reset(new TemplateInfo());
+		TemplateInfo& tmpl = *nothrow_invocable_tmpl_;
+		tmpl.name = "__is_nothrow_invocable";
+		tmpl.kind = TMPL_ALIAS;
+		tmpl.declaring = model_.global();
+		TemplateParam fn_param;
+		fn_param.kind = TPK_TYPE;
+		fn_param.name = "__f";
+		tmpl.params.push_back(fn_param);
+		TemplateParam pack_param;
+		pack_param.kind = TPK_TYPE;
+		pack_param.pack = true;
+		pack_param.name = "__args";
+		tmpl.params.push_back(pack_param);
+		tmpl.anchor = model_.CreateNamedTypeInfo(
+			"__is_nothrow_invocable", model_.global(),
+			"__is_nothrow_invocable");
+		tmpl.anchor->is_template_anchor = true;
+		tmpl.anchor->spec_template = &tmpl;
+	}
+	return *nothrow_invocable_tmpl_;
+}
+
+const ScopeBinding* SemBinder::ResolveNothrowInvocableUse(
+	const vector<TemplateArg>& args)
+{
+	TemplateInfo& tmpl = NothrowInvocableTemplate();
+	string key = TemplateArgumentKey(args);
+	unique_ptr<ScopeBinding>& slot = tmpl.dependent_uses[key];
+	if (slot)
+		return slot.get();
+	slot.reset(new ScopeBinding());
+	slot->kind = SB_TYPE_ALIAS;
+	slot->name = tmpl.name;
+	slot->owner = tmpl.declaring;
+	slot->home = tmpl.declaring;
+	bool dependent = false;
+	for (size_t i = 0; i < args.size(); i++)
+		if (TemplateArgIsDependent(args[i]))
+			dependent = true;
+	if (dependent)
+	{
+		slot->type = MakeTemplateSpecType(tmpl.anchor, args);
+		return slot.get();
+	}
+	vector<TypePtr> types;
+	for (size_t i = 0; i < args.size(); i++)
+	{
+		if (args[i].is_value || !args[i].type)
+			throw runtime_error("__is_nothrow_invocable takes type "
+			                    "arguments");
+		types.push_back(args[i].type);
+	}
+	bool no_throw = false;
+	bool can = analyzer_.ProbeTraitInvocable(types, no_throw);
+	bool value = can && no_throw;
+	const string spec_name =
+		tmpl.name + TemplateArgumentSpelling(args);
+	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
+		"struct " + spec_name, model_.global(), spec_name);
+	info->class_key = "struct";
+	info->complete = true;
+	info->size = 1;
+	info->alignment = 1;
+	Scope* members = model_.CreateScope(SCOPE_CLASS, spec_name,
+	                                    model_.global());
+	model_.SetMemberScope(info, members);
+	ScopeBinding value_binding;
+	value_binding.kind = SB_VARIABLE;
+	value_binding.name = "value";
+	value_binding.no_object = true;
+	value_binding.has_value = true;
+	value_binding.value = ConstValue(FT_BOOL, value ? 1 : 0);
+	value_binding.type = MakeCvQualifiedType(
+		MakeFundamentalType(FT_BOOL), true, false);
+	AddBinding(*members, value_binding);
+	slot->type = MakeNamedType(TK_CLASS, info);
+	return slot.get();
+}
+
 const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 	TemplateInfo& tmpl, const vector<TemplateArg>& args)
 {
 	// PA34: the builtin __type_pack_element selects its indexed
-	// element instead of substituting an aliased type.
+	// element instead of substituting an aliased type; the builtin
+	// __is_nothrow_invocable synthesizes its value record.
 	if (&tmpl == type_pack_element_tmpl_.get())
 		return ResolveTypePackElementUse(args);
+	if (&tmpl == nothrow_invocable_tmpl_.get())
+		return ResolveNothrowInvocableUse(args);
 	if (!tmpl.alias_type)
 		throw runtime_error("alias template " + tmpl.name +
 		                    " has no aliased type");

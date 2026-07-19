@@ -472,6 +472,12 @@ private:
 	TemplateInfo& TypePackElementTemplate();
 	const ScopeBinding* ResolveTypePackElementUse(
 		const vector<TemplateArg>& args);
+	// PA34 builtin trait template __is_nothrow_invocable<F, Args...>
+	// (sem_spec.cpp): wins over user declarations per the checked-in
+	// reference; resolves to a synthesized value record.
+	TemplateInfo& NothrowInvocableTemplate();
+	const ScopeBinding* ResolveNothrowInvocableUse(
+		const vector<TemplateArg>& args);
 	// A SCOPE_TEMPLATE_PARAMS scope under the template's declaring
 	// scope with each parameter name aliased to its argument (type
 	// aliases and constant-value bindings).
@@ -1044,6 +1050,8 @@ private:
 	// for its index parameter's declared type.
 	std::unique_ptr<TemplateInfo> type_pack_element_tmpl_;
 	std::unique_ptr<AstTemplateParameter> type_pack_index_param_;
+	// PA34 __is_nothrow_invocable shadow record.
+	std::unique_ptr<TemplateInfo> nothrow_invocable_tmpl_;
 
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;

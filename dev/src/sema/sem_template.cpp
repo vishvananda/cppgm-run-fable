@@ -472,6 +472,15 @@ void SemBinder::CaptureQualifiedClassTemplate(const AstDecl& decl,
 const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 	const AstNamePart& part, Scope* prefix)
 {
+	// PA34: the builtin trait template wins even over a user class
+	// template of the same name (the checked-in reference pins the
+	// GCC-13 behavior).
+	if (!prefix && part.identifier == "__is_nothrow_invocable")
+	{
+		TemplateInfo& builtin = NothrowInvocableTemplate();
+		return ResolveNothrowInvocableUse(
+			ResolveTemplateArgumentList(builtin, part));
+	}
 	const ScopeBinding* found = prefix
 		? QualifiedLookup(*prefix, part.identifier, SLF_ANY)
 		: UnqualifiedLookup(current_, part.identifier, SLF_ANY);

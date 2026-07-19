@@ -353,6 +353,10 @@ public:
 	                          bool& no_throw, bool& trivial);
 	bool ProbeTraitDestructible(const TypePtr& target, bool& no_throw,
 	                            bool& trivial);
+	// PA34 hosted: INVOKE(declval<F>(), declval<Args>()...) viability
+	// over the type list (types[0] is the callable).
+	bool ProbeTraitInvocable(const vector<TypePtr>& types,
+	                         bool& no_throw);
 	// PA34 fold-expressions over constant operands (sem_trait.cpp).
 	SemValue AnalyzeFold(const AstExpr& expr);
 	// A constructed (or aggregate-initialized) temporary of a class
