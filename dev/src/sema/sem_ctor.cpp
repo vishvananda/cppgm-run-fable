@@ -1256,3 +1256,41 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		return -1;
 	return (int)winner;
 }
+
+SemNodePtr SemBinder::MakeDestructorCall(const ClassInfo& cls,
+                                         bool base_entry,
+                                         SemNodePtr address)
+{
+	if (!cls.has_user_dtor)
+		EnsureImplicitDtor(cls);
+	if (cls.dtor_deleted)
+		throw runtime_error("use of deleted destructor");
+	CheckMemberAccess(cls.members, cls.dtor_access, "destructor");
+	TypePtr dtor_type = MethodAdjustedType(
+		cls, MakeFunctionType(MakeFundamentalType(FT_VOID),
+		                      vector<TypePtr>(), false));
+	const string& base_name = cls.members->name;
+	string qualified = QualifiedScopePath(cls.members->parent) +
+		base_name + "::~" + base_name;
+	SemNodePtr action = MakeSemNode(SN_DESTRUCTOR_ACTION);
+	action->name = qualified;
+	action->special = base_entry ? SF_DESTRUCTOR_BASE : SF_DESTRUCTOR;
+	SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
+	call->type = MakeFundamentalType(FT_VOID);
+	call->category = VC_PRVALUE;
+	SemNodePtr callee = MakeSemNode(SN_CALLEE);
+	callee->name = qualified;
+	callee->type = dtor_type;
+	callee->entity_scope = cls.members;
+	callee->entity_name = "~" + base_name;
+	callee->is_method = true;
+	callee->special = action->special;
+	callee->unwind_no = cls.has_user_dtor ? cls.dtor_unwind_no
+	                                      : cls.implicit_dtor_unwind_no;
+	callee->noexcept_decl = callee->unwind_no;
+	call->children.push_back(std::move(callee));
+	if (address)
+		call->children.push_back(std::move(address));
+	action->children.push_back(std::move(call));
+	return action;
+}

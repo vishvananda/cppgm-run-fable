@@ -212,14 +212,13 @@ void SemBinder::DeclareClosureSpecialMembers(ClassInfo& cls)
 	}
 }
 
-void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
+// Classifies the user-declared assignment operators (12.8p17/p19);
+// explicitly-defaulted ones synthesize like the implicit members.
+void SemBinder::ClassifyUserAssignOperators(ClassInfo& cls)
 {
-	if (cls.specials_declared)
+	ScopeBinding* assign = FindOwnBinding(*cls.members, "operator =");
+	if (!assign)
 		return;
-	cls.specials_declared = true;
-	// Classify the user-declared assignment operators (12.8p17/p19).
-	// Explicitly-defaulted ones synthesize like the implicit members.
-	if (ScopeBinding* assign = FindOwnBinding(*cls.members, "operator ="))
 	{
 		// PA21: a template-only operator= binding has no ordinary
 		// overload entries (12.8p17 last sentence: an assignment
@@ -286,6 +285,14 @@ void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
 			ctor.ignore_in_overload = true;
 		}
 	}
+}
+
+void SemBinder::DeclareImplicitSpecialMembers(ClassInfo& cls)
+{
+	if (cls.specials_declared)
+		return;
+	cls.specials_declared = true;
+	ClassifyUserAssignOperators(cls);
 	bool suppress_moves = cls.has_user_copy_ctor || cls.has_user_move_ctor ||
 		cls.has_user_copy_assign || cls.has_user_move_assign ||
 		cls.dtor_user_declared;

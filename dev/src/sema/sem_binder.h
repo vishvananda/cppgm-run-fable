@@ -1041,6 +1041,7 @@ public:
 	}
 private:
 	bool NothrowTraitShorthand(const AstName& name, ConstValue& out);
+	void ClassifyUserAssignOperators(ClassInfo& cls);
 	// Saved method contexts around member-signature composition.
 	vector<MethodContext> signature_contexts_;
 	bool in_bit_field_;
