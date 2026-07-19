@@ -455,6 +455,86 @@ void SemBinder::BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
 
 // The function scope of a constructor/destructor body, with its
 // declared parameters bound.
+// PA34 GNU complex: `_Complex T` models as a synthesized two-field
+// record ({__real, __imag}) bound at global scope on first use, so
+// layout, copies, and the host ABI classification follow the ordinary
+// class rules (the SysV complex ABI matches the pair layout). This is
+// the compile-acceptance model; complex arithmetic stays a boundary.
+TypePtr SemBinder::MakeGnuComplexType(const TypePtr& element)
+{
+	TypePtr bare = RemoveTopCv(element);
+	if (bare->kind != TK_FUNDAMENTAL)
+		throw OutsideBoundary("complex element type");
+	EFundamentalType ft = bare->fundamental;
+	if (ft != FT_FLOAT && ft != FT_DOUBLE && ft != FT_LONG_DOUBLE)
+		throw OutsideBoundary("complex element type");
+	std::map<int, TypePtr>::iterator found = complex_types_.find(ft);
+	if (found != complex_types_.end())
+		return found->second;
+	const char* stem = ft == FT_FLOAT ? "__cppgm_complex_float"
+		: ft == FT_DOUBLE ? "__cppgm_complex_double"
+		                  : "__cppgm_complex_long_double";
+	AstDeclPtr decl(new AstDecl(DK_CLASS));
+	decl->has_name = true;
+	AstNamePart name_part;
+	name_part.kind = NP_IDENTIFIER;
+	name_part.identifier = stem;
+	decl->class_name.parts.push_back(std::move(name_part));
+	decl->class_key = KW_STRUCT;
+	decl->class_key_spelling = "struct";
+	const char* field_names[2] = {"__real", "__imag"};
+	for (int f = 0; f < 2; f++)
+	{
+		AstDeclPtr member(new AstDecl(DK_SIMPLE));
+		if (ft == FT_LONG_DOUBLE)
+		{
+			AstSpecifier spec_long;
+			spec_long.kind = SPEC_KEYWORD;
+			spec_long.keyword = KW_LONG;
+			spec_long.spelling = "long";
+			member->specifiers.push_back(std::move(spec_long));
+		}
+		AstSpecifier spec_base;
+		spec_base.kind = SPEC_KEYWORD;
+		spec_base.keyword = ft == FT_FLOAT ? KW_FLOAT : KW_DOUBLE;
+		spec_base.spelling = ft == FT_FLOAT ? "float" : "double";
+		member->specifiers.push_back(std::move(spec_base));
+		AstInitDeclarator declarator;
+		declarator.declarator.reset(new AstDeclarator());
+		AstDeclaratorItem id_item;
+		id_item.kind = DI_ID;
+		AstNamePart id_part;
+		id_part.kind = NP_IDENTIFIER;
+		id_part.identifier = field_names[f];
+		id_item.name.parts.push_back(std::move(id_part));
+		declarator.declarator->items.push_back(std::move(id_item));
+		member->declarators.push_back(std::move(declarator));
+		decl->members.push_back(std::move(member));
+	}
+	// Bind at global scope, detached from the open sem-tree position.
+	Scope* saved = current_;
+	current_ = model_.global();
+	SemNodePtr holder = MakeSemNode(SN_COMPOUND_STATEMENT);
+	parents_.push_back(holder.get());
+	TypePtr type;
+	try
+	{
+		BindClassDeclaration(*decl);
+		type = ResolveTypeName(decl->class_name);
+	}
+	catch (...)
+	{
+		parents_.pop_back();
+		current_ = saved;
+		throw;
+	}
+	parents_.pop_back();
+	current_ = saved;
+	synth_decls_.push_back(std::move(decl));
+	complex_types_[ft] = type;
+	return type;
+}
+
 Scope* SemBinder::MakeSpecialMemberScope(const string& name,
                                          const DeclaratorInfo& composed,
                                          ClassInfo& cls)

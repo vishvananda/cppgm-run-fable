@@ -25,6 +25,14 @@ struct ITypeBuilderHost
 	// declaration used inside a specifier sequence: bind it and return
 	// the type it names.
 	virtual TypePtr BindNestedTypeSpecifier(const AstDecl& decl) = 0;
+	// PA34 GNU _Complex/__complex__: the two-field record over the
+	// element type (the full binder synthesizes it; null marks a tool
+	// without complex support).
+	virtual TypePtr MakeGnuComplexType(const TypePtr& element)
+	{
+		(void)element;
+		return TypePtr();
+	}
 	// PA19: expands a pack-expanded function parameter (`Args...
 	// args`) into its per-element composed parameters. False when no
 	// concrete pack is in scope (abstract pattern contexts keep the

@@ -186,6 +186,9 @@ struct ISemExprHost
 	// immediate-invocation arguments and yields the bound closure.
 	virtual SemValue AnalyzeTemplatedLambdaInvoke(
 		const AstExpr& expr, const vector<SemValue>& args) = 0;
+	// PA34 GNU complex: the synthesized two-field record over the
+	// element type.
+	virtual TypePtr MakeGnuComplexType(const TypePtr& element) = 0;
 	// PA29 GNU statement expressions: the binder binds the compound
 	// statement in place; the last expression statement's value is
 	// the expression's value.
@@ -653,6 +656,8 @@ private:
 	bool TryAnalyzeAtomicBuiltin(const AstExpr& expr, const string& name,
 	                             SemValue& out);
 	SemValue AnalyzeBuiltinInvoke(const AstExpr& expr);
+	SemValue AnalyzeBuiltinComplex(const AstExpr& expr);
+	SemValue AnalyzeComplexPart(const AstExpr& expr);
 	SemValue AnalyzeOffsetof(const AstExpr& expr);
 	const ClassField* OffsetofField(const ClassInfo& cls,
 	                                const string& name,

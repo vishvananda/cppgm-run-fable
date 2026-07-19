@@ -56,6 +56,7 @@ const char * const kSupportedBuiltins[] = {
 	"__builtin_addressof",
 	"__builtin_offsetof",
 	"__builtin_invoke",
+	"__builtin_complex",
 	"__builtin_operator_new",
 	"__builtin_operator_delete",
 	"__builtin_add_overflow",

@@ -31,6 +31,7 @@ enum EExprKind
 	EK_PACK_EXPANSION,   // initializer-clause ...
 	EK_BRACED,           // braced-init-list
 	EK_DESIGNATED,       // PA34: `.name = clause` braced element
+	EK_COMPLEX_PART,     // PA34 GNU __real__/__imag__ operand
 	EK_THROW,            // throw-expression (15.1)
 	EK_STATEMENT_EXPR,   // GNU ( compound-statement ) expression
 	EK_VA_ARG,           // __builtin_va_arg ( expr , type-id )

@@ -180,12 +180,18 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 	bool sign_combinable = false;
 	bool is_const = false;
 	bool is_volatile = false;
+	bool complex_form = false;
 	for (size_t i = 0; i < seq.size(); i++)
 	{
 		const AstSpecifier& spec = seq[i];
 		TypePtr resolved;
 		switch (spec.kind)
 		{
+		case SPEC_COMPLEX:
+			// PA34 GNU _Complex/__complex__: wraps the combined
+			// element type below.
+			complex_form = true;
+			continue;
 		case SPEC_KEYWORD:
 			ConsumeSpecifierKeyword(spec, allow_storage, info, simple,
 			                        is_const, is_volatile);
@@ -259,6 +265,12 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 	else
 		base = named ? named
 			: MakeFundamentalType(CombineSimpleTypeSpecifiers(simple));
+	if (complex_form)
+	{
+		base = host_.MakeGnuComplexType(base);
+		if (!base)
+			throw OutsideBoundary("complex type");
+	}
 	info.type = MakeCvQualifiedType(base, is_const, is_volatile);
 	return info;
 }

@@ -75,6 +75,8 @@ bool SemExprAnalyzer::TryAnalyzeMagicBuiltin(const AstExpr& expr,
 		out = AnalyzeBuiltinFpclassify(expr);
 	else if (name == "__builtin_invoke")
 		out = AnalyzeBuiltinInvoke(expr);
+	else if (name == "__builtin_complex")
+		out = AnalyzeBuiltinComplex(expr);
 	else if (name == "__builtin_FUNCTION")
 		out = MakeFunctionNameLiteral(host_.CurrentFunctionName());
 	else if ((name.compare(0, 13, "__c11_atomic_") == 0 ||
@@ -355,6 +357,83 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinFpclassify(const AstExpr& expr)
 	CheckCallArguments(fn_type, args);
 	return MakeBuiltinCallResult("__builtin_fpclassify", fn_type, args,
 	                             true);
+}
+
+// PA34 GNU __builtin_complex(re, im): the complex value of its parts;
+// the value is the synthesized complex record initialized field-wise.
+SemValue SemExprAnalyzer::AnalyzeBuiltinComplex(const AstExpr& expr)
+{
+	if (expr.arguments.size() != 2)
+		throw runtime_error("__builtin_complex takes two arguments");
+	vector<SemValue> args;
+	AnalyzeArgumentList(expr.arguments, args);
+	TypePtr element = RemoveTopCv(args[0].type);
+	TypePtr other = RemoveTopCv(args[1].type);
+	if (element->kind != TK_FUNDAMENTAL ||
+	    !IsFloatingFundamental(element->fundamental) ||
+	    !TypeEquals(element, other))
+		throw runtime_error("__builtin_complex operands must be the "
+		                    "same floating type");
+	TypePtr complex_type = host_.MakeGnuComplexType(element);
+	const ClassInfo* cls = host_.Classes().Find(complex_type->named);
+	if (!cls)
+		throw runtime_error("complex record missing");
+	SemNodePtr action =
+		host_.MakeAggregateTemporary(*cls, std::move(args));
+	SemValue value;
+	value.type = complex_type;
+	value.category = VC_PRVALUE;
+	action->type = complex_type;
+	action->category = VC_PRVALUE;
+	value.node = std::move(action);
+	return value;
+}
+
+// GNU __real__/__imag__: a complex record selects its field; a real
+// arithmetic operand is its own real part with a zero imaginary part.
+SemValue SemExprAnalyzer::AnalyzeComplexPart(const AstExpr& expr)
+{
+	bool real = expr.op_spelling.compare(0, 6, "__real") == 0;
+	SemValue operand = Analyze(*expr.operands[0]);
+	TypePtr bare = RemoveTopCv(operand.type);
+	if (bare->kind == TK_CLASS)
+	{
+		const ClassInfo* cls = host_.Classes().Find(bare->named);
+		const ClassField* field = 0;
+		if (cls)
+			for (size_t i = 0; i < cls->fields.size(); i++)
+				if (cls->fields[i].name ==
+				    (real ? "__real" : "__imag"))
+					field = &cls->fields[i];
+		if (!field)
+			throw runtime_error("__real__/__imag__ needs a complex "
+			                    "operand");
+		SemValue value;
+		value.type = field->type;
+		value.category = VC_LVALUE;
+		value.node = MakeSemNode(SN_MEMBER_EXPRESSION);
+		value.node->name = field->name;
+		value.node->type = field->type;
+		value.node->category = VC_LVALUE;
+		value.node->member_offset = field->offset;
+		value.node->children.push_back(std::move(operand.node));
+		return value;
+	}
+	if (!IsArithmeticType(bare))
+		throw runtime_error("__real__/__imag__ operand type");
+	if (real)
+		return operand;
+	SemValue zero;
+	zero.type = MakeFundamentalType(FT_INT);
+	zero.category = VC_PRVALUE;
+	zero.node = MakeSemNode(SN_LITERAL);
+	zero.node->token = "0";
+	zero.node->type = zero.type;
+	zero.node->category = VC_PRVALUE;
+	zero.node->has_value = true;
+	zero.node->value = ConstValue(FT_INT, 0);
+	CopyInitialize(zero, bare, "imaginary part");
+	return zero;
 }
 
 // 20.8.2 INVOKE over the analyzed first argument: member function

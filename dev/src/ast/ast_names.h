@@ -96,7 +96,8 @@ enum ESpecifierKind
 	SPEC_NESTED_DECL,// class-specifier / enum-specifier /
 	                 // class-forward-declaration used as a specifier
 	SPEC_TRANSFORM,  // PA33 builtin transform: __decay ( type-id )
-	SPEC_BITINT      // PA34 _BitInt ( constant-expression )
+	SPEC_BITINT,     // PA34 _BitInt ( constant-expression )
+	SPEC_COMPLEX     // PA34 GNU _Complex/__complex__ qualification
 };
 
 struct AstSpecifier

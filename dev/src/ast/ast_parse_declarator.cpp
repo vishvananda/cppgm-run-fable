@@ -206,6 +206,19 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		Restore(state);
 		return false;
 	}
+	// GNU _Complex/__complex__: the complex qualification records
+	// beside the element keywords (`__complex__ long double`).
+	if (token.kind == PTOK_IDENTIFIER &&
+	    (token.spelling == "_Complex" ||
+	     token.spelling == "__complex__") && type_state != kNamedType)
+	{
+		AstSpecifier spec;
+		spec.kind = SPEC_COMPLEX;
+		spec.spelling = token.spelling;
+		Advance();
+		seq.push_back(move(spec));
+		return true;
+	}
 	// GNU __int128: a base-type specifier spelled as an identifier;
 	// sign keywords may appear on either side (`__int128 unsigned`),
 	// so it sets the keyword-combination state, not the named state.

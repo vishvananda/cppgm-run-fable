@@ -521,6 +521,25 @@ AstExprPtr AstParser::ParseDeleteExpression()
 AstExprPtr AstParser::ParseUnaryExpression()
 {
 	const ParseToken& token = Peek();
+	// GNU __real__/__imag__ (also the __real/__imag spellings): a
+	// complex part selection; an unparsable operand falls back to the
+	// ordinary identifier reading.
+	if (token.kind == PTOK_IDENTIFIER &&
+	    (token.spelling == "__real__" || token.spelling == "__real" ||
+	     token.spelling == "__imag__" || token.spelling == "__imag"))
+	{
+		State state = Save();
+		string spelling = token.spelling;
+		Advance();
+		if (AstExprPtr operand = ParseCastExpression())
+		{
+			AstExprPtr node = MakeExpr(EK_COMPLEX_PART);
+			node->op_spelling = spelling;
+			node->operands.push_back(move(operand));
+			return node;
+		}
+		Restore(state);
+	}
 	if (token.kind == PTOK_SIMPLE)
 	{
 		switch (token.simple_type)

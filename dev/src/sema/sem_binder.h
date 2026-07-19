@@ -478,6 +478,9 @@ private:
 	TemplateInfo& NothrowInvocableTemplate();
 	const ScopeBinding* ResolveNothrowInvocableUse(
 		const vector<TemplateArg>& args);
+	// PA34 GNU complex (sem_class.cpp): `_Complex T` models as a
+	// synthesized two-field record bound at global scope on demand.
+	virtual TypePtr MakeGnuComplexType(const TypePtr& element);
 	// A SCOPE_TEMPLATE_PARAMS scope under the template's declaring
 	// scope with each parameter name aliased to its argument (type
 	// aliases and constant-value bindings).
@@ -926,6 +929,10 @@ private:
 	// fragments (owned here) and the per-body hidden-name counter.
 	vector<AstExprPtr> synth_exprs_;
 	vector<std::unique_ptr<AstInitializer>> synth_inits_;
+	// PA34 GNU complex: synthesized record declarations and the
+	// per-element-type cache (sem_class.cpp MakeGnuComplexType).
+	vector<AstDeclPtr> synth_decls_;
+	std::map<int, TypePtr> complex_types_;
 	int range_hidden_counter_ = 0;
 
 	SemUnit& unit_;
