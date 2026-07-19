@@ -337,7 +337,8 @@ TypePtr DeclBinder::ResolveBuiltinTypeName(const AstName& name)
 	if (name.parts.size() == 1 &&
 	    name.parts[0].kind == NP_IDENTIFIER && !name.parts[0].tilde)
 	{
-		if (name.parts[0].identifier == "__int128_t")
+		if (name.parts[0].identifier == "__int128_t" ||
+		    name.parts[0].identifier == "__int128")
 			return MakeFundamentalType(FT_INT128);
 		if (name.parts[0].identifier == "__uint128_t")
 			return MakeFundamentalType(FT_UINT128);

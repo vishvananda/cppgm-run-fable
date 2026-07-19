@@ -58,14 +58,22 @@ enum EScopeBindingKind
 
 // A typed value of the PA11 integral constant-expression subset. For
 // signed types the 64 stored bits are the sign-extended value.
+// PA34: 128-bit values carry their upper word in `high` (the two-arg
+// form sign-extends a 64-bit source for __int128).
 struct ConstValue
 {
-	ConstValue() : type(FT_INT), bits(0) {}
+	ConstValue() : type(FT_INT), bits(0), high(0) {}
 	ConstValue(EFundamentalType type_in, unsigned long long bits_in)
-		: type(type_in), bits(bits_in) {}
+		: type(type_in), bits(bits_in),
+		  high(type_in == FT_INT128 && (long long)bits_in < 0 ? ~0ull
+		                                                      : 0) {}
+	ConstValue(EFundamentalType type_in, unsigned long long bits_in,
+	           unsigned long long high_in)
+		: type(type_in), bits(bits_in), high(high_in) {}
 
 	EFundamentalType type;
 	unsigned long long bits;
+	unsigned long long high;  // upper word of a 128-bit value
 };
 
 struct Scope;

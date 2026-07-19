@@ -164,6 +164,44 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		Restore(state);
 		return false;
 	}
+	// GNU __int128: a base-type specifier spelled as an identifier;
+	// sign keywords may appear on either side (`__int128 unsigned`),
+	// so it sets the keyword-combination state, not the named state.
+	if (token.kind == PTOK_IDENTIFIER && token.spelling == "__int128" &&
+	    type_state != kNamedType)
+	{
+		AstSpecifier spec;
+		spec.kind = SPEC_TYPE_NAME;
+		AstNamePart part;
+		part.kind = NP_IDENTIFIER;
+		part.identifier = token.spelling;
+		spec.name.parts.push_back(move(part));
+		Advance();
+		seq.push_back(move(spec));
+		type_state = kKeywordType;
+		return true;
+	}
+	// Clang/C23 _BitInt ( constant-expression ): a bit-precise base
+	// type; sign keywords combine like __int128.
+	if (token.kind == PTOK_IDENTIFIER && token.spelling == "_BitInt" &&
+	    type_state != kNamedType && AtSimple(OP_LPAREN, 1))
+	{
+		State state = Save();
+		Advance();
+		Advance();
+		AstExprPtr width = ParseConditionalExpression();
+		if (width && MatchSimple(OP_RPAREN))
+		{
+			AstSpecifier spec;
+			spec.kind = SPEC_BITINT;
+			spec.decltype_expr = move(width);
+			seq.push_back(move(spec));
+			type_state = kKeywordType;
+			return true;
+		}
+		Restore(state);
+		return false;
+	}
 	// A builtin trait name followed by ( is always the PA34 trait
 	// expression, never an unknown type-name (`X<__is_function(T)>`
 	// must not re-read as a functional cast).
@@ -233,8 +271,10 @@ bool AstParser::ParsePtrOperators(AstDeclarator& declarator)
 	for (;;)
 	{
 		const ParseToken& token = Peek();
-		if (AtSimple(OP_STAR))
+		if (AtSimple(OP_STAR) || AtSimple(OP_XOR))
 		{
+			// Clang block pointers (`^`) compose as ordinary function
+			// pointers for hosted compile acceptance.
 			AstDeclaratorItem item;
 			item.kind = DI_PTR;
 			item.token = OP_STAR;
@@ -269,14 +309,35 @@ bool AstParser::ParsePtrOperators(AstDeclarator& declarator)
 			item.name = move(qualifier);
 			declarator.items.push_back(move(item));
 		}
-		while (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
+		for (;;)
 		{
-			AstDeclaratorItem cv;
-			cv.kind = DI_CV;
-			cv.token = Peek().simple_type;
-			cv.spelling = Peek().spelling;
-			Advance();
-			declarator.items.push_back(move(cv));
+			if (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
+			{
+				AstDeclaratorItem cv;
+				cv.kind = DI_CV;
+				cv.token = Peek().simple_type;
+				cv.spelling = Peek().spelling;
+				Advance();
+				declarator.items.push_back(move(cv));
+				continue;
+			}
+			// Clang nullability qualifiers and GNU restrict: hosted
+			// annotations with no C++ object-model effect, dropped.
+			if (AtIdentifierSpelled("_Nonnull") ||
+			    AtIdentifierSpelled("_Nullable") ||
+			    AtIdentifierSpelled("_Null_unspecified") ||
+			    AtIdentifierSpelled("_Nullable_result") ||
+			    AtIdentifierSpelled("__restrict") ||
+			    AtIdentifierSpelled("__restrict__"))
+			{
+				Advance();
+				continue;
+			}
+			// GNU `* __attribute__((...))` mid-declarator attributes.
+			State adorned = Save();
+			SkipDeclAdornments();
+			if (adorned.pos == Save().pos)
+				break;
 		}
 	}
 }
@@ -593,7 +654,8 @@ bool AstParser::ParseParameterDeclaration(AstParameter& parameter)
 	State declarator_state = Save();
 	AstDeclaratorPtr abstract;
 	bool have = false;
-	if (ParseDeclarator(abstract, false) && AtParameterFollow())
+	if (ParseDeclarator(abstract, false) &&
+	    (SkipDeclAdornments(), AtParameterFollow()))
 	{
 		if (!abstract->Empty())
 			parameter.declarator = move(abstract);
@@ -603,7 +665,10 @@ bool AstParser::ParseParameterDeclaration(AstParameter& parameter)
 	{
 		Restore(declarator_state);
 		AstDeclaratorPtr named;
-		if (ParseDeclarator(named, true) && AtParameterFollow())
+		// PA34: post-declarator parameter attributes
+		// (`name __attribute__((...))`) drop before the follow check.
+		if (ParseDeclarator(named, true) &&
+		    (SkipDeclAdornments(), AtParameterFollow()))
 			parameter.declarator = move(named);
 		else
 		{

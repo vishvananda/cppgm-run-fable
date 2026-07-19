@@ -261,13 +261,19 @@ EvalValue ConstEvalEngine::ReadScalar(const ConstObject& object,
 		return value;
 	}
 	unsigned long long bits = 0;
+	unsigned long long high = 0;
 	for (size_t i = 0; i < width; i++)
-		bits |= (unsigned long long)at[i] << (8 * i);
+	{
+		if (i < 8)
+			bits |= (unsigned long long)at[i] << (8 * i);
+		else
+			high |= (unsigned long long)at[i] << (8 * (i - 8));
+	}
 	if (IsSignedIntegralFundamental(kind) && width < 8 &&
 	    (bits & (1ull << (8 * width - 1))))
 		bits |= ~((1ull << (8 * width)) - 1);
 	value.kind = EvalValue::EV_INT;
-	value.ival = ConstValue(kind, bits);
+	value.ival = ConstValue(kind, bits, high);
 	return value;
 }
 
@@ -321,7 +327,8 @@ void ConstEvalEngine::WriteScalar(ConstObject& object,
 	if (value.kind != EvalValue::EV_INT)
 		throw NotConstant("integral store of a non-integral value");
 	for (size_t i = 0; i < width; i++)
-		at[i] = (unsigned char)(value.ival.bits >> (8 * i));
+		at[i] = (unsigned char)(i < 8 ? value.ival.bits >> (8 * i)
+		                              : value.ival.high >> (8 * (i - 8)));
 }
 
 void ConstEvalEngine::WriteValue(const ConstPointer& dest,

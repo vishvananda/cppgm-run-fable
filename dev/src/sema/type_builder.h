@@ -187,6 +187,8 @@ private:
 	// needs instantiation-time facts (the deferred alias-substitution
 	// path re-resolves it concretely).
 	TypePtr ResolveTransformSpecifier(const AstSpecifier& spec);
+	// PA34 _BitInt(N): the bit-precise base type (container mapping).
+	TypePtr ResolveBitIntSpecifier(const AstSpecifier& spec);
 	void ConsumeSpecifierKeyword(const AstSpecifier& spec,
 	                             bool allow_storage,
 	                             DeclSpecifierInfo& info,

@@ -220,6 +220,8 @@ string FlattenSpecifier(const AstSpecifier& specifier)
 		return FlattenName(specifier.name);
 	case SPEC_DECLTYPE:
 		return "decltype(" + FlattenExpr(*specifier.decltype_expr) + ")";
+	case SPEC_BITINT:
+		return "_BitInt(" + FlattenExpr(*specifier.decltype_expr) + ")";
 	case SPEC_NESTED_DECL:
 	{
 		const AstDecl& decl = *specifier.nested_decl;

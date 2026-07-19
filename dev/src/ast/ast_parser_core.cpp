@@ -593,6 +593,12 @@ void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags)
 			Restore(state);
 			return;
 		}
+		// GNU __extension__: suppresses extension diagnostics only.
+		if (AtIdentifierSpelled("__extension__"))
+		{
+			Advance();
+			continue;
+		}
 		// PA34 GNU asm label (`declarator __asm("name")`), accepted and
 		// discarded for hosted compile acceptance (host symbol renaming
 		// is a PA36 boundary; see pa34/plan.md).

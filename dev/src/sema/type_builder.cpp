@@ -50,11 +50,66 @@ bool NormalizeVoidParameter(const vector<ParameterInfo>& parameters,
 	return lone_void;
 }
 
+// The signed/unsigned counterpart of an integer base type spelled as
+// an identifier (__int128, _BitInt containers).
+EFundamentalType SignAdjustedFundamental(EFundamentalType type,
+                                         bool make_unsigned)
+{
+	switch (type)
+	{
+	case FT_SIGNED_CHAR:
+	case FT_UNSIGNED_CHAR:
+		return make_unsigned ? FT_UNSIGNED_CHAR : FT_SIGNED_CHAR;
+	case FT_SHORT_INT:
+	case FT_UNSIGNED_SHORT_INT:
+		return make_unsigned ? FT_UNSIGNED_SHORT_INT : FT_SHORT_INT;
+	case FT_INT:
+	case FT_UNSIGNED_INT:
+		return make_unsigned ? FT_UNSIGNED_INT : FT_INT;
+	case FT_LONG_LONG_INT:
+	case FT_UNSIGNED_LONG_LONG_INT:
+		return make_unsigned ? FT_UNSIGNED_LONG_LONG_INT
+		                     : FT_LONG_LONG_INT;
+	case FT_INT128:
+	case FT_UINT128:
+		return make_unsigned ? FT_UINT128 : FT_INT128;
+	default:
+		throw runtime_error("invalid type specifier combination");
+	}
+}
+
 }  // namespace
 
 TypeBuilder::TypeBuilder(ITypeBuilderHost& host)
 	: host_(host), adjust_parameters_(false)
 {
+}
+
+// Clang/C23 _BitInt(N): a bit-precise integer accepted with its
+// smallest power-of-two container type (size, alignment, and the
+// value range of hosted uses up to 128 bits match the x86-64 ABI
+// containers; sub-container wrap-at-N arithmetic is a documented
+// boundary).
+TypePtr TypeBuilder::ResolveBitIntSpecifier(const AstSpecifier& spec)
+{
+	unsigned long long width =
+		host_.EvaluateArrayBound(*spec.decltype_expr);
+	EFundamentalType type;
+	if (width == 0)
+		throw runtime_error("_BitInt width must be positive");
+	else if (width <= 8)
+		type = FT_SIGNED_CHAR;
+	else if (width <= 16)
+		type = FT_SHORT_INT;
+	else if (width <= 32)
+		type = FT_INT;
+	else if (width <= 64)
+		type = FT_LONG_LONG_INT;
+	else if (width <= 128)
+		type = FT_INT128;
+	else
+		throw runtime_error("_BitInt width above 128 bits");
+	return MakeFundamentalType(type);
 }
 
 void TypeBuilder::SetParameterAdjustment(bool adjust)
@@ -122,6 +177,7 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 	DeclSpecifierInfo info;
 	SimpleTypeSpecifiers simple;
 	TypePtr named;
+	bool sign_combinable = false;
 	bool is_const = false;
 	bool is_volatile = false;
 	for (size_t i = 0; i < seq.size(); i++)
@@ -136,6 +192,11 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 			continue;
 		case SPEC_TYPE_NAME:
 			resolved = host_.ResolveTypeName(spec.name);
+			// GNU __int128: the identifier-spelled base type accepts
+			// sign keywords on either side.
+			if (spec.name.IsPlainIdentifier() &&
+			    spec.name.parts[0].identifier == "__int128")
+				sign_combinable = true;
 			break;
 		case SPEC_DECLTYPE:
 			resolved = host_.ResolveDecltype(*spec.decltype_expr);
@@ -146,14 +207,28 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 		case SPEC_TRANSFORM:
 			resolved = ResolveTransformSpecifier(spec);
 			break;
+		case SPEC_BITINT:
+			resolved = ResolveBitIntSpecifier(spec);
+			sign_combinable = true;
+			break;
 		}
 		if (named)
 			throw runtime_error("multiple type specifiers");
 		named = resolved;
 	}
 	if (named && AnySimpleTypeSpecifier(simple))
-		throw runtime_error("type-name combined with simple type "
-		                    "specifiers");
+	{
+		bool sign_only = !simple.has_base && !simple.short_count &&
+			!simple.long_count &&
+			simple.signed_count + simple.unsigned_count == 1;
+		if (!sign_combinable || !sign_only ||
+		    RemoveTopCv(named)->kind != TK_FUNDAMENTAL)
+			throw runtime_error("type-name combined with simple type "
+			                    "specifiers");
+		named = MakeFundamentalType(SignAdjustedFundamental(
+			RemoveTopCv(named)->fundamental,
+			simple.unsigned_count > 0));
+	}
 	if (info.is_typedef &&
 	    (info.is_static || info.is_extern || info.is_thread_local ||
 	     info.is_constexpr || info.is_inline || info.is_virtual))

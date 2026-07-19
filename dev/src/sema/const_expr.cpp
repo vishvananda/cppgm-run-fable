@@ -43,12 +43,24 @@ int WidthBits(EFundamentalType type)
 	}
 }
 
-// The evaluator computes in 64-bit representations; 128-bit operations
-// stay outside the constant subset (they lower to runtime code).
-void RequireEvaluableWidth(EFundamentalType type)
+// PA34: 128-bit constants compute in the host-independent packed
+// form (the pair rides ConstValue.high/bits).
+typedef __int128 SWide;
+typedef unsigned __int128 UWide;
+
+UWide PackWide(const ConstValue& value)
 {
-	if (WidthBits(type) > 64)
-		throw OutsideSubset("128-bit constant arithmetic");
+	if (WidthBits(value.type) > 64)
+		return ((UWide)value.high << 64) | value.bits;
+	if (IsSignedIntegralFundamental(value.type))
+		return (UWide)(SWide)(long long)value.bits;
+	return (UWide)value.bits;
+}
+
+ConstValue MakeWide(EFundamentalType type, UWide value)
+{
+	return ConstValue(type, (unsigned long long)value,
+	                  (unsigned long long)(value >> 64));
 }
 
 // Truncates to the type's width and re-extends to the 64-bit storage
@@ -180,13 +192,15 @@ ConstValue EvaluateUnary(const AstExpr& expr, IConstExprContext& context)
 	case OP_MINUS:
 	{
 		ConstValue promoted = Promote(operand);
-		RequireEvaluableWidth(promoted.type);
+		if (WidthBits(promoted.type) > 64)
+			return MakeWide(promoted.type, 0 - PackWide(promoted));
 		return Normalize(promoted.type, 0 - promoted.bits);
 	}
 	case OP_COMPL:
 	{
 		ConstValue promoted = Promote(operand);
-		RequireEvaluableWidth(promoted.type);
+		if (WidthBits(promoted.type) > 64)
+			return MakeWide(promoted.type, ~PackWide(promoted));
 		return Normalize(promoted.type, ~promoted.bits);
 	}
 	case OP_LNOT:
@@ -201,12 +215,20 @@ ConstValue EvaluateShift(ETokenType op, const ConstValue& lhs,
 {
 	ConstValue value = Promote(lhs);
 	ConstValue amount = Promote(rhs);
-	RequireEvaluableWidth(value.type);
 	long long count = (long long)amount.bits;
 	if (IsSignedIntegralFundamental(amount.type) && count < 0)
 		throw runtime_error("negative shift count");
 	if ((unsigned long long)count >= (unsigned)WidthBits(value.type))
 		throw runtime_error("shift count out of range");
+	if (WidthBits(value.type) > 64)
+	{
+		UWide wide = PackWide(value);
+		if (op == OP_LSHIFT)
+			return MakeWide(value.type, wide << count);
+		if (IsSignedIntegralFundamental(value.type))
+			return MakeWide(value.type, (UWide)((SWide)wide >> count));
+		return MakeWide(value.type, wide >> count);
+	}
 	if (op == OP_LSHIFT)
 		return Normalize(value.type, value.bits << count);
 	if (IsSignedIntegralFundamental(value.type))
@@ -217,12 +239,70 @@ ConstValue EvaluateShift(ETokenType op, const ConstValue& lhs,
 	return Normalize(value.type, value.bits >> count);
 }
 
+// The 5p9 operators over packed 128-bit operands.
+ConstValue EvaluateWideArithmetic(ETokenType op, EFundamentalType common,
+                                  UWide a, UWide b)
+{
+	bool is_signed = IsSignedIntegralFundamental(common);
+	switch (op)
+	{
+	case OP_STAR:
+		return MakeWide(common, a * b);
+	case OP_DIV:
+	case OP_MOD:
+	{
+		if (b == 0)
+			throw runtime_error("division by zero in constant "
+			                    "expression");
+		UWide quotient;
+		UWide remainder;
+		if (is_signed)
+		{
+			quotient = (UWide)((SWide)a / (SWide)b);
+			remainder = (UWide)((SWide)a % (SWide)b);
+		}
+		else
+		{
+			quotient = a / b;
+			remainder = a % b;
+		}
+		return MakeWide(common, op == OP_DIV ? quotient : remainder);
+	}
+	case OP_PLUS:
+		return MakeWide(common, a + b);
+	case OP_MINUS:
+		return MakeWide(common, a - b);
+	case OP_AMP:
+		return MakeWide(common, a & b);
+	case OP_XOR:
+		return MakeWide(common, a ^ b);
+	case OP_BOR:
+		return MakeWide(common, a | b);
+	case OP_LT:
+		return MakeBool(is_signed ? (SWide)a < (SWide)b : a < b);
+	case OP_GT:
+		return MakeBool(is_signed ? (SWide)a > (SWide)b : a > b);
+	case OP_LE:
+		return MakeBool(is_signed ? (SWide)a <= (SWide)b : a <= b);
+	case OP_GE:
+		return MakeBool(is_signed ? (SWide)a >= (SWide)b : a >= b);
+	case OP_EQ:
+		return MakeBool(a == b);
+	case OP_NE:
+		return MakeBool(a != b);
+	default:
+		throw OutsideSubset("binary operator");
+	}
+}
+
 ConstValue EvaluateArithmetic(ETokenType op, const ConstValue& lhs,
                               const ConstValue& rhs)
 {
 	EFundamentalType common =
 		CommonType(Promote(lhs).type, Promote(rhs).type);
-	RequireEvaluableWidth(common);
+	if (WidthBits(common) > 64)
+		return EvaluateWideArithmetic(op, common, PackWide(lhs),
+		                              PackWide(rhs));
 	unsigned long long a = Normalize(common, lhs.bits).bits;
 	unsigned long long b = Normalize(common, rhs.bits).bits;
 	bool is_signed = IsSignedIntegralFundamental(common);
@@ -551,6 +631,10 @@ ConstValue ConvertConstValue(const ConstValue& value, EFundamentalType to)
 {
 	if (!IsIntegralFundamental(to))
 		throw OutsideSubset("conversion to a non-integral type");
+	// 128-bit targets extend by the source's signedness; narrower
+	// targets truncate from the low word.
+	if (WidthBits(to) > 64)
+		return MakeWide(to, PackWide(value));
 	return Normalize(to, value.bits);
 }
 
@@ -575,10 +659,12 @@ ConstValue ConstIntUnary(ETokenType op, const ConstValue& operand)
 	case OP_PLUS:
 		return promoted;
 	case OP_MINUS:
-		RequireEvaluableWidth(promoted.type);
+		if (WidthBits(promoted.type) > 64)
+			return MakeWide(promoted.type, 0 - PackWide(promoted));
 		return Normalize(promoted.type, 0 - promoted.bits);
 	case OP_COMPL:
-		RequireEvaluableWidth(promoted.type);
+		if (WidthBits(promoted.type) > 64)
+			return MakeWide(promoted.type, ~PackWide(promoted));
 		return Normalize(promoted.type, ~promoted.bits);
 	case OP_LNOT:
 		return MakeBool(!ConstValueIsNonZero(operand));
@@ -589,7 +675,7 @@ ConstValue ConstIntUnary(ETokenType op, const ConstValue& operand)
 
 bool ConstValueIsNonZero(const ConstValue& value)
 {
-	return value.bits != 0;
+	return value.bits != 0 || value.high != 0;
 }
 
 ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)

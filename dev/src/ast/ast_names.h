@@ -95,7 +95,8 @@ enum ESpecifierKind
 	SPEC_DECLTYPE,   // decltype-specifier
 	SPEC_NESTED_DECL,// class-specifier / enum-specifier /
 	                 // class-forward-declaration used as a specifier
-	SPEC_TRANSFORM   // PA33 builtin transform: __decay ( type-id )
+	SPEC_TRANSFORM,  // PA33 builtin transform: __decay ( type-id )
+	SPEC_BITINT      // PA34 _BitInt ( constant-expression )
 };
 
 struct AstSpecifier
@@ -109,7 +110,7 @@ struct AstSpecifier
 	std::string spelling;      // SPEC_KEYWORD source spelling;
 	                           // SPEC_TRANSFORM trait name
 	AstName name;              // SPEC_TYPE_NAME
-	AstExprPtr decltype_expr;  // SPEC_DECLTYPE
+	AstExprPtr decltype_expr;  // SPEC_DECLTYPE; SPEC_BITINT width
 	AstDeclPtr nested_decl;    // SPEC_NESTED_DECL
 	AstTypeIdPtr transform_type;  // SPEC_TRANSFORM operand
 };

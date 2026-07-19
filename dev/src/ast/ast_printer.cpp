@@ -60,6 +60,11 @@ void PrintDeclSpecifierSeq(const AstSpecifierSeq& seq, ostream& out, int depth)
 			     FlattenExpr(*spec.decltype_expr) + ")");
 			PrintExpr(*spec.decltype_expr, out, depth + 2);
 			break;
+		case SPEC_BITINT:
+			Line(out, depth + 1, "decl-specifier _BitInt(" +
+			     FlattenExpr(*spec.decltype_expr) + ")");
+			PrintExpr(*spec.decltype_expr, out, depth + 2);
+			break;
 		case SPEC_NESTED_DECL:
 			PrintDecl(*spec.nested_decl, out, depth + 1);
 			break;
@@ -84,6 +89,11 @@ void PrintTypeSpecifierSeq(const AstSpecifierSeq& seq, ostream& out, int depth)
 			break;
 		case SPEC_DECLTYPE:
 			Line(out, depth + 1, "decltype-specifier decltype(" +
+			     FlattenExpr(*spec.decltype_expr) + ")");
+			PrintExpr(*spec.decltype_expr, out, depth + 2);
+			break;
+		case SPEC_BITINT:
+			Line(out, depth + 1, "type-specifier _BitInt(" +
 			     FlattenExpr(*spec.decltype_expr) + ")");
 			PrintExpr(*spec.decltype_expr, out, depth + 2);
 			break;
