@@ -156,6 +156,12 @@ private:
 	void BindSynthesizedVariable(const string& name, const TypePtr& type,
 	                             AstExprPtr init_expr,
 	                             const DeclSpecifierInfo& specs);
+	// PA34 hosted C++17 structured bindings (sem_auto.cpp): the block
+	// form binds the hidden object from its initializer; the shared
+	// name binder decomposes it member-wise.
+	virtual void BindStructuredBinding(const AstDecl& decl);
+	void BindStructuredBindingNames(const AstDecl& decl,
+	                                const string& object_name);
 	void BindSwitchStatement(const AstStmt& stmt);
 	void BindLabelStatement(const AstStmt& stmt);
 

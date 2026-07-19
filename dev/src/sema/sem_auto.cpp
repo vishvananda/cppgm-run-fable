@@ -372,6 +372,81 @@ void SemBinder::BindSynthesizedVariable(const string& name,
 	synth_inits_.push_back(std::move(init));
 }
 
+// PA34 hosted C++17 structured bindings over class members (8.5 v4
+// subset): the hidden object variable binds the initializer under the
+// spelled `auto` form, then each introduced name binds `auto&` onto
+// its member in declaration order, so a reference-typed member
+// decomposes to its referent with real reference semantics.
+void SemBinder::BindStructuredBinding(const AstDecl& decl)
+{
+	DeclSpecifierInfo specs =
+		builder_.ProcessSpecifiers(decl.specifiers, true);
+	TypePtr declared = specs.type;
+	if (decl.sb_rvalue_ref)
+		declared = MakeReferenceType(declared, true, false);
+	else if (decl.sb_ref)
+		declared = MakeReferenceType(declared, false, false);
+	if (!decl.sb_init)
+		throw runtime_error("structured binding requires an "
+		                    "initializer");
+	string object_name = NextRangeForName("__sb");
+	BindVariable(object_name, declared, decl.sb_init.get(), specs);
+	BindStructuredBindingNames(decl, object_name);
+}
+
+void SemBinder::BindStructuredBindingNames(const AstDecl& decl,
+                                           const string& object_name)
+{
+	const ScopeBinding* object = FindOwnBinding(*current_, object_name);
+	if (!object)
+		throw runtime_error("structured binding object missing");
+	TypePtr bare = object->type;
+	while (bare && IsReferenceType(bare))
+		bare = bare->target;
+	bare = bare ? RemoveTopCv(bare) : bare;
+	if (!bare || bare->kind != TK_CLASS)
+		throw OutsideBoundary("non-class structured binding");
+	EnsureTypeCompleteness(bare->named);
+	const ClassInfo* cls = unit_.classes.Find(bare->named);
+	if (!cls)
+		throw runtime_error("structured binding class record missing");
+	// 8.5 v4: every member must live in the decomposed class itself.
+	if (cls->members && (cls->members->class_base ||
+	                     !cls->members->class_extra_bases.empty()))
+		throw OutsideBoundary("structured binding over a class with "
+		                      "bases");
+	vector<const ClassField*> members;
+	for (size_t i = 0; i < cls->fields.size(); i++)
+	{
+		const ClassField& field = cls->fields[i];
+		if (field.anonymous_storage)
+			continue;
+		if (field.name.empty() || field.is_bit_field)
+			throw OutsideBoundary("structured binding member form");
+		members.push_back(&field);
+	}
+	if (members.size() != decl.sb_names.size())
+		throw runtime_error("structured binding name count does not "
+		                    "match the member count");
+	for (size_t i = 0; i < decl.sb_names.size(); i++)
+	{
+		AstExprPtr member(new AstExpr(EK_MEMBER));
+		member->op = OP_DOT;
+		member->op_spelling = ".";
+		member->operands.push_back(MakeSynthId(object_name));
+		AstNamePart part;
+		part.kind = NP_IDENTIFIER;
+		part.identifier = members[i]->name;
+		member->name.parts.push_back(std::move(part));
+		DeclSpecifierInfo auto_specs;
+		auto_specs.is_auto = true;
+		auto_specs.type = MakeAutoPlaceholder();
+		TypePtr ref = MakeReferenceType(auto_specs.type, false, false);
+		BindSynthesizedVariable(decl.sb_names[i], ref,
+		                        std::move(member), auto_specs);
+	}
+}
+
 void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 {
 	Scope* saved = current_;
@@ -596,17 +671,37 @@ desugared:
 	current_ = model_.CreateScope(SCOPE_BLOCK, "", body_saved);
 	{
 		const AstDecl& decl = *stmt.for_range_decl;
-		DeclSpecifierInfo specs =
-			builder_.ProcessSpecifiers(decl.specifiers, true);
-		const AstInitDeclarator& declarator = decl.declarators[0];
-		DeclaratorInfo composed = builder_.ComposeDeclarator(
-			declarator.declarator.get(), specs.type);
-		if (!composed.id || !composed.id->IsPlainIdentifier())
-			throw OutsideBoundary("range declaration form");
-		current_declarator_begin_token_ = declarator.begin_token;
-		BindSynthesizedVariable(composed.id->parts[0].identifier,
-		                        composed.type, std::move(loop_init),
-		                        specs);
+		if (decl.kind == DK_STRUCTURED_BINDING)
+		{
+			// `for (auto [x, y] : r)`: the loop declaration is the
+			// hidden decomposed object, then the names bind onto it
+			// per iteration.
+			DeclSpecifierInfo specs =
+				builder_.ProcessSpecifiers(decl.specifiers, true);
+			TypePtr declared = specs.type;
+			if (decl.sb_rvalue_ref)
+				declared = MakeReferenceType(declared, true, false);
+			else if (decl.sb_ref)
+				declared = MakeReferenceType(declared, false, false);
+			string object_name = NextRangeForName("__sb");
+			BindSynthesizedVariable(object_name, declared,
+			                        std::move(loop_init), specs);
+			BindStructuredBindingNames(decl, object_name);
+		}
+		else
+		{
+			DeclSpecifierInfo specs =
+				builder_.ProcessSpecifiers(decl.specifiers, true);
+			const AstInitDeclarator& declarator = decl.declarators[0];
+			DeclaratorInfo composed = builder_.ComposeDeclarator(
+				declarator.declarator.get(), specs.type);
+			if (!composed.id || !composed.id->IsPlainIdentifier())
+				throw OutsideBoundary("range declaration form");
+			current_declarator_begin_token_ = declarator.begin_token;
+			BindSynthesizedVariable(composed.id->parts[0].identifier,
+			                        composed.type, std::move(loop_init),
+			                        specs);
+		}
 	}
 	BindStatement(*stmt.body);
 	current_ = body_saved;

@@ -844,6 +844,19 @@ void PrintDecl(const AstDecl& decl, ostream& out, int depth)
 		Line(out, depth, "explicit-instantiation-declaration");
 		PrintDecl(*decl.inner, out, depth + 1);
 		break;
+	case DK_STRUCTURED_BINDING:
+	{
+		string names;
+		for (size_t i = 0; i < decl.sb_names.size(); i++)
+			names += (i ? " " : "") + decl.sb_names[i];
+		Line(out, depth, "structured-binding-declaration " +
+		     string(decl.sb_rvalue_ref ? "&& " : decl.sb_ref ? "& " : "")
+		     + "[" + names + "]");
+		PrintDeclSpecifierSeq(decl.specifiers, out, depth + 1);
+		if (decl.sb_init)
+			PrintInitializer(*decl.sb_init, out, depth + 1);
+		break;
+	}
 	}
 }
 

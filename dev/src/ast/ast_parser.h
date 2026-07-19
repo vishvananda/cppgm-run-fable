@@ -238,6 +238,9 @@ private:
 	AstDeclPtr ParseNamespaceAliasDefinition();
 	AstDeclPtr ParseUsingDeclarationOrDirective();
 	AstDeclPtr ParseAliasDeclaration();
+	bool AtStructuredBindingIntro() const;
+	bool ParseStructuredBindingIntro(AstDecl& decl);
+	AstDeclPtr ParseStructuredBinding();
 	AstDeclPtr ParseLinkageSpecification();
 	AstDeclPtr ParseExplicitInstantiation();
 	AstDeclPtr ParseStaticAssertDeclaration();

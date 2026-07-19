@@ -27,7 +27,10 @@ enum EDeclKind
 	DK_BIT_FIELD,
 	DK_SPECIAL_MEMBER_DECLARATION,
 	DK_SPECIAL_MEMBER_DEFINITION,
-	DK_EXPLICIT_INSTANTIATION
+	DK_EXPLICIT_INSTANTIATION,
+	// PA34 hosted C++17: `auto [a, b] = expr;` (and the range-for
+	// declaration form without an initializer).
+	DK_STRUCTURED_BINDING
 };
 
 struct AstInitDeclarator
@@ -192,6 +195,14 @@ struct AstDecl
 		AstExprPtr width;
 	};
 	std::vector<BitField> bit_fields;
+
+	// DK_STRUCTURED_BINDING: the introduced names, the ref-qualifier
+	// spelled after the specifiers, and the initializer (null in the
+	// range-for declaration form).
+	std::vector<std::string> sb_names;
+	bool sb_ref = false;
+	bool sb_rvalue_ref = false;
+	AstInitializerPtr sb_init;
 
 	// special members (the name annotation comes from the declarator-id)
 	std::vector<AstMemberSpecifier> member_specifiers;

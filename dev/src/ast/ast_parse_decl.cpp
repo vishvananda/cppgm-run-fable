@@ -315,6 +315,84 @@ AstDeclPtr AstParser::ParseAliasDeclaration()
 	return decl;
 }
 
+// Cheap structured-binding gate: `auto` within the leading specifier
+// tokens, followed within a few tokens by a `[` that is not part of
+// an attribute's `[[`.
+bool AstParser::AtStructuredBindingIntro() const
+{
+	for (size_t k = 0; k < 8; k++)
+	{
+		if (!AtSimple(KW_AUTO, k))
+			continue;
+		for (size_t j = k + 1; j <= k + 3; j++)
+			if (AtSimple(OP_LSQUARE, j) &&
+			    !AtSimple(OP_LSQUARE, j + 1) &&
+			    !AtSimple(OP_LSQUARE, j - 1))
+				return true;
+		return false;
+	}
+	return false;
+}
+
+// structured-binding introducer (PA34 hosted C++17):
+// decl-specifier-seq (with auto) &|&&? [ identifier-list ]. The
+// caller adds the initializer or the range-for colon.
+bool AstParser::ParseStructuredBindingIntro(AstDecl& decl)
+{
+	if (!ParseSpecifierSeq(decl.specifiers, kDeclSpecifierSeq))
+		return false;
+	bool has_auto = false;
+	for (size_t i = 0; i < decl.specifiers.size(); i++)
+		if (decl.specifiers[i].kind == SPEC_KEYWORD &&
+		    decl.specifiers[i].keyword == KW_AUTO)
+			has_auto = true;
+	if (!has_auto)
+		return false;
+	if (AtSimple(OP_AMP))
+	{
+		decl.sb_ref = true;
+		Advance();
+	}
+	else if (AtSimple(OP_LAND))
+	{
+		decl.sb_rvalue_ref = true;
+		Advance();
+	}
+	// `[[` introduces an attribute, never an identifier-list.
+	if (AtSimple(OP_LSQUARE, 1) || !MatchSimple(OP_LSQUARE))
+		return false;
+	for (;;)
+	{
+		if (!AtIdentifier())
+			return false;
+		decl.sb_names.push_back(Peek().spelling);
+		Advance();
+		if (!MatchSimple(OP_COMMA))
+			break;
+	}
+	if (!MatchSimple(OP_RSQUARE))
+		return false;
+	for (size_t i = 0; i < decl.sb_names.size(); i++)
+		Register(decl.sb_names[i], NF_VALUE);
+	return true;
+}
+
+// structured-binding-declaration: the introducer plus a required
+// initializer and semicolon.
+AstDeclPtr AstParser::ParseStructuredBinding()
+{
+	State state = Save();
+	AstDeclPtr decl(new AstDecl(DK_STRUCTURED_BINDING));
+	if (!ParseStructuredBindingIntro(*decl) ||
+	    !ParseInitializer(decl->sb_init, true) || !decl->sb_init ||
+	    !MatchSimple(OP_SEMICOLON))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
+	return decl;
+}
+
 // linkage-specification: KW_EXTERN TT_LITERAL ( { declaration* } |
 // declaration ).
 AstDeclPtr AstParser::ParseLinkageSpecification()
@@ -610,6 +688,11 @@ AstDeclPtr AstParser::ParseDeclarationForms()
 			return guide;
 	if (AtSimple(KW_STATIC_ASSERT))
 		return ParseStaticAssertDeclaration();
+	// PA34 structured bindings, behind a cheap token gate (`auto`
+	// followed shortly by `[` that is not `[[`).
+	if (AtStructuredBindingIntro())
+		if (AstDeclPtr sb = ParseStructuredBinding())
+			return sb;
 	AstDeclPtr decl = ParseClassDeclaration();
 	if (decl)
 		return decl;

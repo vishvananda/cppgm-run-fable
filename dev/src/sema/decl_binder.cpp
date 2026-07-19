@@ -570,8 +570,18 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 	case DK_EXPLICIT_INSTANTIATION:
 		BindExplicitInstantiation(decl);
 		return;
+	case DK_STRUCTURED_BINDING:
+		BindStructuredBinding(decl);
+		return;
 	}
 	throw OutsideBoundary("declaration form");
+}
+
+// PA34 structured bindings carry statement semantics; only the full
+// PA15+ binder implements them.
+void DeclBinder::BindStructuredBinding(const AstDecl&)
+{
+	throw OutsideBoundary("structured binding declaration");
 }
 
 void DeclBinder::BindClassDeclaration(const AstDecl& decl)

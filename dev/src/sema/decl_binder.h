@@ -79,6 +79,8 @@ protected:
 		return false;
 	}
 	virtual void BindSimpleDeclaration(const AstDecl& decl);
+	// PA34 structured bindings (full semantics live on SemBinder).
+	virtual void BindStructuredBinding(const AstDecl& decl);
 	void BindInitDeclarator(const DeclSpecifierInfo& specs,
 	                        const AstInitDeclarator& declarator);
 	// PA20: the terminal token span of the init-declarator being

@@ -242,6 +242,29 @@ AstStmtPtr AstParser::ParseForInitStatement()
 AstStmtPtr AstParser::ParseRangeForForm(bool& matched)
 {
 	State range_state = Save();
+	// PA34 structured-binding range declaration: `auto [x, y] : r`.
+	if (AtStructuredBindingIntro())
+	{
+		AstDeclPtr sb(new AstDecl(DK_STRUCTURED_BINDING));
+		if (ParseStructuredBindingIntro(*sb) && AtSimple(OP_COLON))
+		{
+			matched = true;
+			Advance();
+			AstExprPtr sb_init = AtSimple(OP_LBRACE)
+				? ParseBracedInitList() : ParseExpression();
+			AstStmtPtr sb_body;
+			if (!sb_init || !MatchSimple(OP_RPAREN) ||
+			    !(sb_body = ParseStatement()))
+				return AstStmtPtr();
+			PopScope();
+			AstStmtPtr sb_stmt = MakeStmt(SK_FOR);
+			sb_stmt->for_range_decl = move(sb);
+			sb_stmt->for_range_init = move(sb_init);
+			sb_stmt->body = move(sb_body);
+			return sb_stmt;
+		}
+		Restore(range_state);
+	}
 	AstDeclPtr range_decl = MakeDecl(DK_SIMPLE);
 	AstInitDeclarator range_declarator;
 	range_declarator.begin_token = pos_;

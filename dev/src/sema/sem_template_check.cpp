@@ -217,6 +217,29 @@ void WalkLocalDecl(const AstDecl* decl, BodyNames& names,
 		names.give_up = true;
 		return;
 	}
+	if (decl->kind == DK_STRUCTURED_BINDING)
+	{
+		// PA34: the introduced names are known; their member types are
+		// unknowable here, so accesses through them stay unchecked
+		// (silence is always allowed).
+		for (size_t i = 0; i < decl->sb_names.size(); i++)
+		{
+			if (names.params.count(decl->sb_names[i]))
+				throw runtime_error("declaration of " +
+				                    decl->sb_names[i] +
+				                    " shadows a template parameter");
+			names.known.insert(decl->sb_names[i]);
+			names.dependent.insert(decl->sb_names[i]);
+		}
+		if (decl->sb_init)
+		{
+			if (decl->sb_init->expr)
+				WalkExpr(decl->sb_init->expr.get(), names, ids);
+			for (size_t a = 0; a < decl->sb_init->args.size(); a++)
+				WalkExpr(decl->sb_init->args[a].get(), names, ids);
+		}
+		return;
+	}
 	if (decl->kind != DK_SIMPLE)
 		return;
 	bool dependent_type = SpecifiersMentionParam(decl->specifiers, names);
