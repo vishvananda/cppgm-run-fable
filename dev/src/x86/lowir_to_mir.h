@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <map>
 #include <set>
 #include <string>
@@ -265,6 +266,10 @@ private:
 	long long residual_bytes_ = 0;
 	int current_position_ = 0;
 	std::map<std::string, const LowIRInstruction *> pending_loads_;
+	// Stable homes for rewritten atomic-load instructions: a deferred
+	// single-use load records its instruction by pointer, so the
+	// rewritten copy must outlive LowerAtomicLoad's frame.
+	std::deque<LowIRInstruction> rewritten_atomics_;
 	bool index_dest_lowering_ = false;
 	bool arg_homes_clobbered_ = false;
 	bool has_dead_source_spill_ = false;

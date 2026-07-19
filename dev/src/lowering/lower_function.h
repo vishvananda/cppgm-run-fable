@@ -260,6 +260,8 @@ private:
 	// expansions of the GNU/Clang bit, annotation, float-constant,
 	// classification, overflow, and allocation builtins.
 	bool IsHostedBuiltinCall(const SemNode& node) const;
+	bool TryLowerExpandedCall(const SemNode& node, const SemNode& callee,
+	                          bool direct, LowerValue& out);
 	LowerValue LowerHostedBuiltin(const SemNode& node);
 	LowerValue BuiltinArgument(const SemNode& node, size_t index);
 	LowerValue LowerBuiltinAnnotation(const SemNode& node,
@@ -282,6 +284,12 @@ private:
 	                                const string& name);
 	LowerValue LowerBuiltinOperatorNewDelete(const SemNode& node,
 	                                         const string& name);
+	LowerValue LowerBuiltinAtomic(const SemNode& node, const string& name);
+	LowerValue LowerBuiltinAtomicBitwise(const SemNode& node,
+	                                     const string& name,
+	                                     const string& spell,
+	                                     const string& pointer,
+	                                     const string& order_text);
 	// --- call-argument binding (lower_arg_bind.cpp) ---
 	string LowerCallArgument(const SemNode& node, const TypePtr& param);
 	string LowerReferenceArgument(const SemNode& node,

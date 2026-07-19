@@ -165,6 +165,21 @@ name literals; GNU __null. Fixed a latent void-conditional lowering
 bug (the then arm fell through into the else arm). 53 failures
 remain.
 
+Atomics landed: _Atomic(T) parses as a type operand (atomicity is
+dropped; the operators carry the semantics), the __c11_atomic_*,
+__atomic_*, and __sync_lock_* families analyze as magic-typed
+builtins over the pointee type and lower onto the LowIR atomic
+instructions; the bitwise read-modify-write forms expand as
+slot-based compare-exchange loops (MIR temps are block-local); the
+lock-free queries fold from their constant sizes. Registered builtin
+names never read as type-names in declaration disambiguation. Fixed
+a latent dangling-instruction bug in the MIR atomic-load rewrite
+(the deferred single-use load kept a pointer to a stack-local copy).
+43 failures remain: templated lambdas (6), structured bindings (4),
+designated initializers (3), deduction guides (3), trait/invocable
+corners (~8), integer_pack/type_pack_element corners (~6),
+__complex__ (2), and misc parser/sema items.
+
 Next clusters, in leverage order:
 
 1. **Would-it-compile trait family** — landed via

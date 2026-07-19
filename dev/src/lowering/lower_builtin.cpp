@@ -58,6 +58,25 @@ string HostedBuiltinName(const SemNode& node)
 	if (name == "__c11_atomic_thread_fence" ||
 	    name == "__c11_atomic_signal_fence")
 		return name;
+	// The atomic operator families (magic-typed callees).
+	static const char* const kAtomicBuiltins[] = {
+		"__c11_atomic_init", "__c11_atomic_load", "__c11_atomic_store",
+		"__c11_atomic_exchange", "__c11_atomic_compare_exchange_strong",
+		"__c11_atomic_compare_exchange_weak",
+		"__atomic_load", "__atomic_load_n", "__atomic_store",
+		"__atomic_store_n", "__atomic_exchange_n",
+		"__atomic_add_fetch", "__atomic_sub_fetch",
+		"__atomic_fetch_add", "__atomic_fetch_sub",
+		"__c11_atomic_fetch_add", "__c11_atomic_fetch_sub",
+		"__c11_atomic_fetch_and", "__c11_atomic_fetch_or",
+		"__c11_atomic_fetch_xor",
+		"__atomic_fetch_and", "__atomic_fetch_or", "__atomic_fetch_xor",
+		"__atomic_and_fetch", "__atomic_or_fetch", "__atomic_xor_fetch",
+		"__sync_lock_test_and_set", "__sync_lock_release", 0
+	};
+	for (const char* const* at = kAtomicBuiltins; *at; at++)
+		if (name == *at)
+			return name;
 	if (name.compare(0, 10, "__builtin_") != 0)
 		return string();
 	string tail = name.substr(10);
@@ -125,7 +144,216 @@ LowerValue FunctionLowerer::LowerHostedBuiltin(const SemNode& node)
 		return LowerBuiltinOverflow(node, name);
 	if (name == "operator_new" || name == "operator_delete")
 		return LowerBuiltinOperatorNewDelete(node, name);
+	if (name.compare(0, 13, "__c11_atomic_") == 0 ||
+	    name.compare(0, 9, "__atomic_") == 0 ||
+	    name.compare(0, 7, "__sync_") == 0)
+	{
+		if (name != "__c11_atomic_thread_fence" &&
+		    name != "__c11_atomic_signal_fence")
+			return LowerBuiltinAtomic(node, name);
+	}
 	return LowerBuiltinAnnotation(node, name);
+}
+
+// The atomic operator families over the LowIR atomic instructions.
+// Memory orders emit as constants (seq_cst when the order is a
+// runtime value); x86 CAS is always strong.
+LowerValue FunctionLowerer::LowerBuiltinAtomic(const SemNode& node,
+                                               const string& name)
+{
+	const SemNode& callee = *node.children[0];
+	TypePtr element;
+	if (callee.type->parameters[0]->kind == TK_POINTER)
+		element = RemoveTopCv(callee.type->parameters[0]->target);
+	string spell = LowerValueType(element);
+	LowerValue result;
+	result.type = NodeType(node);
+	// The trailing int arguments are memory orders (constant when
+	// the caller spelled a macro; seq_cst otherwise).
+	size_t last = node.children.size() - 1;
+	long long order = 5;
+	if (node.children[last]->has_value)
+		order = (long long)node.children[last]->value.bits;
+	if (order < 0 || order > 5)
+		order = 5;
+	string order_text = to_string(order);
+	LowerValue pointer = BuiltinArgument(node, 1);
+	if (name == "__c11_atomic_init")
+	{
+		LowerValue value = BuiltinArgument(node, 2);
+		Emit("store " + spell + " " + value.text + ", " + pointer.text);
+		return result;
+	}
+	if (name == "__c11_atomic_load" || name == "__atomic_load_n")
+	{
+		result.text = NewTemp();
+		Emit(result.text + " = atomic_load " + spell + " " +
+		     pointer.text + ", " + order_text);
+		return result;
+	}
+	if (name == "__atomic_load")
+	{
+		LowerValue out = BuiltinArgument(node, 2);
+		string loaded = NewTemp();
+		Emit(loaded + " = atomic_load " + spell + " " + pointer.text +
+		     ", " + order_text);
+		Emit("store " + spell + " " + loaded + ", " + out.text);
+		return result;
+	}
+	if (name == "__c11_atomic_store" || name == "__atomic_store_n")
+	{
+		LowerValue value = BuiltinArgument(node, 2);
+		Emit("atomic_store " + spell + " " + value.text + ", " +
+		     pointer.text + ", " + order_text);
+		return result;
+	}
+	if (name == "__atomic_store")
+	{
+		LowerValue in = BuiltinArgument(node, 2);
+		string value = NewTemp();
+		Emit(value + " = load " + spell + " " + in.text);
+		Emit("atomic_store " + spell + " " + value + ", " +
+		     pointer.text + ", " + order_text);
+		return result;
+	}
+	if (name == "__c11_atomic_exchange" || name == "__atomic_exchange_n" ||
+	    name == "__sync_lock_test_and_set")
+	{
+		LowerValue value = BuiltinArgument(node, 2);
+		if (name == "__sync_lock_test_and_set")
+			order_text = "2";  // acquire
+		result.text = NewTemp();
+		Emit(result.text + " = atomic_exchange " + spell + " " +
+		     pointer.text + ", " + value.text + ", " + order_text);
+		return result;
+	}
+	if (name == "__sync_lock_release")
+	{
+		string zero = NewTemp();
+		Emit(zero + " = const " + spell + " 0");
+		Emit("atomic_store " + spell + " " + zero + ", " +
+		     pointer.text + ", 3");  // release
+		return result;
+	}
+	if (name == "__c11_atomic_compare_exchange_strong" ||
+	    name == "__c11_atomic_compare_exchange_weak")
+	{
+		LowerValue expected = BuiltinArgument(node, 2);
+		LowerValue desired = BuiltinArgument(node, 3);
+		long long failure = 5;
+		if (node.children[last]->has_value)
+			failure = (long long)node.children[last]->value.bits;
+		long long success = 5;
+		if (node.children[last - 1]->has_value)
+			success = (long long)node.children[last - 1]->value.bits;
+		if (failure < 0 || failure > 5)
+			failure = 5;
+		if (success < 0 || success > 5)
+			success = 5;
+		string flag = NewTemp();
+		Emit(flag + " = atomic_compare_exchange " + spell + " " +
+		     pointer.text + ", " + expected.text + ", " + desired.text +
+		     ", " + to_string(success) + ", " + to_string(failure));
+		result.text = NewTemp();
+		Emit(result.text + " = convert trunc u8 i64 " + flag);
+		return result;
+	}
+	// Bitwise read-modify-write families: a compare-exchange loop
+	// (x86 has no old-value-producing lock and/or/xor).
+	if (name.find("_and") != string::npos ||
+	    name.find("_or") != string::npos ||
+	    name.find("_xor") != string::npos)
+		return LowerBuiltinAtomicBitwise(node, name, spell,
+		                                 pointer.text, order_text);
+	// add/sub fetch families.
+	LowerValue delta = BuiltinArgument(node, 2);
+	string amount = delta.text;
+	bool subtract = name == "__atomic_sub_fetch" ||
+		name == "__atomic_fetch_sub" ||
+		name == "__c11_atomic_fetch_sub";
+	if (subtract)
+	{
+		string negated = NewTemp();
+		Emit(negated + " = unary neg " + spell + " " + amount);
+		amount = negated;
+	}
+	string updated = NewTemp();
+	Emit(updated + " = atomic_add_fetch " + spell + " " + pointer.text +
+	     ", " + amount + ", " + order_text);
+	bool fetch_old = name == "__atomic_fetch_add" ||
+		name == "__atomic_fetch_sub" ||
+		name == "__c11_atomic_fetch_add" ||
+		name == "__c11_atomic_fetch_sub";
+	if (!fetch_old)
+	{
+		result.text = updated;
+		return result;
+	}
+	result.text = NewTemp();
+	Emit(result.text + " = binary sub " + spell + " " + updated + ", " +
+	     amount);
+	return result;
+}
+
+// The bitwise atomic read-modify-write forms: load, apply, publish
+// through compare-exchange, retry on interference. The expected slot
+// holds the observed value (compare-exchange refreshes it on
+// failure), so the loop re-applies over the newest value.
+LowerValue FunctionLowerer::LowerBuiltinAtomicBitwise(
+	const SemNode& node, const string& name, const string& spell,
+	const string& pointer, const string& order_text)
+{
+	LowerValue operand = BuiltinArgument(node, 2);
+	string op = name.find("_and") != string::npos ? "and"
+		: name.find("_xor") != string::npos ? "xor" : "or";
+	// Loop-crossing values ride slots: MIR temps are block-local.
+	string slot = AddMatSlot("atomicrmw", spell);
+	string pointer_slot = AddMatSlot("atomicrmwp", "ptr");
+	string operand_slot = AddMatSlot("atomicrmwv", spell);
+	string initial = NewTemp();
+	Emit(initial + " = atomic_load " + spell + " " + pointer + ", 0");
+	Emit("store " + spell + " " + initial + ", $" + slot);
+	Emit("store ptr " + pointer + ", $" + pointer_slot);
+	Emit("store " + spell + " " + operand.text + ", $" + operand_slot);
+	string retry = NewLabel("rmw_retry");
+	string done = NewLabel("rmw_done");
+	CloseInto(retry);
+	string target = NewTemp();
+	Emit(target + " = load ptr $" + pointer_slot);
+	string observed = NewTemp();
+	Emit(observed + " = load " + spell + " $" + slot);
+	string amount = NewTemp();
+	Emit(amount + " = load " + spell + " $" + operand_slot);
+	string updated = NewTemp();
+	Emit(updated + " = binary " + op + " " + spell + " " + observed +
+	     ", " + amount);
+	string expected_address = NewTemp();
+	Emit(expected_address + " = addr $" + slot);
+	string swapped = NewTemp();
+	Emit(swapped + " = atomic_compare_exchange " + spell + " " +
+	     target + ", " + expected_address + ", " + updated + ", " +
+	     order_text + ", 0");
+	ReferenceLabel(retry);
+	ReferenceLabel(done);
+	Terminate("branch " + swapped + ", ^" + done + ", ^" + retry);
+	OpenBlock(done);
+	LowerValue result;
+	result.type = NodeType(node);
+	bool fetch_old = name.compare(0, 19, "__c11_atomic_fetch_") == 0 ||
+		name.compare(0, 15, "__atomic_fetch_") == 0;
+	string old_value = NewTemp();
+	Emit(old_value + " = load " + spell + " $" + slot);
+	if (fetch_old)
+	{
+		result.text = old_value;
+		return result;
+	}
+	string final_amount = NewTemp();
+	Emit(final_amount + " = load " + spell + " $" + operand_slot);
+	result.text = NewTemp();
+	Emit(result.text + " = binary " + op + " " + spell + " " +
+	     old_value + ", " + final_amount);
+	return result;
 }
 
 // expect/assume_aligned reduce to their surviving operand; prefetch

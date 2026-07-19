@@ -167,6 +167,7 @@ private:
 	AstExprPtr ParseExpression();
 	AstExprPtr ParseAssignmentExpression();
 	AstExprPtr ParseConditionalExpression();
+	AstExprPtr ParseOffsetofExpression();
 	AstExprPtr ParseBinaryExpression(int level);
 	bool MatchBinaryOperator(int level, ETokenType& op, std::string& spelling);
 	AstExprPtr ParseCastExpression();

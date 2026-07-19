@@ -477,7 +477,9 @@ mir_model::Operand FunctionLowering::address_operand(
 		return frame_operand(slot.frame_offset);
 	}
 	if(operand.kind != LOWIR_OPERAND_TEMP)
-		throw std::runtime_error("literal used as address");
+		throw std::runtime_error("literal used as address: " +
+		                         operand.name + "/" + operand.literal +
+		                         " in @" + function_.name);
 	const ValueLocation & location = resolve_location(operand.name);
 	if(location.kind == ValueLocation::VL_SLOT_ADDR) {
 		mir_model::Instruction & lea = emit(mir_model::Instruction::MI_LEA);

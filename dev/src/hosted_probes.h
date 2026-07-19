@@ -25,6 +25,10 @@ bool HostedProbeHasBuiltin(const std::string & name);
 // variant: "" double, f float, l long double).
 std::string LibcBuiltinSignature(const std::string & name);
 
+// The host C library symbol a registered `__builtin_X` calls under
+// separate compilation ("" when the name is not libc-backed).
+std::string HostLibraryBuiltinSymbol(const std::string & name);
+
 // __has_feature / __has_extension. Leading/trailing double underscores
 // on the queried name are stripped first (clang spelling equivalence).
 // Every supported feature is also a supported extension.

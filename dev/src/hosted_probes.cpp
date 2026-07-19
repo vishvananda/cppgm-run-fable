@@ -78,6 +78,37 @@ const char * const kSupportedBuiltins[] = {
 	"__builtin_popcountg",
 	"__c11_atomic_thread_fence",
 	"__c11_atomic_signal_fence",
+	"__c11_atomic_init",
+	"__c11_atomic_load",
+	"__c11_atomic_store",
+	"__c11_atomic_exchange",
+	"__c11_atomic_compare_exchange_strong",
+	"__c11_atomic_compare_exchange_weak",
+	"__atomic_load",
+	"__atomic_load_n",
+	"__atomic_store",
+	"__atomic_store_n",
+	"__atomic_exchange_n",
+	"__atomic_add_fetch",
+	"__atomic_sub_fetch",
+	"__atomic_fetch_add",
+	"__atomic_fetch_sub",
+	"__atomic_always_lock_free",
+	"__atomic_is_lock_free",
+	"__c11_atomic_is_lock_free",
+	"__c11_atomic_fetch_add",
+	"__c11_atomic_fetch_sub",
+	"__c11_atomic_fetch_and",
+	"__c11_atomic_fetch_or",
+	"__c11_atomic_fetch_xor",
+	"__atomic_fetch_and",
+	"__atomic_fetch_or",
+	"__atomic_fetch_xor",
+	"__atomic_and_fetch",
+	"__atomic_or_fetch",
+	"__atomic_xor_fetch",
+	"__sync_lock_test_and_set",
+	"__sync_lock_release",
 	// builtin trait/transform identifiers (clang answers __has_builtin
 	// for these; the sema parses them as builtin expressions/types)
 	"__integer_pack",
@@ -351,4 +382,11 @@ string LibcBuiltinSignature(const string & name)
 			return ResolveMathPattern(at->pattern, 'e');
 	}
 	return string();
+}
+
+string HostLibraryBuiltinSymbol(const string & name)
+{
+	if (LibcBuiltinSignature(name).empty())
+		return string();
+	return name.substr(10);  // strlen("__builtin_")
 }

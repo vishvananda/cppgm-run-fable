@@ -31,18 +31,6 @@ string QualifiedKey(const Scope* scope, const string& name)
 	return LowerScopeKey(scope) + name;
 }
 
-// PA34: the C-library-backed builtins call the host C library under
-// separate compilation - the emitted object references the plain
-// libc symbol (matching the GNU builtin contract: __builtin_memcpy
-// generates a call to memcpy when it is not expanded inline). The
-// hosted_probes registry names the family.
-string HostLibraryBuiltinSymbol(const string& name)
-{
-	if (LibcBuiltinSignature(name).empty())
-		return string();
-	return name.substr(10);  // strlen("__builtin_")
-}
-
 // PA20: the per-scope identity of a function-local static (the plain
 // key collapses block scopes so block-scope extern declarations reach
 // their namespace entities; hoisted statics must stay distinct).

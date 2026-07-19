@@ -165,29 +165,38 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		return false;
 	}
 	// GNU __typeof__/typeof: decltype semantics (references
-	// stripped) over an expression or type operand.
+	// stripped) over an expression or type operand. C11 _Atomic(T)
+	// rides the same shape: the atomic qualification is accepted and
+	// dropped (the atomic builtin operators carry the semantics).
 	if (type_state == kNoType && Peek().kind == PTOK_IDENTIFIER &&
 	    (Peek().spelling == "__typeof__" ||
-	     Peek().spelling == "__typeof" || Peek().spelling == "typeof") &&
+	     Peek().spelling == "__typeof" || Peek().spelling == "typeof" ||
+	     Peek().spelling == "_Atomic") &&
 	    AtSimple(OP_LPAREN, 1))
 	{
 		State state = Save();
+		bool atomic = Peek().spelling == "_Atomic";
 		Advance();
 		Advance();
 		AstSpecifier spec;
 		spec.kind = SPEC_DECLTYPE;
 		spec.typeof_strip = true;
-		AstExprPtr expr = ParseExpression();
-		if (expr && MatchSimple(OP_RPAREN))
+		// _Atomic's operand is always a type; typeof reads its
+		// expression form first.
+		if (!atomic)
 		{
-			spec.decltype_expr = move(expr);
-			seq.push_back(move(spec));
-			type_state = kNamedType;
-			return true;
+			AstExprPtr expr = ParseExpression();
+			if (expr && MatchSimple(OP_RPAREN))
+			{
+				spec.decltype_expr = move(expr);
+				seq.push_back(move(spec));
+				type_state = kNamedType;
+				return true;
+			}
+			Restore(state);
+			Advance();
+			Advance();
 		}
-		Restore(state);
-		Advance();
-		Advance();
 		if (ParseTypeId(spec.transform_type) && MatchSimple(OP_RPAREN))
 		{
 			seq.push_back(move(spec));
@@ -240,6 +249,12 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 	// must not re-read as a functional cast).
 	if (token.kind == PTOK_IDENTIFIER &&
 	    HostedBuiltinTraitName(token.spelling) && AtSimple(OP_LPAREN, 1))
+		return false;
+	// A registered builtin function name is never a type-name (the
+	// declaration reading of `__sync_lock_release(&lock);` must not
+	// shadow the call statement).
+	if (token.kind == PTOK_IDENTIFIER &&
+	    HostedProbeHasBuiltin(token.spelling))
 		return false;
 	if ((token.kind == PTOK_IDENTIFIER || AtSimple(OP_COLON2)) &&
 	    type_state == kNoType)

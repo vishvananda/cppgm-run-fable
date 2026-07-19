@@ -77,8 +77,142 @@ bool SemExprAnalyzer::TryAnalyzeMagicBuiltin(const AstExpr& expr,
 		out = AnalyzeBuiltinInvoke(expr);
 	else if (name == "__builtin_FUNCTION")
 		out = MakeFunctionNameLiteral(host_.CurrentFunctionName());
+	else if ((name.compare(0, 13, "__c11_atomic_") == 0 ||
+	          name.compare(0, 9, "__atomic_") == 0 ||
+	          name.compare(0, 7, "__sync_") == 0) &&
+	         name != "__c11_atomic_thread_fence" &&
+	         name != "__c11_atomic_signal_fence")
+		// The fences keep their fixed declarations
+		// (ResolveBuiltinFunction).
+		return TryAnalyzeAtomicBuiltin(expr, name, out);
 	else
 		return false;
+	return true;
+}
+
+// The GNU/C11 atomic operator families: each form's parameter list
+// derives from the first argument's pointee type; the lowering maps
+// them onto the LowIR atomic instructions.
+bool SemExprAnalyzer::TryAnalyzeAtomicBuiltin(const AstExpr& expr,
+                                              const string& name,
+                                              SemValue& out)
+{
+	TypePtr int_type = MakeFundamentalType(FT_INT);
+	TypePtr bool_type = MakeFundamentalType(FT_BOOL);
+	TypePtr void_type = MakeFundamentalType(FT_VOID);
+	if (name == "__atomic_always_lock_free" ||
+	    name == "__atomic_is_lock_free" ||
+	    name == "__c11_atomic_is_lock_free")
+	{
+		// x86-64: power-of-two sizes through 16 bytes are lock-free.
+		if (expr.arguments.empty() || expr.arguments.size() > 2)
+			throw runtime_error(name + " argument count");
+		ConstValue size;
+		if (!host_.TryEvaluateConstant(*expr.arguments[0], size))
+			throw runtime_error(name + " requires a constant size");
+		if (expr.arguments.size() > 1)
+			Analyze(*expr.arguments[1]);
+		bool lock_free = size.bits == 1 || size.bits == 2 ||
+			size.bits == 4 || size.bits == 8 || size.bits == 16;
+		SemValue value;
+		value.type = bool_type;
+		value.category = VC_PRVALUE;
+		value.node = MakeSemNode(SN_LITERAL);
+		value.node->token = lock_free ? "true" : "false";
+		value.node->type = bool_type;
+		value.node->category = VC_PRVALUE;
+		value.node->has_value = true;
+		value.node->value = ConstValue(FT_BOOL, lock_free ? 1 : 0);
+		out = std::move(value);
+		return true;
+	}
+	vector<SemValue> args;
+	AnalyzeArgumentList(expr.arguments, args);
+	if (args.empty())
+		throw runtime_error(name + " needs an atomic address");
+	TypePtr pointer = RemoveTopCv(args[0].type);
+	if (pointer->kind != TK_POINTER)
+		throw runtime_error(name + " requires a pointer operand");
+	TypePtr element = RemoveTopCv(pointer->target);
+	if (element->kind != TK_FUNDAMENTAL && element->kind != TK_POINTER &&
+	    element->kind != TK_ENUM)
+		throw runtime_error(name + " element type");
+	vector<TypePtr> params;
+	params.push_back(pointer);
+	TypePtr result;
+	if (name == "__c11_atomic_init")
+	{
+		params.push_back(element);
+		result = void_type;
+	}
+	else if (name == "__c11_atomic_load" || name == "__atomic_load_n")
+	{
+		params.push_back(int_type);
+		result = element;
+	}
+	else if (name == "__c11_atomic_store" || name == "__atomic_store_n")
+	{
+		params.push_back(element);
+		params.push_back(int_type);
+		result = void_type;
+	}
+	else if (name == "__atomic_load" || name == "__atomic_store")
+	{
+		if (args.size() < 2 ||
+		    RemoveTopCv(args[1].type)->kind != TK_POINTER)
+			throw runtime_error(name + " requires a value pointer");
+		params.push_back(RemoveTopCv(args[1].type));
+		params.push_back(int_type);
+		result = void_type;
+	}
+	else if (name == "__c11_atomic_exchange" ||
+	         name == "__atomic_exchange_n")
+	{
+		params.push_back(element);
+		params.push_back(int_type);
+		result = element;
+	}
+	else if (name == "__c11_atomic_compare_exchange_strong" ||
+	         name == "__c11_atomic_compare_exchange_weak")
+	{
+		params.push_back(MakePointerType(element, false, false));
+		params.push_back(element);
+		params.push_back(int_type);
+		params.push_back(int_type);
+		result = bool_type;
+	}
+	else if (name == "__atomic_add_fetch" ||
+	         name == "__atomic_sub_fetch" ||
+	         name == "__atomic_fetch_add" ||
+	         name == "__atomic_fetch_sub" ||
+	         name == "__c11_atomic_fetch_add" ||
+	         name == "__c11_atomic_fetch_sub" ||
+	         name == "__c11_atomic_fetch_and" ||
+	         name == "__c11_atomic_fetch_or" ||
+	         name == "__c11_atomic_fetch_xor" ||
+	         name == "__atomic_fetch_and" ||
+	         name == "__atomic_fetch_or" ||
+	         name == "__atomic_fetch_xor" ||
+	         name == "__atomic_and_fetch" ||
+	         name == "__atomic_or_fetch" ||
+	         name == "__atomic_xor_fetch")
+	{
+		params.push_back(element);
+		params.push_back(int_type);
+		result = element;
+	}
+	else if (name == "__sync_lock_test_and_set")
+	{
+		params.push_back(element);
+		result = element;
+	}
+	else if (name == "__sync_lock_release")
+		result = void_type;
+	else
+		return false;
+	TypePtr fn_type = MakeFunctionType(result, params, false);
+	CheckCallArguments(fn_type, args);
+	out = MakeBuiltinCallResult(name, fn_type, args, true);
 	return true;
 }
 

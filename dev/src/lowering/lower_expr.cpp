@@ -1100,29 +1100,57 @@ bool FunctionLowerer::SkipTrivialDefaultConstruction(const SemNode& node,
 	return true;
 }
 
+// The compiler-expanded call forms that never reach the ordinary
+// call emission: RTTI identity comparison, elided trivial default
+// construction, and the inline-expanded builtin families.
+bool FunctionLowerer::TryLowerExpandedCall(const SemNode& node,
+                                           const SemNode& callee,
+                                           bool direct, LowerValue& out)
+{
+	// PA25 5.2.8: std::type_info comparison folds to RTTI record
+	// address identity - no runtime call.
+	if (IsTypeInfoComparison(node))
+	{
+		out = LowerTypeInfoComparison(node, callee);
+		return true;
+	}
+	if (direct && SkipTrivialDefaultConstruction(node, callee))
+	{
+		out = LowerValue();
+		return true;
+	}
+	// PA29: the float-classification builtins expand inline - no
+	// runtime definition exists, and no eh region is needed.
+	if (IsFloatBuiltinCall(node))
+	{
+		out = LowerFloatBuiltin(node, callee);
+		return true;
+	}
+	// PA33: the vararg-cursor and stack-allocation builtins lower to
+	// backend-expanded role calls (or nothing); never a runtime call.
+	if (IsVarargBuiltinCall(node))
+	{
+		out = LowerVarargBuiltin(node, callee);
+		return true;
+	}
+	// PA34: the hosted GNU/Clang builtin families expand inline.
+	if (IsHostedBuiltinCall(node))
+	{
+		out = LowerHostedBuiltin(node);
+		return true;
+	}
+	return false;
+}
+
 LowerValue FunctionLowerer::LowerCall(const SemNode& node,
                                       const string& result_address)
 {
 	const SemNode& callee = *node.children[0];
 	TypePtr fn_type = CalleeFnType(callee);
 	bool direct = callee.kind == SN_CALLEE;
-	// PA25 5.2.8: std::type_info comparison folds to RTTI record
-	// address identity - no runtime call.
-	if (IsTypeInfoComparison(node))
-		return LowerTypeInfoComparison(node, callee);
-	if (direct && SkipTrivialDefaultConstruction(node, callee))
-		return LowerValue();
-	// PA29: the float-classification builtins expand inline - no
-	// runtime definition exists, and no eh region is needed.
-	if (IsFloatBuiltinCall(node))
-		return LowerFloatBuiltin(node, callee);
-	// PA33: the vararg-cursor and stack-allocation builtins lower to
-	// backend-expanded role calls (or nothing); never a runtime call.
-	if (IsVarargBuiltinCall(node))
-		return LowerVarargBuiltin(node, callee);
-	// PA34: the hosted GNU/Clang builtin families expand inline.
-	if (IsHostedBuiltinCall(node))
-		return LowerHostedBuiltin(node);
+	LowerValue expanded;
+	if (TryLowerExpandedCall(node, callee, direct, expanded))
+		return expanded;
 	// A call with armed cleanups runs under an unwind-dispatch region:
 	// live temporaries protect every call, destructible locals only
 	// calls the unwind analysis cannot prove non-throwing. The result

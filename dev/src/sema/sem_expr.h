@@ -639,6 +639,8 @@ private:
 	                                  const string& name);
 	SemValue AnalyzeBuiltinFpclassify(const AstExpr& expr);
 	SemValue MakeFunctionNameLiteral(const string& text);
+	bool TryAnalyzeAtomicBuiltin(const AstExpr& expr, const string& name,
+	                             SemValue& out);
 	SemValue AnalyzeBuiltinInvoke(const AstExpr& expr);
 	SemValue AnalyzeOffsetof(const AstExpr& expr);
 	const ClassField* OffsetofField(const ClassInfo& cls,
