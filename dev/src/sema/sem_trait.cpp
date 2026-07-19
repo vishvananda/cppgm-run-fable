@@ -226,6 +226,28 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinTrait(const AstExpr& expr)
 	if (types.empty())
 		throw runtime_error("builtin trait needs at least one operand: " +
 		                    expr.op_spelling);
+	// PA34 value trait: __array_rank(T) counts array dimensions.
+	if (expr.op_spelling == "__array_rank")
+	{
+		TypePtr bare = RemoveTopCv(types[0]);
+		unsigned long long rank = 0;
+		while (bare->kind == TK_ARRAY)
+		{
+			rank++;
+			bare = RemoveTopCv(bare->target);
+		}
+		SemValue out;
+		out.type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
+		out.category = VC_PRVALUE;
+		out.node = MakeSemNode(SN_LITERAL);
+		out.node->type = out.type;
+		out.node->category = VC_PRVALUE;
+		out.node->has_value = true;
+		out.node->value = ConstValue(FT_UNSIGNED_LONG_INT, rank);
+		out.node->token = RenderConstValue(out.node->value);
+		out.node->materialize_const = true;
+		return out;
+	}
 	ISemExprHost& host = host_;
 	bool value = IsSemaProbeTraitName(expr.op_spelling)
 		? EvaluateSemaProbeTrait(expr.op_spelling, types)

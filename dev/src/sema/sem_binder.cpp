@@ -658,9 +658,11 @@ void SemBinder::FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 		if (object_valued || is_ref)
 		{
 			// A storage definition without its own initializer (9.4.2p3)
-			// reuses the in-class evaluated image.
+			// reuses the in-class evaluated image. An explicit
+			// initializer that produced no actions (`= {}` over an
+			// empty aggregate) still evaluates its own zero image.
 			ConstObjectPtr image;
-			if (item.children.empty())
+			if (item.children.empty() && !item.has_explicit_init)
 			{
 				// A storage definition without its own initializer
 				// (9.4.2p3) reuses the in-class evaluated image; a

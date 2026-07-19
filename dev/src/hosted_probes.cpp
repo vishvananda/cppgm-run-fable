@@ -232,6 +232,7 @@ const char * const kBuiltinTraits[] = {
 	"__is_trivially_copyable",
 	"__is_standard_layout",
 	"__is_literal_type",
+	"__array_rank",
 	"__reference_constructs_from_temporary",
 	"__reference_binds_to_temporary",
 	0

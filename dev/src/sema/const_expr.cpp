@@ -777,6 +777,18 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 			if (TypeIsDependent(types.back()))
 				throw OutsideSubset("dependent builtin trait operand");
 		}
+		// PA34 value trait: __array_rank(T) counts array dimensions.
+		if (expr.op_spelling == "__array_rank")
+		{
+			TypePtr bare = RemoveTopCv(types[0]);
+			unsigned long long rank = 0;
+			while (bare->kind == TK_ARRAY)
+			{
+				rank++;
+				bare = RemoveTopCv(bare->target);
+			}
+			return ConstValue(FT_UNSIGNED_LONG_INT, rank);
+		}
 		bool value = EvaluateBuiltinTraitOnTypes(
 			expr.op_spelling, types,
 			[&context](const TypePtr& type) {

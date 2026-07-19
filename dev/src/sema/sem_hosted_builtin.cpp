@@ -442,31 +442,45 @@ SemValue SemExprAnalyzer::AnalyzeComplexPart(const AstExpr& expr)
 // operator() / surrogates through the ordinary functor path).
 SemValue SemExprAnalyzer::AnalyzeBuiltinInvoke(const AstExpr& expr)
 {
-	if (expr.arguments.empty())
+	// Pack expansions among the arguments (`declval<Args>()...`)
+	// expand before the INVOKE dispatch reads the callable.
+	vector<SemValue> all;
+	AnalyzeArgumentList(expr.arguments, all);
+	if (all.empty())
 		throw runtime_error("__builtin_invoke needs a callable");
-	SemValue callable = Analyze(*expr.arguments[0]);
-	TypePtr bare = RemoveTopCv(callable.type);
+	TypePtr bare = RemoveTopCv(all[0].type);
+	if (bare->kind == TK_CLASS)
+	{
+		// The functor path resolves operator() over the analyzed
+		// operand values (13.3.1.2 member selection).
+		SemValue result;
+		if (!ResolveOperatorCall("()", all, true, result))
+			throw runtime_error("__builtin_invoke callable type");
+		return result;
+	}
+	SemValue callable = std::move(all[0]);
 	if (bare->kind == TK_MEMBER_POINTER)
 	{
-		if (expr.arguments.size() < 2)
+		if (all.size() < 2)
 			throw runtime_error("__builtin_invoke member pointer "
 			                    "needs an object");
-		SemValue object = Analyze(*expr.arguments[1]);
+		SemValue object = std::move(all[1]);
 		bool arrow = RemoveTopCv(object.type)->kind == TK_POINTER;
 		AstExpr access_shape(EK_BINARY);
 		access_shape.op = arrow ? OP_ARROWSTAR : OP_DOTSTAR;
 		access_shape.op_spelling = arrow ? "->*" : ".*";
 		SemValue access = AnalyzeMemberPointerBinary(access_shape,
 		                                             object, callable);
+		vector<SemValue> args(
+			std::make_move_iterator(all.begin() + 2),
+			std::make_move_iterator(all.end()));
 		if (access.type->kind != TK_FUNCTION)
 		{
-			if (expr.arguments.size() != 2)
+			if (!args.empty())
 				throw runtime_error("__builtin_invoke data member "
 				                    "takes one object");
 			return access;
 		}
-		vector<SemValue> args;
-		AnalyzeArgumentList(expr.arguments, args, false, 2);
 		CheckCallArguments(access.type, args);
 		SemValue value = CallResult(access.type);
 		value.node->children.push_back(std::move(access.node));
@@ -474,8 +488,6 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinInvoke(const AstExpr& expr)
 			value.node->children.push_back(std::move(args[i].node));
 		return value;
 	}
-	if (bare->kind == TK_CLASS)
-		return AnalyzeFunctorCall(std::move(callable), expr, 1);
 	TypePtr fn_type;
 	if (bare->kind == TK_FUNCTION)
 		fn_type = bare;
@@ -484,8 +496,9 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinInvoke(const AstExpr& expr)
 		fn_type = bare->target;
 	else
 		throw runtime_error("__builtin_invoke callable type");
-	vector<SemValue> args;
-	AnalyzeArgumentList(expr.arguments, args, false, 1);
+	vector<SemValue> args(
+		std::make_move_iterator(all.begin() + 1),
+		std::make_move_iterator(all.end()));
 	CheckCallArguments(fn_type, args);
 	SemValue value = CallResult(fn_type);
 	value.node->children.push_back(std::move(callable.node));
