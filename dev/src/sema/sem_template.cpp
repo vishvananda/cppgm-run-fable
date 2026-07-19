@@ -476,8 +476,17 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 		? QualifiedLookup(*prefix, part.identifier, SLF_ANY)
 		: UnqualifiedLookup(current_, part.identifier, SLF_ANY);
 	if (!found)
+	{
+		// PA34: builtin alias templates referenced by name.
+		if (!prefix && part.identifier == "__type_pack_element")
+		{
+			TemplateInfo& builtin = TypePackElementTemplate();
+			return ResolveTypePackElementUse(
+				ResolveTemplateArgumentList(builtin, part));
+		}
 		throw runtime_error("undeclared template name " +
 		                    part.identifier);
+	}
 	if (found->kind == SB_FUNCTION)
 		return ResolveFunctionTemplateId(*found, part);
 	if (found->kind == SB_VARIABLE_TEMPLATE && found->templ)

@@ -285,6 +285,49 @@ void SemBinder::ExpandTemplateArgumentPack(TemplateInfo& tmpl,
 			}
 		}
 	}
+	// PA34 GCC __integer_pack(N): the expansion is the value run
+	// 0..N-1 over the pack parameter's declared type. A dependent
+	// operand falls through to the abstract pattern carry below and
+	// re-resolves here at instantiation.
+	if (argument.expr && argument.expr->kind == EK_CALL &&
+	    !argument.expr->operands.empty() &&
+	    argument.expr->operands[0]->kind == EK_ID &&
+	    argument.expr->operands[0]->name.IsPlainIdentifier() &&
+	    argument.expr->operands[0]->name.parts[0].identifier ==
+	        "__integer_pack" &&
+	    argument.expr->arguments.size() == 1)
+	{
+		ConstValue count;
+		if (TryEvaluateConstant(*argument.expr->arguments[0], count) ||
+		    TryFullConstant(*argument.expr->arguments[0], count))
+		{
+			TypePtr param_type = ValueParamType(
+				param, EnsureArgBindingScope(tmpl, args, partial));
+			TypePtr bare = RemoveTopCv(param_type);
+			EFundamentalType target;
+			if (bare->kind == TK_ENUM)
+				target = bare->named->enum_underlying;
+			else if (IsIntegralType(bare))
+				target = bare->fundamental;
+			else
+				throw runtime_error("__integer_pack over a "
+				                    "non-integral parameter pack");
+			long long total = (long long)count.bits;
+			for (long long k = 0; k < total; k++)
+			{
+				TemplateArg element;
+				element.is_value = true;
+				element.type = param_type;
+				ConstValue value = ConvertConstValue(
+					ConstValue(FT_LONG_LONG_INT,
+					           (unsigned long long)k), target);
+				element.value_type = value.type;
+				element.value_bits = value.bits;
+				args.push_back(element);
+			}
+			return;
+		}
+	}
 	if (mentions.packs.empty() || PacksAreAbstract(mentions))
 	{
 		if (!InAbstractTemplateContext())

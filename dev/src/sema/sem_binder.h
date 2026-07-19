@@ -466,6 +466,12 @@ private:
 	vector<TemplateArg> ResolveTemplateArgumentList(TemplateInfo& tmpl,
 	                                                const AstNamePart& part,
 	                                                size_t* spelled = 0);
+	// PA34 builtin alias template __type_pack_element<I, Ts...>
+	// (sem_spec.cpp): the shadow template record and its use
+	// resolution (dependent uses defer like alias uses).
+	TemplateInfo& TypePackElementTemplate();
+	const ScopeBinding* ResolveTypePackElementUse(
+		const vector<TemplateArg>& args);
 	// A SCOPE_TEMPLATE_PARAMS scope under the template's declaring
 	// scope with each parameter name aliased to its argument (type
 	// aliases and constant-value bindings).
@@ -1034,6 +1040,10 @@ private:
 	// (its head's argument aliases are in scope); any other templated
 	// lambda reaching AnalyzeLambda is an uninvoked boundary.
 	const AstLambda* invoked_templated_lambda_ = 0;
+	// PA34 __type_pack_element shadow record and the synthesized AST
+	// for its index parameter's declared type.
+	std::unique_ptr<TemplateInfo> type_pack_element_tmpl_;
+	std::unique_ptr<AstTemplateParameter> type_pack_index_param_;
 
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;

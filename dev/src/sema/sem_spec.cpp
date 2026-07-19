@@ -86,9 +86,94 @@ void SemBinder::CaptureAliasTemplate(const AstDecl& decl,
 // (14.5.7: names in the type-id resolve there, not at the use site)
 // and the type-id resolves through the ordinary builder. Cached per
 // argument key.
+// PA34 Clang __type_pack_element<I, Ts...>: a builtin alias template
+// selecting the I-th element of its type list. The shadow
+// TemplateInfo lets ordinary argument resolution, pack expansion, and
+// the deferred-alias machinery treat it like any alias template.
+TemplateInfo& SemBinder::TypePackElementTemplate()
+{
+	if (!type_pack_element_tmpl_)
+	{
+		type_pack_index_param_.reset(new AstTemplateParameter());
+		AstTemplateParameter& index = *type_pack_index_param_;
+		index.kind = TP_NON_TYPE;
+		AstSpecifier spec_unsigned;
+		spec_unsigned.kind = SPEC_KEYWORD;
+		spec_unsigned.keyword = KW_UNSIGNED;
+		spec_unsigned.spelling = "unsigned";
+		index.specifiers.push_back(std::move(spec_unsigned));
+		AstSpecifier spec_long;
+		spec_long.kind = SPEC_KEYWORD;
+		spec_long.keyword = KW_LONG;
+		spec_long.spelling = "long";
+		index.specifiers.push_back(std::move(spec_long));
+		type_pack_element_tmpl_.reset(new TemplateInfo());
+		TemplateInfo& tmpl = *type_pack_element_tmpl_;
+		tmpl.name = "__type_pack_element";
+		tmpl.kind = TMPL_ALIAS;
+		tmpl.declaring = model_.global();
+		TemplateParam index_param;
+		index_param.kind = TPK_VALUE;
+		index_param.name = "__i";
+		index_param.source = &index;
+		tmpl.params.push_back(index_param);
+		TemplateParam pack_param;
+		pack_param.kind = TPK_TYPE;
+		pack_param.pack = true;
+		pack_param.name = "__ts";
+		tmpl.params.push_back(pack_param);
+		tmpl.anchor = model_.CreateNamedTypeInfo(
+			"__type_pack_element", model_.global(),
+			"__type_pack_element");
+		tmpl.anchor->is_template_anchor = true;
+		tmpl.anchor->spec_template = &tmpl;
+	}
+	return *type_pack_element_tmpl_;
+}
+
+const ScopeBinding* SemBinder::ResolveTypePackElementUse(
+	const vector<TemplateArg>& args)
+{
+	TemplateInfo& tmpl = TypePackElementTemplate();
+	string key = TemplateArgumentKey(args);
+	unique_ptr<ScopeBinding>& slot = tmpl.dependent_uses[key];
+	if (slot)
+		return slot.get();
+	slot.reset(new ScopeBinding());
+	slot->kind = SB_TYPE_ALIAS;
+	slot->name = tmpl.name;
+	slot->owner = tmpl.declaring;
+	slot->home = tmpl.declaring;
+	bool dependent = false;
+	for (size_t i = 0; i < args.size(); i++)
+		if (TemplateArgIsDependent(args[i]))
+			dependent = true;
+	if (dependent)
+	{
+		// Deferred like a dependent alias use; instantiation
+		// re-resolves through ResolveAliasTemplateId.
+		slot->type = MakeTemplateSpecType(tmpl.anchor, args);
+		return slot.get();
+	}
+	if (args.empty() || !args[0].is_value)
+		throw runtime_error("__type_pack_element index is not a "
+		                    "constant");
+	size_t index = (size_t)args[0].value_bits;
+	if (index + 1 >= args.size() || args[index + 1].is_value ||
+	    !args[index + 1].type)
+		throw runtime_error("__type_pack_element index is out of "
+		                    "range");
+	slot->type = args[index + 1].type;
+	return slot.get();
+}
+
 const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 	TemplateInfo& tmpl, const vector<TemplateArg>& args)
 {
+	// PA34: the builtin __type_pack_element selects its indexed
+	// element instead of substituting an aliased type.
+	if (&tmpl == type_pack_element_tmpl_.get())
+		return ResolveTypePackElementUse(args);
 	if (!tmpl.alias_type)
 		throw runtime_error("alias template " + tmpl.name +
 		                    " has no aliased type");
