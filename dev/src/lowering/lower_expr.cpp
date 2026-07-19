@@ -1120,6 +1120,9 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	// backend-expanded role calls (or nothing); never a runtime call.
 	if (IsVarargBuiltinCall(node))
 		return LowerVarargBuiltin(node, callee);
+	// PA34: the hosted GNU/Clang builtin families expand inline.
+	if (IsHostedBuiltinCall(node))
+		return LowerHostedBuiltin(node);
 	// A call with armed cleanups runs under an unwind-dispatch region:
 	// live temporaries protect every call, destructible locals only
 	// calls the unwind analysis cannot prove non-throwing. The result

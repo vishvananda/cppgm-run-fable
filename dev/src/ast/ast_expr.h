@@ -34,7 +34,8 @@ enum EExprKind
 	EK_STATEMENT_EXPR,   // GNU ( compound-statement ) expression
 	EK_VA_ARG,           // __builtin_va_arg ( expr , type-id )
 	EK_BUILTIN_TRAIT,    // PA34 __is_*/__has_* ( type-id-list )
-	EK_FOLD              // PA34 ( pack op ... [op init] ) fold forms
+	EK_FOLD,             // PA34 ( pack op ... [op init] ) fold forms
+	EK_OFFSETOF          // PA34 __builtin_offsetof ( type-id , designator )
 };
 
 struct AstExpr
@@ -47,6 +48,9 @@ struct AstExpr
 	std::vector<AstExprPtr> operands;  // operands in source order
 	std::vector<AstExprPtr> arguments; // call/cast/placement arguments
 	AstName name;              // EK_ID; EK_MEMBER member name
+	// EK_OFFSETOF member-designator steps ride `arguments`: EK_ID
+	// entries are member names, any other kind is an array index
+	// expression.
 	std::string literal;       // EK_LITERAL / EK_KEYWORD_LITERAL spelling
 	// EK_LITERAL phase-7 facts copied from the terminal (PTK_LITERAL /
 	// PTK_LITERAL_ARRAY / user-defined kinds, scalar or element type,

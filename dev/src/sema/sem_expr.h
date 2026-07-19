@@ -368,7 +368,8 @@ public:
 	// arguments as deferred list-initialization values (PA24 8.5.4).
 	void AnalyzeArgumentList(const vector<AstExprPtr>& items,
 	                         vector<SemValue>& out,
-	                         bool allow_braced = false);
+	                         bool allow_braced = false,
+	                         size_t from = 0);
 
 	// PA16: contextual bool conversion; a class operand materializes
 	// its conversion-function call into the value.
@@ -495,7 +496,8 @@ private:
 	SemValue AnalyzeMethodCall(SemValue object, const ScopeBinding& binding,
 	                           const vector<AstExprPtr>& arguments,
 	                           bool qualified = false,
-	                           const AstNamePart* explicit_part = 0);
+	                           const AstNamePart* explicit_part = 0,
+	                           size_t args_from = 0);
 	SemValue AnalyzeStaticMethodCall(const AstExpr& expr,
 	                                 const ScopeBinding& binding,
 	                                 const AstNamePart* explicit_part = 0);
@@ -613,7 +615,28 @@ private:
 	                       SemValue& rhs, SemValue& result);
 	bool TryUnaryOperator(const string& spelling, SemValue& operand,
 	                      bool postfix, SemValue& result);
-	SemValue AnalyzeFunctorCall(SemValue object, const AstExpr& expr);
+	SemValue AnalyzeFunctorCall(SemValue object, const AstExpr& expr,
+	                            size_t args_from = 0);
+	// PA34 magic-typed hosted builtins (sem_hosted_builtin.cpp):
+	// callee forms whose types derive from their arguments.
+	bool TryAnalyzeMagicBuiltin(const AstExpr& expr, const string& name,
+	                            SemValue& out);
+	SemValue MakeBuiltinCallResult(const string& name,
+	                               const TypePtr& fn_type,
+	                               vector<SemValue>& args, bool no_throw);
+	SemValue AnalyzeBuiltinAddressOf(const AstExpr& expr);
+	SemValue AnalyzeBuiltinBitCountG(const AstExpr& expr,
+	                                 const string& name);
+	SemValue AnalyzeBuiltinOverflow(const AstExpr& expr,
+	                                const string& name);
+	SemValue AnalyzeBuiltinAllocation(const AstExpr& expr,
+	                                  const string& name);
+	SemValue AnalyzeBuiltinFpclassify(const AstExpr& expr);
+	SemValue AnalyzeBuiltinInvoke(const AstExpr& expr);
+	SemValue AnalyzeOffsetof(const AstExpr& expr);
+	const ClassField* OffsetofField(const ClassInfo& cls,
+	                                const string& name,
+	                                unsigned long long& offset);
 	static AstName MakeDestructorTypeName(const AstName& name);
 	SemValue MakeExplicitDestructorCall(SemValue object,
 	                                    const ClassInfo& cls, bool arrow);

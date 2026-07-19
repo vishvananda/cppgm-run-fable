@@ -29,6 +29,23 @@ string QualifiedKey(const Scope* scope, const string& name)
 	return LowerScopeKey(scope) + name;
 }
 
+// PA34: the C-library-backed builtins call the host C library under
+// separate compilation - the emitted object references the plain
+// libc symbol (matching the GNU builtin contract: __builtin_memcpy
+// generates a call to memcpy when it is not expanded inline).
+string HostLibraryBuiltinSymbol(const string& name)
+{
+	static const char* const kLibraryBuiltins[] = {
+		"__builtin_strlen", "__builtin_memcpy", "__builtin_memmove",
+		"__builtin_strcmp", "__builtin_memcmp", "__builtin_memchr",
+		"__builtin_strchr", "__builtin_bzero", 0
+	};
+	for (const char* const* at = kLibraryBuiltins; *at; at++)
+		if (name == *at)
+			return name.substr(10);  // strlen("__builtin_")
+	return string();
+}
+
 // PA20: the per-scope identity of a function-local static (the plain
 // key collapses block scopes so block-scope extern declarations reach
 // their namespace entities; hoisted statics must stay distinct).
@@ -514,6 +531,16 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 		info.object_name = MangleFunctionTemplateObjectName(*spec);
 	else if (!info.is_main)
 		info.object_name = MangleFunctionObjectName(scope, name, type);
+	if (global_scope)
+	{
+		string host_symbol = HostLibraryBuiltinSymbol(name);
+		if (!host_symbol.empty())
+		{
+			info.c_linkage = true;
+			info.object_name =
+				separate_compilation_ ? host_symbol : string();
+		}
+	}
 	info.index = functions_.size();
 	function_index_[key] = functions_.size();
 	functions_.push_back(info);
@@ -690,7 +717,10 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 	if (item.c_linkage)
 	{
 		info.c_linkage = true;
-		info.object_name.clear();
+		// An explicit redeclaration of a C-library-backed builtin
+		// keeps its host library symbol.
+		info.object_name = separate_compilation_
+			? HostLibraryBuiltinSymbol(item.entity_name) : string();
 	}
 	if (defined)
 	{

@@ -814,7 +814,8 @@ bool SemExprAnalyzer::TryUnaryOperator(const string& spelling,
 
 // `object(args)`: the class object's operator() member.
 SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
-                                             const AstExpr& expr)
+                                             const AstExpr& expr,
+                                             size_t args_from)
 {
 	// PA24: a directly-called captureless lambda expression calls its
 	// synthesized function through the pointer conversion (the
@@ -835,7 +836,8 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 			fn->entity_scope = owner;
 			fn->entity_name = name;
 			vector<SemValue> args;
-			AnalyzeArgumentList(expr.arguments, args);
+			AnalyzeArgumentList(expr.arguments, args, false,
+			                    args_from);
 			CheckCallArguments(fn_type, args);
 			SemValue value = CallResult(fn_type);
 			value.node->children.push_back(std::move(fn));
@@ -886,7 +888,8 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 				conv.conv_index = (int)i;
 				ApplyConversion(object, conv, conversion.result);
 				vector<SemValue> args;
-				AnalyzeArgumentList(expr.arguments, args);
+				AnalyzeArgumentList(expr.arguments, args, false,
+				                    args_from);
 				CheckCallArguments(function_type, args);
 				SemValue value = CallResult(function_type);
 				value.node->children.push_back(std::move(object.node));
@@ -899,5 +902,6 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 		throw runtime_error("object is not callable");
 	}
 	host_.CheckMemberAccess(member->home, member->access, "operator ()");
-	return AnalyzeMethodCall(std::move(object), *member, expr.arguments);
+	return AnalyzeMethodCall(std::move(object), *member, expr.arguments,
+	                         false, 0, args_from);
 }

@@ -323,6 +323,11 @@ EvalValue ConstEvalEngine::EvalCall(const SemNode& node,
 		RunConstructor(node, *definition, address.ptr, 2);
 		return EvalValue();
 	}
+	// PA34: the integer builtin families fold from their argument
+	// values (no definition exists to run).
+	EvalValue folded;
+	if (TryEvalBuiltinCall(node, folded))
+		return folded;
 	const SemNode* definition = registry_.Find(callee);
 	if (!definition)
 		throw NotConstant("call to an undefined function");

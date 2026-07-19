@@ -6,77 +6,139 @@ using std::string;
 
 // The lazily declared global-scope builtin functions: unknown-name
 // lookup falls back here (PA12 __builtin_strlen and friends; PA29
-// adds the float-classification pair, which the lowering expands
-// inline - see lowering/lower_arg_bind.cpp).
+// adds the float-classification pair; PA33 the vararg-cursor and
+// alloca builtins; PA34 the hosted GNU/Clang builtin families).
+//
+// Every entry here either expands inline during lowering
+// (lowering/lower_builtin.cpp, lowering/lower_expand.cpp) or - for
+// the C-library-backed builtins under separate compilation - lowers
+// to a call carrying the host C library symbol name
+// (lower_unit.cpp HostLibraryBuiltinSymbol). Constant-foldable
+// entries evaluate in sema/const_eval_builtin.cpp.
+
+namespace {
+
+// One builtin signature, spelled compactly: ret / params use one
+// letter per type (see DecodeBuiltinType).
+struct BuiltinFunctionSpec
+{
+	const char* name;
+	char ret;
+	const char* params;
+	bool variadic;
+};
+
+const BuiltinFunctionSpec kBuiltinFunctions[] = {
+	// PA12/PA34 C-library-backed builtins (host symbol under
+	// separate compilation).
+	{"__builtin_strlen", 'm', "s", false},
+	{"__builtin_memcpy", 'p', "pqm", false},
+	{"__builtin_memmove", 'p', "pqm", false},
+	{"__builtin_strcmp", 'i', "ss", false},
+	{"__builtin_memcmp", 'i', "qqm", false},
+	{"__builtin_memchr", 'p', "qim", false},
+	{"__builtin_strchr", 'c', "si", false},
+	{"__builtin_bzero", 'v', "pm", false},
+	// Control/annotation builtins the lowering erases or reduces to
+	// their surviving operand.
+	{"__builtin_unreachable", 'v', "", false},
+	{"__builtin_expect", 'l', "ll", false},
+	{"__builtin_assume_aligned", 'p', "qm", true},
+	{"__builtin_prefetch", 'v', "q", true},
+	// PA29 float classification; PA34 rounds out the constant and
+	// classification families (lowering materializes the constants).
+	{"__builtin_isnan", 'b', "e", false},
+	{"__builtin_nanl", 'e', "s", false},
+	{"__builtin_nan", 'd', "s", false},
+	{"__builtin_nanf", 'f', "s", false},
+	{"__builtin_nans", 'd', "s", false},
+	{"__builtin_nansf", 'f', "s", false},
+	{"__builtin_nansl", 'e', "s", false},
+	{"__builtin_inf", 'd', "", false},
+	{"__builtin_inff", 'f', "", false},
+	{"__builtin_infl", 'e', "", false},
+	{"__builtin_huge_val", 'd', "", false},
+	{"__builtin_huge_valf", 'f', "", false},
+	{"__builtin_huge_vall", 'e', "", false},
+	// The translation-environment queries (constant per 5.2.4.2.2:
+	// this implementation translates under round-to-nearest).
+	{"__builtin_flt_rounds", 'i', "", false},
+	{"__builtin_is_constant_evaluated", 'b', "", false},
+	// PA33 vararg cursor / stack allocation.
+	{"__builtin_va_start", 'v', "F", true},
+	{"__builtin_va_end", 'v', "F", false},
+	{"__builtin_alloca", 'p', "m", false},
+	// Integer bit-manipulation family (constant folds in
+	// const_eval_builtin.cpp; runtime forms expand inline).
+	{"__builtin_bswap16", 'h', "h", false},
+	{"__builtin_bswap32", 'u', "u", false},
+	{"__builtin_bswap64", 'y', "y", false},
+	{"__builtin_clz", 'i', "u", false},
+	{"__builtin_clzl", 'i', "m", false},
+	{"__builtin_clzll", 'i', "y", false},
+	{"__builtin_ctz", 'i', "u", false},
+	{"__builtin_ctzl", 'i', "m", false},
+	{"__builtin_ctzll", 'i', "y", false},
+	{"__builtin_popcount", 'i', "u", false},
+	{"__builtin_popcountl", 'i', "m", false},
+	{"__builtin_popcountll", 'i', "y", false},
+	// C11 fence operators (the LowIR fence instructions).
+	{"__c11_atomic_thread_fence", 'v', "i", false},
+	{"__c11_atomic_signal_fence", 'v', "i", false},
+	{0, 0, 0, false}
+};
+
+TypePtr DecodeBuiltinType(char code)
+{
+	switch (code)
+	{
+	case 'v': return MakeFundamentalType(FT_VOID);
+	case 'b': return MakeFundamentalType(FT_BOOL);
+	case 'i': return MakeFundamentalType(FT_INT);
+	case 'l': return MakeFundamentalType(FT_LONG_INT);
+	case 'm': return MakeFundamentalType(FT_UNSIGNED_LONG_INT);
+	case 'y': return MakeFundamentalType(FT_UNSIGNED_LONG_LONG_INT);
+	case 'h': return MakeFundamentalType(FT_UNSIGNED_SHORT_INT);
+	case 'u': return MakeFundamentalType(FT_UNSIGNED_INT);
+	case 'f': return MakeFundamentalType(FT_FLOAT);
+	case 'd': return MakeFundamentalType(FT_DOUBLE);
+	case 'e': return MakeFundamentalType(FT_LONG_DOUBLE);
+	case 'c': return MakePointerType(MakeFundamentalType(FT_CHAR),
+	                                 false, false);
+	case 's': return MakePointerType(
+		MakeCvQualifiedType(MakeFundamentalType(FT_CHAR), true, false),
+		false, false);
+	case 'p': return MakePointerType(MakeFundamentalType(FT_VOID),
+	                                 false, false);
+	case 'q': return MakePointerType(
+		MakeCvQualifiedType(MakeFundamentalType(FT_VOID), true, false),
+		false, false);
+	case 'F':
+		// The va_list cursor argument, decayed to its element pointer.
+		return MakePointerType(
+			MakeFundamentalType(FT_UNSIGNED_LONG_INT), false, false);
+	}
+	return TypePtr();
+}
+
+}  // namespace
 
 const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
 {
-	TypePtr void_type = MakeFundamentalType(FT_VOID);
-	TypePtr size_type = MakeFundamentalType(FT_UNSIGNED_LONG_INT);
-	TypePtr byte_ptr = MakePointerType(MakeFundamentalType(FT_VOID),
-	                                   false, false);
-	TypePtr const_char_ptr = MakePointerType(
-		MakeCvQualifiedType(MakeFundamentalType(FT_CHAR), true, false),
-		false, false);
-	TypePtr type;
-	vector<TypePtr> params;
-	if (name == "__builtin_strlen")
-	{
-		params.push_back(const_char_ptr);
-		type = MakeFunctionType(size_type, params, false);
-	}
-	else if (name == "__builtin_memcpy" || name == "__builtin_memmove")
-	{
-		params.push_back(byte_ptr);
-		params.push_back(MakePointerType(
-			MakeCvQualifiedType(MakeFundamentalType(FT_VOID), true,
-			                    false), false, false));
-		params.push_back(size_type);
-		type = MakeFunctionType(byte_ptr, params, false);
-	}
-	else if (name == "__builtin_unreachable")
-		type = MakeFunctionType(void_type, params, false);
-	else if (name == "__builtin_isnan")
-	{
-		// PA29: any floating operand arrives through its long double
-		// conversion; the lowering expands the classification inline
-		// (never a runtime call, so it cannot recurse into itself).
-		params.push_back(MakeFundamentalType(FT_LONG_DOUBLE));
-		type = MakeFunctionType(MakeFundamentalType(FT_BOOL), params,
-		                        false);
-	}
-	else if (name == "__builtin_nanl")
-	{
-		// PA29: a default quiet NaN (the tag argument only evaluates);
-		// the lowering materializes the constant inline.
-		params.push_back(const_char_ptr);
-		type = MakeFunctionType(MakeFundamentalType(FT_LONG_DOUBLE),
-		                        params, false);
-	}
-	else if (name == "__builtin_va_start")
-	{
-		// PA33: the va_list argument arrives decayed to its element
-		// pointer; the second (last-named-parameter) argument only
-		// evaluates. The backend expands the register-cursor fill.
-		params.push_back(MakePointerType(
-			MakeFundamentalType(FT_UNSIGNED_LONG_INT), false, false));
-		type = MakeFunctionType(void_type, params, true);
-	}
-	else if (name == "__builtin_va_end")
-	{
-		// PA33: no cleanup work on this ABI; the lowering drops it.
-		params.push_back(MakePointerType(
-			MakeFundamentalType(FT_UNSIGNED_LONG_INT), false, false));
-		type = MakeFunctionType(void_type, params, false);
-	}
-	else if (name == "__builtin_alloca")
-	{
-		// PA33: dynamic stack allocation; the backend opens the frame.
-		params.push_back(size_type);
-		type = MakeFunctionType(byte_ptr, params, false);
-	}
-	else
+	const BuiltinFunctionSpec* spec = 0;
+	for (const BuiltinFunctionSpec* at = kBuiltinFunctions; at->name; at++)
+		if (name == at->name)
+		{
+			spec = at;
+			break;
+		}
+	if (!spec)
 		return 0;
+	vector<TypePtr> params;
+	for (const char* code = spec->params; *code; code++)
+		params.push_back(DecodeBuiltinType(*code));
+	TypePtr type = MakeFunctionType(DecodeBuiltinType(spec->ret), params,
+	                                spec->variadic);
 	if (const ScopeBinding* existing =
 	        FindOwnBinding(*model_.global(), name))
 		return existing;

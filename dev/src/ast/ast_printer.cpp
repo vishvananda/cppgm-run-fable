@@ -403,6 +403,12 @@ void PrintExprTail(const AstExpr& expr, ostream& out, int depth)
 		for (size_t i = 0; i < expr.trait_args.size(); i++)
 			PrintTypeId(*expr.trait_args[i].type, out, depth + 1);
 		break;
+	case EK_OFFSETOF:
+		Line(out, depth, "offsetof-expression");
+		PrintTypeId(*expr.type, out, depth + 1);
+		for (size_t i = 0; i < expr.arguments.size(); i++)
+			PrintExpr(*expr.arguments[i], out, depth + 1);
+		break;
 	case EK_FOLD:
 		Line(out, depth, "fold-expression " + expr.op_spelling);
 		for (size_t i = 0; i < expr.operands.size(); i++)

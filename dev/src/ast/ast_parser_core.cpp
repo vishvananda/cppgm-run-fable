@@ -49,6 +49,13 @@ static bool GnuAliasKeyword(const string& spelling, ETokenType& type,
 		type = KW_DECLTYPE;
 		canonical = "decltype";
 	}
+	else if (spelling == "__alignof" || spelling == "__alignof__")
+	{
+		// GNU alignof: same trait, expression operands included
+		// (ParseTraitExpression accepts both operand forms).
+		type = KW_ALIGNOF;
+		canonical = "alignof";
+	}
 	else
 		return false;
 	return true;

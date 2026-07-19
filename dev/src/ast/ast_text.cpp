@@ -382,6 +382,19 @@ string FlattenExpr(const AstExpr& expr)
 				FlattenExpr(*expr.operands[expr.operands.size() - 1]);
 		return text + ")";
 	}
+	case EK_OFFSETOF:
+	{
+		string text = "__builtin_offsetof(" + FlattenTypeId(*expr.type);
+		for (size_t i = 0; i < expr.arguments.size(); i++)
+		{
+			if (expr.arguments[i]->kind == EK_ID)
+				text += (i ? "." : ", ") +
+					FlattenName(expr.arguments[i]->name);
+			else
+				text += "[" + FlattenExpr(*expr.arguments[i]) + "]";
+		}
+		return text + ")";
+	}
 	case EK_BUILTIN_TRAIT:
 	{
 		string text = expr.op_spelling + "(";

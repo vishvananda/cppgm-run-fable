@@ -211,6 +211,9 @@ private:
 	// results (allocated by the caller when needed).
 	EvalValue EvalCall(const SemNode& node,
 	                   const ConstPointer* result_dest);
+	// PA34 builtin folds (const_eval_builtin.cpp): true when the
+	// callee is a value-computable builtin family member.
+	bool TryEvalBuiltinCall(const SemNode& node, EvalValue& out);
 	void BindArguments(const SemNode& call, const SemNode& definition,
 	                   Frame& frame);
 	void BindOneArgument(const SemNode& arg, const SemNode& param,

@@ -912,11 +912,11 @@ void SemExprAnalyzer::AttachMethodObjectArgument(
 SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	SemValue object, const ScopeBinding& binding,
 	const vector<AstExprPtr>& arguments, bool qualified,
-	const AstNamePart* explicit_part)
+	const AstNamePart* explicit_part, size_t args_from)
 {
 	const NamedTypeInfo* object_entity = object.type->named;
 	vector<SemValue> args;
-	AnalyzeArgumentList(arguments, args, true);
+	AnalyzeArgumentList(arguments, args, true, args_from);
 	MemberCandidateSet set;
 	ComposeMethodCandidates(object, binding, args, explicit_part, set);
 	AugmentOverloadSetArguments(set.candidates, args, 1);

@@ -1258,7 +1258,18 @@ const ScopeBinding* SemBinder::ResolveVariableTemplateId(
 			current_ = saved;
 			return object;
 		}
-		value = EvaluateConstExpr(*init, *this);
+		try
+		{
+			value = EvaluateConstExpr(*init, *this);
+		}
+		catch (...)
+		{
+			// Outside the PA11 subset: the full PA20 engine evaluates
+			// the analyzed initializer (builtin folds, constexpr
+			// calls).
+			if (!TryFullConstant(*init, value))
+				throw;
+		}
 	}
 	catch (...)
 	{

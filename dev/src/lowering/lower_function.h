@@ -256,6 +256,30 @@ private:
 	LowerValue LowerVarargBuiltin(const SemNode& node,
 	                              const SemNode& callee);
 	LowerValue LowerVaArg(const SemNode& node);
+	// PA34 hosted builtin families (lower_builtin.cpp): inline
+	// expansions of the GNU/Clang bit, annotation, float-constant,
+	// classification, overflow, and allocation builtins.
+	bool IsHostedBuiltinCall(const SemNode& node) const;
+	LowerValue LowerHostedBuiltin(const SemNode& node);
+	LowerValue BuiltinArgument(const SemNode& node, size_t index);
+	LowerValue LowerBuiltinAnnotation(const SemNode& node,
+	                                  const string& name);
+	LowerValue LowerBuiltinBswap(const SemNode& node, const string& name);
+	string BuiltinBitPattern64(const LowerValue& operand);
+	string BuiltinPopcount64(const string& pattern);
+	LowerValue LowerBuiltinBitCount(const SemNode& node,
+	                                const string& name);
+	LowerValue BuiltinFloatImage(const TypePtr& type,
+	                             unsigned long long low,
+	                             unsigned exponent);
+	LowerValue LowerBuiltinFloatConstant(const SemNode& node,
+	                                     const string& name);
+	void BuiltinFloatClassRow(const LowerValue& operand, string preds[5]);
+	LowerValue LowerBuiltinFpclassify(const SemNode& node);
+	LowerValue LowerBuiltinOverflow(const SemNode& node,
+	                                const string& name);
+	LowerValue LowerBuiltinOperatorNewDelete(const SemNode& node,
+	                                         const string& name);
 	// --- call-argument binding (lower_arg_bind.cpp) ---
 	string LowerCallArgument(const SemNode& node, const TypePtr& param);
 	string LowerReferenceArgument(const SemNode& node,

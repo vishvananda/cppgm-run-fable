@@ -961,6 +961,55 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 			break;
 		}
 	}
+	// __builtin_offsetof ( type-id , member-designator ): the type
+	// operand cannot parse as an ordinary call. Designator steps are
+	// `identifier`, `. identifier`, and `[ constant-expression ]`.
+	if (AtIdentifierSpelled("__builtin_offsetof"))
+	{
+		State state = Save();
+		Advance();
+		AstTypeIdPtr type;
+		if (MatchSimple(OP_LPAREN) && ParseTypeId(type) &&
+		    MatchSimple(OP_COMMA) && AtIdentifier())
+		{
+			AstExprPtr node = MakeExpr(EK_OFFSETOF);
+			node->type = move(type);
+			bool valid = true;
+			for (;;)
+			{
+				if (AtIdentifier())
+				{
+					AstExprPtr step = MakeExpr(EK_ID);
+					AstNamePart part;
+					part.kind = NP_IDENTIFIER;
+					part.identifier = Peek().spelling;
+					step->name.parts.push_back(move(part));
+					node->arguments.push_back(move(step));
+					Advance();
+				}
+				else
+				{
+					valid = false;
+					break;
+				}
+				while (MatchSimple(OP_LSQUARE))
+				{
+					AstExprPtr index = ParseExpression();
+					if (!index || !MatchSimple(OP_RSQUARE))
+					{
+						valid = false;
+						break;
+					}
+					node->arguments.push_back(move(index));
+				}
+				if (!valid || !MatchSimple(OP_DOT))
+					break;
+			}
+			if (valid && MatchSimple(OP_RPAREN))
+				return node;
+		}
+		Restore(state);
+	}
 	// __builtin_va_arg ( assignment-expression , type-id ): the SysV
 	// vararg fetch takes a type operand, so it cannot parse as an
 	// ordinary call.

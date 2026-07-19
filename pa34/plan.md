@@ -124,6 +124,21 @@ for compile acceptance: inline-assembly codegen and asm-label symbol
 renaming are documented boundaries for PA36 to revisit). ~115 compile +
 24 run failures remain.
 
+Cluster 4 (builtin function families) landed: fixed-signature builtins
+are table-driven in sem_builtin.cpp (bswap/clz/ctz/popcount families,
+expect, assume_aligned, prefetch, string/memory functions, float
+constants, fences); C-library-backed builtins carry host libc symbol
+names under separate compilation (lower_unit.cpp
+HostLibraryBuiltinSymbol); magic-typed builtins (addressof, clzg/ctzg/
+popcountg, overflow family, operator_new/delete, fpclassify, invoke,
+offsetof) analyze in sem_hosted_builtin.cpp; constant folds live in
+const_eval_builtin.cpp (hooked from EvalCall, with a PA20 fallback in
+the scalar variable-template initializer path); inline lowerings live
+in lower_builtin.cpp (SWAR popcount, smear clz, bswap op, i128
+overflow check, per-format fpclassify rows, storage-image float
+constants, ABI-named allocation calls, LowIR fences).
+`__alignof__`/`__alignof` normalize to alignof. ~82 failures remain.
+
 Next clusters, in leverage order:
 
 1. **Would-it-compile trait family** — landed via

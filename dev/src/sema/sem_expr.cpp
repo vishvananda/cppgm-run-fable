@@ -182,6 +182,8 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return host_.AnalyzeStatementExpression(expr);
 	case EK_VA_ARG:
 		return AnalyzeVaArg(expr);
+	case EK_OFFSETOF:
+		return AnalyzeOffsetof(expr);
 	default:
 		throw OutsideBoundary("expression form");
 	}
@@ -1364,9 +1366,9 @@ SemValue SemExprAnalyzer::AnalyzeMember(const AstExpr& expr)
 // resolution has selected a parameter.
 void SemExprAnalyzer::AnalyzeArgumentList(const vector<AstExprPtr>& items,
                                           vector<SemValue>& out,
-                                          bool allow_braced)
+                                          bool allow_braced, size_t from)
 {
-	for (size_t i = 0; i < items.size(); i++)
+	for (size_t i = from; i < items.size(); i++)
 	{
 		if (items[i]->kind == EK_PACK_EXPANSION)
 		{

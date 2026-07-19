@@ -66,9 +66,15 @@ SemValue SemExprAnalyzer::AnalyzeCall(const AstExpr& expr)
 		}
 		catch (const std::exception&)
 		{
-			if (plain &&
-			    callee->name.parts[0].identifier == "__builtin_constant_p")
-				return AnalyzeBuiltinConstantP(expr);
+			if (plain)
+			{
+				// PA34: the magic-typed builtins shape their calls
+				// from their arguments (sem_hosted_builtin.cpp).
+				SemValue magic;
+				if (TryAnalyzeMagicBuiltin(
+				        expr, callee->name.parts[0].identifier, magic))
+					return magic;
+			}
 			if (plain)
 				binding = host_.ResolveBuiltinFunction(
 					callee->name.parts[0].identifier);
