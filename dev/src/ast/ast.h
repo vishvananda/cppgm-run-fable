@@ -105,6 +105,9 @@ struct AstMemberSpecifier
 
 	ETokenType keyword;
 	std::string spelling;
+	// PA34 hosted C++20 concession: `explicit(constant-expression)`.
+	// Null for a plain `explicit`; evaluated per instantiation.
+	AstExprPtr explicit_expr;
 };
 
 // PA20 7.1.5: whether a declaration spells `constexpr` (ordinary

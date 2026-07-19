@@ -224,7 +224,17 @@ AstDeclPtr AstParser::ParseDeductionGuide()
 			Restore(state);
 			return AstDeclPtr();
 		}
-		MatchSimple(KW_EXPLICIT);
+		if (MatchSimple(KW_EXPLICIT) && AtSimple(OP_LPAREN))
+		{
+			// C++20 conditional explicit-specifier on a guide.
+			Advance();
+			if (!ParseConditionalExpression() || !MatchSimple(OP_RPAREN))
+			{
+				PopScope();
+				Restore(state);
+				return AstDeclPtr();
+			}
+		}
 		if (!AtIdentifier() || !AtSimple(OP_LPAREN, 1))
 		{
 			PopScope();
@@ -244,7 +254,16 @@ AstDeclPtr AstParser::ParseDeductionGuide()
 		PopScope();
 		return MakeDecl(DK_EMPTY);
 	}
-	MatchSimple(KW_EXPLICIT);
+	if (MatchSimple(KW_EXPLICIT) && AtSimple(OP_LPAREN))
+	{
+		// C++20 conditional explicit-specifier on a guide.
+		Advance();
+		if (!ParseConditionalExpression() || !MatchSimple(OP_RPAREN))
+		{
+			Restore(state);
+			return AstDeclPtr();
+		}
+	}
 	if (!AtIdentifier() || !AtSimple(OP_LPAREN, 1))
 	{
 		Restore(state);

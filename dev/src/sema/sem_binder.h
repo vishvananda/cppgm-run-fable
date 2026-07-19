@@ -143,6 +143,8 @@ private:
 	void BindConditionDeclaration(const AstCondition& condition,
 	                              bool for_switch);
 	void BindIfStatement(const AstStmt& stmt);
+	void BindConstexprIfStatement(const AstStmt& stmt);
+	bool ExplicitSpecifierValue(const AstMemberSpecifier& spec);
 	void BindWhileStatement(const AstStmt& stmt);
 	void BindDoStatement(const AstStmt& stmt);
 	void BindForStatement(const AstStmt& stmt);

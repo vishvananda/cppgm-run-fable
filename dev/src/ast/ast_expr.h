@@ -188,7 +188,12 @@ struct AstStmt
 	AstStmtPtr then_branch;         // SK_IF
 	AstStmtPtr else_branch;         // SK_IF
 	AstStmtPtr body;                // loop/switch/labeled/case bodies, try compound
-	AstStmtPtr for_init;            // SK_FOR (declaration or expression stmt)
+	// SK_FOR first clause; also the PA34 hosted C++17 init-statement
+	// of an if/switch (declaration or expression statement).
+	AstStmtPtr for_init;
+	// PA34 hosted C++17 `if constexpr`: the condition is a constant
+	// expression and only the taken branch is analyzed.
+	bool constexpr_if = false;
 	AstExprPtr iteration;           // SK_FOR third clause
 	// SK_FOR range form (6.5.4): the for-range-declaration (one
 	// uninitialized declarator) and the for-range-initializer.

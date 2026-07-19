@@ -1413,6 +1413,8 @@ void DeclBinder::BindStatement(const AstStmt& stmt)
 		BindDeclaration(*stmt.decl);
 		return;
 	case SK_IF:
+		if (stmt.for_init)
+			BindStatement(*stmt.for_init);
 		if (stmt.then_branch)
 			BindStatement(*stmt.then_branch);
 		if (stmt.else_branch)
@@ -1437,6 +1439,8 @@ void DeclBinder::BindStatement(const AstStmt& stmt)
 	case SK_LABELED:
 	case SK_CASE:
 	case SK_DEFAULT:
+		if (stmt.for_init)
+			BindStatement(*stmt.for_init);
 		if (stmt.body)
 			BindStatement(*stmt.body);
 		return;

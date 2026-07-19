@@ -1384,25 +1384,68 @@ void SemBinder::BindCondition(const AstCondition& condition, bool for_switch)
 
 void SemBinder::BindIfStatement(const AstStmt& stmt)
 {
-	SemNode* item = AppendItem(SN_IF_STATEMENT);
-	parents_.push_back(item);
 	Scope* saved = current_;
-	if (stmt.condition->is_declaration)
-		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
-	BindCondition(*stmt.condition, false);
-	SemNode* then_item = AppendItem(SN_THEN);
-	parents_.push_back(then_item);
-	BindStatement(*stmt.then_branch);
-	parents_.pop_back();
-	if (stmt.else_branch)
+	// C++17 init-statement: the declared names live in an implicit
+	// block around the whole selection statement; a wrapping compound
+	// node reuses the ordinary declaration and lowering paths.
+	SemNode* wrapper = 0;
+	if (stmt.for_init)
 	{
-		SemNode* else_item = AppendItem(SN_ELSE);
-		parents_.push_back(else_item);
-		BindStatement(*stmt.else_branch);
+		wrapper = AppendItem(SN_COMPOUND_STATEMENT);
+		parents_.push_back(wrapper);
+		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+		BindStatement(*stmt.for_init);
+	}
+	if (stmt.constexpr_if)
+		BindConstexprIfStatement(stmt);
+	else
+	{
+		SemNode* item = AppendItem(SN_IF_STATEMENT);
+		parents_.push_back(item);
+		Scope* before = current_;
+		if (stmt.condition->is_declaration)
+			current_ = model_.CreateScope(SCOPE_BLOCK, "", before);
+		BindCondition(*stmt.condition, false);
+		SemNode* then_item = AppendItem(SN_THEN);
+		parents_.push_back(then_item);
+		BindStatement(*stmt.then_branch);
+		parents_.pop_back();
+		if (stmt.else_branch)
+		{
+			SemNode* else_item = AppendItem(SN_ELSE);
+			parents_.push_back(else_item);
+			BindStatement(*stmt.else_branch);
+			parents_.pop_back();
+		}
+		current_ = before;
 		parents_.pop_back();
 	}
+	if (wrapper)
+		parents_.pop_back();
 	current_ = saved;
-	parents_.pop_back();
+}
+
+// C++17 6.4.1 hosted concession: the constexpr-if condition is a
+// constant expression contextually converted to bool, and only the
+// taken branch is analyzed, so a discarded dependent statement is
+// never instantiated.
+void SemBinder::BindConstexprIfStatement(const AstStmt& stmt)
+{
+	if (stmt.condition->is_declaration)
+		throw OutsideBoundary("constexpr if condition declaration");
+	ConstValue cond;
+	if (!TryEvaluateConstant(*stmt.condition->expr, cond) &&
+	    !TryFullConstant(*stmt.condition->expr, cond))
+		throw runtime_error("constexpr if condition is not a constant "
+		                    "expression");
+	const AstStmt* taken = ConstValueIsNonZero(cond)
+		? stmt.then_branch.get() : stmt.else_branch.get();
+	if (!taken)
+		return;
+	Scope* saved = current_;
+	current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+	BindStatement(*taken);
+	current_ = saved;
 }
 
 void SemBinder::BindWhileStatement(const AstStmt& stmt)
@@ -1460,15 +1503,27 @@ void SemBinder::BindForStatement(const AstStmt& stmt)
 
 void SemBinder::BindSwitchStatement(const AstStmt& stmt)
 {
+	Scope* saved = current_;
+	SemNode* wrapper = 0;
+	if (stmt.for_init)
+	{
+		wrapper = AppendItem(SN_COMPOUND_STATEMENT);
+		parents_.push_back(wrapper);
+		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+		BindStatement(*stmt.for_init);
+	}
 	SemNode* item = AppendItem(SN_SWITCH_STATEMENT);
 	parents_.push_back(item);
-	Scope* saved = current_;
+	Scope* before = current_;
 	if (stmt.condition->is_declaration)
-		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+		current_ = model_.CreateScope(SCOPE_BLOCK, "", before);
 	BindCondition(*stmt.condition, true);
 	BindStatement(*stmt.body);
-	current_ = saved;
+	current_ = before;
 	parents_.pop_back();
+	if (wrapper)
+		parents_.pop_back();
+	current_ = saved;
 }
 
 void SemBinder::BindLabelStatement(const AstStmt& stmt)

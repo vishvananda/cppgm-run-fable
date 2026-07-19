@@ -568,6 +568,19 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition,
 			spec.keyword = Peek().simple_type;
 			spec.spelling = Peek().spelling;
 			Advance();
+			// C++20 explicit-specifier: `explicit ( constant-expression )`.
+			// A constructor name never follows `explicit` with `(`, so
+			// the open paren is unambiguous here.
+			if (spec.keyword == KW_EXPLICIT && AtSimple(OP_LPAREN))
+			{
+				Advance();
+				spec.explicit_expr = ParseConditionalExpression();
+				if (!spec.explicit_expr || !MatchSimple(OP_RPAREN))
+				{
+					Restore(state);
+					return AstDeclPtr();
+				}
+			}
 			decl->member_specifiers.push_back(move(spec));
 			continue;
 		}

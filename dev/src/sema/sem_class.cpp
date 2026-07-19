@@ -263,6 +263,20 @@ static void ReadSpecialMemberSpecifiers(const AstDecl& decl, bool is_dtor,
 	}
 }
 
+// C++20 explicit(constant-expression) (PA34 hosted concession): the
+// condition contextually converts to bool per instantiation.
+bool SemBinder::ExplicitSpecifierValue(const AstMemberSpecifier& spec)
+{
+	if (!spec.explicit_expr)
+		return true;
+	ConstValue value;
+	if (!TryEvaluateConstant(*spec.explicit_expr, value) &&
+	    !TryFullConstant(*spec.explicit_expr, value))
+		throw runtime_error("explicit specifier condition is not a "
+		                    "constant expression");
+	return ConstValueIsNonZero(value);
+}
+
 void SemBinder::BindSpecialMember(const AstDecl& decl)
 {
 	ClassInfo* cls = OpenClass();
@@ -295,6 +309,11 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	bool is_explicit = false;
 	bool is_virtual = false;
 	ReadSpecialMemberSpecifiers(decl, is_dtor, is_explicit, is_virtual);
+	for (size_t i = 0; i < decl.member_specifiers.size(); i++)
+		if (decl.member_specifiers[i].keyword == KW_EXPLICIT &&
+		    decl.member_specifiers[i].explicit_expr)
+			is_explicit =
+				ExplicitSpecifierValue(decl.member_specifiers[i]);
 	// Composing the declarator over void yields exactly the
 	// constructor/destructor function type over the declared parameters.
 	DeclaratorInfo composed = builder_.ComposeDeclarator(
@@ -393,7 +412,8 @@ void SemBinder::BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
 	{
 		ETokenType keyword = decl.member_specifiers[i].keyword;
 		if (keyword == KW_EXPLICIT)
-			is_explicit = true;
+			is_explicit =
+				ExplicitSpecifierValue(decl.member_specifiers[i]);
 		else if (keyword == KW_VIRTUAL)
 			throw OutsideBoundary("virtual conversion function");
 	}

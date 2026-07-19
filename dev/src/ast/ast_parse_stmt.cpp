@@ -157,10 +157,20 @@ AstStmtPtr AstParser::ParseSelectionStatement()
 	if (!is_if && !AtSimple(KW_SWITCH))
 		return AstStmtPtr();
 	Advance();
+	// C++17 6.4.1: `if constexpr` selects the taken branch at compile
+	// time (hosted concession; only `if` takes it).
+	bool constexpr_if = is_if && MatchSimple(KW_CONSTEXPR);
 	PushTransientScope();
 	AstConditionPtr condition;
+	AstStmtPtr init;
 	AstStmtPtr body;
-	if (!MatchSimple(OP_LPAREN) || !(condition = ParseCondition()) ||
+	bool ok = MatchSimple(OP_LPAREN);
+	// C++17 init-statement: a declaration or expression statement with
+	// its own `;` before the condition; a plain condition never
+	// matches (its parse stops at `)` without the semicolon).
+	if (ok)
+		init = ParseForInitStatement();
+	if (!ok || !(condition = ParseCondition()) ||
 	    !MatchSimple(OP_RPAREN) || !(body = ParseStatement()))
 	{
 		PopScope();
@@ -168,6 +178,8 @@ AstStmtPtr AstParser::ParseSelectionStatement()
 		return AstStmtPtr();
 	}
 	AstStmtPtr stmt = MakeStmt(is_if ? SK_IF : SK_SWITCH);
+	stmt->constexpr_if = constexpr_if;
+	stmt->for_init = move(init);
 	stmt->condition = move(condition);
 	if (is_if)
 	{
@@ -190,11 +202,15 @@ AstStmtPtr AstParser::ParseSelectionStatement()
 	return stmt;
 }
 
-// for-init-statement: a simple-declaration (with its semicolon) or an
-// optional expression followed by one.
+// for-init-statement (also the if/switch init-statement): a
+// simple-declaration or alias-declaration (with its semicolon) or an
+// optional expression followed by one. The alias form covers the
+// hosted `if constexpr (using A = ...; A::value)` idiom.
 AstStmtPtr AstParser::ParseForInitStatement()
 {
-	AstDeclPtr decl = ParseSimpleDeclaration();
+	AstDeclPtr decl = ParseAliasDeclaration();
+	if (!decl)
+		decl = ParseSimpleDeclaration();
 	if (decl)
 	{
 		AstStmtPtr stmt = MakeStmt(SK_DECLARATION);

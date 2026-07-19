@@ -470,7 +470,13 @@ void PrintStmt(const AstStmt& stmt, ostream& out, int depth)
 			PrintExpr(*stmt.expr, out, depth + 1);
 		break;
 	case SK_IF:
-		Line(out, depth, "if-statement");
+		Line(out, depth, stmt.constexpr_if ? "constexpr-if-statement"
+		                                   : "if-statement");
+		if (stmt.for_init)
+		{
+			Line(out, depth + 1, "init-statement");
+			PrintStmt(*stmt.for_init, out, depth + 2);
+		}
 		PrintCondition(*stmt.condition, out, depth + 1);
 		Line(out, depth + 1, "then");
 		PrintStmt(*stmt.then_branch, out, depth + 2);
@@ -482,6 +488,11 @@ void PrintStmt(const AstStmt& stmt, ostream& out, int depth)
 		break;
 	case SK_SWITCH:
 		Line(out, depth, "switch-statement");
+		if (stmt.for_init)
+		{
+			Line(out, depth + 1, "init-statement");
+			PrintStmt(*stmt.for_init, out, depth + 2);
+		}
 		PrintCondition(*stmt.condition, out, depth + 1);
 		PrintStmt(*stmt.body, out, depth + 1);
 		break;
@@ -696,7 +707,12 @@ void PrintSpecialMember(const AstDecl& decl, ostream& out, int depth)
 		for (size_t i = 0; i < decl.member_specifiers.size(); i++)
 		{
 			const AstMemberSpecifier& spec = decl.member_specifiers[i];
-			if (spec.keyword == KW_EXPLICIT)
+			if (spec.keyword == KW_EXPLICIT && spec.explicit_expr)
+			{
+				Line(out, depth + 2, "specifier explicit-if");
+				PrintExpr(*spec.explicit_expr, out, depth + 3);
+			}
+			else if (spec.keyword == KW_EXPLICIT)
 				Line(out, depth + 2, "specifier explicit");
 			else
 				Line(out, depth + 2, "specifier " +
