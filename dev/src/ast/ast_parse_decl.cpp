@@ -171,7 +171,28 @@ AstDeclPtr AstParser::ParseUsingDeclarationOrDirective()
 	// dependent member type.
 	if (!directive && MatchSimple(KW_TYPENAME))
 		decl->target.typename_keyword = true;
-	if (!ParseIdExpressionName(decl->target) || !MatchSimple(OP_SEMICOLON))
+	if (!ParseIdExpressionName(decl->target))
+	{
+		Restore(state);
+		return AstDeclPtr();
+	}
+	// Clang using_if_exists: a missing target binds nothing. Other
+	// trailing attributes are discarded.
+	while (AtIdentifierSpelled("__attribute__"))
+	{
+		if (AtSimple(OP_LPAREN, 1) && AtSimple(OP_LPAREN, 2) &&
+		    (Peek(3).spelling == "__using_if_exists__" ||
+		     Peek(3).spelling == "using_if_exists") &&
+		    AtSimple(OP_RPAREN, 4) && AtSimple(OP_RPAREN, 5))
+			decl->using_if_exists = true;
+		Advance();
+		if (!SkipAttributeParens(0))
+		{
+			Restore(state);
+			return AstDeclPtr();
+		}
+	}
+	if (!MatchSimple(OP_SEMICOLON))
 	{
 		Restore(state);
 		return AstDeclPtr();

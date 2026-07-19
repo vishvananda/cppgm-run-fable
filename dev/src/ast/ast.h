@@ -135,6 +135,8 @@ struct AstDecl
 	AstStmtPtr body;               // function/special-member compound
 	// PA33: a leading [[no_unique_address]] on a member declaration.
 	bool no_unique_address = false;
+	// PA34 using_if_exists attribute: a missing target binds nothing.
+	bool using_if_exists = false;
 
 	// namespace-definition / namespace-alias / alias-declaration
 	std::string name;

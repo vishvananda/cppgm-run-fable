@@ -450,8 +450,8 @@ unsigned long long DeclBinder::EvaluateArrayBound(const AstExpr& expr)
 	if (IsSignedIntegralFundamental(value.type) &&
 	    (long long)value.bits < 0)
 		throw runtime_error("negative array bound");
-	if (value.bits == 0)
-		throw runtime_error("zero-size arrays are ill-formed");
+	// GNU zero-length arrays (hosted flexible-array members) are
+	// accepted as an extension.
 	return value.bits;
 }
 

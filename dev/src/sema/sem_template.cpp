@@ -1205,7 +1205,8 @@ void SemBinder::BindClassDeclaration(const AstDecl& decl)
 			return;
 		}
 		Scope* declaring = ResolvePrefixScope(decl.class_name);
-		if (declaring->kind != SCOPE_CLASS)
+		if (declaring->kind != SCOPE_CLASS &&
+		    declaring->kind != SCOPE_NAMESPACE)
 			throw OutsideBoundary("qualified class definition scope");
 		Scope* saved = current_;
 		bool saved_allow = allow_qualified_class_name_;

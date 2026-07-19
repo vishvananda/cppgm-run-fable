@@ -68,6 +68,8 @@ void DeclBinder::BindUsingDeclaration(const AstDecl& decl)
 		return;
 	}
 	const ScopeBinding* found = QualifiedLookup(*prefix, name, SLF_ANY);
+	if (!found && decl.using_if_exists)
+		return;  // Clang using_if_exists: a missing target binds nothing
 	if (!found)
 		throw runtime_error("using-declaration target not found: " + name);
 	if (found->kind == SB_NAMESPACE || found->kind == SB_NAMESPACE_ALIAS)
