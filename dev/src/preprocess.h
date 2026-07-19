@@ -165,11 +165,13 @@ private:
 	// from_chain_index >= 0 restricts the search to chain entries at or
 	// after that slot (the #include_next resume point).
 	IncludeResolution ResolveIncludeFile(const string& name,
-	                                     int from_chain_index) const;
+	                                     int from_chain_index,
+	                                     bool angled = false) const;
 	void ProcessIncludedFile(const IncludeResolution& resolved);
 	int IncludeNextChainStart() const;
 
 	// PA34 hosted handlers (preprocess_hosted.cpp).
+	static bool IsHostedProbeName(const string& name);
 	vector<PPToken> FoldHostedProbeOperators(const vector<PPToken>& tokens);
 	long FoldOneHostedProbe(const vector<PPToken>& tokens, size_t at,
 	                        size_t& consumed);

@@ -35,6 +35,12 @@ struct ISemExprHost
 		return false;
 	}
 	virtual Scope* CurrentScope() = 0;
+	// PA34 __func__/__builtin_FUNCTION: the name of the function whose
+	// body is being analyzed ("" at namespace scope).
+	virtual string CurrentFunctionName()
+	{
+		return string();
+	}
 	virtual TypesModel& Model() = 0;
 	// Resolution of a possibly qualified value name; `member_class` is
 	// set when the binding is a class member (null otherwise). Throws
@@ -632,6 +638,7 @@ private:
 	SemValue AnalyzeBuiltinAllocation(const AstExpr& expr,
 	                                  const string& name);
 	SemValue AnalyzeBuiltinFpclassify(const AstExpr& expr);
+	SemValue MakeFunctionNameLiteral(const string& text);
 	SemValue AnalyzeBuiltinInvoke(const AstExpr& expr);
 	SemValue AnalyzeOffsetof(const AstExpr& expr);
 	const ClassField* OffsetofField(const ClassInfo& cls,

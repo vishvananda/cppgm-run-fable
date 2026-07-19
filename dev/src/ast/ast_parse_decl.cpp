@@ -35,7 +35,17 @@ AstDeclPtr AstParser::ParseTranslationUnit()
 		unit->body_decls.push_back(move(decl));
 	}
 	if (!AtEof())
-		throw std::runtime_error("parse error at token: " + Peek().spelling);
+	{
+		// Report a token neighborhood: parse failures on hosted
+		// headers need the construct, not just the leading token.
+		string context;
+		for (size_t i = 0; i < 40 && !AtEof(); i++)
+		{
+			context += " " + Peek().spelling;
+			Advance();
+		}
+		throw std::runtime_error("parse error at:" + context);
+	}
 	return unit;
 }
 
@@ -84,9 +94,18 @@ AstDeclPtr AstParser::ParseNamespaceDefinition()
 		AstDeclPtr inner = ParseDeclaration();
 		if (!inner)
 		{
+			// Committed once `namespace name {` matched: report the
+			// failing construct instead of backtracking to a
+			// context-free "parse error at token" at the file top.
+			string context;
+			for (size_t i = 0; i < 40 && !AtEof(); i++)
+			{
+				context += " " + Peek().spelling;
+				Advance();
+			}
 			PopScope();
-			Restore(state);
-			return AstDeclPtr();
+			throw std::runtime_error(
+				"parse error in namespace body at:" + context);
 		}
 		decl->body_decls.push_back(move(inner));
 	}
@@ -305,6 +324,9 @@ AstDeclPtr AstParser::ParseSimpleDeclaration()
 				Restore(state);
 				return AstDeclPtr();
 			}
+			// PA34: GNU post-declarator attributes / asm labels
+			// (`int x __attribute__((...)) = ...`), discarded.
+			SkipDeclAdornments(&init_declarator.declarator->abi_tags);
 			if (AtSimple(OP_ASS) || AtSimple(OP_LBRACE) ||
 			    AtSimple(OP_LPAREN))
 			{
@@ -408,6 +430,18 @@ AstDeclPtr AstParser::ParseDeclarationForms()
 {
 	if (MatchSimple(OP_SEMICOLON))
 		return MakeDecl(DK_EMPTY);
+	// GNU __extension__ prefixes any declaration form (it only
+	// suppresses extension diagnostics).
+	if (AtIdentifierSpelled("__extension__"))
+	{
+		State state = Save();
+		Advance();
+		AstDeclPtr inner = ParseDeclarationForms();
+		if (inner)
+			return inner;
+		Restore(state);
+		return AstDeclPtr();
+	}
 	if (AtSimple(KW_NAMESPACE) || (AtSimple(KW_INLINE) &&
 	    AtSimple(KW_NAMESPACE, 1)))
 	{

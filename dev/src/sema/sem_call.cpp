@@ -236,9 +236,16 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 
 	SemValue value = CallResult(function_type);
 	SemNodePtr callee = MakeSemNode(SN_CALLEE);
-	callee->name = CanonicalQualifiedName(chosen.owner, chosen.name);
+	// A using-declaration merges overloads from another namespace;
+	// the winner keeps its real declaring scope for identity (the
+	// member-call path applies the same rule).
+	const Scope* owner_scope = chosen.owner;
+	if (!spec && !chosen.fn_self_spec && slot < chosen.fn_owner.size() &&
+	    chosen.fn_owner[slot])
+		owner_scope = chosen.fn_owner[slot];
+	callee->name = CanonicalQualifiedName(owner_scope, chosen.name);
 	callee->type = function_type;
-	callee->entity_scope = chosen.owner;
+	callee->entity_scope = owner_scope;
 	callee->entity_name = chosen.name;
 	// An explicit template-id callee arrives as the specialization's
 	// own single-overload binding (fn_self_spec) rather than a deduced

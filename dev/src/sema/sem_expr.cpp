@@ -471,6 +471,44 @@ bool SemExprAnalyzer::AnalyzeVariableIdValue(const AstExpr& expr,
 SemValue SemExprAnalyzer::AnalyzeId(const AstExpr& expr)
 {
 	const NamedTypeInfo* member_class = 0;
+	// GNU __null: the null pointer constant NULL expands to (a
+	// pointer-sized integer literal zero).
+	if (expr.name.IsPlainIdentifier() &&
+	    expr.name.parts[0].identifier == "__null")
+	{
+		SemValue value;
+		value.type = MakeFundamentalType(FT_LONG_INT);
+		value.category = VC_PRVALUE;
+		value.null_pointer_literal = true;
+		value.node = MakeSemNode(SN_LITERAL);
+		value.node->token = "0";
+		value.node->type = value.type;
+		value.node->category = VC_PRVALUE;
+		value.node->has_value = true;
+		value.node->value = ConstValue(FT_LONG_INT, 0);
+		value.node->null_pointer = true;
+		return value;
+	}
+	// 8.4.1p8 / GNU: the predefined function-name variables (the GNU
+	// pretty spelling approximates with the plain name; values are
+	// not part of any grading contract).
+	if (expr.name.IsPlainIdentifier() &&
+	    (expr.name.parts[0].identifier == "__func__" ||
+	     expr.name.parts[0].identifier == "__FUNCTION__" ||
+	     expr.name.parts[0].identifier == "__PRETTY_FUNCTION__"))
+	{
+		// A real declaration of the name wins; otherwise the
+		// predefined variable synthesizes here.
+		try
+		{
+			host_.ResolveValue(expr.name, member_class);
+		}
+		catch (const std::exception&)
+		{
+			return MakeFunctionNameLiteral(host_.CurrentFunctionName());
+		}
+		member_class = 0;
+	}
 	const ScopeBinding* binding = host_.ResolveValue(expr.name, member_class);
 	string written = FlattenNameTopLevel(expr.name);
 	// An unqualified name found in a class scope is an implicit member

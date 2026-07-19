@@ -112,7 +112,11 @@ struct AstSpecifier
 	AstName name;              // SPEC_TYPE_NAME
 	AstExprPtr decltype_expr;  // SPEC_DECLTYPE; SPEC_BITINT width
 	AstDeclPtr nested_decl;    // SPEC_NESTED_DECL
-	AstTypeIdPtr transform_type;  // SPEC_TRANSFORM operand
+	AstTypeIdPtr transform_type;  // SPEC_TRANSFORM operand;
+	                              // GNU typeof(type-id) operand
+	// GNU __typeof__/typeof: decltype semantics with references
+	// stripped (the GNU operator never yields a reference type).
+	bool typeof_strip = false;
 };
 
 typedef std::vector<AstSpecifier> AstSpecifierSeq;

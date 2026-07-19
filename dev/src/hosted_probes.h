@@ -14,6 +14,17 @@
 // type transforms referenced by their reserved identifiers.
 bool HostedProbeHasBuiltin(const std::string & name);
 
+// PA34 C-library-backed builtin registry: `__builtin_X` forms that
+// call the host C library function X. Returns the compact signature
+// pattern for a full builtin name ("" when the name is not
+// libc-backed). Pattern codes (first character is the result):
+// v void, b bool, i int, l long, x long long, m unsigned long,
+// p void*, q const void*, s const char*, c char*, f float, d double,
+// e long double, I int*, and for the three-variant math families the
+// family's own real type r / pointer-to-real R (resolved per
+// variant: "" double, f float, l long double).
+std::string LibcBuiltinSignature(const std::string & name);
+
 // __has_feature / __has_extension. Leading/trailing double underscores
 // on the queried name are stripped first (clang spelling equivalence).
 // Every supported feature is also a supported extension.

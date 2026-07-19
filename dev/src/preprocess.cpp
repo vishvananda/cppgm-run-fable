@@ -340,7 +340,13 @@ void Preprocessor::ProcessDirective(const vector<PPToken>& line,
 	else if (name == "line")
 		HandleLine(args, terminator);
 	else if (name == "error")
-		throw runtime_error("#error directive in active section");
+	{
+		string text;
+		for (size_t i = 0; i < args.size(); i++)
+			text += " " + args[i].data;
+		throw runtime_error("#error directive in active section (line " +
+		                    std::to_string(terminator.line) + "):" + text);
+	}
 	else if (name == "pragma")
 		HandlePragma(args);
 	else
@@ -445,6 +451,23 @@ bool Preprocessor::EvaluateCondition(const vector<PPToken>& tokens)
 	vector<PPToken> expanded = expander_.ExpandTextSequence(
 		FoldDefinedOperators(hosted_ ? FoldHostedProbeOperators(tokens)
 		                             : tokens));
+	// Hosted probe operators are builtin macros: a probe spelled by
+	// another macro's expansion (glibc's __glibc_has_attribute
+	// forwarding idiom) folds after that expansion, to a fixpoint.
+	if (hosted_)
+		for (int round = 0; round < 8; round++)
+		{
+			bool probes = false;
+			for (size_t i = 0; !probes && i < expanded.size(); i++)
+				probes = expanded[i].kind == PPT_IDENTIFIER &&
+					IsHostedProbeName(expanded[i].data) &&
+					i + 1 < expanded.size() &&
+					IsOp(expanded[i + 1], "(");
+			if (!probes)
+				break;
+			expanded = expander_.ExpandTextSequence(
+				FoldHostedProbeOperators(expanded));
+		}
 	if (expanded.empty())
 		throw runtime_error("no tokens in controlling expression");
 	std::vector<PostToken> converted;
@@ -455,7 +478,14 @@ bool Preprocessor::EvaluateCondition(const vector<PPToken>& tokens)
 		converted,
 		[&table](const string& name) { return table.Lookup(name) != 0; });
 	if (result.kind != CtrlExprResult::kValue)
-		throw runtime_error("error in controlling expression");
+	{
+		string where;
+		if (!tokens.empty())
+			where = " at line " + std::to_string(tokens[0].line) + ":";
+		for (size_t i = 0; i < tokens.size() && i < 24; i++)
+			where += " " + tokens[i].data;
+		throw runtime_error("error in controlling expression" + where);
+	}
 	return result.value != 0;
 }
 
@@ -519,8 +549,10 @@ void Preprocessor::HandleInclude(const vector<PPToken>& args,
 		throw runtime_error("invalid token in #include: " +
 		                    expanded[0].data);
 
+	bool angled = expanded[0].kind == PPT_HEADER_NAME &&
+		!expanded[0].data.empty() && expanded[0].data[0] == '<';
 	IncludeResolution resolved = ResolveIncludeFile(
-		nextf, include_next ? IncludeNextChainStart() : -1);
+		nextf, include_next ? IncludeNextChainStart() : -1, angled);
 	if (!resolved.found)
 		throw runtime_error("include file not found: " + nextf);
 	if (pragma_onced_.count(resolved.fileid))
@@ -535,10 +567,15 @@ void Preprocessor::HandleInclude(const vector<PPToken>& args,
 // or after that index, skipping the file-relative and working-directory
 // positions.
 Preprocessor::IncludeResolution Preprocessor::ResolveIncludeFile(
-	const string& name, int from_chain_index) const
+	const string& name, int from_chain_index, bool angled) const
 {
 	IncludeResolution result;
-	if (from_chain_index < 0 && current_file_ >= 0)
+	// Hosted angle includes never search the including file's
+	// directory (the glibc bits/ headers rely on `#include <unistd.h>`
+	// from inside bits/ finding the top-level header, not
+	// bits/unistd.h).
+	if (from_chain_index < 0 && current_file_ >= 0 &&
+	    !(hosted_ && angled))
 	{
 		const string& presumed = files_[current_file_].presumed_name;
 		size_t slash = presumed.rfind('/');

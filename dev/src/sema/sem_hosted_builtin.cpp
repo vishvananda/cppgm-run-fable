@@ -75,9 +75,29 @@ bool SemExprAnalyzer::TryAnalyzeMagicBuiltin(const AstExpr& expr,
 		out = AnalyzeBuiltinFpclassify(expr);
 	else if (name == "__builtin_invoke")
 		out = AnalyzeBuiltinInvoke(expr);
+	else if (name == "__builtin_FUNCTION")
+		out = MakeFunctionNameLiteral(host_.CurrentFunctionName());
 	else
 		return false;
 	return true;
+}
+
+// A synthesized narrow string literal (__func__ and the
+// __builtin_FUNCTION operator): an lvalue array of n const char.
+SemValue SemExprAnalyzer::MakeFunctionNameLiteral(const string& text)
+{
+	SemValue value;
+	value.type = MakeArrayType(
+		MakeCvQualifiedType(MakeFundamentalType(FT_CHAR), true, false),
+		true, text.size() + 1);
+	value.category = VC_LVALUE;
+	value.node = MakeSemNode(SN_LITERAL);
+	value.node->token = "\"" + text + "\"";
+	value.node->is_string_literal = true;
+	value.node->string_bytes = text + '\0';
+	value.node->type = value.type;
+	value.node->category = value.category;
+	return value;
 }
 
 // 20.6.12.1: the address of the object, never an overloaded

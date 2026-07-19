@@ -199,7 +199,16 @@ DeclSpecifierInfo TypeBuilder::ProcessSpecifiers(const AstSpecifierSeq& seq,
 				sign_combinable = true;
 			break;
 		case SPEC_DECLTYPE:
-			resolved = host_.ResolveDecltype(*spec.decltype_expr);
+			// GNU typeof: a type operand resolves directly; either
+			// form strips references (the GNU operator never yields
+			// a reference type).
+			if (spec.transform_type)
+				resolved = ResolveTypeId(*spec.transform_type);
+			else
+				resolved = host_.ResolveDecltype(*spec.decltype_expr);
+			if (spec.typeof_strip && resolved &&
+			    IsReferenceType(resolved))
+				resolved = resolved->target;
 			break;
 		case SPEC_NESTED_DECL:
 			resolved = host_.BindNestedTypeSpecifier(*spec.nested_decl);

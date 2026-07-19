@@ -1,5 +1,6 @@
 #include "numeric_literals.h"
 
+#include <cctype>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -185,6 +186,49 @@ PostToken MakeIntegerLiteral(const string& source, size_t digits_end,
 	return MakeInvalidToken(source);
 }
 
+// The floating-suffix tail: the basic f/l set, plus the GNU/C23
+// extended forms hosted headers use (q/Q/w/W and the _FloatN family
+// bf16/f16/f32/f64/f128 with x variants), each mapped to the nearest
+// evaluated type: 'f' float, 0 double, 'q' long double.
+bool MatchGnuFloatingSuffix(const string& tail, char& suffix)
+{
+	suffix = 0;
+	if (tail.empty())
+		return true;
+	if (tail.size() == 1)
+	{
+		char c = tail[0];
+		if (c == 'f' || c == 'F' || c == 'l' || c == 'L' ||
+		    c == 'q' || c == 'Q')
+		{
+			suffix = c;
+			return true;
+		}
+		if (c == 'w' || c == 'W')
+		{
+			suffix = 'q';
+			return true;
+		}
+		return false;
+	}
+	string lower;
+	for (size_t i = 0; i < tail.size(); i++)
+		lower += (char)std::tolower((unsigned char)tail[i]);
+	if (lower == "f16" || lower == "bf16" || lower == "f32")
+	{
+		suffix = 'f';
+		return true;
+	}
+	if (lower == "f64" || lower == "f32x")
+		return true;
+	if (lower == "f128" || lower == "f64x")
+	{
+		suffix = 'q';
+		return true;
+	}
+	return false;
+}
+
 // Matches floating-literal (2.14.4); suffix is the floating-suffix
 // character or 0 when absent.
 bool MatchFloating(const string& s, char& suffix)
@@ -228,12 +272,7 @@ bool MatchFloating(const string& s, char& suffix)
 	// requires the exponent-part
 	if (!has_dot && !has_exponent)
 		return false;
-	suffix = 0;
-	if (i < s.size() &&
-	    (s[i] == 'f' || s[i] == 'F' || s[i] == 'l' || s[i] == 'L' ||
-	     s[i] == 'q' || s[i] == 'Q'))
-		suffix = s[i++];
-	return i == s.size();
+	return MatchGnuFloatingSuffix(s.substr(i), suffix);
 }
 
 // The reference toolchain additionally accepts C99-style hexadecimal

@@ -1034,6 +1034,12 @@ private:
 	};
 	vector<RetryBody> retry_bodies_;
 	MethodContext method_;
+public:
+	string CurrentFunctionName() override
+	{
+		return method_.fn_name;
+	}
+private:
 	// Saved method contexts around member-signature composition.
 	vector<MethodContext> signature_contexts_;
 	bool in_bit_field_;

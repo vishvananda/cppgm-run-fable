@@ -128,6 +128,13 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	binding.fn_owner.resize(count, 0);
 	if (binding.home)
 		binding.fn_owner[index] = binding.home;
+	// 7.3.3: a direct declaration over a using-imported set belongs
+	// to the declaring namespace, not the import's source scope
+	// (std::ceil(float) beside `using ::ceil`).
+	if (binding.owner && binding.owner != current_ &&
+	    binding.owner->kind == SCOPE_NAMESPACE &&
+	    current_->kind == SCOPE_NAMESPACE)
+		binding.fn_owner[index] = current_;
 	if (deleted)
 		binding.fn_deleted[index] = true;
 	if (index >= old_count)
@@ -342,6 +349,21 @@ TypePtr DeclBinder::ResolveBuiltinTypeName(const AstName& name)
 			return MakeFundamentalType(FT_INT128);
 		if (name.parts[0].identifier == "__uint128_t")
 			return MakeFundamentalType(FT_UINT128);
+		// GNU/C23 extended floating types, mapped to the nearest
+		// evaluated type (the x86-64 f32/f64/f80 formats; binary128
+		// evaluation is a documented hosted boundary).
+		if (name.parts[0].identifier == "_Float16" ||
+		    name.parts[0].identifier == "__bf16" ||
+		    name.parts[0].identifier == "_Float32")
+			return MakeFundamentalType(FT_FLOAT);
+		if (name.parts[0].identifier == "_Float64" ||
+		    name.parts[0].identifier == "_Float32x")
+			return MakeFundamentalType(FT_DOUBLE);
+		if (name.parts[0].identifier == "_Float128" ||
+		    name.parts[0].identifier == "_Float64x" ||
+		    name.parts[0].identifier == "__float128" ||
+		    name.parts[0].identifier == "__float80")
+			return MakeFundamentalType(FT_LONG_DOUBLE);
 		// The SysV va_list: one 24-byte register-cursor record
 		// ({u32 gp_offset, u32 fp_offset, ptr overflow, ptr save}),
 		// spelled as an array so it decays on call like the host's
@@ -493,9 +515,11 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 	case DK_LINKAGE:
 	{
 		// 7.5: members of an extern "C" body get C language linkage;
-		// the scope model itself is unaffected.
+		// the scope model itself is unaffected. A nested extern "C++"
+		// restores C++ linkage (glibc's overloaded string.h protos).
 		bool saved = in_c_linkage_;
-		in_c_linkage_ = saved || decl.linkage == "C";
+		in_c_linkage_ = decl.linkage == "C++"
+			? false : (saved || decl.linkage == "C");
 		// 7.5p7: the declaration directly contained in an unbraced
 		// linkage-specification is treated as if it spells `extern`.
 		in_linkage_single_ = decl.linkage_single;

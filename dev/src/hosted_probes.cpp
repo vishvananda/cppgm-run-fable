@@ -226,7 +226,8 @@ bool HostedProbeHasBuiltin(const string & name)
 {
 	static const set<string> builtins = MakeNameSet(kSupportedBuiltins);
 	return builtins.count(name) != 0 || HostedBuiltinTransformName(name) ||
-		HostedBuiltinTraitName(name);
+		HostedBuiltinTraitName(name) ||
+		!LibcBuiltinSignature(name).empty();
 }
 
 bool HostedBuiltinTransformName(const string & name)
@@ -265,4 +266,89 @@ bool HostedProbeHasCppAttribute(const string & name)
 {
 	(void)name;
 	return false;
+}
+
+namespace {
+
+// The three-variant C math families ("" double / f float / l long
+// double); r/R in the pattern resolve to the variant's real type.
+struct MathBuiltinFamily
+{
+	const char * name;
+	const char * pattern;
+};
+
+const MathBuiltinFamily kMathFamilies[] = {
+	{"acos", "rr"}, {"acosh", "rr"}, {"asin", "rr"}, {"asinh", "rr"},
+	{"atan", "rr"}, {"atanh", "rr"}, {"cbrt", "rr"}, {"ceil", "rr"},
+	{"cos", "rr"}, {"cosh", "rr"}, {"erf", "rr"}, {"erfc", "rr"},
+	{"exp", "rr"}, {"exp2", "rr"}, {"expm1", "rr"}, {"fabs", "rr"},
+	{"floor", "rr"}, {"lgamma", "rr"}, {"log", "rr"}, {"log10", "rr"},
+	{"log1p", "rr"}, {"log2", "rr"}, {"logb", "rr"},
+	{"nearbyint", "rr"}, {"rint", "rr"}, {"round", "rr"},
+	{"sin", "rr"}, {"sinh", "rr"}, {"sqrt", "rr"}, {"tan", "rr"},
+	{"tanh", "rr"}, {"tgamma", "rr"}, {"trunc", "rr"},
+	{"atan2", "rrr"}, {"copysign", "rrr"}, {"fdim", "rrr"},
+	{"fmax", "rrr"}, {"fmin", "rrr"}, {"fmod", "rrr"},
+	{"hypot", "rrr"}, {"nextafter", "rrr"}, {"pow", "rrr"},
+	{"remainder", "rrr"},
+	{"ldexp", "rri"}, {"scalbn", "rri"}, {"scalbln", "rrl"},
+	{"nexttoward", "rre"},
+	{"ilogb", "ir"}, {"lrint", "lr"}, {"lround", "lr"},
+	{"llrint", "xr"}, {"llround", "xr"},
+	{"fma", "rrrr"}, {"frexp", "rrI"}, {"modf", "rrR"},
+	{"remquo", "rrrI"},
+	{0, 0}
+};
+
+// Fixed-signature libc-backed builtins (string/memory/utility).
+const MathBuiltinFamily kLibcSingles[] = {
+	{"strlen", "ms"}, {"memcpy", "ppqm"}, {"memmove", "ppqm"},
+	{"strcmp", "iss"}, {"memcmp", "iqqm"}, {"memchr", "pqim"},
+	{"strchr", "csi"}, {"bzero", "vpm"}, {"free", "vp"},
+	{"abs", "ii"}, {"labs", "ll"}, {"llabs", "xx"},
+	{"fabsf128", "ee"},
+	{0, 0}
+};
+
+// Resolves r/R in a family pattern for one variant suffix.
+string ResolveMathPattern(const string & pattern, char real_code)
+{
+	string resolved;
+	for (size_t i = 0; i < pattern.size(); i++)
+	{
+		if (pattern[i] == 'r')
+			resolved += real_code;
+		else if (pattern[i] == 'R')
+		{
+			resolved += 'P';
+			resolved += real_code;
+		}
+		else
+			resolved += pattern[i];
+	}
+	return resolved;
+}
+
+}  // namespace
+
+string LibcBuiltinSignature(const string & name)
+{
+	if (name.compare(0, 10, "__builtin_") != 0)
+		return string();
+	string tail = name.substr(10);
+	for (const MathBuiltinFamily * at = kLibcSingles; at->name; at++)
+		if (tail == at->name)
+			return at->pattern;
+	for (const MathBuiltinFamily * at = kMathFamilies; at->name; at++)
+	{
+		string base = at->name;
+		if (tail == base)
+			return ResolveMathPattern(at->pattern, 'd');
+		if (tail == base + "f")
+			return ResolveMathPattern(at->pattern, 'f');
+		if (tail == base + "l")
+			return ResolveMathPattern(at->pattern, 'e');
+	}
+	return string();
 }

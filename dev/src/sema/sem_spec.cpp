@@ -934,8 +934,17 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 	if (inner.kind == DK_CLASS_FORWARD)
 		return;  // a declaration reserves the key
 	if (spec.instantiated && (was_explicit || spec.hard_used))
+	{
+		// PA34 hosted alias collapse: the _FloatN spellings resolve
+		// to the standard floating types, so glibc's per-format
+		// specialization sets (the iseqsig helpers) can land twice on
+		// one key. The first explicit definition wins; a use before
+		// the specialization stays ill-formed.
+		if (was_explicit)
+			return;
 		throw runtime_error("explicit specialization of " + tmpl.name +
 		                    " after its instantiation");
+	}
 	if (spec.instantiated)
 	{
 		// 14.7.3p6 makes a use before the explicit specialization

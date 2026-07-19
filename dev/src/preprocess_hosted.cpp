@@ -30,7 +30,7 @@ const char* const kHostedProbeNames[] = {
 	0
 };
 
-bool IsHostedProbeName(const string& name)
+bool IsHostedProbeNameImpl(const string& name)
 {
 	for (const char* const* probe = kHostedProbeNames; *probe; probe++)
 	{
@@ -69,6 +69,11 @@ string ProbeStringValue(const string& spelling)
 
 }  // namespace
 
+bool Preprocessor::IsHostedProbeName(const string& name)
+{
+	return IsHostedProbeNameImpl(name);
+}
+
 void Preprocessor::EnableHostedMode()
 {
 	if (hosted_)
@@ -76,6 +81,12 @@ void Preprocessor::EnableHostedMode()
 	hosted_ = true;
 	for (const char* const* probe = kHostedProbeNames; *probe; probe++)
 		table_.DefineBuiltin(*probe, kBuiltinHostedProbe);
+	// The source-location builtin operators expand at their spelling
+	// site (the call-site re-evaluation of defaulted arguments is a
+	// PA35 source_location boundary; columns are not tracked).
+	table_.Define(TokenizeMacroBody("__builtin_FILE() __FILE__"));
+	table_.Define(TokenizeMacroBody("__builtin_LINE() __LINE__"));
+	table_.Define(TokenizeMacroBody("__builtin_COLUMN() 0"));
 }
 
 void Preprocessor::AddSystemIncludeDir(const string& dir)
@@ -165,7 +176,29 @@ vector<PPToken> Preprocessor::FoldHostedProbeOperators(
 	while (i < tokens.size())
 	{
 		const PPToken& token = tokens[i];
-		if (token.kind != PPT_IDENTIFIER || !IsHostedProbeName(token.data))
+		// A probe name as the operand of `defined` (with or without
+		// parens, as in `#elif defined __has_feature`) stays for the
+		// defined folding: the operator names register as builtin
+		// macros, so the existence query answers there.
+		if (token.kind == PPT_IDENTIFIER && token.data == "defined")
+		{
+			out.push_back(token);
+			i++;
+			size_t skip = i;
+			if (skip < tokens.size() && IsOp(tokens[skip], "("))
+				skip++;
+			if (skip < tokens.size() &&
+			    tokens[skip].kind == PPT_IDENTIFIER)
+				skip++;
+			if (skip < tokens.size() && i < tokens.size() &&
+			    IsOp(tokens[i], "(") && IsOp(tokens[skip], ")"))
+				skip++;
+			for (; i < skip; i++)
+				out.push_back(tokens[i]);
+			continue;
+		}
+		if (token.kind != PPT_IDENTIFIER ||
+		    !IsHostedProbeNameImpl(token.data))
 		{
 			out.push_back(token);
 			i++;
@@ -226,13 +259,18 @@ long Preprocessor::EvaluateHasIncludeOperand(const string& op,
 	if (operand.empty())
 		throw runtime_error("missing " + op + " operand");
 	string name;
+	bool angled = false;
 	if (operand.size() == 1 && operand[0].kind == PPT_STRING_LITERAL)
 		name = ProbeStringValue(operand[0].data);
 	else if (operand.size() == 1 && operand[0].kind == PPT_HEADER_NAME)
+	{
+		angled = operand[0].data[0] == '<';
 		name = operand[0].data.substr(1, operand[0].data.size() - 2);
+	}
 	else if (IsOp(operand[0], "<") &&
 	         IsOp(operand[operand.size() - 1], ">"))
 	{
+		angled = true;
 		for (size_t i = 1; i + 1 < operand.size(); i++)
 			name += operand[i].data;
 	}
@@ -241,7 +279,7 @@ long Preprocessor::EvaluateHasIncludeOperand(const string& op,
 	if (name.empty())
 		throw runtime_error("empty " + op + " header name");
 	int from = op == "__has_include_next" ? IncludeNextChainStart() : -1;
-	return ResolveIncludeFile(name, from).found ? 1 : 0;
+	return ResolveIncludeFile(name, from, angled).found ? 1 : 0;
 }
 
 // The single-name probes. Names the registry does not know (and shaped

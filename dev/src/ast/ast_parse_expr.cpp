@@ -231,6 +231,17 @@ AstExprPtr AstParser::ParseBinaryExpression(int level)
 // `(dev_t)(...)` casts.
 AstExprPtr AstParser::ParseCastExpression()
 {
+	// GNU __extension__ prefixes a cast-expression (diagnostic
+	// suppression only).
+	if (AtIdentifierSpelled("__extension__"))
+	{
+		State state = Save();
+		Advance();
+		AstExprPtr inner = ParseCastExpression();
+		if (inner)
+			return inner;
+		Restore(state);
+	}
 	if (AtSimple(OP_LPAREN))
 	{
 		State state = Save();

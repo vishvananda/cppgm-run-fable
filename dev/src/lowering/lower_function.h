@@ -276,6 +276,8 @@ private:
 	                                     const string& name);
 	void BuiltinFloatClassRow(const LowerValue& operand, string preds[5]);
 	LowerValue LowerBuiltinFpclassify(const SemNode& node);
+	LowerValue LowerBuiltinFloatQuery(const SemNode& node,
+	                                  const string& name);
 	LowerValue LowerBuiltinOverflow(const SemNode& node,
 	                                const string& name);
 	LowerValue LowerBuiltinOperatorNewDelete(const SemNode& node,

@@ -139,6 +139,32 @@ overflow check, per-format fpclassify rows, storage-image float
 constants, ABI-named allocation calls, LowIR fences).
 `__alignof__`/`__alignof` normalize to alignof. ~82 failures remain.
 
+Hosted-header cluster landed: the run suite's hosted headers
+(cstddef/cstdlib/cstring/cstdio/cassert/cmath/csignal) compile and
+run. That required: probe operators folding to a fixpoint through
+macro expansion (glibc's __glibc_has_attribute forwarding idiom) and
+surviving `defined __has_feature`; hosted angle includes skipping the
+including file's directory (bits/ headers include <unistd.h>);
+GNU floating-literal suffixes (f16/bf16/f32/f64/f128/w/q families);
+_FloatN/__float128 type names mapped to the nearest evaluated types
+with first-wins tolerance for the alias-collapsed duplicate explicit
+specializations and duplicate identical inline definitions;
+__extension__ in declaration/expression positions; __typeof__ (a
+reference-stripping SPEC_DECLTYPE variant with expression or type
+operands); extern "C++" restoring C++ linkage inside extern "C";
+namespace-scope using-imports merging with own overloads (per-slot
+fn_owner keeps each overload's declaring namespace for host ABI
+names, and per-slot fn_c_linkage decides item linkage); glibc math
+builtins (full three-variant family) through the hosted_probes
+LibcBuiltinSignature registry lowering to host libm calls; float
+classification/comparison queries (isinf/isfinite/isnormal/signbit/
+isgreater...) as inline f80 bit tests and unordered-aware compares;
+__builtin_FILE/LINE/COLUMN as hosted spelling-site macros;
+__builtin_FUNCTION/__func__/__PRETTY_FUNCTION__ as synthesized
+name literals; GNU __null. Fixed a latent void-conditional lowering
+bug (the then arm fell through into the else arm). 53 failures
+remain.
+
 Next clusters, in leverage order:
 
 1. **Would-it-compile trait family** — landed via

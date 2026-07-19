@@ -1,5 +1,7 @@
 #include "lowering/lower_program.h"
 
+#include "hosted_probes.h"
+
 #include <algorithm>
 
 #include <cstring>
@@ -32,18 +34,13 @@ string QualifiedKey(const Scope* scope, const string& name)
 // PA34: the C-library-backed builtins call the host C library under
 // separate compilation - the emitted object references the plain
 // libc symbol (matching the GNU builtin contract: __builtin_memcpy
-// generates a call to memcpy when it is not expanded inline).
+// generates a call to memcpy when it is not expanded inline). The
+// hosted_probes registry names the family.
 string HostLibraryBuiltinSymbol(const string& name)
 {
-	static const char* const kLibraryBuiltins[] = {
-		"__builtin_strlen", "__builtin_memcpy", "__builtin_memmove",
-		"__builtin_strcmp", "__builtin_memcmp", "__builtin_memchr",
-		"__builtin_strchr", "__builtin_bzero", 0
-	};
-	for (const char* const* at = kLibraryBuiltins; *at; at++)
-		if (name == *at)
-			return name.substr(10);  // strlen("__builtin_")
-	return string();
+	if (LibcBuiltinSignature(name).empty())
+		return string();
+	return name.substr(10);  // strlen("__builtin_")
 }
 
 // PA20: the per-scope identity of a function-local static (the plain
@@ -725,7 +722,17 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 	if (defined)
 	{
 		if (info.defined)
+		{
+			// PA34 hosted alias collapse: the _FloatN spellings
+			// resolve to the standard floating types, so glibc's
+			// per-format inline overload sets (iscanonical and
+			// friends) can define one signature twice. The first
+			// inline definition wins; non-inline duplicates stay
+			// ill-formed.
+			if (item.inline_def && info.weak)
+				return;
 			throw runtime_error("redefinition of " + item.entity_name);
+		}
 		info.defined = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;

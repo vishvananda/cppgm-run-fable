@@ -937,7 +937,23 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 		item->inline_def = true;
 	}
 	if (const ScopeBinding* fn = FindOwnBinding(*declaring, name))
+	{
+		// The per-overload linkage decides: a C++ overload declared
+		// beside a using-imported extern "C" function (std::ceil over
+		// `using ::ceil`) keeps C++ linkage.
 		item->c_linkage = fn->c_linkage;
+		if (!fn->fn_c_linkage.empty())
+		{
+			size_t slot = 0;
+			for (size_t i = 0; i < fn->overloads.size(); i++)
+				if (TypeEquals(fn->overloads[i], composed.type))
+					slot = i + 1;
+			if (TypeEquals(fn->type, composed.type))
+				slot = 0;
+			item->c_linkage = slot < fn->fn_c_linkage.size() &&
+				fn->fn_c_linkage[slot];
+		}
+	}
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{
 		SemNodePtr parameter = MakeSemNode(SN_PARAMETER);

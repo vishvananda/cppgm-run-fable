@@ -370,7 +370,11 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 		LowerEffect(*node.children[1]);
 		if (eh_open_)
 			CloseEhRegion();
-		CloseInto(else_label);
+		// The taken arm skips the other arm (5.16p2: only one
+		// operand is evaluated).
+		ReferenceLabel(end_label);
+		Terminate("jump ^" + end_label);
+		OpenBlock(else_label);
 		OpenSegmentRegion(*node.children[2]);
 		LowerEffect(*node.children[2]);
 		if (eh_open_)

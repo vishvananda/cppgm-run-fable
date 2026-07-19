@@ -84,9 +84,12 @@ void DeclBinder::BindUsingDeclaration(const AstDecl& decl)
 	}
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 	{
-		// 7.3.3p15: the class's own function declarations and the
-		// imported overloads form one set.
-		if (current_->kind != SCOPE_CLASS ||
+		// 7.3.3p15 (classes) and 7.3.3p11 (namespaces): the scope's
+		// own function declarations and the imported overloads form
+		// one set; repeated imports merge idempotently (hosted
+		// <cstdlib> re-imports ::div beside std's own overloads).
+		if ((current_->kind != SCOPE_CLASS &&
+		     current_->kind != SCOPE_NAMESPACE) ||
 		    existing->kind != SB_FUNCTION ||
 		    imported.kind != SB_FUNCTION)
 			throw runtime_error("redeclaration of " + name);

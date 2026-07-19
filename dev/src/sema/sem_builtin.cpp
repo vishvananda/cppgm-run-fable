@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include "hosted_probes.h"
 #include "sema/class_info.h"
 
 using std::string;
@@ -29,16 +30,9 @@ struct BuiltinFunctionSpec
 };
 
 const BuiltinFunctionSpec kBuiltinFunctions[] = {
-	// PA12/PA34 C-library-backed builtins (host symbol under
-	// separate compilation).
-	{"__builtin_strlen", 'm', "s", false},
-	{"__builtin_memcpy", 'p', "pqm", false},
-	{"__builtin_memmove", 'p', "pqm", false},
-	{"__builtin_strcmp", 'i', "ss", false},
-	{"__builtin_memcmp", 'i', "qqm", false},
-	{"__builtin_memchr", 'p', "qim", false},
-	{"__builtin_strchr", 'c', "si", false},
-	{"__builtin_bzero", 'v', "pm", false},
+	// (The C-library-backed builtins - string/memory/math families -
+	// declare through the hosted_probes LibcBuiltinSignature registry
+	// below.)
 	// Control/annotation builtins the lowering erases or reduces to
 	// their surviving operand.
 	{"__builtin_unreachable", 'v', "", false},
@@ -85,6 +79,20 @@ const BuiltinFunctionSpec kBuiltinFunctions[] = {
 	// C11 fence operators (the LowIR fence instructions).
 	{"__c11_atomic_thread_fence", 'v', "i", false},
 	{"__c11_atomic_signal_fence", 'v', "i", false},
+	// Float classification/comparison family (inline bit tests and
+	// unordered-aware compares in lower_builtin.cpp; any floating
+	// operand arrives through its long double conversion, matching
+	// the PA29 isnan convention).
+	{"__builtin_isinf", 'i', "e", false},
+	{"__builtin_isfinite", 'i', "e", false},
+	{"__builtin_isnormal", 'i', "e", false},
+	{"__builtin_signbit", 'i', "e", false},
+	{"__builtin_isgreater", 'i', "ee", false},
+	{"__builtin_isgreaterequal", 'i', "ee", false},
+	{"__builtin_isless", 'i', "ee", false},
+	{"__builtin_islessequal", 'i', "ee", false},
+	{"__builtin_islessgreater", 'i', "ee", false},
+	{"__builtin_isunordered", 'i', "ee", false},
 	{0, 0, 0, false}
 };
 
@@ -96,6 +104,7 @@ TypePtr DecodeBuiltinType(char code)
 	case 'b': return MakeFundamentalType(FT_BOOL);
 	case 'i': return MakeFundamentalType(FT_INT);
 	case 'l': return MakeFundamentalType(FT_LONG_INT);
+	case 'x': return MakeFundamentalType(FT_LONG_LONG_INT);
 	case 'm': return MakeFundamentalType(FT_UNSIGNED_LONG_INT);
 	case 'y': return MakeFundamentalType(FT_UNSIGNED_LONG_LONG_INT);
 	case 'h': return MakeFundamentalType(FT_UNSIGNED_SHORT_INT);
@@ -118,10 +127,37 @@ TypePtr DecodeBuiltinType(char code)
 		return MakePointerType(
 			MakeFundamentalType(FT_UNSIGNED_LONG_INT), false, false);
 	}
-	return TypePtr();
+	throw std::runtime_error(string("unknown builtin type code: ") +
+	                         code);
 }
 
 }  // namespace
+
+// Decodes one signature pattern (a return code then parameter codes;
+// 'P' prefixes a pointer to the following code's type).
+static TypePtr DecodeBuiltinSignature(const string& pattern,
+                                      vector<TypePtr>& params,
+                                      bool variadic)
+{
+	TypePtr ret;
+	for (size_t i = 0; i < pattern.size(); i++)
+	{
+		TypePtr type;
+		if (pattern[i] == 'P' || pattern[i] == 'I')
+		{
+			char code = pattern[i] == 'I' ? 'i' : pattern[++i];
+			type = MakePointerType(DecodeBuiltinType(code), false,
+			                       false);
+		}
+		else
+			type = DecodeBuiltinType(pattern[i]);
+		if (!ret)
+			ret = type;
+		else
+			params.push_back(type);
+	}
+	return MakeFunctionType(ret, params, variadic);
+}
 
 const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
 {
@@ -132,13 +168,19 @@ const ScopeBinding* SemBinder::ResolveBuiltinFunction(const string& name)
 			spec = at;
 			break;
 		}
-	if (!spec)
-		return 0;
+	string pattern;
+	if (spec)
+		pattern = string(1, spec->ret) + spec->params;
+	else
+	{
+		// The C-library-backed families (hosted_probes registry).
+		pattern = LibcBuiltinSignature(name);
+		if (pattern.empty())
+			return 0;
+	}
 	vector<TypePtr> params;
-	for (const char* code = spec->params; *code; code++)
-		params.push_back(DecodeBuiltinType(*code));
-	TypePtr type = MakeFunctionType(DecodeBuiltinType(spec->ret), params,
-	                                spec->variadic);
+	TypePtr type = DecodeBuiltinSignature(pattern, params,
+	                                      spec && spec->variadic);
 	if (const ScopeBinding* existing =
 	        FindOwnBinding(*model_.global(), name))
 		return existing;

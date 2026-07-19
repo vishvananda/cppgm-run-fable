@@ -34,6 +34,9 @@ const char* const kHostedBuiltins[] = {
 	"inf", "inff", "infl", "huge_val", "huge_valf", "huge_vall",
 	"nan", "nanf", "nans", "nansf", "nansl",
 	"fpclassify", "flt_rounds", "is_constant_evaluated",
+	"isinf", "isfinite", "isnormal", "signbit",
+	"isgreater", "isgreaterequal", "isless", "islessequal",
+	"islessgreater", "isunordered",
 	"add_overflow", "sub_overflow", "mul_overflow",
 	"operator_new", "operator_delete",
 	0
@@ -111,6 +114,12 @@ LowerValue FunctionLowerer::LowerHostedBuiltin(const SemNode& node)
 		return LowerBuiltinFloatConstant(node, name);
 	if (name == "fpclassify")
 		return LowerBuiltinFpclassify(node);
+	if (name == "isinf" || name == "isfinite" || name == "isnormal" ||
+	    name == "signbit" || name == "isgreater" ||
+	    name == "isgreaterequal" || name == "isless" ||
+	    name == "islessequal" || name == "islessgreater" ||
+	    name == "isunordered")
+		return LowerBuiltinFloatQuery(node, name);
 	if (name == "add_overflow" || name == "sub_overflow" ||
 	    name == "mul_overflow")
 		return LowerBuiltinOverflow(node, name);
@@ -522,6 +531,91 @@ LowerValue FunctionLowerer::LowerBuiltinFpclassify(const SemNode& node)
 	result.type = NodeType(node);
 	result.text = NewTemp();
 	Emit(result.text + " = convert trunc i32 i64 " + sum);
+	return result;
+}
+
+// The float classification/comparison queries: bit tests on the f80
+// image (the classification row) and unordered-aware compares (an
+// ordered predicate is false on NaN operands; isunordered reads the
+// self-inequality of each operand).
+LowerValue FunctionLowerer::LowerBuiltinFloatQuery(const SemNode& node,
+                                                   const string& name)
+{
+	LowerValue result;
+	result.type = NodeType(node);
+	string flag;
+	if (node.children.size() > 2)
+	{
+		LowerValue lhs = BuiltinArgument(node, 1);
+		LowerValue rhs = BuiltinArgument(node, 2);
+		if (name == "isunordered")
+		{
+			string lhs_nan = NewTemp();
+			Emit(lhs_nan + " = cmp ne f80 " + lhs.text + ", " +
+			     lhs.text);
+			string rhs_nan = NewTemp();
+			Emit(rhs_nan + " = cmp ne f80 " + rhs.text + ", " +
+			     rhs.text);
+			flag = NewTemp();
+			Emit(flag + " = binary or i64 " + lhs_nan + ", " + rhs_nan);
+		}
+		else if (name == "islessgreater")
+		{
+			string below = NewTemp();
+			Emit(below + " = cmp lt f80 " + lhs.text + ", " + rhs.text);
+			string above = NewTemp();
+			Emit(above + " = cmp gt f80 " + lhs.text + ", " + rhs.text);
+			flag = NewTemp();
+			Emit(flag + " = binary or i64 " + below + ", " + above);
+		}
+		else
+		{
+			string pred = name == "isgreater" ? "gt"
+				: name == "isgreaterequal" ? "ge"
+				: name == "isless" ? "lt" : "le";
+			flag = NewTemp();
+			Emit(flag + " = cmp " + pred + " f80 " + lhs.text + ", " +
+			     rhs.text);
+		}
+	}
+	else
+	{
+		LowerValue operand = BuiltinArgument(node, 1);
+		if (name == "signbit")
+		{
+			string slot = AddMatSlot("signbit", "f80");
+			Emit("store f80 " + operand.text + ", $" + slot);
+			string address = NewTemp();
+			Emit(address + " = addr $" + slot);
+			string high_address = NewTemp();
+			Emit(high_address + " = index i8 " + address + ", 8");
+			string high = NewTemp();
+			Emit(high + " = load u16 " + high_address);
+			string sign = NewTemp();
+			Emit(sign + " = binary and u16 " + high + ", 32768");
+			flag = NewTemp();
+			Emit(flag + " = cmp ne u16 " + sign + ", 0");
+		}
+		else
+		{
+			string preds[5];
+			BuiltinFloatClassRow(operand, preds);
+			if (name == "isinf")
+				flag = preds[1];
+			else if (name == "isnormal")
+				flag = preds[2];
+			else
+			{
+				string special = NewTemp();
+				Emit(special + " = binary or i64 " + preds[0] + ", " +
+				     preds[1]);
+				flag = NewTemp();
+				Emit(flag + " = cmp eq i64 " + special + ", 0");
+			}
+		}
+	}
+	result.text = NewTemp();
+	Emit(result.text + " = convert trunc i32 i64 " + flag);
 	return result;
 }
 
