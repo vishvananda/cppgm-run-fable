@@ -625,6 +625,24 @@ AstStmtPtr AstParser::ParseStatement()
 	if (AtSimple(KW_BREAK) || AtSimple(KW_CONTINUE) || AtSimple(KW_GOTO) ||
 	    AtSimple(KW_RETURN) || AtSimple(KW_THROW))
 		return ParseJumpStatement();
+	// PA34 hosted coroutine concession: `co_return expr;` reads as a
+	// contextual return statement when an operand follows; the
+	// identifier reading (`co_return = x;`) keeps priority otherwise.
+	if (AtIdentifierSpelled("co_return") &&
+	    (Peek(1).kind == PTOK_IDENTIFIER ||
+	     Peek(1).kind == PTOK_LITERAL))
+	{
+		State state = Save();
+		Advance();
+		AstExprPtr value = ParseExpression();
+		if (value && MatchSimple(OP_SEMICOLON))
+		{
+			AstStmtPtr co_stmt = MakeStmt(SK_RETURN);
+			co_stmt->expr = move(value);
+			return co_stmt;
+		}
+		Restore(state);
+	}
 	if (AtSimple(KW_TRY))
 		return ParseTryBlock();
 	// PA34 GNU asm statement: `asm/__asm/__asm__ qualifiers? ( ... ) ;`

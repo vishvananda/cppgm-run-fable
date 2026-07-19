@@ -169,6 +169,11 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 		return AnalyzeFold(expr);
 	case EK_COMPLEX_PART:
 		return AnalyzeComplexPart(expr);
+	case EK_COROUTINE_OP:
+		// Parse-level hosted concession only: an instantiated
+		// coroutine body stays outside the PA34 boundary.
+		throw runtime_error("coroutine operator evaluation is outside "
+		                    "the PA34 assignment boundary");
 	case EK_SIZEOF_PACK:
 	{
 		// 5.3.3p5: the number of elements of the named pack; the value

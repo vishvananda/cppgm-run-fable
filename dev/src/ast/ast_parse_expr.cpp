@@ -521,6 +521,29 @@ AstExprPtr AstParser::ParseDeleteExpression()
 AstExprPtr AstParser::ParseUnaryExpression()
 {
 	const ParseToken& token = Peek();
+	// PA34 hosted coroutine concession: `co_await`/`co_yield` read as
+	// contextual unary operators when a primary operand follows
+	// (hosted template bodies that are never instantiated); with an
+	// operator following they stay ordinary identifiers.
+	if (token.kind == PTOK_IDENTIFIER &&
+	    (token.spelling == "co_await" || token.spelling == "co_yield") &&
+	    (Peek(1).kind == PTOK_IDENTIFIER ||
+	     Peek(1).kind == PTOK_LITERAL ||
+	     AtSimple(KW_THIS, 1) || AtSimple(KW_TRUE, 1) ||
+	     AtSimple(KW_FALSE, 1) || AtSimple(KW_NULLPTR, 1)))
+	{
+		State state = Save();
+		string spelling = token.spelling;
+		Advance();
+		if (AstExprPtr operand = ParseCastExpression())
+		{
+			AstExprPtr node = MakeExpr(EK_COROUTINE_OP);
+			node->op_spelling = spelling;
+			node->operands.push_back(move(operand));
+			return node;
+		}
+		Restore(state);
+	}
 	// GNU __real__/__imag__ (also the __real/__imag spellings): a
 	// complex part selection; an unparsable operand falls back to the
 	// ordinary identifier reading.

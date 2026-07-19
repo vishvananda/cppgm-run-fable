@@ -1240,9 +1240,32 @@ const FunctionSpecialization* SemBinder::DeduceFunctionTemplate(
 		if (slots.size() == 1 && slots[0] != pack_index)
 		{
 			call_pack = slots[0];
-			bound[pack_index].pack_done = true;
-			bound[pack_index].pack_elements = pack_elements;
-			pack_elements.clear();
+			// PA34: seal the leading pack only when it has explicit
+			// elements or no fixed parameter pattern can deduce it;
+			// multiple packs each deduced from their own
+			// template-spec parameter (`indices<Uf...>, types<Tf...>,
+			// ..., Up&&...`) keep their runs open for unification.
+			bool deducible = false;
+			for (size_t f = 0; f + 1 < tmpl.param_patterns.size() &&
+			     !deducible; f++)
+			{
+				if (f < tmpl.param_pattern_packs.size() &&
+				    tmpl.param_pattern_packs[f])
+					continue;
+				std::vector<size_t> fixed_slots;
+				if (tmpl.param_patterns[f] &&
+				    CollectPatternSlots(tmpl.param_patterns[f],
+				                        fixed_slots))
+					for (size_t s = 0; s < fixed_slots.size(); s++)
+						if (fixed_slots[s] == pack_index)
+							deducible = true;
+			}
+			if (!deducible || !pack_elements.empty())
+			{
+				bound[pack_index].pack_done = true;
+				bound[pack_index].pack_elements = pack_elements;
+				pack_elements.clear();
+			}
 		}
 	}
 	// 14.8.2p2: explicit arguments substitute into P before deduction;

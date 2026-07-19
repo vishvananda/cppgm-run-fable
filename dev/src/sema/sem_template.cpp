@@ -474,12 +474,24 @@ const ScopeBinding* SemBinder::ResolveTemplateIdBinding(
 {
 	// PA34: the builtin trait template wins even over a user class
 	// template of the same name (the checked-in reference pins the
-	// GCC-13 behavior).
+	// GCC-13 behavior) — but a library's own namespace-scoped
+	// declaration (std::__is_nothrow_invocable) keeps priority, per
+	// the earlier-stage LowIR fixtures.
 	if (!prefix && part.identifier == "__is_nothrow_invocable")
 	{
-		TemplateInfo& builtin = NothrowInvocableTemplate();
-		return ResolveNothrowInvocableUse(
-			ResolveTemplateArgumentList(builtin, part));
+		const ScopeBinding* user =
+			UnqualifiedLookup(current_, part.identifier, SLF_ANY);
+		const Scope* declaring = user
+			? (user->owner ? user->owner : user->home) : 0;
+		bool namespace_owned = declaring &&
+			declaring->kind == SCOPE_NAMESPACE &&
+			declaring != model_.global();
+		if (!namespace_owned)
+		{
+			TemplateInfo& builtin = NothrowInvocableTemplate();
+			return ResolveNothrowInvocableUse(
+				ResolveTemplateArgumentList(builtin, part));
+		}
 	}
 	const ScopeBinding* found = prefix
 		? QualifiedLookup(*prefix, part.identifier, SLF_ANY)
