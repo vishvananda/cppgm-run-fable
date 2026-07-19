@@ -282,6 +282,18 @@ void SemExprAnalyzer::CheckCallArguments(const TypePtr& function_type,
 
 SemValue SemExprAnalyzer::AnalyzeIndirectCall(const AstExpr& expr)
 {
+	// PA34: an immediately-invoked templated lambda deduces its head
+	// from the call arguments before the closure can bind.
+	const AstExpr* callee = StripParens(expr.operands[0].get());
+	if (callee->kind == EK_LAMBDA && callee->lambda &&
+	    callee->lambda->template_head)
+	{
+		vector<SemValue> args;
+		AnalyzeArgumentList(expr.arguments, args);
+		SemValue closure =
+			host_.AnalyzeTemplatedLambdaInvoke(*callee, args);
+		return AnalyzeFunctorCall(std::move(closure), expr);
+	}
 	SemValue fn = Analyze(*expr.operands[0]);
 	if (fn.type->kind == TK_CLASS)
 		return AnalyzeFunctorCall(std::move(fn), expr);

@@ -116,6 +116,10 @@ struct AstLambda
 	bool has_capture_default;
 	ETokenType capture_default;  // OP_AMP / OP_ASS
 	std::vector<AstLambdaCapture> captures;
+	// PA34 hosted C++20 concession: `[]<class T>(...)`. A DK_TEMPLATE
+	// shell holding only the head's parameter list (null when absent),
+	// so template machinery reads it like any template declaration.
+	AstDeclPtr template_head;
 	bool has_declarator;
 	AstParameterClausePtr parameters;
 	bool mutable_specifier;

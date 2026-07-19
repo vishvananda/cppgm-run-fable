@@ -1119,11 +1119,31 @@ AstExprPtr AstParser::ParseLambdaExpression()
 		Restore(state);
 		return AstExprPtr();
 	}
+	// C++20 template head: `[]<class T, int... I>`; the parameters
+	// register in a parse scope spanning the declarator and body.
+	bool template_scope = false;
+	if (AtSimple(OP_LT) && MatchOpenAngle())
+	{
+		PushScope(NewTable(), true);
+		template_scope = true;
+		std::vector<AstTemplateParameter> params;
+		if ((!AtCloseAngle() && !ParseTemplateParameterList(params)) ||
+		    !MatchCloseAngle() || params.empty())
+		{
+			PopScope();
+			Restore(state);
+			return AstExprPtr();
+		}
+		lambda->template_head = AstDeclPtr(new AstDecl(DK_TEMPLATE));
+		lambda->template_head->template_params = move(params);
+	}
 	lambda->declarator_begin_token = Save().pos;
 	if (AtSimple(OP_LPAREN))
 	{
 		if (!ParseParameterClause(lambda->parameters))
 		{
+			if (template_scope)
+				PopScope();
 			Restore(state);
 			return AstExprPtr();
 		}
@@ -1154,6 +1174,8 @@ AstExprPtr AstParser::ParseLambdaExpression()
 			AstTypeIdPtr type;
 			if (!ParseTypeId(type))
 			{
+				if (template_scope)
+					PopScope();
 				Restore(state);
 				return AstExprPtr();
 			}
@@ -1175,6 +1197,8 @@ AstExprPtr AstParser::ParseLambdaExpression()
 	}
 	AstStmtPtr body = ParseCompoundStatement();
 	PopScope();
+	if (template_scope)
+		PopScope();
 	if (!body)
 	{
 		Restore(state);

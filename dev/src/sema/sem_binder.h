@@ -69,6 +69,8 @@ public:
 	virtual SemNodePtr MakeAggregateTemporary(const ClassInfo& cls,
 	                                          vector<SemValue> args);
 	virtual SemValue AnalyzeLambda(const AstExpr& expr);  // PA24
+	virtual SemValue AnalyzeTemplatedLambdaInvoke(
+		const AstExpr& expr, const vector<SemValue>& args);  // PA34
 	virtual SemValue AnalyzeStatementExpression(const AstExpr& expr);
 	virtual bool TryCaptureUse(const ScopeBinding& binding, SemValue& out);
 	virtual SemNodePtr ThisValueNode();
@@ -1022,6 +1024,10 @@ private:
 	// object view (local-type-owning bodies; the reference shape).
 	std::set<const NamedTypeInfo*> closure_object_view_;
 	int lambda_counter_ = 0;
+	// PA34: the templated lambda whose invocation is being analyzed
+	// (its head's argument aliases are in scope); any other templated
+	// lambda reaching AnalyzeLambda is an uninvoked boundary.
+	const AstLambda* invoked_templated_lambda_ = 0;
 
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;

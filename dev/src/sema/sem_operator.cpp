@@ -827,7 +827,12 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 		string name;
 		TypePtr fn_type;
 		if (host_.CapturelessClosureFunction(
-		        RemoveTopCv(object.type)->named, owner, name, fn_type))
+		        RemoveTopCv(object.type)->named, owner, name, fn_type) &&
+		    // An omitted trailing default argument takes the
+		    // operator() member path (its binding carries the
+		    // defaults).
+		    expr.arguments.size() - args_from ==
+		        fn_type->parameters.size())
 		{
 			SemNodePtr fn = MakeSemNode(SN_ID_EXPRESSION);
 			fn->name = name;

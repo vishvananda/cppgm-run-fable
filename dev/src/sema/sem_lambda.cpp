@@ -311,6 +311,10 @@ SemValue SemBinder::MakeLambdaValue(const LambdaInfo& info)
 SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 {
 	const AstLambda& lambda = *expr.lambda;
+	// PA34: a templated lambda binds only through its immediate
+	// invocation (the head's argument aliases are then in scope).
+	if (lambda.template_head && invoked_templated_lambda_ != &lambda)
+		throw OutsideBoundary("uninvoked templated lambda");
 	// One synthesis per (lambda, enclosing body): the deduction and
 	// initialization analyses of one declaration share it, while a
 	// re-instantiated template body synthesizes its own.
@@ -432,6 +436,114 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	return MakeLambdaValue(cached);
 }
 
+// PA34 hosted C++20 templated lambdas. The checked-in uses immediately
+// invoke the lambda, so the head's parameters deduce from the call
+// arguments (14.8.2.1 over the parameter clause) and the closure binds
+// with the deduced argument aliases in scope; an uninvoked templated
+// lambda stays a documented boundary.
+SemValue SemBinder::AnalyzeTemplatedLambdaInvoke(const AstExpr& expr,
+                                                 const vector<SemValue>& args)
+{
+	const AstLambda& lambda = *expr.lambda;
+	TemplateInfo shadow;
+	CollectTemplateParams(*lambda.template_head, shadow.params);
+	shadow.declaring = current_;
+	// Per-parameter deduction patterns: the head's names bind the
+	// positional placeholders while each declared type composes.
+	vector<TypePtr> patterns;
+	vector<bool> pattern_packs;
+	{
+		Scope* pattern_scope =
+			MakePatternParamScope(shadow.params, current_);
+		Scope* saved = current_;
+		Scope* saved_capture = param_capture_scope_;
+		current_ = pattern_scope;
+		param_capture_scope_ = 0;
+		const AstParameterClause* clause =
+			lambda.has_declarator ? lambda.parameters.get() : 0;
+		for (size_t i = 0; clause && i < clause->parameters.size(); i++)
+		{
+			const AstParameter& parameter = clause->parameters[i];
+			bool is_pack = false;
+			if (parameter.declarator)
+				for (size_t d = 0;
+				     d < parameter.declarator->items.size(); d++)
+					if (parameter.declarator->items[d].kind == DI_PACK)
+						is_pack = true;
+			TypePtr pattern;
+			try
+			{
+				DeclSpecifierInfo specs = builder_.ProcessSpecifiers(
+					parameter.specifiers, false);
+				DeclaratorInfo composed = builder_.ComposeDeclarator(
+					parameter.declarator.get(), specs.type);
+				pattern = composed.type;
+			}
+			catch (const std::exception&)
+			{
+				pattern = TypePtr();  // non-deduced context
+			}
+			patterns.push_back(pattern);
+			pattern_packs.push_back(is_pack);
+		}
+		current_ = saved;
+		param_capture_scope_ = saved_capture;
+	}
+	size_t pack_index = TemplatePackIndex(shadow.params);
+	bool has_pack = pack_index < shadow.params.size();
+	vector<TemplateArg> bound(shadow.params.size());
+	for (size_t i = 0; i < bound.size(); i++)
+		bound[i].is_pack_slot = shadow.params[i].pack;
+	vector<TemplateArg> pack_elements;
+	size_t p = 0;
+	for (size_t i = 0; i < args.size(); i++)
+	{
+		if (p >= patterns.size())
+			throw runtime_error("templated lambda call has too many "
+			                    "arguments");
+		if (pattern_packs[p])
+			throw OutsideBoundary("pack-expanded templated-lambda "
+			                      "parameter");
+		const TypePtr pattern = patterns[p++];
+		// A failed unification leaves the parameter to the closure
+		// call's ordinary conversion check.
+		if (pattern)
+			DeduceFixedParameter(pattern, args[i], bound);
+	}
+	if (has_pack && !bound[pack_index].pack_done)
+	{
+		// An unmentioned head pack deduces the empty run.
+		bound[pack_index].pack_done = true;
+		bound[pack_index].pack_elements = pack_elements;
+	}
+	if (!FillDeducedDefaults(shadow, bound, pack_elements))
+		throw runtime_error("templated lambda argument deduction "
+		                    "failed");
+	for (size_t i = 0; i < bound.size(); i++)
+		if (!ArgBound(bound[i]))
+			throw runtime_error("templated lambda argument deduction "
+			                    "failed");
+	Scope* alias_scope = MakeArgumentAliasScope(shadow, bound);
+	Scope* saved = current_;
+	const AstLambda* saved_invoked = invoked_templated_lambda_;
+	current_ = alias_scope;
+	invoked_templated_lambda_ = &lambda;
+	SemValue value;
+	try
+	{
+		value = AnalyzeLambda(expr);
+	}
+	catch (...)
+	{
+		current_ = saved;
+		invoked_templated_lambda_ = saved_invoked;
+		throw;
+	}
+	current_ = saved;
+	invoked_templated_lambda_ = saved_invoked;
+	return value;
+}
+
 // Binds a lambda body as the open function: the shared statement path
 // runs with the given method context, return deduction included.
 // Returns the deduced return type.
@@ -551,6 +663,11 @@ void SemBinder::BindCapturelessLambda(const AstLambda& lambda,
 		added.fn_unwind_no.resize(1, false);
 		added.fn_unwind_no[0] = true;
 	}
+	// 8.3.6 (PA34): lambda parameter default arguments follow the
+	// ordinary omitted-trailing-argument path.
+	added.fn_defaults.resize(1);
+	for (size_t i = 0; i < parameters.size(); i++)
+		added.fn_defaults[0].push_back(parameters[i].default_arg);
 	unit_.deferred.push_back(std::move(item));
 	info.fn_name = name;
 	info.fn_type = fn_type;
@@ -777,6 +894,11 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 		added.fn_unwind_no.resize(1, false);
 		added.fn_unwind_no[0] = true;
 	}
+	// 8.3.6 (PA34): lambda parameter default arguments follow the
+	// ordinary omitted-trailing-argument path.
+	added.fn_defaults.resize(1);
+	for (size_t i = 0; i < parameters.size(); i++)
+		added.fn_defaults[0].push_back(parameters[i].default_arg);
 	unit_.deferred.push_back(std::move(item));
 	info.cls = &cls;
 	info.captures = bound.captures;

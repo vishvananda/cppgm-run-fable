@@ -182,6 +182,10 @@ struct ISemExprHost
 	// PA24 lambdas (sem_lambda.cpp): analyzes a lambda-expression (the
 	// binder owns closure/function synthesis).
 	virtual SemValue AnalyzeLambda(const AstExpr& expr) = 0;
+	// PA34 templated lambdas: deduces the template head from the
+	// immediate-invocation arguments and yields the bound closure.
+	virtual SemValue AnalyzeTemplatedLambdaInvoke(
+		const AstExpr& expr, const vector<SemValue>& args) = 0;
 	// PA29 GNU statement expressions: the binder binds the compound
 	// statement in place; the last expression statement's value is
 	// the expression's value.
