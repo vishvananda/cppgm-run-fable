@@ -166,6 +166,7 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 	item->inline_def = !body.out_of_class;
 	item->is_method = is_method;
 	item->special = special;
+	item->member_template_body = body.member_template;
 	if (is_method)
 	{
 		item->type = MethodAdjustedType(*body.cls, body.composed.type);

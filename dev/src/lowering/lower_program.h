@@ -519,6 +519,9 @@ private:
 	// PA15: demand-emitted member/friend/special definitions, keyed by
 	// MemberDefinitionKey; lifetime helper state.
 	map<string, const SemNode*> member_defs_;
+	// PA36 14.7.2p10: member scopes of extern-declared class
+	// specializations (host mode references their members externally).
+	set<const Scope*> extern_member_scopes_;
 	bool needs_eh_runtime_;
 	// The lowest functions_ index whose demand flipped since the body
 	// sweep last passed it (rescans restart there, not from zero).

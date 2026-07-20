@@ -531,6 +531,23 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 			// The mangler keeps its concrete fallback spelling.
 		}
 	}
+	// PA36 14.7.2p10: class specializations still extern-declared at
+	// the end of the unit hand their member scopes to the lowering -
+	// member emissions become external references (host mode).
+	for (size_t t = 0; t < templates.size(); t++)
+	{
+		TemplateInfo& tmpl = *templates[t];
+		if (tmpl.kind != TMPL_CLASS)
+			continue;
+		for (map<string, unique_ptr<ClassSpecialization>>::iterator it =
+		         tmpl.class_specs.begin();
+		     it != tmpl.class_specs.end(); ++it)
+			if (it->second && it->second->extern_declared &&
+			    it->second->entity)
+				if (Scope* members =
+				        model_.MemberScope(it->second->entity))
+					unit_.extern_class_scopes.push_back(members);
+	}
 	FinishTemplateChecks();
 }
 

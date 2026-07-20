@@ -28,6 +28,9 @@ struct SemDeferredBody
 	// The qualified definition spelled `inline`: it still prints,
 	// but weak (7.1.2p4 linkage with the reference's presentation).
 	bool spelled_inline = false;
+	// PA36: a member-template specialization body (constructor
+	// templates); extern-template class suppression skips it.
+	bool member_template = false;
 };
 
 // The current function context while a body is analyzed: the member

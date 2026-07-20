@@ -76,6 +76,12 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 	units_.push_back(&unit);
 	if (unit.std_type_info)
 		std_type_info_entities_.insert(unit.std_type_info);
+	// PA36 14.7.2p10 host mode: extern-declared specializations'
+	// members reference the owning TU (whole-program keeps the local
+	// weak emissions - there is no external library to defer to).
+	if (separate_compilation_)
+		for (size_t i = 0; i < unit.extern_class_scopes.size(); i++)
+			extern_member_scopes_.insert(unit.extern_class_scopes[i]);
 	for (size_t i = 0; i < unit.items.size(); i++)
 		CollectItem(*unit.items[i]);
 	// unit.synthesized is the PA12 dump artifact; the real demand-driven
@@ -628,6 +634,15 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		info.weak = def->second->inline_def;
 		info.definition = def->second;
 		info.unwind_no = def->second->unwind_no;
+		// PA36 14.7.2p10 note: in-class (inline) members of an
+		// extern-declared specialization keep their local weak
+		// emission (the standard's inline carve-out). Suppressing
+		// them like GCC does requires per-constructor entry
+		// identities first: a converting-constructor-template
+		// specialization can share the plain copy constructor's
+		// signature, and the shared entry then declares the wrong
+		// symbol. Out-of-class members are suppressed at the
+		// instantiation layer (sem_template.cpp).
 	}
 	info.index = functions_.size();
 	function_index_[key] = functions_.size();

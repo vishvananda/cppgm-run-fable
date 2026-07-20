@@ -619,6 +619,11 @@ void SemBinder::BindExplicitInstantiation(const AstDecl& decl)
 			record.deferred_end = unit_.deferred.size();
 			unit_.explicit_instantiations.push_back(record);
 		}
+		else
+			// The definition lifts the extern suppression: pending
+			// members instantiate on the next pass and emit on
+			// ordinary demand.
+			spec->extern_declared = false;
 		return;
 	}
 	if (inner.kind == DK_SIMPLE)

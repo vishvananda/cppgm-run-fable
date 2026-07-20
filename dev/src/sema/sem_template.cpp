@@ -907,12 +907,13 @@ void SemBinder::InstantiateReadyPartialMembers(TemplateInfo& tmpl)
 		{
 			if (spec.partial_members_done.count(i))
 				continue;
-			spec.partial_members_done[i] = true;
 			const AstDecl& def = *partial.member_defs[i];
-			if (spec.member_spec_names.count(MemberDefName(def)))
-				continue;
-			// 14.7.2p10: extern-template members stay external.
+			// 14.7.2p10: extern-template members stay external (and
+			// pending: a later definition lifts the suppression).
 			if (ExternSuppressedMemberDef(spec, def))
+				continue;
+			spec.partial_members_done[i] = true;
+			if (spec.member_spec_names.count(MemberDefName(def)))
 				continue;
 			if (instantiation_depth_ >=
 			    kTemplateInstantiationDepthLimit)
@@ -1046,13 +1047,12 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 				continue;
 			}
 			// 14.7.2p10: an extern-template declaration owns the
-			// non-inline member definitions elsewhere.
+			// non-inline member definitions elsewhere. The member
+			// stays pending: a later explicit-instantiation
+			// definition lifts the suppression.
 			if (ExternSuppressedMemberDef(spec,
 			                              *tmpl.member_defs[i]))
-			{
-				spec.members_done[i] = true;
 				continue;
-			}
 			// An object demand covers non-constexpr statics only;
 			// constexpr members wait for odr-use even when their
 			// definition registers after the demand (the same policy
@@ -1088,12 +1088,13 @@ void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
 			continue;
 		if (skip_constexpr && DeclHasConstexpr(*decl.inner))
 			continue;
+		// 14.7.2p10: extern-template statics stay external (and
+		// pending, so a later instantiation definition lifts this).
+		if (ExternSuppressedMemberDef(spec, decl))
+			continue;
 		// 14.7.3: an explicit member specialization owns its name.
 		spec.members_done[i] = true;
 		if (spec.member_spec_names.count(MemberDefName(decl)))
-			continue;
-		// 14.7.2p10: extern-template statics stay external.
-		if (ExternSuppressedMemberDef(spec, decl))
 			continue;
 		InstantiateMemberDefinition(tmpl, spec, i);
 	}

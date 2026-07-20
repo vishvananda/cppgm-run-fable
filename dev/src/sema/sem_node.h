@@ -339,6 +339,11 @@ struct SemNode
 	// instantiation, so its references are not definition-time demand
 	// (14.7.1: an unused instantiated body is never required).
 	bool from_instantiation = false;
+	// PA36 SN_FUNCTION_DEFINITION: a member-template specialization
+	// body riding the special-member rails (constructor templates).
+	// An extern-template class declaration does not cover it
+	// (14.7.2p8 instantiates non-template members only).
+	bool member_template_body = false;
 	// PA33 SN_STATIC_GUARD: set the guard before running the guarded
 	// actions (the host `__tls_init` shape - a re-entrant TLS wrapper
 	// call during initialization must not recurse). Local statics keep
@@ -445,6 +450,10 @@ struct SemUnit
 	// another translation unit).
 	vector<const FunctionSpecialization*> explicit_fn_instantiations;
 	vector<const FunctionSpecialization*> extern_fn_suppressions;
+	// PA36 14.7.2p10 class form: member scopes of extern-declared
+	// class specializations - their member emissions reference the
+	// owning translation unit (constexpr members keep local bodies).
+	vector<const Scope*> extern_class_scopes;
 	// PA21 14.7.2: explicit-instantiation definitions naming a single
 	// member of a class-template specialization (the member's
 	// instantiated definition emits unconditionally).
