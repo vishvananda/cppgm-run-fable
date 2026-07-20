@@ -568,6 +568,55 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 // `object.name(args)` / `pointer->name(args)`: data members holding
 // callables call indirectly through the member value; member functions
 // resolve against the implicit object argument.
+// The looked-up member name of a member-call callee, with the
+// qualification flag (10.3p15: a qualified call is direct) and the
+// explicit template-id part when the callee spells arguments.
+const AstNamePart* SemExprAnalyzer::ClassifyMemberCalleeName(
+	const AstName& callee_name, string& name, bool& qualified)
+{
+	const AstNamePart& last = callee_name.parts.back();
+	if (callee_name.IsPlainIdentifier())
+	{
+		name = callee_name.parts[0].identifier;
+		return 0;
+	}
+	if (last.kind == NP_CONVERSION_FUNCTION &&
+	    callee_name.parts.size() == 1)
+	{
+		// An explicit conversion call: the type-id resolves to the
+		// canonical member name.
+		name = "operator " + DescribeType(
+			host_.ResolveCastTypeId(*last.conversion_type));
+		return 0;
+	}
+	if (last.kind == NP_OPERATOR_FUNCTION)
+	{
+		// Unqualified, or a qualified operator call
+		// (`this->__shared_ptr<_Tp>::operator=(...)`).
+		name = "operator " + last.operator_text;
+		qualified = callee_name.parts.size() > 1;
+		return 0;
+	}
+	if (last.kind == NP_TEMPLATE_ID)
+	{
+		// PA21 member templates: an explicit member template-id call
+		// (`obj.f<int>(..)`, possibly Base-qualified).
+		name = last.identifier;
+		qualified = callee_name.parts.size() > 1;
+		return &last;
+	}
+	if (last.kind == NP_IDENTIFIER)
+	{
+		// PA17 10.3p15: explicit scope qualification (`d.Base::f()`)
+		// names the function to call; the call is direct, without
+		// virtual dispatch.
+		name = last.identifier;
+		qualified = true;
+		return 0;
+	}
+	throw OutsideBoundary("member name form");
+}
+
 SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
                                             const AstExpr& callee)
 {
@@ -611,44 +660,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		object = DereferenceObject(std::move(object));
 	string name;
 	bool qualified = false;
-	const AstNamePart* explicit_part = 0;
-	const AstNamePart& last = callee.name.parts.back();
-	if (callee.name.IsPlainIdentifier())
-		name = callee.name.parts[0].identifier;
-	else if (callee.name.parts.size() == 1 &&
-	         last.kind == NP_OPERATOR_FUNCTION)
-		name = "operator " + last.operator_text;
-	else if (callee.name.parts.size() == 1 &&
-	         last.kind == NP_CONVERSION_FUNCTION)
-		// An explicit conversion call: the type-id resolves to the
-		// canonical member name.
-		name = "operator " + DescribeType(
-			host_.ResolveCastTypeId(*last.conversion_type));
-	else if (last.kind == NP_TEMPLATE_ID)
-	{
-		// PA21 member templates: an explicit member template-id call
-		// (`obj.f<int>(..)`, possibly Base-qualified).
-		name = last.identifier;
-		explicit_part = &last;
-		qualified = callee.name.parts.size() > 1;
-	}
-	else if (last.kind == NP_IDENTIFIER)
-	{
-		// PA17 10.3p15: explicit scope qualification (`d.Base::f()`)
-		// names the function to call; the call is direct, without
-		// virtual dispatch.
-		name = last.identifier;
-		qualified = true;
-	}
-	else if (last.kind == NP_OPERATOR_FUNCTION)
-	{
-		// A qualified operator call
-		// (`this->__shared_ptr<_Tp>::operator=(...)`).
-		name = "operator " + last.operator_text;
-		qualified = true;
-	}
-	else
-		throw OutsideBoundary("member name form");
+	const AstNamePart* explicit_part =
+		ClassifyMemberCalleeName(callee.name, name, qualified);
 	if (object.type->kind != TK_CLASS)
 		throw runtime_error("member call on a non-class value");
 	host_.RequireCompleteType(object.type->named);

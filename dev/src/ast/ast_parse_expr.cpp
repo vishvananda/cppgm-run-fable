@@ -518,52 +518,49 @@ AstExprPtr AstParser::ParseDeleteExpression()
 	return node;
 }
 
+// Identifier-spelled prefix operators. PA34 hosted coroutine
+// concession: `co_await`/`co_yield` read as contextual unary
+// operators when a primary operand follows (hosted template bodies
+// that are never instantiated); with an operator following they stay
+// ordinary identifiers. GNU __real__/__imag__ (also the
+// __real/__imag spellings): a complex part selection; an unparsable
+// operand falls back to the ordinary identifier reading.
+AstExprPtr AstParser::ParseContextualUnaryPrefix()
+{
+	const ParseToken& token = Peek();
+	bool coroutine =
+		(token.spelling == "co_await" || token.spelling == "co_yield") &&
+		InTemplateScope() &&
+		(Peek(1).kind == PTOK_IDENTIFIER ||
+		 Peek(1).kind == PTOK_LITERAL ||
+		 AtSimple(KW_THIS, 1) || AtSimple(KW_TRUE, 1) ||
+		 AtSimple(KW_FALSE, 1) || AtSimple(KW_NULLPTR, 1));
+	bool complex_part =
+		token.spelling == "__real__" || token.spelling == "__real" ||
+		token.spelling == "__imag__" || token.spelling == "__imag";
+	if (!coroutine && !complex_part)
+		return AstExprPtr();
+	State state = Save();
+	string spelling = token.spelling;
+	Advance();
+	if (AstExprPtr operand = ParseCastExpression())
+	{
+		AstExprPtr node = MakeExpr(coroutine ? EK_COROUTINE_OP
+		                                     : EK_COMPLEX_PART);
+		node->op_spelling = spelling;
+		node->operands.push_back(move(operand));
+		return node;
+	}
+	Restore(state);
+	return AstExprPtr();
+}
+
 AstExprPtr AstParser::ParseUnaryExpression()
 {
 	const ParseToken& token = Peek();
-	// PA34 hosted coroutine concession: `co_await`/`co_yield` read as
-	// contextual unary operators when a primary operand follows
-	// (hosted template bodies that are never instantiated); with an
-	// operator following they stay ordinary identifiers.
-	if (token.kind == PTOK_IDENTIFIER &&
-	    (token.spelling == "co_await" || token.spelling == "co_yield") &&
-	    InTemplateScope() &&
-	    (Peek(1).kind == PTOK_IDENTIFIER ||
-	     Peek(1).kind == PTOK_LITERAL ||
-	     AtSimple(KW_THIS, 1) || AtSimple(KW_TRUE, 1) ||
-	     AtSimple(KW_FALSE, 1) || AtSimple(KW_NULLPTR, 1)))
-	{
-		State state = Save();
-		string spelling = token.spelling;
-		Advance();
-		if (AstExprPtr operand = ParseCastExpression())
-		{
-			AstExprPtr node = MakeExpr(EK_COROUTINE_OP);
-			node->op_spelling = spelling;
-			node->operands.push_back(move(operand));
-			return node;
-		}
-		Restore(state);
-	}
-	// GNU __real__/__imag__ (also the __real/__imag spellings): a
-	// complex part selection; an unparsable operand falls back to the
-	// ordinary identifier reading.
-	if (token.kind == PTOK_IDENTIFIER &&
-	    (token.spelling == "__real__" || token.spelling == "__real" ||
-	     token.spelling == "__imag__" || token.spelling == "__imag"))
-	{
-		State state = Save();
-		string spelling = token.spelling;
-		Advance();
-		if (AstExprPtr operand = ParseCastExpression())
-		{
-			AstExprPtr node = MakeExpr(EK_COMPLEX_PART);
-			node->op_spelling = spelling;
-			node->operands.push_back(move(operand));
-			return node;
-		}
-		Restore(state);
-	}
+	if (token.kind == PTOK_IDENTIFIER)
+		if (AstExprPtr contextual = ParseContextualUnaryPrefix())
+			return contextual;
 	if (token.kind == PTOK_SIMPLE)
 	{
 		switch (token.simple_type)

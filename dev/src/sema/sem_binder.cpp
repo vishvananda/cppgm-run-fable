@@ -799,6 +799,42 @@ void SemBinder::FinishConstexprObject(SemNode& item, ScopeBinding& binding,
 	}
 }
 
+bool SemBinder::ParenInitHasPack(const AstInitializer& init)
+{
+	for (size_t i = 0; i < init.args.size(); i++)
+		if (init.args[i]->kind == EK_PACK_EXPANSION)
+			return true;
+	return false;
+}
+
+// 14.5.3: `T __x(args...)` expands its packs first; the expanded run
+// then initializes like the written arity (8.5p10: an empty expanded
+// list value-initializes).
+void SemBinder::AnalyzeExpandedParenInit(SemNode& item,
+                                         ScopeBinding& binding,
+                                         const AstInitializer& init)
+{
+	vector<const AstExpr*> items;
+	for (size_t i = 0; i < init.args.size(); i++)
+		items.push_back(init.args[i].get());
+	vector<SemValue> values;
+	AnalyzeInitArguments(items, values);
+	if (values.empty())
+	{
+		item.children.push_back(
+			ZeroValue(RemoveTopCv(binding.type)).node);
+		return;
+	}
+	if (values.size() != 1)
+		throw OutsideBoundary("paren-initializer form");
+	ImplicitConversion conv = ClassifyConversionEx(
+		MakeConversionSource(values[0]), binding.type, true);
+	if (!conv.viable)
+		throw runtime_error("no conversion for initialization");
+	analyzer_.ApplyConversion(values[0], conv, binding.type);
+	item.children.push_back(std::move(values[0].node));
+}
+
 void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
                                     const AstInitializer* init)
 {
@@ -813,42 +849,15 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 			expr = init->expr.get();
 		break;
 	case INIT_PAREN:
-	{
-		// 14.5.3: `T __x(args...)` expands its packs first; the
-		// expanded run then initializes like the written arity.
-		bool has_pack = false;
-		for (size_t i = 0; i < init->args.size(); i++)
-			if (init->args[i]->kind == EK_PACK_EXPANSION)
-				has_pack = true;
-		if (has_pack)
+		if (ParenInitHasPack(*init))
 		{
-			vector<const AstExpr*> items;
-			for (size_t i = 0; i < init->args.size(); i++)
-				items.push_back(init->args[i].get());
-			vector<SemValue> values;
-			AnalyzeInitArguments(items, values);
-			if (values.empty())
-			{
-				// 8.5p10: an empty expanded list value-initializes.
-				item.children.push_back(
-					ZeroValue(RemoveTopCv(binding.type)).node);
-				return;
-			}
-			if (values.size() != 1)
-				throw OutsideBoundary("paren-initializer form");
-			ImplicitConversion conv = ClassifyConversionEx(
-				MakeConversionSource(values[0]), binding.type, true);
-			if (!conv.viable)
-				throw runtime_error("no conversion for initialization");
-			analyzer_.ApplyConversion(values[0], conv, binding.type);
-			item.children.push_back(std::move(values[0].node));
+			AnalyzeExpandedParenInit(item, binding, *init);
 			return;
 		}
 		if (init->args.size() != 1)
 			throw OutsideBoundary("paren-initializer form");
 		expr = init->args[0].get();
 		break;
-	}
 	case INIT_BRACED:
 		braced = init->expr.get();
 		break;
@@ -1162,28 +1171,33 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	published.declaring = current_->parent;
 	published.composed = composed;
 	if (TypeContainsAutoPlaceholder(composed.type->target))
-	{
-		// 7.1.6.4p7/p10: the body's return statements deduced the
-		// placeholder (void when none did); the definition node, the
-		// function scope, and the declared overload entry take the
-		// deduced signature.
-		if (TypeContainsAutoPlaceholder(deduced_return))
-			deduced_return = MakeFundamentalType(FT_VOID);
-		TypePtr fixed = MakeFunctionType(deduced_return,
-		                                 composed.type->parameters,
-		                                 composed.type->variadic);
-		item->type = fixed;
-		current_->fn_type = fixed;
-		if (ScopeBinding* fn = FindOwnBinding(*current_->parent, name))
-		{
-			if (fn->type && TypeEquals(fn->type, composed.type))
-				fn->type = fixed;
-			else
-				for (size_t i = 0; i < fn->overloads.size(); i++)
-					if (TypeEquals(fn->overloads[i], composed.type))
-						fn->overloads[i] = fixed;
-		}
-		published.composed.type = fixed;
-	}
+		AdoptDeducedReturn(*item, published, deduced_return, name);
 	PublishBodyUnwindFact(published, SF_NONE, *item);
+}
+
+// 7.1.6.4p7/p10: the body's return statements deduced the placeholder
+// (void when none did); the definition node, the function scope, and
+// the declared overload entry take the deduced signature.
+void SemBinder::AdoptDeducedReturn(SemNode& item, DeferredBody& published,
+                                   TypePtr deduced_return,
+                                   const string& name)
+{
+	const TypePtr& composed_type = published.composed.type;
+	if (TypeContainsAutoPlaceholder(deduced_return))
+		deduced_return = MakeFundamentalType(FT_VOID);
+	TypePtr fixed = MakeFunctionType(deduced_return,
+	                                 composed_type->parameters,
+	                                 composed_type->variadic);
+	item.type = fixed;
+	current_->fn_type = fixed;
+	if (ScopeBinding* fn = FindOwnBinding(*current_->parent, name))
+	{
+		if (fn->type && TypeEquals(fn->type, composed_type))
+			fn->type = fixed;
+		else
+			for (size_t i = 0; i < fn->overloads.size(); i++)
+				if (TypeEquals(fn->overloads[i], composed_type))
+					fn->overloads[i] = fixed;
+	}
+	published.composed.type = fixed;
 }

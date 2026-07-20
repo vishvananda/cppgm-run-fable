@@ -132,34 +132,17 @@ SemValue SemExprAnalyzer::AnalyzeAtomicLockFreeQuery(const AstExpr& expr,
 // The GNU/C11 atomic operator families: each form's parameter list
 // derives from the first argument's pointee type; the lowering maps
 // them onto the LowIR atomic instructions.
-bool SemExprAnalyzer::TryAnalyzeAtomicBuiltin(const AstExpr& expr,
-                                              const string& name,
-                                              SemValue& out)
+// The parameter/result signature of one atomic builtin family member
+// over its element type; false when the name is not an atomic form.
+bool SemExprAnalyzer::AtomicBuiltinSignature(const string& name,
+                                             const TypePtr& element,
+                                             const vector<SemValue>& args,
+                                             vector<TypePtr>& params,
+                                             TypePtr& result)
 {
 	TypePtr int_type = MakeFundamentalType(FT_INT);
 	TypePtr bool_type = MakeFundamentalType(FT_BOOL);
 	TypePtr void_type = MakeFundamentalType(FT_VOID);
-	if (name == "__atomic_always_lock_free" ||
-	    name == "__atomic_is_lock_free" ||
-	    name == "__c11_atomic_is_lock_free")
-	{
-		out = AnalyzeAtomicLockFreeQuery(expr, name);
-		return true;
-	}
-	vector<SemValue> args;
-	AnalyzeArgumentList(expr.arguments, args);
-	if (args.empty())
-		throw runtime_error(name + " needs an atomic address");
-	TypePtr pointer = RemoveTopCv(args[0].type);
-	if (pointer->kind != TK_POINTER)
-		throw runtime_error(name + " requires a pointer operand");
-	TypePtr element = RemoveTopCv(pointer->target);
-	if (element->kind != TK_FUNDAMENTAL && element->kind != TK_POINTER &&
-	    element->kind != TK_ENUM)
-		throw runtime_error(name + " element type");
-	vector<TypePtr> params;
-	params.push_back(pointer);
-	TypePtr result;
 	if (name == "__c11_atomic_init")
 	{
 		params.push_back(element);
@@ -259,6 +242,39 @@ bool SemExprAnalyzer::TryAnalyzeAtomicBuiltin(const AstExpr& expr,
 	else if (name == "__sync_lock_release")
 		result = void_type;
 	else
+		return false;
+	return true;
+}
+
+bool SemExprAnalyzer::TryAnalyzeAtomicBuiltin(const AstExpr& expr,
+                                              const string& name,
+                                              SemValue& out)
+{
+	TypePtr int_type = MakeFundamentalType(FT_INT);
+	TypePtr bool_type = MakeFundamentalType(FT_BOOL);
+	TypePtr void_type = MakeFundamentalType(FT_VOID);
+	if (name == "__atomic_always_lock_free" ||
+	    name == "__atomic_is_lock_free" ||
+	    name == "__c11_atomic_is_lock_free")
+	{
+		out = AnalyzeAtomicLockFreeQuery(expr, name);
+		return true;
+	}
+	vector<SemValue> args;
+	AnalyzeArgumentList(expr.arguments, args);
+	if (args.empty())
+		throw runtime_error(name + " needs an atomic address");
+	TypePtr pointer = RemoveTopCv(args[0].type);
+	if (pointer->kind != TK_POINTER)
+		throw runtime_error(name + " requires a pointer operand");
+	TypePtr element = RemoveTopCv(pointer->target);
+	if (element->kind != TK_FUNDAMENTAL && element->kind != TK_POINTER &&
+	    element->kind != TK_ENUM)
+		throw runtime_error(name + " element type");
+	vector<TypePtr> params;
+	params.push_back(pointer);
+	TypePtr result;
+	if (!AtomicBuiltinSignature(name, element, args, params, result))
 		return false;
 	TypePtr fn_type = MakeFunctionType(result, params, false);
 	CheckCallArguments(fn_type, args);

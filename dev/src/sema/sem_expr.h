@@ -508,6 +508,9 @@ private:
 	                             ETokenType op, bool implicit_this);
 	SemValue AnalyzeImplicitMember(const ScopeBinding& binding,
 	                               const string& written);
+	const AstNamePart* ClassifyMemberCalleeName(const AstName& callee_name,
+	                                            string& name,
+	                                            bool& qualified);
 	SemValue AnalyzeMemberCall(const AstExpr& expr,
 	                           const AstExpr& callee);
 	// PA17: the class named by a qualified member-call name's prefix
@@ -658,6 +661,9 @@ private:
 	                                  const string& name);
 	SemValue AnalyzeBuiltinFpclassify(const AstExpr& expr);
 	SemValue MakeFunctionNameLiteral(const string& text);
+	bool AtomicBuiltinSignature(const string& name, const TypePtr& element,
+	                            const vector<SemValue>& args,
+	                            vector<TypePtr>& params, TypePtr& result);
 	bool TryAnalyzeAtomicBuiltin(const AstExpr& expr, const string& name,
 	                             SemValue& out);
 	SemValue AnalyzeAtomicLockFreeQuery(const AstExpr& expr,

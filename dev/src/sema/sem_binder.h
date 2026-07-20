@@ -7,6 +7,7 @@
 #include "sema/const_eval.h"
 #include "sema/decl_binder.h"
 #include "sema/sem_expr.h"
+#include "sema/sem_binder_state.h"
 #include "sema/sem_lambda_state.h"
 #include "sema/sem_node.h"
 
@@ -16,8 +17,8 @@
 // SemUnit. One instance binds one translation unit.
 class SemBinder : public DeclBinder, public ISemExprHost
 {
-	struct DeferredBody;
-
+	typedef SemDeferredBody DeferredBody;
+	typedef SemMethodContext MethodContext;
 
 public:
 	SemBinder(TypesModel& model, SemUnit& unit);
@@ -183,6 +184,11 @@ private:
 	// (also used by return-type deduction, 7.1.6.4).
 	TypePtr DeduceAutoDeclared(const TypePtr& type, const SemValue& value,
 	                           const char* what);
+	void AdoptDeducedReturn(SemNode& item, DeferredBody& published,
+	                        TypePtr deduced_return, const string& name);
+	bool ParenInitHasPack(const AstInitializer& init);
+	void AnalyzeExpandedParenInit(SemNode& item, ScopeBinding& binding,
+	                              const AstInitializer& init);
 	void AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 	                         const AstInitializer* init);
 	// PA20: evaluates a constexpr (or engine-foldable const) object's
@@ -293,6 +299,9 @@ private:
 	                         bool base_entry, SemNodePtr address);
 	void AppendElidedCtorDemand(const ClassInfo& cls, bool base_entry,
 	                            vector<SemNodePtr>& out);
+	void AppendValueInitArrayMemberInit(const ClassField& field,
+	                                    const TypePtr& bare,
+	                                    vector<SemNodePtr>& out);
 	void AppendArrayMemberInit(const ClassField& field,
 	                           const AstExpr* braced,
 	                           vector<SemNodePtr>& out);
@@ -311,6 +320,9 @@ private:
 	// Overload resolution over the class's declared constructors;
 	// applies conversions and synthesizes default arguments. Returns -1
 	// when initialization uses the implicit default constructor.
+	void FillCtorDefaultArguments(const ClassInfo& cls,
+	                              const ClassCtor& ctor,
+	                              vector<SemValue>& args);
 	int ResolveClassConstructor(const ClassInfo& cls,
 	                            vector<SemValue>& args, bool copy_init,
 	                            const char* what);
@@ -979,43 +991,7 @@ private:
 	int local_types_;
 	bool pending_local_type_;
 
-	// --- PA15 class state (sem_class.cpp) ---
-	// One queued in-class member-function (or hidden-friend) body,
-	// analyzed when the outermost enclosing class completes (9.2p2).
-	struct DeferredBody
-	{
-		const AstDecl* decl = 0;
-		DeclaratorInfo composed;  // DK_FUNCTION methods / friends
-		string name;
-		Scope* fn_scope = 0;
-		Scope* declaring = 0;  // class scope (methods) / namespace (friends)
-		ClassInfo* cls = 0;    // lexical class context
-		bool is_friend = false;
-		bool is_static = false;
-		bool out_of_class = false;  // qualified definition: strong emission
-		// The qualified definition spelled `inline`: it still prints,
-		// but weak (7.1.2p4 linkage with the reference's presentation).
-		bool spelled_inline = false;
-	};
-	// The current function context while a body is analyzed: the member
-	// class (methods), the lexical class (hidden friends), and the
-	// function's own identity for friendship checks.
-	struct MethodContext
-	{
-		MethodContext() : cls(0), lexical_cls(0), fn_scope(0), fn_owner(0)
-		{}
-
-		const ClassInfo* cls;          // null outside member functions
-		const ClassInfo* lexical_cls;  // hidden friend's lexical class
-		TypePtr this_type;  // pointer to cv class (null outside methods)
-		Scope* fn_scope;
-		const Scope* fn_owner;  // declaring scope of the open function
-		string fn_name;
-		// PA21: the template name behind an instantiated specialization
-		// body ("read" while binding read<int>); friend grants recorded
-		// under the template name match through it.
-		string fn_template_name;
-	};
+	// --- PA15 class state (sem_binder_state.h / sem_class.cpp) ---
 
 	// --- PA24 lambda state (sem_lambda_state.h / sem_lambda.cpp) ---
 	typedef SemLambdaCapture LambdaCapture;

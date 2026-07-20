@@ -217,54 +217,7 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 	{
 		if (!braced && args.empty())
 		{
-			// 8.5p10: `arr()` value-initializes every element.
-			TypePtr element = RemoveTopCv(bare->target);
-			if (element->kind == TK_CLASS)
-			{
-				const ClassInfo* ecls =
-					unit_.classes.Find(element->named);
-				if (!ecls)
-					throw OutsideBoundary(
-						"class array member initializer");
-				for (unsigned long long i = 0; i < bare->bound; i++)
-				{
-					vector<SemValue> no_args;
-					int index = ResolveClassConstructor(
-						*ecls, no_args, false, field.name.c_str());
-					SemNodePtr action = MakeConstructorCall(
-						*ecls, index, false,
-						AddressOfNode(SubscriptNode(
-							ThisFieldExpr(field), i)),
-						vector<SemNodePtr>());
-					// 8.5p7: zero-initialization precedes a
-					// non-user-provided default constructor.
-					bool user_provided = index >= 0 &&
-						!ecls->ctors[index].implicit &&
-						!ecls->ctors[index].defaulted;
-					if (!user_provided)
-					{
-						action->has_value = true;
-						action->value = ConstValue(
-							FT_UNSIGNED_LONG_INT, ecls->size);
-					}
-					ArmSubobjectCleanup(
-						*action, *ecls, false,
-						AddressOfNode(SubscriptNode(
-							ThisFieldExpr(field), i)));
-					out.push_back(std::move(action));
-				}
-				return;
-			}
-			for (unsigned long long i = 0; i < bare->bound; i++)
-			{
-				ClassField element_field;
-				element_field.name = field.name;
-				element_field.type = element;
-				out.push_back(MemberAssignAction(
-					element_field,
-					SubscriptNode(ThisFieldExpr(field), i),
-					ZeroValue(element)));
-			}
+			AppendValueInitArrayMemberInit(field, bare, out);
 			return;
 		}
 		if (!braced)
@@ -317,6 +270,57 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 		throw runtime_error("too many initializers for " + field.name);
 	out.push_back(MemberAssignAction(field, ThisFieldExpr(field),
 	                                 std::move(values[0])));
+}
+
+// 8.5p10: `arr()` in a mem-initializer value-initializes every
+// element - per-element constructor calls (with the 8.5p7 zero-fill
+// fold and cleanup arming) for class elements, zero stores otherwise.
+void SemBinder::AppendValueInitArrayMemberInit(const ClassField& field,
+                                               const TypePtr& bare,
+                                               vector<SemNodePtr>& out)
+{
+	TypePtr element = RemoveTopCv(bare->target);
+	if (element->kind == TK_CLASS)
+	{
+		const ClassInfo* ecls = unit_.classes.Find(element->named);
+		if (!ecls)
+			throw OutsideBoundary("class array member initializer");
+		for (unsigned long long i = 0; i < bare->bound; i++)
+		{
+			vector<SemValue> no_args;
+			int index = ResolveClassConstructor(
+				*ecls, no_args, false, field.name.c_str());
+			SemNodePtr action = MakeConstructorCall(
+				*ecls, index, false,
+				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)),
+				vector<SemNodePtr>());
+			// 8.5p7: zero-initialization precedes a non-user-provided
+			// default constructor.
+			bool user_provided = index >= 0 &&
+				!ecls->ctors[index].implicit &&
+				!ecls->ctors[index].defaulted;
+			if (!user_provided)
+			{
+				action->has_value = true;
+				action->value = ConstValue(FT_UNSIGNED_LONG_INT,
+				                           ecls->size);
+			}
+			ArmSubobjectCleanup(
+				*action, *ecls, false,
+				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)));
+			out.push_back(std::move(action));
+		}
+		return;
+	}
+	for (unsigned long long i = 0; i < bare->bound; i++)
+	{
+		ClassField element_field;
+		element_field.name = field.name;
+		element_field.type = element;
+		out.push_back(MemberAssignAction(
+			element_field, SubscriptNode(ThisFieldExpr(field), i),
+			ZeroValue(element)));
+	}
 }
 
 // A zero-valued prvalue of the scalar type (value-initialization).
@@ -1412,11 +1416,22 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		if (i < fn->parameters.size())
 			analyzer_.ApplyConversion(args[i], conversions[i],
 			                          fn->parameters[i]);
+	FillCtorDefaultArguments(cls, ctor, args);
+	if (ctor.defaulted && fn->parameters.empty())
+		return -1;
+	return (int)winner;
+}
+
+// 8.3.6p9/p5: a member default argument's names resolve in the class
+// scope (which chains through a specialization's template-argument
+// aliases), not the call site.
+void SemBinder::FillCtorDefaultArguments(const ClassInfo& cls,
+                                         const ClassCtor& ctor,
+                                         vector<SemValue>& args)
+{
+	const TypePtr& fn = ctor.type;
 	for (size_t i = args.size(); i < fn->parameters.size(); i++)
 	{
-		// 8.3.6p9/p5: a member default argument's names resolve in the
-		// class scope (which chains through a specialization's
-		// template-argument aliases), not the call site.
 		Scope* saved = current_;
 		current_ = cls.members;
 		SemValue filled;
@@ -1434,9 +1449,6 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		                         "default argument");
 		args.push_back(std::move(filled));
 	}
-	if (ctor.defaulted && fn->parameters.empty())
-		return -1;
-	return (int)winner;
 }
 
 SemNodePtr SemBinder::MakeDestructorCall(const ClassInfo& cls,
