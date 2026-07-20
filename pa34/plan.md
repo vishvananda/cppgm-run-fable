@@ -353,3 +353,106 @@ templates and the GNU complex record to sema/sem_builtin_template.cpp,
 the InstantiationContext RAII definition to sema/sem_instantiation.h,
 array braced-init to sem_apply.cpp, and redeclaration signature
 agreement to template_order.cpp.
+
+## Architecture Review
+
+How the stage's ownership boundaries came out in the implementation:
+
+- **Hosted facts enter only at the front.** The host probe
+  (`gen_builtin_host_config.pl`, regenerated per build with a compare
+  guard) bakes `-dM` macros and include dirs into a generated header
+  that only `toolchain/hosted_env` reads. `hosted_env` feeds the
+  preprocessor via `CompileOptions`; nothing downstream of the token
+  stream consults the host environment, so `--emit-lowir` stays
+  representative and object emission consumes serialized LowIR only.
+  The pa5 `preproc` tool and the `--emit-*` fixture modes construct
+  plain unhosted `Preprocessor`s — the gate is the options struct, not
+  environment sniffing.
+- **One capability registry.** `hosted_probes` answers `__has_builtin`
+  and friends for the preprocessor and backs the sema-side builtin
+  tables. The registry under-reports (some accepted builtins answer 0)
+  but never over-reports: nothing advertises a capability sema
+  rejects.
+- **Traits computed from the class model.** The `EK_BUILTIN_TRAIT`
+  evaluator and the would-it-compile probes
+  (`ProbeTraitConstructible`/`Assignable`/`Invocable`/`Convertible`)
+  run declval surrogates through the real conversion/overload
+  machinery with probe-scoped error containment, reading
+  `ClassInfo` triviality/noexcept facts. There are no name-keyed
+  canned answers. The two builtin templates
+  (`__type_pack_element`, `__is_nothrow_invocable`) resolve through
+  shadow `TemplateInfo`s with per-argument-key caching; the
+  builtin-vs-user priority for `__is_nothrow_invocable` keys on the
+  declaring scope's kind (GCC-13 behavior), not on any fixture.
+- **Concessions are grammar plus AST, not text matches.** Every parser
+  concession (templated lambdas, structured bindings, designated
+  initializers, `__decltype`/`__typeof__`, `_Complex`, contextual
+  `co_*`, GNU attributes) lands as a grammar rule building real AST
+  that sema binds. Parse-and-discard is limited to the documented
+  boundaries (asm bodies, attribute payloads, nullability qualifiers,
+  `__restrict`, `__extension__`); everything else either binds with
+  real semantics or throws a boundary error — there is no fallback
+  success path.
+- **Alias collapse is the one deliberate divergence.** `_FloatN` /
+  `__float128` map to the nearest evaluated standard types, which can
+  make distinct glibc per-format declarations collide. The audit
+  scoped both resulting first-wins tolerances (duplicate explicit
+  specializations, duplicate inline definitions) to landings whose
+  resolution actually spelled a collapsed alias — tracked by a typed
+  counter/flag chain (`collapsed_alias_uses_` →
+  `ClassSpecialization::alias_collapsed` /
+  `SemNode::alias_collapsed` → `LowFunctionInfo::alias_collapsed`) —
+  so ordinary redefinitions still error.
+
+## Final Architecture Review
+
+The stage audit (pa34/audit.md) confirmed the boundaries above and
+closed the gaps it found; the final state:
+
+- **No fallback success paths.** The audit removed the three that had
+  crept in: `co_return` no longer silently compiles as `return` (it
+  now throws the stage-boundary error at binding, matching
+  co_await/co_yield); the fold-expression constant evaluator no
+  longer folds past a non-constant operand that runtime evaluation
+  would have reached (position-aware short-circuit); and the
+  `std::is_nothrow_*_constructible::value` shorthand only answers for
+  a class template actually declared in namespace std. Every
+  concession now either binds real semantics or fails loudly.
+- **Standard behavior in non-template code.** Non-template
+  `if constexpr` fully checks its discarded branch (binding into a
+  detached holder outside return-type deduction); only template
+  instantiation skips it, keyed on the binder's `instantiating_`
+  state.
+- **The alias-collapse tolerances are typed and scoped.** Duplicate
+  explicit specializations and duplicate inline definitions are
+  accepted first-wins only when a collapsed `_FloatN` spelling was
+  involved on either landing, tracked through
+  `collapsed_alias_uses_` → `ClassSpecialization::alias_collapsed` /
+  `SemNode::alias_collapsed` → `LowFunctionInfo::alias_collapsed`.
+  Plain redefinitions error again.
+- **Overflow builtins follow GCC's semantics.** Operands keep their
+  own promoted types and the lowering checks exact-128-bit results
+  against the result type; the 128-bit cases that the scheme cannot
+  check are a loud boundary instead of a silent never-overflows.
+- **Hosted include search matches GCC for angle includes** (no
+  including-directory and no CWD fallback in hosted mode); the
+  unhosted PA5 order is untouched.
+- **Parser cost is linear where it was exponential**: the paren
+  primary parses the expression first and consults the fold tail only
+  behind a depth-0 `...` pre-scan.
+- **Perf posture**: host macro import is map-based and parsed once
+  per process; builtin dispatch tables are static with a two-byte
+  prefix guard on the lowering hot path; probe/trait template uses
+  cache per argument key; pack expansion is O(N).
+- **Remaining documented boundaries** (all loud errors or
+  documented-and-harmless): complex arithmetic, inline-assembly
+  codegen and asm-label renaming (PA36), uninvoked templated lambdas,
+  runtime fold expressions and the non-logical fold operators,
+  `_Atomic` qualification dropped outside the operator families,
+  Clang block pointers composed as function pointers, 128-bit
+  overflow-builtin operands/results, structured bindings without the
+  tuple-like (`std::get`) protocol, and `__has_cpp_attribute`
+  answering 0 while attributes stay parse-and-discard.
+
+Exit state: fileAudit pass (0 fatal), `make test-report-through-pa34`
+3189/3189 across pa1-pa34.
