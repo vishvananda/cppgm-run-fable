@@ -129,8 +129,32 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	// *this when the context provides one; otherwise only static
 	// members are callable (9.3.1p3).
 	const NamedTypeInfo* home_entity = 0;
+	const ScopeBinding* routed = &binding;
 	if (binding.home && binding.home->kind == SCOPE_CLASS)
 		home_entity = host_.Model().ScopeEntity(binding.home);
+	// PA36 9.3.1p3: an unqualified member-template-id call
+	// (`get<true>(x)`) resolves to the specialization's own binding,
+	// whose home is the argument alias scope - the owning class must
+	// still route the implicit *this, through the member's overload
+	// set like the object-qualified form.
+	if (!member_class && !home_entity && binding.fn_self_spec &&
+	    binding.fn_self_spec->owner &&
+	    binding.fn_self_spec->owner->member_of &&
+	    !binding.fn_self_spec->owner->member_static)
+	{
+		const NamedTypeInfo* owner_entity =
+			binding.fn_self_spec->owner->member_of;
+		const ClassInfo* cls = host_.Classes().Find(owner_entity);
+		const ScopeBinding* member = cls
+			? FindOwnBinding(*cls->members,
+			                 binding.fn_self_spec->owner->name)
+			: 0;
+		if (member)
+		{
+			home_entity = owner_entity;
+			routed = member;
+		}
+	}
 	if (member_class || home_entity)
 	{
 		const NamedTypeInfo* target = member_class ? member_class
@@ -173,11 +197,11 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 				object.node = std::move(adjusted);
 				object.type = MakeNamedType(TK_CLASS, target);
 			}
-			return AnalyzeMethodCall(std::move(object), binding,
+			return AnalyzeMethodCall(std::move(object), *routed,
 			                         expr.arguments, qualified,
 			                         explicit_part);
 		}
-		return AnalyzeStaticMethodCall(expr, binding, explicit_part);
+		return AnalyzeStaticMethodCall(expr, *routed, explicit_part);
 	}
 	vector<SemValue> args;
 	vector<ConversionSource> sources;

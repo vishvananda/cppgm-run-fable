@@ -1,8 +1,13 @@
 # PA36 Plan: Hosted Header Emission Link/Runtime Compatibility
 
-Status: in progress (loop 83: 59/69 pa36 link tests passing,
-through-pa36 at 3330/3340 with every failure inside pa36; current
-work: dynamic exception specifications, 15.4/15.5.2 host EH).
+Status: in progress (loop 83: 63/69 pa36 link tests passing,
+through-pa36 at 3334/3340 with every failure inside pa36). Landed
+this loop: dynamic exception specifications (15.4/15.5.2 LSDA
+filters + __cxa_call_unexpected), the host data-addressing model
+(pcrel data access, GOT-mediated imports, course _Z spelling for
+unscoped non-TLS variables), and destructible function-local statics
+(__cxa_atexit/__cxa_thread_atexit registration, weak/TLS guard
+mirroring, lowering/lower_static.cpp).
 
 PA36 asks whether hosted header-generated code (inline, template, and
 header-emitted definitions) links and runs through the plain host

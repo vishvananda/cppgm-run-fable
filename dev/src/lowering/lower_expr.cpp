@@ -315,6 +315,15 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 			return result;
 		LowerValue loaded;
 		loaded.type = NodeType(node);
+		// A function or array referent has no lvalue-to-rvalue load:
+		// the reference's pointer is the value (matching the
+		// id-expression presentation above).
+		if (loaded.type->kind == TK_FUNCTION ||
+		    loaded.type->kind == TK_ARRAY)
+		{
+			loaded.text = result.text;
+			return loaded;
+		}
 		loaded.text = NewTemp();
 		Emit(loaded.text + " = load " + LowerValueType(loaded.type) +
 		     " " + result.text);
