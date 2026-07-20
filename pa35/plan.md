@@ -90,7 +90,15 @@ suffixes; template-id friends.
 Remaining 22 failures cluster on:
 - `__test<_Tp>(0)` SFINAE member-template calls resolving to
   "member function __test called without an object" (nothrow traits,
-  std::function): implicit static member-template call candidates.
+  std::function). Diagnosed: explicit args bind fine
+  (BindExplicitDeductionArgs accepts); DeduceFunctionTemplate then
+  returns null for BOTH overloads only when the enclosing class
+  INHERITS __test and the explicit arg is a class-template
+  specialization (repro: /tmp/sf9.cpp shape - base with
+  `template<typename T> static BC<noexcept(declval<T&>().~T())>
+  __test(int);`, derived typedef `decltype(__test<_Tp>(0))`,
+  _Tp=P<int>). Failure is after explicit binding, likely the dependent
+  return-type (noexcept dtor eval) composition in the deduce seam.
 - "function template operator >> has no definition": istream.tcc
   operator-template definition pairing with the extern-template
   declarations (istream/getline family).

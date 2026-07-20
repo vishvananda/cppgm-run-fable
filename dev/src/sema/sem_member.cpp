@@ -8,6 +8,7 @@
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
+using std::to_string;
 
 // PA15 member access and method calls: the `.` / `->` / implicit-this
 // resolution paths of the expression analyzer, including the implicit
@@ -1083,8 +1084,10 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 		}
 	}
 	if (candidates.empty())
+	{
 		throw runtime_error("member function " + binding.name +
 		                    " called without an object");
+	}
 	vector<ImplicitConversion> conversions;
 	SpecOverloadOrder order(host_, specs, args.size());
 	size_t best;
