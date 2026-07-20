@@ -544,7 +544,7 @@ private:
 	// incomplete or non-simple template classes) and the external
 	// __cxxabiv1 vtable declares, by ERttiVtableKind.
 	map<string, string> rtti_type_names_;
-	string external_rtti_vtable_names_[5];
+	string external_rtti_vtable_names_[7];
 	// PA25: external runtime helper declares (__cxa_bad_typeid,
 	// __dynamic_cast, ...), keyed by their object name.
 	map<string, string> runtime_fn_names_;
