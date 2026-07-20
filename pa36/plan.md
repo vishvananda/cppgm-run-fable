@@ -159,10 +159,12 @@ Progress notes (loop 81):
   slot instead of failing the PA14 address boundary.
 
 Remaining failures by root cause (loop 81 end-state triage):
-- `std::hash<T*>` invocability: static_assert "hash function must be
-  invocable" (unordered_set/unordered_map probes).
-- `__remove_reference_t` (GCC builtin alias template) unparsed
-  (dependent-alias-pack-invoke-result).
+- unordered_map: `_M_hash_code` member lookup through the
+  `_Hashtable_base`/`_Hash_code_base` chain fails; unordered_set now
+  clears the invocability assert (functor calls demand completeness
+  before the operator() lookup) but trips the nothrow one - the
+  ProbeTraitInvocable no_throw leg for the hash<T*> partial-spec
+  member is next.
 - `basic_streambuf does not name a type` during <streambuf> member
   instantiation (header-inline-unemitted-callee-signature).
 - `_M_erase_at_end does not name a type`: statement decl/expr

@@ -866,6 +866,10 @@ SemValue SemExprAnalyzer::AnalyzeFunctorCall(SemValue object,
 		}
 	}
 	const ScopeBinding* member = 0;
+	// 14.7.1: the call is a completeness demand - a specialization
+	// first named here (an unevaluated invocability probe over
+	// hash<T*>) instantiates before the member lookup.
+	host_.RequireCompleteType(RemoveTopCv(object.type)->named);
 	Scope* members = host_.Model().MemberScope(object.type->named);
 	if (members)
 		member = ClassMemberLookup(*members, "operator ()");

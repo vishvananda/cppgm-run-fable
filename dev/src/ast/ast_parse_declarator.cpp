@@ -144,18 +144,26 @@ bool AstParser::ParseOneSpecifier(AstSpecifierSeq& seq, ESeqKind kind,
 		if (type != OP_COLON2)
 			return false;
 	}
-	// PA33 __decay / PA34 transform family: __remove_cv ( type-id ) etc.
+	// PA33 __decay / PA34 transform family: __remove_cv ( type-id ).
+	// PA36: GCC 15 also exposes these as builtin alias templates, so
+	// the template-id spelling __remove_reference_t < type-id > is the
+	// same transform.
 	if (type_state == kNoType && Peek().kind == PTOK_IDENTIFIER &&
 	    HostedBuiltinTransformName(Peek().spelling) &&
-	    AtSimple(OP_LPAREN, 1))
+	    (AtSimple(OP_LPAREN, 1) || AtSimple(OP_LT, 1)))
 	{
+		bool angle_form = AtSimple(OP_LT, 1);
 		State state = Save();
 		AstSpecifier spec;
 		spec.kind = SPEC_TRANSFORM;
 		spec.spelling = Peek().spelling;
 		Advance();
-		Advance();
-		if (ParseTypeId(spec.transform_type) && MatchSimple(OP_RPAREN))
+		if (angle_form)
+			MatchOpenAngle();
+		else
+			Advance();
+		if (ParseTypeId(spec.transform_type) &&
+		    (angle_form ? MatchCloseAngle() : MatchSimple(OP_RPAREN)))
 		{
 			seq.push_back(move(spec));
 			type_state = kNamedType;
