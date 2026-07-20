@@ -1434,10 +1434,22 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 			}
 			else if (param.kind == TPK_TYPE)
 			{
-				if (!argument.is_type || !argument.type)
+				if (argument.is_type && argument.type)
+					resolved = TemplateArg(
+						builder_.ResolveTypeId(*argument.type));
+				else if (argument.expr &&
+				         argument.expr->kind == EK_ID)
+				{
+					// The parser can classify a bare name as an
+					// expression argument; a type name re-reads.
+					TypePtr named =
+						TryResolveTypeFromName(argument.expr->name);
+					if (!named)
+						return false;
+					resolved = TemplateArg(named);
+				}
+				else
 					return false;
-				resolved = TemplateArg(
-					builder_.ResolveTypeId(*argument.type));
 			}
 			else
 			{
