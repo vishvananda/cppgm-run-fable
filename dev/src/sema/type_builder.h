@@ -86,6 +86,17 @@ struct ITypeBuilderHost
 		(void)name;
 		(void)type;
 	}
+	// PA36: a conditional noexcept(constant-expression) specification
+	// reduced to its boolean value (15.4p1). False when the context
+	// cannot evaluate it (abstract patterns re-evaluate on the
+	// instantiated declaration; tools without an evaluator keep the
+	// conservative may-throw reading).
+	virtual bool EvaluateNoexceptSpec(const AstExpr& expr, bool& result)
+	{
+		(void)expr;
+		(void)result;
+		return false;
+	}
 	virtual ~ITypeBuilderHost() {}
 };
 

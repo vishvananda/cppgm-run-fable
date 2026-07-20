@@ -696,6 +696,34 @@ void DeclBinder::BindStaticAssert(const AstDecl& decl)
 		throw runtime_error("static_assert failed " + decl.message);
 }
 
+bool DeclBinder::EvaluateNoexceptSpec(const AstExpr& expr, bool& result)
+{
+	// PA36 15.4p1: the specification's constant expression reduces to
+	// its boolean. A context that cannot evaluate it (an abstract
+	// pattern, a dependent operand) reports false and the composed
+	// declaration keeps the conservative may-throw reading; the
+	// instantiated declaration composes again with concrete types.
+	ConstValue value;
+	try
+	{
+		value = EvaluateConstExpr(expr, *this);
+	}
+	catch (...)
+	{
+		try
+		{
+			if (!TryFullConstant(expr, value))
+				return false;
+		}
+		catch (...)
+		{
+			return false;
+		}
+	}
+	result = ConstValueIsNonZero(value);
+	return true;
+}
+
 bool DeclBinder::HasFriendSpecifier(const AstDecl& decl)
 {
 	for (size_t i = 0; i < decl.specifiers.size(); i++)

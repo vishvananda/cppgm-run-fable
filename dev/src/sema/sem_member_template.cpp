@@ -429,6 +429,29 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 				    found->templ && found->templ->anchor)
 					cls->friend_classes.push_back(found->templ->anchor);
 			}
+			else if (name && !name->parts.empty() &&
+			         name->parts.back().kind == NP_IDENTIFIER)
+			{
+				// A qualified friend template (`template<class...>
+				// friend struct __detail::_Map_base;`) references the
+				// already-declared template; the anchor grants every
+				// specialization (11.3p1).
+				const ScopeBinding* found = 0;
+				try
+				{
+					if (Scope* prefix = ResolvePrefixScope(*name))
+						found = QualifiedLookup(
+							*prefix, name->parts.back().identifier,
+							SLF_ANY);
+				}
+				catch (const std::exception&)
+				{
+					found = 0;
+				}
+				if (found && found->kind == SB_CLASS_TEMPLATE &&
+				    found->templ && found->templ->anchor)
+					cls->friend_classes.push_back(found->templ->anchor);
+			}
 		}
 		catch (...)
 		{

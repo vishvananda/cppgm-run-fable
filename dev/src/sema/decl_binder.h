@@ -87,6 +87,9 @@ protected:
 		(void)out;
 		return false;
 	}
+	// ITypeBuilderHost: a conditional noexcept(expression) reduced
+	// through the constant machinery (PA36, 15.4p1).
+	virtual bool EvaluateNoexceptSpec(const AstExpr& expr, bool& result);
 	virtual void BindSimpleDeclaration(const AstDecl& decl);
 	// PA34 structured bindings (full semantics live on SemBinder).
 	virtual void BindStructuredBinding(const AstDecl& decl);

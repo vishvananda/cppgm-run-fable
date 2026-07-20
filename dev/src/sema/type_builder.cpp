@@ -546,6 +546,17 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		if ((item.qual.kind == FQ_NOEXCEPT && !item.qual.has_expr) ||
 		    (item.qual.kind == FQ_THROW && item.qual.throw_types.empty()))
 			out.noexcept_simple = true;
+		else if (item.qual.kind == FQ_NOEXCEPT && item.qual.has_expr &&
+		         item.qual.expr)
+		{
+			// PA36 15.4p1: noexcept(constant-expression) evaluated
+			// true is a non-throwing specification like the bare form.
+			bool spec_value = false;
+			if (host_.EvaluateNoexceptSpec(*item.qual.expr,
+			                               spec_value) &&
+			    spec_value)
+				out.noexcept_simple = true;
+		}
 		break;
 	default:
 		throw OutsideBoundary("declarator form");
