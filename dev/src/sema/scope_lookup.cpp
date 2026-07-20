@@ -47,6 +47,40 @@ bool BindingPassesFilter(const ScopeBinding& binding,
 	}
 }
 
+// The template behind a specialization's synthesized injected-class-name
+// binding, or null for any other binding.
+const TemplateInfo* InjectedSpecTemplate(const ScopeBinding& binding)
+{
+	if (!binding.owner || binding.owner->injected_self.get() != &binding)
+		return 0;
+	if (!binding.owner->entity)
+		return 0;
+	return binding.owner->entity->spec_template;
+}
+
+// Two sibling-subtree findings that are injected-class-names of
+// specializations of the same template (or that template's own
+// binding) denote the template (14.6.1p1); the merge returns the
+// template's declaring-scope binding.
+const ScopeBinding* CollapseInjectedTemplate(const ScopeBinding& a,
+                                             const ScopeBinding& b,
+                                             const string& name)
+{
+	const TemplateInfo* left = InjectedSpecTemplate(a);
+	if (!left && a.kind == SB_CLASS_TEMPLATE)
+		left = a.templ;
+	const TemplateInfo* right = InjectedSpecTemplate(b);
+	if (!right && b.kind == SB_CLASS_TEMPLATE)
+		right = b.templ;
+	if (!left || left != right || !left->declaring)
+		return 0;
+	const Scope* declaring = left->declaring;
+	const ScopeBinding* own = FindOwnBinding(*declaring, name);
+	if (own && own->kind == SB_CLASS_TEMPLATE && own->templ == left)
+		return own;
+	return 0;
+}
+
 // 10.2 member lookup over the non-virtual base DAG: the class's own
 // declarations hide base declarations; otherwise every direct base
 // subtree is searched, and distinct declarations found in sibling
@@ -114,8 +148,19 @@ const ScopeBinding* ClassChainSearch(const Scope& scope, const string& name,
 		if (found && found != member &&
 		    (found->owner != member->owner ||
 		     found->kind != member->kind))
-			throw AmbiguousLookupError("ambiguous member lookup of " +
-			                           name);
+		{
+			// 14.6.1p1: injected-class-names of sibling
+			// specializations of one template collapse to the
+			// template itself (`trampoline<int>` inside a class
+			// deriving from two trampoline bases).
+			const ScopeBinding* collapsed =
+				CollapseInjectedTemplate(*found, *member, name);
+			if (!collapsed)
+				throw AmbiguousLookupError(
+					"ambiguous member lookup of " + name);
+			found = collapsed;
+			continue;
+		}
 		if (!found)
 			found = member;
 	}
