@@ -296,6 +296,29 @@ LowerValue FunctionLowerer::LowerIdValue(const SemNode& node)
 	return value;
 }
 
+// The value of a call: a reference result loads through the returned
+// pointer - except a function or array referent, which has no
+// lvalue-to-rvalue conversion (the reference's pointer is the value,
+// matching the id-expression presentation).
+LowerValue FunctionLowerer::LowerCallValue(const SemNode& node)
+{
+	LowerValue result = LowerCall(node);
+	if (!IsReferenceType(node.type))
+		return result;
+	LowerValue loaded;
+	loaded.type = NodeType(node);
+	if (loaded.type->kind == TK_FUNCTION ||
+	    loaded.type->kind == TK_ARRAY)
+	{
+		loaded.text = result.text;
+		return loaded;
+	}
+	loaded.text = NewTemp();
+	Emit(loaded.text + " = load " + LowerValueType(loaded.type) + " " +
+	     result.text);
+	return loaded;
+}
+
 LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 {
 	switch (node.kind)
@@ -309,26 +332,7 @@ LowerValue FunctionLowerer::LowerValueExpr(const SemNode& node)
 	case SN_VA_ARG:
 		return LowerVaArg(node);
 	case SN_CALL_EXPRESSION:
-	{
-		LowerValue result = LowerCall(node);
-		if (!IsReferenceType(node.type))
-			return result;
-		LowerValue loaded;
-		loaded.type = NodeType(node);
-		// A function or array referent has no lvalue-to-rvalue load:
-		// the reference's pointer is the value (matching the
-		// id-expression presentation above).
-		if (loaded.type->kind == TK_FUNCTION ||
-		    loaded.type->kind == TK_ARRAY)
-		{
-			loaded.text = result.text;
-			return loaded;
-		}
-		loaded.text = NewTemp();
-		Emit(loaded.text + " = load " + LowerValueType(loaded.type) +
-		     " " + result.text);
-		return loaded;
-	}
+		return LowerCallValue(node);
 	case SN_UNARY_EXPRESSION:
 		return LowerUnary(node);
 	case SN_POSTFIX_EXPRESSION:

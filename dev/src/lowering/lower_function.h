@@ -341,6 +341,7 @@ private:
 	                                   const SemNode* member_lhs = 0);
 	LowerValue LowerConditionalValue(const SemNode& node);
 	string LowerConditionalAddress(const SemNode& node);
+	LowerValue LowerCallValue(const SemNode& node);
 	LowerValue LowerIdValue(const SemNode& node);
 	LowerValue LowerLiteralValue(const SemNode& node);
 	string PointerStep(const string& base, const LowerValue& count,
