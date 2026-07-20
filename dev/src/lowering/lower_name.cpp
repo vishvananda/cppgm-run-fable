@@ -52,6 +52,10 @@ NameComponent ScopeComponent(const Scope* scope)
 		ArgsPackSpan(scope->entity->spec_template->params,
 		             part.args->size(), part.pack_start, part.pack_end);
 	}
+	else if (scope->entity && scope->entity->unnamed &&
+	         !scope->entity->linkage_name.empty())
+		// 7.1.3p9: the typedef name for linkage purposes.
+		part.name = scope->entity->linkage_name;
 	else
 		part.name = scope->name;
 	return part;
@@ -114,6 +118,9 @@ vector<NameComponent> EntityComponents(const NamedTypeInfo& info)
 		ArgsPackSpan(info.spec_template->params, leaf.args->size(),
 		             leaf.pack_start, leaf.pack_end);
 	}
+	else if (info.unnamed && !info.linkage_name.empty())
+		// 7.1.3p9: the typedef name for linkage purposes.
+		leaf.name = info.linkage_name;
 	else
 		leaf.name = info.name;
 	parts.push_back(leaf);
@@ -578,6 +585,39 @@ string SpellStdMemberComponent(const NameComponent& part,
 	return body;
 }
 
+// Spells the leading [::std, parts[1]] pair of a nested name when a
+// catalog abbreviation applies (5.1.4.2): a whole-spec abbreviation
+// (Ss/Si/So/Sd) is a direct standard substitution and registers no
+// numbered candidate; an Sa/Sb template-id spells `SaI...E` and its
+// full chain key still registers. Returns the number of components
+// consumed (0 when no abbreviation applies).
+size_t SpellStdHeadAbbreviation(const vector<NameComponent>& parts,
+                                const vector<string>& full_keys,
+                                Substitutions& subs, string& out)
+{
+	if (parts.size() < 2)
+		return 0;
+	const NameComponent& part = parts[1];
+	const char* spec_code = StdSpecializationAbbreviation(part);
+	if (*spec_code)
+	{
+		out += spec_code;
+		return 2;
+	}
+	const char* tmpl_code = StdTemplateAbbreviation(part);
+	if (*tmpl_code && part.args)
+	{
+		out += tmpl_code;
+		out += "I";
+		out += MangleArgList(*part.args, part.pack_start, part.pack_end,
+		                     subs);
+		out += "E";
+		subs.Add(full_keys[1]);
+		return 2;
+	}
+	return 0;
+}
+
 // Appends one component's spelling. A specialization registers its
 // template name first (5.1.9: the template-name is a substitution
 // candidate), then mangles its arguments in sequence; when the
@@ -678,6 +718,13 @@ string MangleComponentList(const vector<NameComponent>& parts,
 		{
 			if (i == 0 && head_is_std)
 			{
+				size_t consumed = SpellStdHeadAbbreviation(
+					parts, full_keys, subs, body);
+				if (consumed)
+				{
+					i = consumed - 1;
+					continue;
+				}
 				// ::std spells St and never enters the table.
 				body += "St";
 				continue;
@@ -729,6 +776,13 @@ string ManglePrefixComponents(const vector<NameComponent>& parts,
 	{
 		if (i == 0 && HeadIsStd(parts))
 		{
+			size_t consumed = SpellStdHeadAbbreviation(
+				parts, full_keys, subs, encoding);
+			if (consumed)
+			{
+				i = consumed - 1;
+				continue;
+			}
 			// 5.1.4.2: ::std spells St and never enters the table.
 			encoding += "St";
 			continue;

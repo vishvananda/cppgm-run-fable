@@ -137,7 +137,10 @@ private:
 	// arguments record into `abi_tags` when the caller owns a
 	// consuming declaration position; recorded nowhere else, so a
 	// tag never leaks across declarations or tentative re-parses.
-	void SkipDeclAdornments(std::vector<std::string>* abi_tags = 0);
+	// A PA36 post-declarator asm label records into `asm_label` the
+	// same way.
+	void SkipDeclAdornments(std::vector<std::string>* abi_tags = 0,
+	                        std::string* asm_label = 0);
 	// Class-head adornments: __attribute__ forms are discarded,
 	// alignas(...) specifiers are captured into the class declaration.
 	void ParseClassAdornments(AstDecl& decl);

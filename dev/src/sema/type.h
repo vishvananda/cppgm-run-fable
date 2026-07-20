@@ -174,6 +174,12 @@ struct NamedTypeInfo
 	// specialization arrived with a full argument list.
 	size_t spec_spelled = (size_t)-1;
 	bool is_template_anchor;
+	// PA36 7.1.3p9: an unnamed class/enum keeps its display placeholder
+	// name (`__local_typeN`, pinned by PA12 fixtures); the first
+	// typedef-name declared for it becomes its name for linkage
+	// purposes, which the mangler spells instead.
+	bool unnamed = false;
+	string linkage_name;
 	// PA25: a lambda's closure class (spec-argument manglings touch
 	// its operator() entry so emission order follows the reference).
 	bool is_closure = false;

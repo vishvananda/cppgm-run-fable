@@ -420,7 +420,11 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 	if (item.c_linkage)
 	{
 		info.c_linkage = true;
-		info.object_name.clear();
+		// 7.5: a C-linkage object's symbol is its unqualified source
+		// name even inside a namespace. The whole-program presentation
+		// keeps the pinned LowIR spellings.
+		info.object_name = separate_compilation_ ? item.entity_name
+		                                         : string();
 	}
 }
 
@@ -703,10 +707,18 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 	{
 		info.c_linkage = true;
 		// An explicit redeclaration of a C-library-backed builtin
-		// keeps its host library symbol.
-		info.object_name = separate_compilation_
-			? HostLibraryBuiltinSymbol(item.entity_name) : string();
+		// keeps its host library symbol; any other C-linkage function
+		// takes its unqualified source name (7.5: the namespace does
+		// not qualify a C-linkage symbol).
+		string host_symbol = HostLibraryBuiltinSymbol(item.entity_name);
+		info.object_name = !separate_compilation_ ? string()
+			: !host_symbol.empty() ? host_symbol
+			                       : item.entity_name;
 	}
+	// PA36: a GNU asm label pins the object symbol regardless of
+	// language linkage.
+	if (!item.asm_label.empty())
+		info.object_name = item.asm_label;
 	if (defined)
 	{
 		if (info.defined)

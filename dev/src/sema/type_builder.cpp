@@ -702,7 +702,10 @@ DeclaratorInfo TypeBuilder::ComposeDeclarator(const AstDeclarator* declarator,
 	DeclaratorInfo info;
 	info.type = base;
 	if (declarator)
+	{
 		ComposeItems(declarator->items, true, info);
+		info.asm_label = declarator->asm_label;
+	}
 	return info;
 }
 

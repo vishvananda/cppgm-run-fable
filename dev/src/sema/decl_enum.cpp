@@ -68,6 +68,8 @@ TypePtr DeclBinder::DeclareEnumEntity(const AstDecl& decl,
 		TypeDisplayName(scoped ? "enum class" : "enum", name), current_,
 		name);
 	info->complete = true;
+	// 7.1.3p9: an unnamed enumeration's placeholder is display-only.
+	info->unnamed = decl.name.empty();
 	info->is_scoped = scoped;
 	info->enum_underlying = underlying->fundamental;
 	info->size = TypeSize(underlying);

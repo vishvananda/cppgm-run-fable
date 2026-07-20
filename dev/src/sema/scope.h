@@ -169,6 +169,9 @@ struct ScopeBinding
 	// 7.5p6: which overload slots were declared with C language
 	// linkage (at most one function per name may be).
 	vector<bool> fn_c_linkage;
+	// PA36 GNU asm labels per overload slot ("" when undeclared): the
+	// declared overload's exact object symbol.
+	vector<string> fn_asm_label;
 	// PA15 member facts. `access` is the declared access of a non-function
 	// member (and of the first function overload); functions carry one
 	// entry per overload position in the fn_* vectors below.

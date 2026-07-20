@@ -157,6 +157,8 @@ struct DeclaratorInfo
 	// PA17 virt-specifiers on a member function declarator (10.3).
 	bool has_override;
 	bool has_final;
+	// PA36 GNU asm label: the declared entity's exact object symbol.
+	string asm_label;
 };
 
 class TypeBuilder

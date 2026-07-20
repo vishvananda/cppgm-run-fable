@@ -215,6 +215,7 @@ SemNodePtr CloneSemNode(const SemNode& node)
 	out.is_extern_decl = node.is_extern_decl;
 	out.is_thread_local_decl = node.is_thread_local_decl;
 	out.c_linkage = node.c_linkage;
+	out.asm_label = node.asm_label;
 	out.unwind_no = node.unwind_no;
 	out.member_offset = node.member_offset;
 	out.base_hops = node.base_hops;

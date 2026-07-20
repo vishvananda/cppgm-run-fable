@@ -649,6 +649,23 @@ void SemBinder::OnTypeAliasBound(const string& name, const TypePtr& type)
 	item->type = type;
 }
 
+// The PA36 asm label declared for the overload of `binding` with
+// `type` ("" when none).
+static string OverloadAsmLabel(const ScopeBinding& binding,
+                               const TypePtr& type)
+{
+	if (binding.fn_asm_label.empty())
+		return string();
+	size_t slot = 0;
+	for (size_t i = 0; i < binding.overloads.size(); i++)
+		if (TypeEquals(binding.overloads[i], type))
+			slot = i + 1;
+	if (TypeEquals(binding.type, type))
+		slot = 0;
+	return slot < binding.fn_asm_label.size()
+		? binding.fn_asm_label[slot] : string();
+}
+
 void SemBinder::OnFunctionDeclared(ScopeBinding& binding,
                                    const TypePtr& type,
                                    const DeclSpecifierInfo* specs,
@@ -679,6 +696,7 @@ void SemBinder::OnFunctionDeclared(ScopeBinding& binding,
 	item->entity_scope = binding.owner;
 	item->entity_name = binding.name;
 	item->c_linkage = binding.c_linkage;
+	item->asm_label = OverloadAsmLabel(binding, type);
 }
 
 void SemBinder::OnVariableBound(ScopeBinding& binding,
@@ -1153,6 +1171,7 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 			item->c_linkage = slot < fn->fn_c_linkage.size() &&
 				fn->fn_c_linkage[slot];
 		}
+		item->asm_label = OverloadAsmLabel(*fn, composed.type);
 	}
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 	{

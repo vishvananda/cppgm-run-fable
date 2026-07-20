@@ -214,6 +214,9 @@ struct SemNode
 	bool is_extern_decl;
 	bool is_thread_local_decl;
 	bool c_linkage;
+	// PA36 GNU asm label: the declared entity's exact object symbol
+	// ("" when undeclared).
+	string asm_label;
 	bool unwind_no;       // simple noexcept marking on the declarator
 	// PA20 SN_CALLEE: the declared (or, for implicit members, the
 	// implicit) exception specification is non-throwing; the noexcept

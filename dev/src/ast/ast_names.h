@@ -188,6 +188,9 @@ struct AstDeclarator
 	// PA33 __attribute__((abi_tag("..."))) tags captured after the
 	// declarator (they append B<len><tag> to the mangled name).
 	std::vector<std::string> abi_tags;
+	// PA36 GNU asm label (`declarator __asm("name")`): the declared
+	// entity's object symbol is this exact name.
+	std::string asm_label;
 };
 
 struct AstParameter

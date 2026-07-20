@@ -144,6 +144,10 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 					binding.name);
 		binding.fn_c_linkage[index] = true;
 	}
+	// PA36: a GNU asm label pins this overload's object symbol.
+	binding.fn_asm_label.resize(count);
+	if (!composed.asm_label.empty())
+		binding.fn_asm_label[index] = composed.asm_label;
 	if (specs && specs->is_static)
 		binding.fn_static[index] = true;
 	if (inline_def)
@@ -865,6 +869,13 @@ void DeclBinder::BindVariable(const string& name, const TypePtr& type_in,
 
 void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 {
+	// 7.1.3p9: the first typedef-name declared for an unnamed class or
+	// enumeration becomes its name for linkage purposes (the mangler
+	// spells it instead of the display placeholder).
+	if ((type->kind == TK_CLASS || type->kind == TK_ENUM) &&
+	    !type->is_const && !type->is_volatile && type->named &&
+	    type->named->unnamed && type->named->linkage_name.empty())
+		model_.MutableInfo(type->named)->linkage_name = name;
 	if (ScopeBinding* existing = FindOwnBinding(*current_, name))
 	{
 		// 7.1.3p3-p4: a typedef-name may redeclare the same type - any
@@ -1193,6 +1204,9 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 			name);
 		info->is_union = is_union;
 		info->class_key = decl.class_key_spelling;
+		// 7.1.3p9: the placeholder name is display-only; a typedef
+		// may later become the name for linkage purposes.
+		info->unnamed = anonymous;
 		type = MakeNamedType(TK_CLASS, info);
 		if (!anonymous)
 		{

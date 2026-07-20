@@ -412,7 +412,7 @@ bool AstParser::ParseFunctionQualifiers(AstDeclarator& declarator)
 	{
 		if (SkipSquareAttribute())
 			continue;
-		SkipDeclAdornments(&declarator.abi_tags);
+		SkipDeclAdornments(&declarator.abi_tags, &declarator.asm_label);
 		const ParseToken& token = Peek();
 		if (AtSimple(KW_CONST) || AtSimple(KW_VOLATILE))
 		{

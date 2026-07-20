@@ -530,9 +530,11 @@ AstDeclPtr AstParser::ParseSimpleDeclaration()
 				Restore(state);
 				return AstDeclPtr();
 			}
-			// PA34: GNU post-declarator attributes / asm labels
-			// (`int x __attribute__((...)) = ...`), discarded.
-			SkipDeclAdornments(&init_declarator.declarator->abi_tags);
+			// GNU post-declarator attributes and PA36 asm labels
+			// (`int x __attribute__((...))`, `f() __asm("name")`)
+			// record on the declarator.
+			SkipDeclAdornments(&init_declarator.declarator->abi_tags,
+			                   &init_declarator.declarator->asm_label);
 			if (AtSimple(OP_ASS) || AtSimple(OP_LBRACE) ||
 			    AtSimple(OP_LPAREN))
 			{

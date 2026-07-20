@@ -583,8 +583,10 @@ bool AstParser::SkipBalancedParens()
 
 // GNU __attribute__((...)) and alignas(...) adornments are accepted
 // where specifiers can appear and discarded (the references omit
-// them); abi_tag strings record into `abi_tags` when provided.
-void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags)
+// them); abi_tag strings record into `abi_tags` when provided, and a
+// post-declarator asm label records into `asm_label` when provided.
+void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags,
+                                   std::string* asm_label)
 {
 	for (;;)
 	{
@@ -612,14 +614,34 @@ void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags)
 			Advance();
 			continue;
 		}
-		// PA34 GNU asm label (`declarator __asm("name")`), accepted and
-		// discarded for hosted compile acceptance (host symbol renaming
-		// is a PA36 boundary; see pa34/plan.md).
+		// PA36 GNU asm label (`declarator __asm("name")`): the string
+		// value (phase-6 concatenation already applied) becomes the
+		// declared entity's object symbol. Positions without a capture
+		// slot still accept and discard the form (PA34 hosted compile
+		// acceptance).
 		if ((AtSimple(KW_ASM) || AtIdentifierSpelled("__asm") ||
 		     AtIdentifierSpelled("__asm__")) &&
 		    AtSimple(OP_LPAREN, 1))
 		{
 			Advance();
+			if (asm_label)
+			{
+				const ParseToken& value = Peek(1);
+				if (value.kind == PTOK_LITERAL &&
+				    value.literal_kind == PTK_LITERAL_ARRAY &&
+				    value.literal_type == FT_CHAR &&
+				    AtSimple(OP_RPAREN, 2))
+				{
+					string label = value.literal_data;
+					if (!label.empty() && label[label.size() - 1] == '\0')
+						label.resize(label.size() - 1);
+					*asm_label = label;
+					Advance();  // (
+					Advance();  // the label literal
+					Advance();  // )
+					continue;
+				}
+			}
 			if (SkipBalancedParens())
 				continue;
 			Restore(state);
