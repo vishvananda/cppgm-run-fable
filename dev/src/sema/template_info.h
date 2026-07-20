@@ -386,6 +386,16 @@ vector<TemplateArg> FlattenDeduced(const vector<TemplateParam>& params,
 string PositionalizeTemplateNames(const string& text,
                                   const vector<TemplateParam>& params);
 
+// PA35 alias-transparent return identity (14.5.7): the canonical
+// return-type spelling with alias template-ids substituted by their
+// type-ids, trailing class-template default arguments filled, and
+// parameter names positionalized. Two declarations spell the same
+// dependent return type when their non-empty keys agree; a form
+// outside the renderer's subset yields an empty key (no claim).
+string AliasExpandedReturnKey(const AstSpecifierSeq& specifiers,
+                              const vector<TemplateParam>& params,
+                              Scope* scope);
+
 // The canonical parameter-clause spelling of a function declarator:
 // per-parameter declared-type text with the declarator-ids stripped
 // and the template-parameter names positionalized, so declarations

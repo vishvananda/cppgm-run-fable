@@ -596,12 +596,14 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	                                       TemplateLookupScope(tmpl), inner,
 	                                       full, param_patterns,
 	                                       pattern_packs);
-	if (composed != bool(tmpl.pattern))
-		return false;
-	if (composed)
+	if (composed && tmpl.pattern)
 		return TypeEquals(full, tmpl.pattern);
-	// Neither signature composes abstractly: compare the composable
-	// parameter patterns positionally as a conservative identity.
+	// One remaining side may still compose: a return type spelled
+	// through an alias template (`_Require<...>`) composes as an
+	// anchor while the alias's own expansion (`typename
+	// enable_if<...>::type`) does not, yet 14.5.7 makes them the same
+	// signature. Compare the composable parameter patterns
+	// positionally as a conservative identity.
 	if (param_patterns.size() != tmpl.param_patterns.size())
 		return false;
 	for (size_t i = 0; i < param_patterns.size(); i++)
@@ -628,12 +630,19 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	// abstract composition cannot see (`typename T::A f(T)` vs
 	// `typename T::B f(T)` are distinct templates).
 	if (PositionalizeTemplateNames(
-	        SignatureReturnSpelling(inner.specifiers), params) !=
+	        SignatureReturnSpelling(inner.specifiers), params) ==
 	    PositionalizeTemplateNames(
 	        SignatureReturnSpelling(tmpl.pattern_decl->specifiers),
 	        tmpl.params))
-		return false;
-	return true;
+		return true;
+	// Differing written returns may still spell one type through
+	// alias templates (14.5.7): the alias-expanded keys decide.
+	string left = AliasExpandedReturnKey(inner.specifiers, params,
+	                                     TemplateLookupScope(tmpl));
+	string right = AliasExpandedReturnKey(
+		tmpl.pattern_decl->specifiers, tmpl.params,
+		TemplateLookupScope(tmpl));
+	return !left.empty() && left == right;
 }
 
 bool SemBinder::SameImportedTemplateSignature(TemplateInfo& own,
