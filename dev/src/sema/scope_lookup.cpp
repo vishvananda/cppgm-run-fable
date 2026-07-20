@@ -1,5 +1,7 @@
 #include "sema/scope_lookup.h"
 
+#include "sema/template_info.h"
+
 #include <algorithm>
 #include <set>
 #include <stdexcept>
@@ -62,8 +64,13 @@ const ScopeBinding* ClassChainSearch(const Scope& scope, const string& name,
 		return own;
 	// 9p2: the injected-class-name, synthesized outside `bindings` so
 	// the pinned scope dumps stay unchanged (`T : L::facet` spells its
-	// base as `facet`).
-	if (!own && scope.entity && scope.entity->name == name)
+	// base as `facet`). A specialization's injected name is its
+	// template's name (14.6.1p1: `: codecvt(__refs)` names the
+	// codecvt<char16_t, char, mbstate_t> base).
+	if (!own && scope.entity &&
+	    (scope.entity->name == name ||
+	     (scope.entity->spec_template &&
+	      scope.entity->spec_template->name == name)))
 	{
 		if (!scope.injected_self)
 		{
