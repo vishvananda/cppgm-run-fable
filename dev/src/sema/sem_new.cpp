@@ -52,7 +52,16 @@ SemValue SemExprAnalyzer::MakeAllocationCall(const char* name,
 	for (size_t i = 0; i < args.size(); i++)
 		sources.push_back(MakeConversionSource(args[i]));
 	vector<ImplicitConversion> conversions;
-	size_t winner = SelectBestOverload(candidates, sources, conversions);
+	size_t winner;
+	try
+	{
+		winner = SelectBestOverload(candidates, sources, conversions);
+	}
+	catch (const NoViableOverloadError&)
+	{
+		throw NoViableOverloadError(
+			string("no matching function for call to ") + name);
+	}
 	const TypePtr& fn = candidates[winner];
 	for (size_t i = 0; i < args.size(); i++)
 		ApplyConversion(args[i], conversions[i], fn->parameters[i]);

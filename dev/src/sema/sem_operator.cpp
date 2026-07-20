@@ -495,8 +495,17 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	}
 	vector<ImplicitConversion> conversions;
 	SpecOverloadOrder order(host_, specs, sources.size());
-	size_t winner = SelectBestOverload(ranking, sources, conversions,
-	                                   &min_arity, &is_template, &order);
+	size_t winner;
+	try
+	{
+		winner = SelectBestOverload(ranking, sources, conversions,
+		                            &min_arity, &is_template, &order);
+	}
+	catch (const NoViableOverloadError&)
+	{
+		throw NoViableOverloadError("no matching function for call to " +
+		                            name);
+	}
 	const OperatorCandidate& chosen = candidates[winner];
 	const ScopeBinding& binding = *chosen.binding;
 	if (chosen.index < binding.fn_deleted.size() &&

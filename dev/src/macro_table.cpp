@@ -66,6 +66,16 @@ size_t ParseParameterList(const vector<PPToken>& line, size_t pos,
 		}
 		else
 		{
+			if (IsOp(token, "..."))
+			{
+				// GNU named variadic parameter: `name...`
+				macro.variadic = true;
+				macro.named_variadic = true;
+				if (pos + 1 >= line.size() || !IsOp(line[pos + 1], ")"))
+					throw runtime_error("expected ) after ... in macro "
+					                    "parameter list");
+				return pos + 2;
+			}
 			if (!IsOp(token, ","))
 				throw runtime_error("expected , or ) in macro parameter "
 				                    "list");
@@ -97,7 +107,8 @@ void ValidateReplacementList(MacroDefinition& macro)
 				                    "parameter");
 		}
 		else if (list[i].kind == PPT_IDENTIFIER &&
-		         list[i].data == kMacroVaArgs && !macro.variadic)
+		         list[i].data == kMacroVaArgs &&
+		         (!macro.variadic || macro.named_variadic))
 		{
 			throw runtime_error("__VA_ARGS__ outside a variadic macro "
 			                    "replacement list");
@@ -124,7 +135,7 @@ bool SameReplacementList(const vector<PPToken>& a, const vector<PPToken>& b)
 bool SameDefinition(const MacroDefinition& a, const MacroDefinition& b)
 {
 	return a.function_like == b.function_like && a.variadic == b.variadic &&
-		a.params == b.params &&
+		a.named_variadic == b.named_variadic && a.params == b.params &&
 		SameReplacementList(a.replacement, b.replacement);
 }
 

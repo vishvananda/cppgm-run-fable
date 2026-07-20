@@ -383,6 +383,11 @@ void CheckBody(const AstDecl& definition, BodyNames names,
 		const string& name = ids[i]->name.parts[0].identifier;
 		if (names.params.count(name) || names.known.count(name))
 			continue;
+		// Predefined names synthesized at use (8.4.1p8, GNU __null)
+		// never have a declaration to resolve to.
+		if (name == "__func__" || name == "__FUNCTION__" ||
+		    name == "__PRETTY_FUNCTION__" || name == "__null")
+			continue;
 		tmpl.suspicious_names.push_back(name);
 	}
 }

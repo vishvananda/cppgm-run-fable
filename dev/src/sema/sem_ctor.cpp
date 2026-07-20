@@ -818,6 +818,31 @@ void SemBinder::AnalyzeMemberInits(const DeferredBody& body, SemNode& item)
 		// A pack-expanded initializer's arguments analyze under the
 		// element scope (the mentioned packs re-bound to the element).
 		Scope* saved_scope = current_;
+		// 12.6.2p7: a braced initializer of an aggregate base
+		// list-initializes the subobject (8.5.1), like the member form.
+		if (init.kind == INIT_BRACED && base.is_aggregate &&
+		    !base.has_user_ctor)
+		{
+			SemNodePtr proto = MakeSemNode(SN_MEMBER_EXPRESSION);
+			proto->type = MakeNamedType(TK_CLASS, base.entity);
+			proto->category = VC_LVALUE;
+			proto->base_hops = 1;
+			proto->base_offset = cls.direct_bases[b].offset;
+			proto->children.push_back(ThisObjectExpr());
+			if (plan.base_init_scopes[b])
+				current_ = plan.base_init_scopes[b];
+			try
+			{
+				AppendAggregateInit(base, *proto, *init.expr, actions);
+			}
+			catch (...)
+			{
+				current_ = saved_scope;
+				throw;
+			}
+			current_ = saved_scope;
+			continue;
+		}
 		if (plan.base_init_scopes[b])
 			current_ = plan.base_init_scopes[b];
 		try
@@ -1005,7 +1030,14 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 	ClassInfo& cls = unit_.classes.Create(cls_in.entity);
 	if (cls.implicit_ctor_built)
 		return;
-	if (cls.has_user_ctor)
+	// 12.1p6: an explicitly-defaulted default constructor is served by
+	// the implicit body even when other user constructors exist.
+	bool defaulted_default = false;
+	for (size_t i = 0; i < cls.ctors.size(); i++)
+		if (cls.ctors[i].defaulted && !cls.ctors[i].deleted &&
+		    cls.ctors[i].type->parameters.empty())
+			defaulted_default = true;
+	if (cls.has_user_ctor && !defaulted_default)
 		throw runtime_error("no default constructor for " +
 		                    cls.entity->display);
 	cls.implicit_ctor_built = true;
@@ -1232,7 +1264,8 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		if (copy_init && args.size() == 1 &&
 		    TryCopyInitSourceConversion(cls, args[0]))
 			return ResolveClassConstructor(cls, args, copy_init, what);
-		throw;
+		throw NoViableOverloadError(
+			"no matching constructor for " + cls.entity->display);
 	}
 	// PA21: a selected constructor-template specialization's body
 	// instantiates at this first use (which may append further ctor

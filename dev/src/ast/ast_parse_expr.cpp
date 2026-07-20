@@ -951,7 +951,19 @@ AstExprPtr AstParser::ParsePostfixRoot()
 		{
 			AstExprPtr node = MakeExpr(EK_ID);
 			node->name = move(name);
-			return node;
+			if (AtSimple(OP_LPAREN))
+				return node;
+			// 5.2.3p3: typename-specifier braced-init-list; the suffix
+			// loop only attaches paren calls, so build the cast here
+			// with the same call shape the simple-type braced form uses.
+			AstExprPtr braced = ParseBracedInitList();
+			if (braced)
+			{
+				AstExprPtr call = MakeExpr(EK_CALL);
+				call->arguments.swap(braced->arguments);
+				call->operands.push_back(move(node));
+				return call;
+			}
 		}
 		Restore(entry);
 	}

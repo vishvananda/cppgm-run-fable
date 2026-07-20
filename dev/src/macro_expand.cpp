@@ -112,7 +112,9 @@ vector<vector<PPToken>> MacroExpander::CollectArguments(
 {
 	vector<vector<PPToken>> args;
 	vector<PPToken> current;
-	size_t named = macro.params.size();
+	// A GNU named variadic parameter is the variadic slot itself: commas
+	// stop splitting one parameter earlier so the tail lands in it.
+	size_t named = macro.params.size() - (macro.named_variadic ? 1 : 0);
 	int depth = 0;
 	while (!input.empty())
 	{
@@ -129,6 +131,9 @@ vector<vector<PPToken>> MacroExpander::CollectArguments(
 				args.clear();
 			if (macro.variadic)
 			{
+				// GNU named variadic tail may be absent entirely
+				if (macro.named_variadic && args.size() == named)
+					args.push_back(vector<PPToken>());
 				// 16.3p4: more arguments than named parameters
 				if (args.size() <= named)
 					throw runtime_error("too few arguments to variadic "

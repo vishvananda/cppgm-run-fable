@@ -260,6 +260,11 @@ private:
 	// PA21: registers later-declared member templates' names before
 	// the members parse (template classification for `<`).
 	void PreScanMemberTemplates(const std::string& class_name);
+	// PA35: a base class's registered names are visible unqualified in
+	// the derived body (`has_x<T>` inherited from a base must classify
+	// as a template for the `<` disambiguation). Copies entry flags
+	// only; unresolvable (e.g. dependent) bases are skipped.
+	void ImportBaseEntries(const AstDecl& decl);
 	AstDeclPtr ParseBitFieldDeclaration();
 	AstDeclPtr ParseSpecialMember(bool require_definition,
 	                              bool qualified_default_only = false);

@@ -98,6 +98,8 @@ void AstParser::ParseClassAdornments(AstDecl& decl)
 			Restore(state);
 			return;
 		}
+		if (SkipSquareAttribute())
+			continue;
 		if (AtSimple(KW_ALIGNAS))
 		{
 			Advance();
@@ -276,6 +278,26 @@ void AstParser::PreScanMemberTemplates(const string& class_name)
 	}
 }
 
+// Inherited-name classification: each resolvable base contributes its
+// table's entry flags to the class scope, so base member templates
+// (variable templates included) drive the template-id-versus-less-than
+// choice inside the derived body. Children are not aliased: a derived
+// nested class with a base member's name must not write into the
+// base's table.
+void AstParser::ImportBaseEntries(const AstDecl& decl)
+{
+	for (size_t i = 0; i < decl.bases.size(); i++)
+	{
+		const NameTable* base = DescendPrefix(decl.bases[i].name);
+		if (!base)
+			continue;
+		for (std::map<string, unsigned>::const_iterator it =
+		         base->entries.begin();
+		     it != base->entries.end(); ++it)
+			Register(it->first, it->second);
+	}
+}
+
 bool AstParser::ParseClassBody(AstDecl& decl)
 {
 	Advance();  // OP_LBRACE
@@ -287,6 +309,7 @@ bool AstParser::ParseClassBody(AstDecl& decl)
 	else
 		table = NewTable();
 	PushScope(table, false);
+	ImportBaseEntries(decl);
 	PreScanMemberTemplates(
 		decl.has_name && !decl.class_name.parts.empty()
 			? decl.class_name.parts.back().identifier : string());
@@ -335,6 +358,10 @@ AstDeclPtr AstParser::ParseClassDeclaration()
 	AstDeclPtr decl = ParseClassSpecifier();
 	if (decl)
 	{
+		// Trailing GNU adornments (`struct X {} __attribute__((...));`)
+		// appertain to the class; a declarator instead of `;` still
+		// falls through to the simple-declaration reading.
+		SkipDeclAdornments();
 		if (MatchSimple(OP_SEMICOLON))
 			return decl;
 		Restore(state);
@@ -561,6 +588,10 @@ AstDeclPtr AstParser::ParseSpecialMember(bool require_definition,
 	for (;;)
 	{
 		SkipDeclAdornments(&leading_tags);
+		// [[...]] attributes appertain to the special member (hosted
+		// headers put them between the template header and the ctor).
+		if (SkipSquareAttribute())
+			continue;
 		if (Peek().kind == PTOK_SIMPLE &&
 		    IsMemberFunctionSpecifier(Peek().simple_type))
 		{

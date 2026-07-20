@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -1264,7 +1265,20 @@ TypePtr DeclBinder::BindClass(const AstDecl& decl, bool standalone)
 TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 {
 	if (!decl.class_name.IsPlainIdentifier())
+	{
+		// 3.4.4p3: an elaborated-type-specifier with a qualified name
+		// only looks the class up; it declares nothing.
+		if (elaborated)
+		{
+			TypePtr found = ResolveTypeName(decl.class_name);
+			if (!found || found->kind != TK_CLASS ||
+			    found->named->is_union != (decl.class_key == KW_UNION))
+				throw runtime_error(FlattenName(decl.class_name) +
+				                    " does not name a matching class");
+			return found;
+		}
 		throw OutsideBoundary("qualified or template class-name");
+	}
 	const string& name = decl.class_name.parts[0].identifier;
 	bool is_union = decl.class_key == KW_UNION;
 	// 3.4.4p2 for the elaborated specifier form (any visible class);
@@ -1341,26 +1355,67 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
                                  const TypePtr& enum_type)
 {
 	EFundamentalType underlying = enum_type->named->enum_underlying;
+	// 7.2p6: an unscoped enumeration without a fixed base takes an
+	// underlying type wide enough for every enumerator; the default
+	// int widens through the host ladder when a value needs it.
+	bool can_widen = !enum_type->named->is_scoped && !decl.has_enum_base;
 	Scope* target = enum_type->named->is_scoped
 		? model_.MemberScope(enum_type->named) : current_;
 	Scope* saved = current_;
 	// 7.2p10: earlier enumerators are in scope inside the list.
 	current_ = target;
+	vector<ConstValue> raws;
 	ConstValue next(underlying, 0);
 	for (size_t i = 0; i < decl.enumerators.size(); i++)
 	{
 		const AstEnumerator& enumerator = decl.enumerators[i];
-		ConstValue value = next;
+		ConstValue raw = next;
 		if (enumerator.value)
+			raw = EvaluateConstExpr(*enumerator.value, *this);
+		raws.push_back(raw);
+		ConstValue value = ConvertConstValue(raw, underlying);
+		if (!SameIntegerValue(raw, value))
 		{
-			// 7.2p5: the given value must be representable in the
-			// (PA11 int-fixed) underlying type; silently wrapping
-			// would dump a value the program never wrote.
-			ConstValue given = EvaluateConstExpr(*enumerator.value, *this);
-			value = ConvertConstValue(given, underlying);
-			if (!SameIntegerValue(given, value))
+			// Widen to the first host type representing every
+			// enumerator seen so far; silently wrapping would dump a
+			// value the program never wrote.
+			static const EFundamentalType kLadder[] = {
+				FT_INT, FT_UNSIGNED_INT, FT_LONG_INT,
+				FT_UNSIGNED_LONG_INT
+			};
+			EFundamentalType widened = FT_INT;
+			bool found = false;
+			for (size_t c = 0; c < 4 && !found; c++)
+			{
+				bool fits_all = true;
+				for (size_t r = 0; r < raws.size() && fits_all; r++)
+					fits_all = SameIntegerValue(
+						raws[r],
+						ConvertConstValue(raws[r], kLadder[c]));
+				if (fits_all)
+				{
+					widened = kLadder[c];
+					found = true;
+				}
+			}
+			if (!can_widen || !found)
 				throw runtime_error(enumerator.name + " is not "
 				                    "representable in the underlying type");
+			underlying = widened;
+			NamedTypeInfo* info = model_.MutableInfo(enum_type->named);
+			info->enum_underlying = underlying;
+			TypePtr ut = MakeFundamentalType(underlying);
+			info->size = TypeSize(ut);
+			info->alignment = TypeAlignment(ut);
+			for (size_t r = 0; r + 1 < raws.size(); r++)
+			{
+				ScopeBinding* earlier = FindOwnBinding(
+					*target, decl.enumerators[r].name);
+				if (earlier)
+					earlier->value = ConvertConstValue(raws[r],
+					                                   underlying);
+			}
+			value = ConvertConstValue(raw, underlying);
 		}
 		ScopeBinding binding;
 		binding.kind = SB_ENUMERATOR;

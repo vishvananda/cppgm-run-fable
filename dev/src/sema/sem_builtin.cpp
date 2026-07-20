@@ -76,9 +76,11 @@ const BuiltinFunctionSpec kBuiltinFunctions[] = {
 	{"__builtin_popcount", 'i', "u", false},
 	{"__builtin_popcountl", 'i', "m", false},
 	{"__builtin_popcountll", 'i', "y", false},
-	// C11 fence operators (the LowIR fence instructions).
+	// C11/GNU fence operators (the LowIR fence instructions).
 	{"__c11_atomic_thread_fence", 'v', "i", false},
 	{"__c11_atomic_signal_fence", 'v', "i", false},
+	{"__atomic_thread_fence", 'v', "i", false},
+	{"__atomic_signal_fence", 'v', "i", false},
 	// Float classification/comparison family (inline bit tests and
 	// unordered-aware compares in lower_builtin.cpp; any floating
 	// operand arrives through its long double conversion, matching

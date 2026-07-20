@@ -199,7 +199,12 @@ SemValue SemExprAnalyzer::AnalyzeCastToReference(const TypePtr& dest,
 			}
 		}
 	}
-	if (value.function_set || !compatible)
+	// 5.2.10p11: a reinterpret_cast to reference type views the lvalue
+	// as the destination type (*reinterpret_cast<T2*>(&x)), with no
+	// type relationship required.
+	bool reinterpret_view = op == KW_REINTERPET_CAST &&
+		!value.function_set && value.category != VC_PRVALUE;
+	if ((value.function_set || !compatible) && !reinterpret_view)
 		throw OutsideBoundary("reference cast form");
 	if (dest->kind == TK_LVALUE_REFERENCE &&
 	    value.category != VC_LVALUE)

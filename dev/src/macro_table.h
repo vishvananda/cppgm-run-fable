@@ -37,13 +37,17 @@ enum EMacroBuiltin
 struct MacroDefinition
 {
 	MacroDefinition()
-		: function_like(false), variadic(false), has_paste(false),
-		  builtin(kBuiltinNone)
+		: function_like(false), variadic(false), named_variadic(false),
+		  has_paste(false), builtin(kBuiltinNone)
 	{}
 
 	string name;
 	bool function_like;
 	bool variadic;
+	// GNU extension: `#define F(args...)` — the trailing named parameter
+	// (last of params) absorbs the variadic tail and __VA_ARGS__ is not
+	// available in the replacement list.
+	bool named_variadic;
 	bool has_paste;
 	vector<string> params;
 	vector<PPToken> replacement;

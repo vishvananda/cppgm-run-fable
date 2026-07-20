@@ -930,9 +930,18 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 		sources.push_back(MakeConversionSource(args[i]));
 	vector<ImplicitConversion> conversions;
 	SpecOverloadOrder order(host_, set.specs, args.size());
-	size_t winner = SelectBestOverload(set.candidates, sources,
-	                                   conversions, &set.min_arity,
-	                                   &set.is_template, &order);
+	size_t winner;
+	try
+	{
+		winner = SelectBestOverload(set.candidates, sources,
+		                            conversions, &set.min_arity,
+		                            &set.is_template, &order);
+	}
+	catch (const NoViableOverloadError&)
+	{
+		throw NoViableOverloadError(
+			"no matching function for member call to " + binding.name);
+	}
 	const FunctionSpecialization* spec =
 		winner < set.ordinary ? 0 : set.specs[winner];
 	if (spec ? spec->self.fn_deleted[0]
@@ -1074,8 +1083,18 @@ SemValue SemExprAnalyzer::AnalyzeStaticMethodCall(
 		                    " called without an object");
 	vector<ImplicitConversion> conversions;
 	SpecOverloadOrder order(host_, specs, args.size());
-	size_t best = SelectBestOverload(candidates, sources, conversions,
-	                                 &min_arity, &is_template, &order);
+	size_t best;
+	try
+	{
+		best = SelectBestOverload(candidates, sources, conversions,
+		                          &min_arity, &is_template, &order);
+	}
+	catch (const NoViableOverloadError&)
+	{
+		throw NoViableOverloadError(
+			"no matching function for implicit member call to " +
+			binding.name);
+	}
 	const FunctionSpecialization* spec =
 		best < specs.size() ? specs[best] : 0;
 	size_t winner = spec ? 0 : positions[best];

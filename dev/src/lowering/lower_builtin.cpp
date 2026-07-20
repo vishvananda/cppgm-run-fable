@@ -60,7 +60,9 @@ string HostedBuiltinName(const SemNode& node)
 	if (name.compare(0, 2, "__") != 0)
 		return string();
 	if (name == "__c11_atomic_thread_fence" ||
-	    name == "__c11_atomic_signal_fence")
+	    name == "__c11_atomic_signal_fence" ||
+	    name == "__atomic_thread_fence" ||
+	    name == "__atomic_signal_fence")
 		return name;
 	// The atomic operator families (magic-typed callees).
 	static const char* const kAtomicBuiltins[] = {
@@ -68,7 +70,9 @@ string HostedBuiltinName(const SemNode& node)
 		"__c11_atomic_exchange", "__c11_atomic_compare_exchange_strong",
 		"__c11_atomic_compare_exchange_weak",
 		"__atomic_load", "__atomic_load_n", "__atomic_store",
-		"__atomic_store_n", "__atomic_exchange_n",
+		"__atomic_store_n", "__atomic_exchange_n", "__atomic_exchange",
+		"__atomic_compare_exchange_n", "__atomic_compare_exchange",
+		"__atomic_test_and_set", "__atomic_clear",
 		"__atomic_add_fetch", "__atomic_sub_fetch",
 		"__atomic_fetch_add", "__atomic_fetch_sub",
 		"__c11_atomic_fetch_add", "__c11_atomic_fetch_sub",
@@ -153,7 +157,9 @@ LowerValue FunctionLowerer::LowerHostedBuiltin(const SemNode& node)
 	    name.compare(0, 7, "__sync_") == 0)
 	{
 		if (name != "__c11_atomic_thread_fence" &&
-		    name != "__c11_atomic_signal_fence")
+		    name != "__c11_atomic_signal_fence" &&
+		    name != "__atomic_thread_fence" &&
+		    name != "__atomic_signal_fence")
 			return LowerBuiltinAtomic(node, name);
 	}
 	return LowerBuiltinAnnotation(node, name);
@@ -238,6 +244,37 @@ LowerValue FunctionLowerer::LowerBuiltinAtomic(const SemNode& node,
 		     pointer.text + ", " + value.text + ", " + order_text);
 		return result;
 	}
+	if (name == "__atomic_exchange")
+	{
+		LowerValue in = BuiltinArgument(node, 2);
+		LowerValue out = BuiltinArgument(node, 3);
+		string value = NewTemp();
+		Emit(value + " = load " + spell + " " + in.text);
+		string old = NewTemp();
+		Emit(old + " = atomic_exchange " + spell + " " + pointer.text +
+		     ", " + value + ", " + order_text);
+		Emit("store " + spell + " " + old + ", " + out.text);
+		return result;
+	}
+	if (name == "__atomic_test_and_set")
+	{
+		string one = NewTemp();
+		Emit(one + " = const " + spell + " 1");
+		string old = NewTemp();
+		Emit(old + " = atomic_exchange " + spell + " " + pointer.text +
+		     ", " + one + ", " + order_text);
+		result.text = NewTemp();
+		Emit(result.text + " = cmp ne " + spell + " " + old + ", 0");
+		return result;
+	}
+	if (name == "__atomic_clear")
+	{
+		string zero = NewTemp();
+		Emit(zero + " = const " + spell + " 0");
+		Emit("atomic_store " + spell + " " + zero + ", " +
+		     pointer.text + ", " + order_text);
+		return result;
+	}
 	if (name == "__sync_lock_release")
 	{
 		string zero = NewTemp();
@@ -247,10 +284,26 @@ LowerValue FunctionLowerer::LowerBuiltinAtomic(const SemNode& node,
 		return result;
 	}
 	if (name == "__c11_atomic_compare_exchange_strong" ||
-	    name == "__c11_atomic_compare_exchange_weak")
+	    name == "__c11_atomic_compare_exchange_weak" ||
+	    name == "__atomic_compare_exchange_n" ||
+	    name == "__atomic_compare_exchange")
 	{
 		LowerValue expected = BuiltinArgument(node, 2);
 		LowerValue desired = BuiltinArgument(node, 3);
+		if (name == "__atomic_compare_exchange")
+		{
+			// The non-_n form passes the desired value by address.
+			string loaded = NewTemp();
+			Emit(loaded + " = load " + spell + " " + desired.text);
+			desired.text = loaded;
+		}
+		if (name.compare(0, 9, "__atomic_") == 0)
+		{
+			// x86 CAS is always strong; a non-constant weak flag still
+			// evaluates for its effects.
+			if (!node.children[last - 2]->has_value)
+				LowerEffect(*node.children[last - 2]);
+		}
 		long long failure = 5;
 		if (node.children[last]->has_value)
 			failure = (long long)node.children[last]->value.bits;
@@ -402,7 +455,9 @@ LowerValue FunctionLowerer::LowerBuiltinAnnotation(const SemNode& node,
 		return result;
 	}
 	if (name == "__c11_atomic_thread_fence" ||
-	    name == "__c11_atomic_signal_fence")
+	    name == "__c11_atomic_signal_fence" ||
+	    name == "__atomic_thread_fence" ||
+	    name == "__atomic_signal_fence")
 	{
 		const SemNode& order_node = *node.children[1];
 		long long order = 5;
@@ -412,9 +467,11 @@ LowerValue FunctionLowerer::LowerBuiltinAnnotation(const SemNode& node,
 			LowerEffect(order_node);
 		if (order < 0 || order > 5)
 			order = 5;
-		Emit((name == "__c11_atomic_thread_fence"
-		      ? string("atomic_thread_fence ")
-		      : string("atomic_signal_fence ")) + to_string(order));
+		bool thread_fence = name == "__c11_atomic_thread_fence" ||
+			name == "__atomic_thread_fence";
+		Emit((thread_fence ? string("atomic_thread_fence ")
+		                   : string("atomic_signal_fence ")) +
+		     to_string(order));
 		return result;
 	}
 	// prefetch / unreachable: operand evaluation only.

@@ -89,7 +89,9 @@ bool SemExprAnalyzer::TryAnalyzeMagicBuiltin(const AstExpr& expr,
 	          name.compare(0, 9, "__atomic_") == 0 ||
 	          name.compare(0, 7, "__sync_") == 0) &&
 	         name != "__c11_atomic_thread_fence" &&
-	         name != "__c11_atomic_signal_fence")
+	         name != "__c11_atomic_signal_fence" &&
+	         name != "__atomic_thread_fence" &&
+	         name != "__atomic_signal_fence")
 		// The fences keep their fixed declarations
 		// (ResolveBuiltinFunction).
 		return TryAnalyzeAtomicBuiltin(expr, name, out);
@@ -198,6 +200,36 @@ bool SemExprAnalyzer::TryAnalyzeAtomicBuiltin(const AstExpr& expr,
 		params.push_back(int_type);
 		params.push_back(int_type);
 		result = bool_type;
+	}
+	else if (name == "__atomic_compare_exchange_n" ||
+	         name == "__atomic_compare_exchange")
+	{
+		params.push_back(MakePointerType(element, false, false));
+		if (name == "__atomic_compare_exchange")
+			params.push_back(MakePointerType(element, false, false));
+		else
+			params.push_back(element);
+		params.push_back(bool_type);
+		params.push_back(int_type);
+		params.push_back(int_type);
+		result = bool_type;
+	}
+	else if (name == "__atomic_exchange")
+	{
+		params.push_back(MakePointerType(element, false, false));
+		params.push_back(MakePointerType(element, false, false));
+		params.push_back(int_type);
+		result = void_type;
+	}
+	else if (name == "__atomic_test_and_set")
+	{
+		params.push_back(int_type);
+		result = bool_type;
+	}
+	else if (name == "__atomic_clear")
+	{
+		params.push_back(int_type);
+		result = void_type;
 	}
 	else if (name == "__atomic_add_fetch" ||
 	         name == "__atomic_sub_fetch" ||
