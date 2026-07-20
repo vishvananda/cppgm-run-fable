@@ -578,3 +578,7 @@ bool ClassTriviallyCopyable(const ClassInfo& info);
 // by_address / returns through indirect_result.
 bool ClassParamDirect(const ClassInfo& info);
 bool ClassReturnDirect(const ClassInfo& info);
+// PA36 host ABI variants (Itanium non-trivial-for-calls; unions
+// classify like structs).
+bool ClassParamDirectHost(const ClassInfo& info);
+bool ClassReturnDirectHost(const ClassInfo& info);

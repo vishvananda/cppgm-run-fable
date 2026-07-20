@@ -189,16 +189,21 @@ unsigned long long LowerValueWidth(const TypePtr& type)
 
 // --- PA16 object ABI ---------------------------------------------------
 
-bool LowerClassDirect(const TypePtr& bare)
+bool LowerClassDirect(const TypePtr& bare, bool host_abi)
 {
-	return bare->named && bare->named->class_record &&
-		ClassParamDirect(*bare->named->class_record);
+	if (!bare->named || !bare->named->class_record)
+		return false;
+	return host_abi ? ClassParamDirectHost(*bare->named->class_record)
+	                : ClassParamDirect(*bare->named->class_record);
 }
 
-bool LowerClassReturnDirect(const TypePtr& bare)
+bool LowerClassReturnDirect(const TypePtr& bare, bool host_abi)
 {
-	return bare->named && bare->named->class_record &&
-		ClassReturnDirect(*bare->named->class_record);
+	if (!bare->named || !bare->named->class_record)
+		return false;
+	return host_abi
+		? ClassReturnDirectHost(*bare->named->class_record)
+		: ClassReturnDirect(*bare->named->class_record);
 }
 
 string LowerObjSpan(const TypePtr& bare)
@@ -252,7 +257,7 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 	TypePtr bare = RemoveTopCv(param);
 	if (bare->kind == TK_CLASS)
 	{
-		if (LowerClassDirect(bare))
+		if (LowerClassDirect(bare, host_abi))
 		{
 			type_text = LowerSlotType(bare);
 			// PA33 host ABI: a 9..16-byte all-INTEGER object passes in
@@ -276,12 +281,13 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 	type_text = LowerValueType(param);
 }
 
-bool LowerAbiReturn(const TypePtr& return_type, string& ret_text)
+bool LowerAbiReturn(const TypePtr& return_type, string& ret_text,
+                    bool host_abi)
 {
 	TypePtr bare = RemoveTopCv(return_type);
 	if (bare->kind == TK_CLASS)
 	{
-		if (LowerClassReturnDirect(bare))
+		if (LowerClassReturnDirect(bare, host_abi))
 		{
 			ret_text = LowerSlotType(bare);
 			return false;

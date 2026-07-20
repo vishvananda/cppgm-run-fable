@@ -459,7 +459,8 @@ void LowerProgram::EnsurePureVirtualDeclare(const TypePtr& adjusted)
 		return;
 	pure_virtual_name_ = UniqueSymbol("__cxa_pure_virtual");
 	string ret_text;
-	bool indirect_result = LowerAbiReturn(adjusted->target, ret_text);
+	bool indirect_result = LowerAbiReturn(adjusted->target, ret_text,
+	                                      SeparateCompilation());
 	string params;
 	size_t at = 0;
 	if (indirect_result)
@@ -759,7 +760,8 @@ string LowerProgram::VTableThunkRef(LowFunctionInfo& target,
 	thunk_names_[key] = name;
 	DemandFunction(target);
 	string ret_text;
-	bool indirect_result = LowerAbiReturn(adjusted->target, ret_text);
+	bool indirect_result = LowerAbiReturn(adjusted->target, ret_text,
+	                                      SeparateCompilation());
 	vector<string> arg_names;
 	string params;
 	size_t at = 0;

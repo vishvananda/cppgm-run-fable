@@ -670,7 +670,7 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 	}
 	if (call.kind == SN_CONDITIONAL_EXPRESSION)
 		LowerClassInit(call, address);
-	else if (LowerClassReturnDirect(bare))
+	else if (LowerClassReturnDirect(bare, program_.SeparateCompilation()))
 	{
 		LowerValue result = LowerCall(call);
 		Emit("copyobj " + LowerObjSpan(bare) + " " + result.text + ", " +
@@ -1410,7 +1410,8 @@ string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type,
                                               bool method_object)
 {
 	string return_text;
-	bool indirect_result = LowerAbiReturn(fn_type->target, return_text);
+	bool indirect_result = LowerAbiReturn(fn_type->target, return_text,
+	                                      program_.SeparateCompilation());
 	string signature;
 	size_t at = 0;
 	if (indirect_result)

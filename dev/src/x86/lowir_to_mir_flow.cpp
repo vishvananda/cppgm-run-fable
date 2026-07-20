@@ -967,7 +967,13 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 	else {
 		const ValueLocation & location = resolve_location(lhs.name);
 		if(location.kind == ValueLocation::VL_FRAME) {
-			if(rhs_literal && wide) {
+			// The direct memory compare reads cmp_width bytes, so the
+			// spilled value's own storage must fill them: a narrow
+			// value under a widened compare (`!bool_temp` spells
+			// cmp eq i64) reloads with its own width instead - the
+			// slot bytes past it are junk.
+			if(rhs_literal && wide &&
+			   FrameSizeOf(values_[lhs.name].type) == cmp_width) {
 				left = frame_operand(location.frame_offset);
 				left_is_memory = true;
 			}

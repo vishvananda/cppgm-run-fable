@@ -528,26 +528,33 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 			return DeduceFromArgList(pattern->targs, entity->spec_args,
 			                         bound, false);
 		}
-		// 14.8.2.1p4: the (unique) base from which deduction succeeds;
-		// a same-template base whose arguments do not unify keeps the
-		// walk going (impl<I+1, Tail...> recursion chains). Outside
-		// call-argument deduction only the class itself participates.
-		while (entity)
+		// 14.8.2.1p4: the (unique) base from which deduction succeeds,
+		// searched breadth-first over the whole base DAG (multiple
+		// inheritance: basic_iostream reaches basic_ostream through
+		// its second base). A same-template candidate whose arguments
+		// do not unify keeps the walk going (impl<I+1, Tail...>
+		// recursion chains). Outside call-argument deduction only the
+		// class itself participates.
+		vector<const NamedTypeInfo*> worklist(1, entity);
+		for (size_t at = 0; at < worklist.size(); at++)
 		{
-			if (entity->spec_template == pattern->named->spec_template)
+			const NamedTypeInfo* current = worklist[at];
+			if (!current)
+				continue;
+			if (current->spec_template == pattern->named->spec_template)
 			{
 				vector<TemplateArg> probe = bound;
-				vector<TemplateArg> concrete = entity->spec_args;
+				vector<TemplateArg> concrete = current->spec_args;
 				// 14.8.2.5 (PA23): a defaulted tail the naming use
 				// never spelled stays out of a trailing pack
 				// pattern's run (tuple<T0, Ts...> against
 				// tuple<int, int, int> with defaulted null tail).
 				if (!pattern->targs.empty() &&
 				    pattern->targs.back().pack_pattern &&
-				    entity->spec_spelled != (size_t)-1 &&
-				    entity->spec_spelled < concrete.size() &&
-				    entity->spec_spelled + 1 >= pattern->targs.size())
-					concrete.resize(entity->spec_spelled);
+				    current->spec_spelled != (size_t)-1 &&
+				    current->spec_spelled < concrete.size() &&
+				    current->spec_spelled + 1 >= pattern->targs.size())
+					concrete.resize(current->spec_spelled);
 				if (DeduceFromArgList(pattern->targs, concrete,
 				                      probe, false))
 				{
@@ -557,7 +564,16 @@ bool DeduceFromType(const TypePtr& pattern, const TypePtr& arg,
 			}
 			if (!deduce_via_bases)
 				return false;
-			entity = entity->base_entity;
+			if (current->class_record)
+			{
+				const vector<ClassDirectBase>& bases =
+					current->class_record->direct_bases;
+				for (size_t b = 0; b < bases.size(); b++)
+					if (bases[b].cls)
+						worklist.push_back(bases[b].cls->entity);
+			}
+			else if (current->base_entity)
+				worklist.push_back(current->base_entity);
 		}
 		return false;
 	}

@@ -54,7 +54,7 @@ string FunctionLowerer::LowerCallArgument(const SemNode& node,
 	if (RemoveTopCv(param)->kind == TK_CLASS)
 	{
 		TypePtr bare = RemoveTopCv(param);
-		if (!LowerClassDirect(bare))
+		if (!LowerClassDirect(bare, program_.SeparateCompilation()))
 			// The indirect boundary: the caller materializes the
 			// argument object and passes its address.
 			return MaterializeClassArg(node, bare);

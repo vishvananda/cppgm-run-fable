@@ -1226,7 +1226,8 @@ LowerValue FunctionLowerer::LowerCall(const SemNode& node,
 	if (pm_call)
 		arguments = object_text + arguments;
 	string return_text;
-	bool indirect_result = LowerAbiReturn(fn_type->target, return_text);
+	bool indirect_result = LowerAbiReturn(fn_type->target, return_text,
+	                                      program_.SeparateCompilation());
 	if (indirect_result)
 	{
 		// The caller-owned result object's address leads the argument

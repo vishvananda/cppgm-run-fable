@@ -47,9 +47,11 @@ unsigned long long LowerValueWidth(const TypePtr& type);
 
 // Complete objects of the class type pass/return as direct obj<SxA>
 // values; otherwise parameters pass by_address and results return
-// through a leading indirect_result destination pointer.
-bool LowerClassDirect(const TypePtr& bare);
-bool LowerClassReturnDirect(const TypePtr& bare);
+// through a leading indirect_result destination pointer. `host_abi`
+// selects the Itanium non-trivial-for-calls walk (unions classify
+// like structs); whole-program mode keeps the pinned reference walk.
+bool LowerClassDirect(const TypePtr& bare, bool host_abi);
+bool LowerClassReturnDirect(const TypePtr& bare, bool host_abi);
 
 // The "SIZExALIGN" span text of a class or array type.
 string LowerObjSpan(const TypePtr& bare);
@@ -63,4 +65,5 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 // The ABI-lowered return facts of a function type: `ret_text` is the
 // emitted return spelling; true when the function carries a leading
 // `ptr [pass=indirect_result]` result parameter (and returns void).
-bool LowerAbiReturn(const TypePtr& return_type, string& ret_text);
+bool LowerAbiReturn(const TypePtr& return_type, string& ret_text,
+                    bool host_abi);

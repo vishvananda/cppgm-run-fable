@@ -44,7 +44,8 @@ string FunctionLowerer::Lower()
 		// 14.7.1: the demanded member's instantiation was ill-formed.
 		throw runtime_error(def_.instantiation_error);
 	string ret_text;
-	indirect_ret_ = LowerAbiReturn(return_type_, ret_text);
+	indirect_ret_ = LowerAbiReturn(return_type_, ret_text,
+	                               program_.SeparateCompilation());
 	if (indirect_ret_)
 	{
 		ParamInfo ret_param;
@@ -215,7 +216,8 @@ string FunctionLowerer::Header() const
 		metadata += (i ? ", " : " [") + meta[i];
 	metadata += "]";
 	string ret_text;
-	LowerAbiReturn(return_type_, ret_text);
+	LowerAbiReturn(return_type_, ret_text,
+	               program_.SeparateCompilation());
 	return "function @" + info_.low_name + "(" + params + ") -> " +
 		ret_text + metadata + " {";
 }
@@ -1291,7 +1293,8 @@ void FunctionLowerer::LowerConditionInto(const SemNode& condition,
 string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 {
 	string ret_text;
-	bool indirect_result = LowerAbiReturn(info.type->target, ret_text);
+	bool indirect_result = LowerAbiReturn(info.type->target, ret_text,
+	                                      SeparateCompilation());
 	string params;
 	size_t at = 0;
 	if (indirect_result)

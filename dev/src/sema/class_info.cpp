@@ -1368,3 +1368,22 @@ bool ClassReturnDirect(const ClassInfo& info)
 {
 	return ClassParamDirect(info) && ClassHasTrivialCopyCtor(info);
 }
+
+// PA36 host ABI: the Itanium non-trivial-for-calls rule with the SysV
+// small-size cut - any non-trivial copy/move constructor or
+// destructor forces memory, and unions classify like any other class
+// (std::fpos carries mbstate_t's union). Polymorphic classes keep the
+// course memory path (no fixture exercises host by-value vptr
+// objects). Whole-program mode keeps the pinned reference walk above.
+bool ClassParamDirectHost(const ClassInfo& info)
+{
+	return info.size <= 16 && !info.is_polymorphic &&
+		ClassHasTrivialCopyCtor(info) &&
+		ClassHasTrivialMoveCtor(info) && ClassHasTrivialDtor(info) &&
+		!ClassCopyCtorDeleted(info);
+}
+
+bool ClassReturnDirectHost(const ClassInfo& info)
+{
+	return ClassParamDirectHost(info);
+}
