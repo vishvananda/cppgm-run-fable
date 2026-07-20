@@ -210,6 +210,22 @@ TypePtr SemBinder::ResolveCastTypeId(const AstTypeId& type_id)
 	return builder_.ResolveTypeId(type_id);
 }
 
+const NamedTypeInfo* SemBinder::ResolveQualifierClass(const AstName& name)
+{
+	Scope* prefix;
+	try
+	{
+		prefix = ResolvePrefixScope(name);
+	}
+	catch (const std::exception&)
+	{
+		return 0;
+	}
+	if (!prefix || prefix->kind != SCOPE_CLASS)
+		return 0;
+	return model_.ScopeEntity(prefix);
+}
+
 bool SemBinder::TryEvaluateConstant(const AstExpr& expr, ConstValue& value)
 {
 	try

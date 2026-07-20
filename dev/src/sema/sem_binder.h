@@ -32,6 +32,8 @@ public:
 	virtual const ScopeBinding* ResolveValue(const AstName& name,
 	                                         const NamedTypeInfo*& member_class);
 	virtual TypePtr TryResolveCalleeType(const AstName& name);
+	virtual const NamedTypeInfo* ResolveQualifierClass(
+		const AstName& name);
 	virtual TypePtr ResolveCastTypeId(const AstTypeId& type_id);
 	virtual bool TryEvaluateConstant(const AstExpr& expr, ConstValue& value);
 	virtual bool TryFullConstant(const AstExpr& expr, ConstValue& out);

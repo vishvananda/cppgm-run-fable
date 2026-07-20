@@ -640,6 +640,13 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 		name = last.identifier;
 		qualified = true;
 	}
+	else if (last.kind == NP_OPERATOR_FUNCTION)
+	{
+		// A qualified operator call
+		// (`this->__shared_ptr<_Tp>::operator=(...)`).
+		name = "operator " + last.operator_text;
+		qualified = true;
+	}
 	else
 		throw OutsideBoundary("member name form");
 	if (object.type->kind != TK_CLASS)
@@ -695,21 +702,9 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 const NamedTypeInfo* SemExprAnalyzer::ResolveMemberQualifier(
 	const AstName& name, const NamedTypeInfo* object_entity)
 {
-	AstName prefix;
-	prefix.global_scope = name.global_scope;
-	for (size_t i = 0; i + 1 < name.parts.size(); i++)
-	{
-		if (name.parts[i].kind != NP_IDENTIFIER || name.parts[i].tilde)
-			throw OutsideBoundary("member name form");
-		AstNamePart part;
-		part.kind = NP_IDENTIFIER;
-		part.identifier = name.parts[i].identifier;
-		prefix.parts.push_back(std::move(part));
-	}
-	TypePtr named = host_.TryResolveCalleeType(prefix);
-	if (!named || RemoveTopCv(named)->kind != TK_CLASS)
+	const NamedTypeInfo* entity = host_.ResolveQualifierClass(name);
+	if (!entity)
 		throw runtime_error("member qualifier does not name a class");
-	const NamedTypeInfo* entity = RemoveTopCv(named)->named;
 	if (BaseClassDistance(object_entity, entity) < 0 &&
 	    !DerivedFromWithExtras(host_.Classes(), object_entity, entity))
 		throw runtime_error("member qualifier does not name the "

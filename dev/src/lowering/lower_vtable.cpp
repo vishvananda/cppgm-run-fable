@@ -182,16 +182,19 @@ string LowerProgram::VTableRef(const ClassInfo* cls)
 
 string LowerProgram::ExternalRttiVtableRef(ERttiVtableKind kind)
 {
-	static const char* const tails[5] = {
+	static const char* const tails[7] = {
 		"__class_type_info", "__si_class_type_info",
 		"__fundamental_type_info", "__pointer_type_info",
-		"__vmi_class_type_info"};
-	static const char* const objects[5] = {
+		"__vmi_class_type_info", "__function_type_info",
+		"__enum_type_info"};
+	static const char* const objects[7] = {
 		"_ZTVN10__cxxabiv117__class_type_infoE",
 		"_ZTVN10__cxxabiv120__si_class_type_infoE",
 		"_ZTVN10__cxxabiv123__fundamental_type_infoE",
 		"_ZTVN10__cxxabiv119__pointer_type_infoE",
-		"_ZTVN10__cxxabiv121__vmi_class_type_infoE"};
+		"_ZTVN10__cxxabiv121__vmi_class_type_infoE",
+		"_ZTVN10__cxxabiv120__function_type_infoE",
+		"_ZTVN10__cxxabiv116__enum_type_infoE"};
 	string& name = external_rtti_vtable_names_[kind];
 	if (name.empty())
 	{
@@ -409,6 +412,18 @@ string LowerProgram::RttiTypeRef(const TypePtr& type_in)
 		low = UniqueSymbol("__rtti_type_" + encoding);
 		name_low = UniqueSymbol("__typeinfo_name_type_" + encoding);
 		head = ExternalRttiVtableRef(RTTI_VT_CLASS);
+		break;
+	case TK_FUNCTION:
+		// A function type reached through a pointer's pointee record
+		// (std::function's typeid(_Functor)).
+		low = UniqueSymbol("__rtti_type_" + encoding);
+		name_low = UniqueSymbol("__typeinfo_name_type_" + encoding);
+		head = ExternalRttiVtableRef(RTTI_VT_FUNCTION);
+		break;
+	case TK_ENUM:
+		low = UniqueSymbol("__rtti_type_" + encoding);
+		name_low = UniqueSymbol("__typeinfo_name_type_" + encoding);
+		head = ExternalRttiVtableRef(RTTI_VT_ENUM);
 		break;
 	default:
 		throw runtime_error("typeid operand type is outside the PA25 "

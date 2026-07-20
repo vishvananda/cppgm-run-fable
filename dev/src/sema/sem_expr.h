@@ -50,6 +50,11 @@ struct ISemExprHost
 	// The type a callee name denotes, or null when it does not name a
 	// type (functional-cast disambiguation).
 	virtual TypePtr TryResolveCalleeType(const AstName& name) = 0;
+	// The class entity named by a qualified name's prefix (all parts
+	// before the terminal), or null when the prefix does not name a
+	// class; the prefix may spell template-id components.
+	virtual const NamedTypeInfo* ResolveQualifierClass(
+		const AstName& name) = 0;
 	// 8.4 type-id resolution (casts, sizeof).
 	virtual TypePtr ResolveCastTypeId(const AstTypeId& type_id) = 0;
 	// Constant evaluation attempt for the __builtin_constant_p fold.

@@ -307,7 +307,9 @@ public:
 		RTTI_VT_SI_CLASS,
 		RTTI_VT_FUNDAMENTAL,
 		RTTI_VT_POINTER,
-		RTTI_VT_VMI_CLASS
+		RTTI_VT_VMI_CLASS,
+		RTTI_VT_FUNCTION,
+		RTTI_VT_ENUM
 	};
 	// PA25: the "@name" of an external runtime helper, declared on
 	// first use with the given signature/metadata suffix.
