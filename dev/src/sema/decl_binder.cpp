@@ -100,6 +100,10 @@ string DeclBinder::DeclaredFunctionName(const AstNamePart& part)
 		return "operator " + part.operator_text;
 	if (part.kind == NP_LITERAL_OPERATOR)
 		return "operator \"\"" + part.identifier;
+	// A template-id declarator names its template
+	// (`friend f<>(...)`).
+	if (part.kind == NP_TEMPLATE_ID && !part.tilde)
+		return part.identifier;
 	return PartName(part);
 }
 

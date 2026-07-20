@@ -1096,10 +1096,11 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 		method_ = saved_method;
 		range_hidden_counter_ = saved_hidden;
 		parents_.pop_back();
-		vector<SemNodePtr>& list =
-			parents_.empty() ? unit_.items : parents_.back()->children;
-		if (!list.empty() && list.back().get() == item)
-			list.pop_back();
+		// The half-analyzed node demotes in place to a declaration
+		// (whichever list owns it). Its partial subtree stays owned
+		// but unvisited: a mid-analysis node graph may hold sharing
+		// edges that make eager destruction unsafe here.
+		item->kind = SN_FUNCTION_DECLARATION;
 		return;
 	}
 	TypePtr deduced_return = current_return_;

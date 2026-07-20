@@ -589,8 +589,16 @@ AstExprPtr AstParser::ParseUnaryExpression()
 		}
 		case KW_SIZEOF:
 			return ParseSizeofExpression();
-		case KW_ALIGNOF:
 		case KW_TYPEID:
+		{
+			// 5.2.8: typeid is a postfix-expression and accepts
+			// further suffixes (`typeid(T).hash_code()`).
+			AstExprPtr node = ParseTraitExpression(token.simple_type);
+			if (!node)
+				return node;
+			return ParsePostfixSuffixes(move(node));
+		}
+		case KW_ALIGNOF:
 		case KW_NOEXCEPT:
 			return ParseTraitExpression(token.simple_type);
 		case KW_DYNAMIC_CAST:

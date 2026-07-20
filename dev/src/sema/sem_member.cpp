@@ -651,7 +651,8 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	const ScopeBinding* member =
 		FindMemberBinding(host_.Model(), lookup_entity, name);
 	if (!member)
-			throw runtime_error("no member named " + name);
+		throw runtime_error("no member named " + name + " in " +
+		                    lookup_entity->display);
 	if (member->kind == SB_VARIABLE)
 	{
 		// A data member holding a function pointer: the call is

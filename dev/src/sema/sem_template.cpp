@@ -733,7 +733,27 @@ void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
 	AddBinding(*spec.param_scope, injected);
 
 	InstantiationContext context(*this, spec.param_scope, true);
-	BindDeclaration(*tmpl.pattern_decl);
+	try
+	{
+		BindDeclaration(*tmpl.pattern_decl);
+	}
+	catch (...)
+	{
+		// A failed body must not leave a hollow "instantiated"
+		// record: reset the entity so the next completeness demand
+		// re-instantiates (and a fault caught upstream is retryable
+		// rather than permanently empty).
+		spec.instantiated = false;
+		NamedTypeInfo* stale = model_.MutableInfo(spec.entity);
+		stale->complete = false;
+		stale->is_defined = false;
+		if (ClassInfo* record = unit_.classes.Find(spec.entity))
+		{
+			*record = ClassInfo();
+			record->entity = spec.entity;
+		}
+		throw;
+	}
 	// The member scope adopts the specialization spelling so the
 	// lowering's scope paths and symbol names see `Foo<int>`.
 	if (Scope* members = model_.MemberScope(spec.entity))
