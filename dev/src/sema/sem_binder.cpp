@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include <cstdio>
 #include <stdexcept>
 
 using std::runtime_error;

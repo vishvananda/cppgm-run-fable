@@ -224,7 +224,15 @@ struct Validator
 		{
 			const LowIRAlias & alias = program.aliases[i];
 			if(!spellings.insert(alias.object_symbol).second)
-				fail("duplicate object alias: " + alias.object_symbol);
+			{
+				string targets;
+				for(size_t j = 0; j < program.aliases.size(); ++j)
+					if(program.aliases[j].object_symbol ==
+					   alias.object_symbol)
+						targets += " @" + program.aliases[j].target;
+				fail("duplicate object alias: " + alias.object_symbol +
+				     " targets:" + targets);
+			}
 			if(!symbol_exists(alias.target))
 				fail("object alias target is not a top-level symbol: @" +
 				     alias.target);

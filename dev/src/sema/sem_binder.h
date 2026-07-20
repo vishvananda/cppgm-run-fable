@@ -614,7 +614,10 @@ private:
 	// constructor).
 	void BindMemberExplicitSpecialization(const AstDecl& inner,
 	                                      const AstName& id);
-	void BindFunctionExplicitSpecialization(const AstDecl& inner);
+	// `declarator` overrides inner.declarator for the DK_SIMPLE
+	// prototype form (`template<> R f(args);`).
+	void BindFunctionExplicitSpecialization(
+		const AstDecl& inner, const AstDeclarator* declarator = 0);
 	void BindVariableExplicitSpecialization(const AstDecl& inner);
 	void CaptureVariableTemplate(const AstDecl& decl,
 	                             const AstDecl& inner);

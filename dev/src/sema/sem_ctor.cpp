@@ -1294,7 +1294,22 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 			                          fn->parameters[i]);
 	for (size_t i = args.size(); i < fn->parameters.size(); i++)
 	{
-		SemValue filled = analyzer_.Analyze(*ctor.defaults[i]);
+		// 8.3.6p9/p5: a member default argument's names resolve in the
+		// class scope (which chains through a specialization's
+		// template-argument aliases), not the call site.
+		Scope* saved = current_;
+		current_ = cls.members;
+		SemValue filled;
+		try
+		{
+			filled = analyzer_.Analyze(*ctor.defaults[i]);
+		}
+		catch (...)
+		{
+			current_ = saved;
+			throw;
+		}
+		current_ = saved;
 		analyzer_.CopyInitialize(filled, fn->parameters[i],
 		                         "default argument");
 		args.push_back(std::move(filled));

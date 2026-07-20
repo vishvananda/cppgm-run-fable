@@ -85,9 +85,21 @@ AstDeclPtr AstParser::ParseNamespaceDefinition()
 		Restore(state);
 		return AstDeclPtr();
 	}
-	NameTable* table = decl->unnamed
-		? NewTable()
-		: GetOrCreateChild(DeclScopeTable(), decl->name);
+	NameTable* table;
+	if (decl->unnamed)
+		table = NewTable();
+	else if (decl->inline_namespace)
+	{
+		// 7.3.1p8: inline-namespace members are usable as members of
+		// the enclosing namespace. Sharing the parent's table gives
+		// both the unqualified and the qualified classification
+		// (`std::basic_string` declared inside std::__cxx11).
+		table = DeclScopeTable();
+		if (!table->children.count(decl->name))
+			table->children[decl->name] = table;
+	}
+	else
+		table = GetOrCreateChild(DeclScopeTable(), decl->name);
 	PushScope(table, false);
 	while (!AtSimple(OP_RBRACE))
 	{
@@ -588,11 +600,35 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 	const AstName* id = decl->declarator->IdName();
 	if (id && id->IsPlainIdentifier())
 		Register(id->parts[0].identifier, NF_VALUE | TemplatedFlag());
+	// 3.4.1p8: an out-of-class member body sees the class's names, so
+	// member values keep the expression reading of `member(args);`
+	// statements. The qualifier's table (template arguments ignored)
+	// pushes under the parameter scope.
+	bool pushed_class = false;
+	if (id && id->parts.size() > 1)
+	{
+		AstName prefix;
+		prefix.global_scope = id->global_scope;
+		for (size_t i = 0; i + 1 < id->parts.size(); i++)
+		{
+			AstNamePart part;
+			part.kind = id->parts[i].kind;
+			part.identifier = id->parts[i].identifier;
+			prefix.parts.push_back(std::move(part));
+		}
+		if (const NameTable* table = DescendPrefix(prefix))
+		{
+			PushScope(const_cast<NameTable*>(table), false);
+			pushed_class = true;
+		}
+	}
 	PushTransientScope();
 	RegisterParameters(*decl->declarator);
 	decl->body = AtSimple(KW_TRY) ? ParseFunctionTryBody(*decl)
 	                              : ParseCompoundStatement();
 	PopScope();
+	if (pushed_class)
+		PopScope();
 	if (!decl->body)
 	{
 		Restore(state);

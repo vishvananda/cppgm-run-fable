@@ -346,6 +346,36 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 					params[i].default_expr =
 						merged->params[i].default_expr;
 			}
+			// The definition may rename template parameters; existing
+			// specializations bound the declaration's names, so each
+			// renamed parameter re-aliases in their argument scopes
+			// before any pending body composes against the new names.
+			for (map<string, unique_ptr<FunctionSpecialization>>::
+			         iterator it = merged->fn_specs.begin();
+			     it != merged->fn_specs.end(); ++it)
+			{
+				FunctionSpecialization* spec = it->second.get();
+				if (!spec || !spec->param_scope)
+					continue;
+				for (size_t i = 0;
+				     i < params.size() && i < merged->params.size();
+				     i++)
+				{
+					const string& fresh = params[i].name;
+					const string& old = merged->params[i].name;
+					if (fresh.empty() || fresh == old)
+						continue;
+					map<string, size_t>::const_iterator at =
+						spec->param_scope->binding_index.find(old);
+					if (at == spec->param_scope->binding_index.end() ||
+					    spec->param_scope->binding_index.count(fresh))
+						continue;
+					ScopeBinding alias =
+						spec->param_scope->bindings[at->second];
+					alias.name = fresh;
+					AddBinding(*spec->param_scope, alias);
+				}
+			}
 			merged->params = params;
 			merged->pattern_ready = false;
 			InstantiatePendingFunctions(*merged);
@@ -813,14 +843,25 @@ void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 	}
 	case DK_SIMPLE:
 	{
-		const AstName* id = inner.declarators.size() == 1 &&
-			inner.declarators[0].declarator
-			? inner.declarators[0].declarator->IdName() : 0;
+		const AstDeclarator* d = inner.declarators.size() == 1
+			? inner.declarators[0].declarator.get() : 0;
+		const AstName* id = d ? d->IdName() : 0;
 		if (id && id->parts.size() > 1)
 		{
 			BindMemberExplicitSpecialization(inner, *id);
 			return;
 		}
+		// A declarator-id directly followed by a parameter clause is a
+		// function specialization declared without a body
+		// (`template<> R f(args);`, 14.7.3p11 deduced form included).
+		if (d)
+			for (size_t i = 0; i + 1 < d->items.size(); i++)
+				if (d->items[i].kind == DI_ID &&
+				    d->items[i + 1].kind == DI_PARAMS)
+				{
+					BindFunctionExplicitSpecialization(inner, d);
+					return;
+				}
 		BindVariableExplicitSpecialization(inner);
 		return;
 	}
@@ -1004,9 +1045,12 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 
 // --- function explicit specialization ----------------------------------------
 
-void SemBinder::BindFunctionExplicitSpecialization(const AstDecl& inner)
+void SemBinder::BindFunctionExplicitSpecialization(
+	const AstDecl& inner, const AstDeclarator* declarator)
 {
-	const AstName* id = inner.declarator ? inner.declarator->IdName() : 0;
+	if (!declarator)
+		declarator = inner.declarator.get();
+	const AstName* id = declarator ? declarator->IdName() : 0;
 	if (!id || id->parts.size() != 1)
 		throw OutsideBoundary("explicit specialization declarator");
 	const AstNamePart& terminal = id->parts.back();
@@ -1028,7 +1072,7 @@ void SemBinder::BindFunctionExplicitSpecialization(const AstDecl& inner)
 		try
 		{
 			DeclaratorInfo composed = builder_.ComposeDeclarator(
-				inner.declarator.get(), specs.type);
+				declarator, specs.type);
 			if (composed.type->kind == TK_FUNCTION)
 				declared = composed.type;
 		}
@@ -1063,7 +1107,7 @@ void SemBinder::BindFunctionExplicitSpecialization(const AstDecl& inner)
 		// `template<> int digits(unsigned int)`: the specialized
 		// arguments deduce from the declared signature (14.7.3p11).
 		DeclaratorInfo composed = builder_.ComposeDeclarator(
-			inner.declarator.get(), specs.type);
+			declarator, specs.type);
 		if (composed.type->kind != TK_FUNCTION)
 			throw runtime_error("explicit specialization of a "
 			                    "non-function");

@@ -23,6 +23,8 @@ const char * const kSupportedBuiltins[] = {
 	"__builtin_strlen",
 	"__builtin_memcpy",
 	"__builtin_memmove",
+	"__builtin_memset",
+	"__builtin_vsnprintf",
 	"__builtin_strcmp",
 	"__builtin_memcmp",
 	"__builtin_memchr",
@@ -344,6 +346,7 @@ const MathBuiltinFamily kMathFamilies[] = {
 // Fixed-signature libc-backed builtins (string/memory/utility).
 const MathBuiltinFamily kLibcSingles[] = {
 	{"strlen", "ms"}, {"memcpy", "ppqm"}, {"memmove", "ppqm"},
+	{"memset", "ppim"}, {"vsnprintf", "icmsF"},
 	{"strcmp", "iss"}, {"memcmp", "iqqm"}, {"memchr", "pqim"},
 	{"strchr", "csi"}, {"bzero", "vpm"}, {"free", "vp"},
 	{"abs", "ii"}, {"labs", "ll"}, {"llabs", "xx"},

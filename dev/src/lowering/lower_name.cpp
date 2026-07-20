@@ -1420,6 +1420,34 @@ string MangleMemberFunctionEncoding(const Scope* scope,
 			encoding += "E";
 			return encoding + MangleBareParameters(bare, subs);
 		}
+	// 5.1.7: a member of an ordinary function-local class takes the
+	// same Z..E local form - each enclosing instantiation's local
+	// class is a distinct entity, so its members must not collide.
+	if (entity && !entity->is_closure)
+		if (const Scope* fn_scope = LocalEntityFunctionScope(*entity))
+		{
+			string encoding = "Z" +
+				MangleEnclosingFunctionEncoding(fn_scope, subs) +
+				"EN";
+			if (is_volatile)
+				encoding += "V";
+			if (is_const)
+				encoding += "K";
+			if (type->ref_qual == 1)
+				encoding += "R";
+			else if (type->ref_qual == 2)
+				encoding += "O";
+			string names;
+			for (const Scope* at = scope; at && at != fn_scope;
+			     at = at->parent)
+				if (at->kind == SCOPE_CLASS && !at->name.empty())
+					names = SourceName(at->name) + names;
+			encoding += names;
+			encoding += Terminal::Spell(name, bare, special_code,
+			                            subs);
+			encoding += "E";
+			return encoding + MangleBareParameters(bare, subs);
+		}
 	string encoding = "N";
 	if (is_volatile)
 		encoding += "V";
