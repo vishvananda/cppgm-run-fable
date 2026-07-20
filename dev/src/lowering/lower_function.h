@@ -219,6 +219,9 @@ private:
 	                                    const TypePtr& source,
 	                                    const TypePtr& target);
 	string LowerAddressExpr(const SemNode& node);
+	// PA36: a folded constant lvalue (a reference bound to
+	// std::string::npos) materializes its value in a local slot.
+	string MaterializeConstantLiteral(const SemNode& node);
 	string CallResultAddress(const SemNode& node);
 	string LowerPointerOperand(const SemNode& node);
 	string LowerPointerCmpOperand(const SemNode& node);

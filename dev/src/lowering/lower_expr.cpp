@@ -1004,20 +1004,7 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 		if (node.is_string_literal)
 			return LowerLiteralValue(node).text;
 		if (node.has_value)
-		{
-			// PA36: a folded constant lvalue (a reference bound to
-			// std::string::npos) materializes its value in a local
-			// slot; the binding observes the value, not the folded
-			// entity's storage identity.
-			LowerValue value = LowerLiteralValue(node);
-			string slot = AddMatSlot(
-				"tmpconst", LowerSlotType(RemoveTopCv(node.type)));
-			Emit("store " + LowerValueType(value.type) + " " +
-			     value.text + ", $" + slot);
-			string address = NewTemp();
-			Emit(address + " = addr $" + slot);
-			return address;
-		}
+			return MaterializeConstantLiteral(node);
 		throw OutsideBoundary("address form");
 	default:
 		throw OutsideBoundary("address form");
@@ -1026,6 +1013,20 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 
 // The address of a call result: a reference result is its pointer; a
 // class prvalue call materializes its result object.
+// The binding observes the value, not the folded entity's storage
+// identity (the entity's own definition may be folded away).
+string FunctionLowerer::MaterializeConstantLiteral(const SemNode& node)
+{
+	LowerValue value = LowerLiteralValue(node);
+	string slot = AddMatSlot("tmpconst",
+	                         LowerSlotType(RemoveTopCv(node.type)));
+	Emit("store " + LowerValueType(value.type) + " " + value.text +
+	     ", $" + slot);
+	string address = NewTemp();
+	Emit(address + " = addr $" + slot);
+	return address;
+}
+
 string FunctionLowerer::CallResultAddress(const SemNode& node)
 {
 	if (!IsReferenceType(node.type))

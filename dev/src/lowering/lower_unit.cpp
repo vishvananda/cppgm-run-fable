@@ -380,60 +380,6 @@ string LowerProgram::LocalStaticGuard(const string& object_name)
 	return globals_.back().low_name;
 }
 
-void LowerProgram::RegisterGlobal(const SemNode& item)
-{
-	LowGlobalInfo& info = GlobalEntry(item.entity_scope,
-	                                  item.entity_name);
-	const ScopeBinding* binding = FindOwnBinding(*item.entity_scope,
-	                                             item.entity_name);
-	info.type = binding->type;  // redeclarations may complete bounds
-	bool defines = !item.children.empty() || !item.is_extern_decl ||
-		item.weak_def;
-	if (defines && !info.defined)
-	{
-		info.defined = true;
-		info.node = &item;
-		// PA20: the sema-evaluated constant image of an object-valued
-		// constexpr definition.
-		for (size_t u = 0; u < units_.size() && !info.image; u++)
-		{
-			map<const SemNode*,
-			    shared_ptr<const ConstObject>>::const_iterator found =
-				units_[u]->const_images.find(&item);
-			if (found != units_[u]->const_images.end())
-				info.image = found->second;
-		}
-	}
-	bool is_const = false;
-	bool is_volatile = false;
-	TopCv(info.type, is_const, is_volatile);
-	if (binding->has_value && is_const)
-		info.folded_const = true;
-	if (item.is_extern_decl)
-		info.extern_declared = true;
-	if (item.weak_def)
-		info.weak = true;
-	else if (item.is_static_decl ||
-	         LowerInUnnamedNamespace(item.entity_scope) ||
-	         (is_const && !item.is_extern_decl &&
-	          !info.extern_declared))
-		// 3.5p3: a const object is internal unless some declaration
-		// spelled extern (a prior `extern const` declaration keeps the
-		// later initializing definition external).
-		info.internal = true;
-	if (item.is_thread_local_decl)
-		info.is_thread_local = true;
-	if (item.c_linkage)
-	{
-		info.c_linkage = true;
-		// 7.5: a C-linkage object's symbol is its unqualified source
-		// name even inside a namespace. The whole-program presentation
-		// keeps the pinned LowIR spellings.
-		info.object_name = separate_compilation_ ? item.entity_name
-		                                         : string();
-	}
-}
-
 LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
                                              const string& name,
                                              const TypePtr& type,

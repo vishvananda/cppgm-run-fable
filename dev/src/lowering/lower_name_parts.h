@@ -58,6 +58,32 @@ vector<NameComponent> ScopeComponents(const Scope* scope);
 // namespace (spelled St, never a substitution candidate).
 bool HeadIsStd(const vector<NameComponent>& parts);
 
+// The ::std abbreviation catalog (lower_name_std.cpp). The
+// whole-specialization codes (Ss/Si/So/Sd) are direct standard
+// substitutions and never enter the numbered table; Sa/Sb template-id
+// spellings still register their chain keys.
+const char* StdSpecializationAbbreviation(const NameComponent& part);
+const char* StdTemplateAbbreviation(const NameComponent& part);
+// Spells one component that is a direct member of ::std;
+// `register_full` reports whether the caller's full-key registration
+// still applies.
+string SpellStdMemberComponent(const NameComponent& part,
+                               const string& name_key,
+                               Substitutions& subs, bool& register_full);
+// Spells the leading [::std, parts[1]] pair of a nested name when an
+// abbreviation applies; returns the number of components consumed
+// (0 when none applies).
+size_t SpellStdHeadAbbreviation(const vector<NameComponent>& parts,
+                                const vector<string>& full_keys,
+                                Substitutions& subs, string& out);
+
+// Appends one component's spelling, registering its template name as
+// a substitution candidate (5.1.9); an already-registered name
+// compresses when the component opens the spelling (lower_name.cpp).
+void AppendComponentSpelling(const NameComponent& part,
+                             const string& name_key, Substitutions& subs,
+                             string& out, bool allow_name_substitution);
+
 // Component substitution table (5.1.9): previously seen substitutable
 // fragments compress to S_/S<n>_.
 class Substitutions

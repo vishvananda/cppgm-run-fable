@@ -164,9 +164,8 @@ private:
 	void BindSynthesizedVariable(const string& name, const TypePtr& type,
 	                             AstExprPtr init_expr,
 	                             const DeclSpecifierInfo& specs);
-	// PA34 hosted C++17 structured bindings (sem_auto.cpp): the block
-	// form binds the hidden object from its initializer; the shared
-	// name binder decomposes it member-wise.
+	// PA34 hosted C++17 structured bindings (sem_auto.cpp): the hidden
+	// object binds from its initializer, decomposed member-wise.
 	virtual void BindStructuredBinding(const AstDecl& decl);
 	void BindStructuredBindingNames(const AstDecl& decl,
 	                                const string& object_name);
@@ -318,8 +317,7 @@ private:
 	SemNodePtr MemberAssignAction(const ClassField& field,
 	                              SemNodePtr lhs, SemValue value);
 	// Overload resolution over the class's declared constructors;
-	// applies conversions and synthesizes default arguments. Returns -1
-	// when initialization uses the implicit default constructor.
+	// -1 when initialization uses the implicit default constructor.
 	void FillCtorDefaultArguments(const ClassInfo& cls,
 	                              const ClassCtor& ctor,
 	                              vector<SemValue>& args);
@@ -405,12 +403,10 @@ private:
 	void CaptureQualifiedClassTemplate(const AstDecl& decl,
 	                                   const AstDecl& inner);
 	// Returns the merged or fresh record; `as_friend` captures a
-	// hidden (ADL-only) namespace-scope friend template.
-	// `friend_home` is the enclosing instantiation's argument-alias
-	// scope: friends captured under different instantiations are
-	// distinct templates (14.5.4) and never merge across it.
-	// `replace_instantiated` permits the 14.7.3p18 replacement of a
-	// pattern-instantiated definition by an explicit member definition.
+	// hidden (ADL-only) namespace-scope friend template, `friend_home`
+	// keys friends per enclosing instantiation (14.5.4: they never
+	// merge across it), and `replace_instantiated` permits the
+	// 14.7.3p18 replacement of a pattern-instantiated definition.
 	TemplateInfo* CaptureFunctionTemplate(const AstDecl& decl,
 	                                      const AstDecl& inner,
 	                                      bool as_friend = false,
@@ -811,10 +807,9 @@ private:
 	bool SameImportedTemplateSignature(TemplateInfo& own,
 	                                   TemplateInfo& other);
 	// The specialization for an explicit/deduced argument list,
-	// composing the concrete signature on first use (and the body once
-	// the definition is available). `slots` (one entry per parameter,
-	// pack slots carrying their runs) keys and binds multi-pack
-	// deduction results whose flattened list is ambiguous.
+	// composed on first use. `slots` (one entry per parameter, pack
+	// slots carrying their runs) keys multi-pack deduction results
+	// whose flattened list is ambiguous.
 	FunctionSpecialization* EnsureFunctionSpecialization(
 		TemplateInfo& tmpl, const vector<TemplateArg>& args,
 		const vector<TemplateArg>* slots = 0);
@@ -1032,8 +1027,8 @@ private:
 	// instantiation, bound after the unit's forward pass.
 	vector<FunctionSpecialization*> pending_instantiations_;
 	void DrainPendingInstantiations();
-	// PA21 14.6.4.1: one pass over the poisoned member bodies awaiting
-	// re-bind (alternates with the drain until both queues empty).
+	// One pass over the poisoned member bodies awaiting re-bind
+	// (alternates with the drain until both queues empty).
 	void RetryDeferredBodies();
 	// PA25 5.1.7: prior closure operator parameter lists per enclosing
 	// function body (the mangled local-name prefix context); the
@@ -1152,8 +1147,7 @@ public:
 	// PA22 dialect intrinsic (template_args.cpp): the libstdc++
 	// tuple-constraints gate.
 	virtual bool TupleConstraintGate(const AstName& name, ConstValue& out);
-	// PA36 probe traits in constant expressions (sem_trait.cpp): the
-	// would-it-compile family evaluates through the analyzer.
+	// PA36 probe traits in constant expressions (sem_trait.cpp).
 	virtual bool ProbeTraitConstant(const string& name,
 	                                const std::vector<TypePtr>& types,
 	                                bool& out);
