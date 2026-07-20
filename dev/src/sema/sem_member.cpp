@@ -726,7 +726,9 @@ void SemExprAnalyzer::ComposeMethodCandidates(
 	const vector<SemValue>& args, const AstNamePart* explicit_part,
 	MemberCandidateSet& out)
 {
-	if (binding.type)
+	// 14.2p2: a template-id callee names only templates; the
+	// non-template overloads stay out of the candidate set.
+	if (binding.type && !explicit_part)
 	{
 		out.declared.push_back(binding.type);
 		for (size_t i = 0; i < binding.overloads.size(); i++)
