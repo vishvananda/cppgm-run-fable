@@ -1173,9 +1173,22 @@ void SemBinder::BindFunctionExplicitSpecialization(
 	if (!spec)
 		throw runtime_error("explicit specialization matches no "
 		                    "template");
+	if (!inner.body)
+	{
+		// 14.7.3p6: a declaration of the specialization without a
+		// definition (basic_string.h declares `template<>
+		// basic_istream<char>& operator>>(...)`, defined in the
+		// library): the primary pattern no longer instantiates for
+		// these arguments and uses reference the external strong
+		// symbol, like an extern explicit-instantiation declaration.
+		spec->extern_suppressed = true;
+		unit_.extern_fn_suppressions.push_back(spec);
+		return;
+	}
 	if (spec->body_emitted)
 		throw runtime_error("redefinition of specialization " +
 		                    spec->name);
+	spec->extern_suppressed = false;
 	spec->explicit_def = &inner;
 	spec->explicit_inline = specs.is_inline;
 	// A definition emits at its point of declaration (strong unless

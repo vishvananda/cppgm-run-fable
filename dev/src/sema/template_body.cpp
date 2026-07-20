@@ -194,6 +194,11 @@ void SemBinder::InstantiateFunctionBody(TemplateInfo& tmpl,
 {
 	if (spec.body_emitted)
 		return;
+	// An extern explicit-instantiation declaration or a body-less
+	// explicit-specialization declaration: the definition lives in
+	// another translation unit (14.7.2p10, 14.7.3p6).
+	if (spec.extern_suppressed)
+		return;
 	// Set before the bind as the recursion guard (a recursive call in
 	// the body finds its own specialization already in progress); a
 	// bind failure propagates as a hard error, so the flag never
