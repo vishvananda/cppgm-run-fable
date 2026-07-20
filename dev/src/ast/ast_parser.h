@@ -146,6 +146,10 @@ private:
 	bool SkipAttributeParens(std::vector<std::string>* abi_tags);
 	// [[no_unique_address]] seen by the last SkipSquareAttribute.
 	bool last_no_unique_address_ = false;
+	// __attribute__((gnu_inline/always_inline)) seen since the last
+	// reset (ParseFunctionDefinition marks such definitions as hosted
+	// intrinsic-style wrappers).
+	bool saw_gnu_inline_ = false;
 
 	// --- names (ast_parse_names.cpp) --------------------------------
 	// Template-id attempt policy for `name <`, from the name table:

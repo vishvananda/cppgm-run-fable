@@ -31,12 +31,40 @@ void SemExprAnalyzer::ApplyConstructorConversion(
 	if (!cls)
 		throw runtime_error("converting constructor class record "
 		                    "missing");
-	const TypePtr& param = cls->ctors[conv.user_ctor].type->parameters[0];
+	// Copies: analyzing a default argument below may instantiate ctor
+	// templates, which appends to (and reallocates) cls->ctors.
+	const TypePtr ctor_type = cls->ctors[conv.user_ctor].type;
+	const vector<const AstExpr*> defaults =
+		cls->ctors[conv.user_ctor].defaults;
+	const TypePtr& param = ctor_type->parameters[0];
 	ImplicitConversion inner =
 		ClassifyConversion(MakeConversionSource(value), param);
 	ApplyConversion(value, inner, param);
 	vector<SemNodePtr> args;
 	args.push_back(std::move(value.node));
+	// 8.3.6p9: the trailing defaulted parameters synthesize here, with
+	// their names resolving in the class scope.
+	for (size_t i = 1; i < ctor_type->parameters.size(); i++)
+	{
+		if (i >= defaults.size() || !defaults[i])
+			throw runtime_error("converting constructor parameter "
+			                    "without a default argument");
+		Scope* saved = host_.SwapLookupScope(cls->members);
+		SemValue filled;
+		try
+		{
+			filled = Analyze(*defaults[i]);
+		}
+		catch (...)
+		{
+			host_.SwapLookupScope(saved);
+			throw;
+		}
+		host_.SwapLookupScope(saved);
+		CopyInitialize(filled, ctor_type->parameters[i],
+		               "default argument");
+		args.push_back(std::move(filled.node));
+	}
 	SemNodePtr action = host_.MakeConstructorCall(
 		*cls, conv.user_ctor, false, SemNodePtr(), std::move(args));
 	action->category = VC_PRVALUE;

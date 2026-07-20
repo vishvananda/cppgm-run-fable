@@ -877,8 +877,57 @@ void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 		}
 		throw OutsideBoundary("explicit specialization form");
 	}
+	case DK_TEMPLATE:
+	{
+		// 14.7.3p18: `template<> template<...> R Owner<args>::member`
+		// declares (or defines) a member template of one concrete
+		// specialization; the inner template captures against the
+		// owner's member scope.
+		const AstDecl* leaf = inner.inner.get();
+		const AstName* id = 0;
+		if (leaf)
+		{
+			if (leaf->kind == DK_CLASS || leaf->kind == DK_CLASS_FORWARD)
+				id = &leaf->class_name;
+			else if (leaf->kind == DK_FUNCTION ||
+			         leaf->kind == DK_SPECIAL_MEMBER_DEFINITION ||
+			         leaf->kind == DK_SPECIAL_MEMBER_DECLARATION)
+				id = leaf->declarator ? leaf->declarator->IdName() : 0;
+			else if (leaf->kind == DK_SIMPLE &&
+			         leaf->declarators.size() == 1 &&
+			         leaf->declarators[0].declarator)
+				id = leaf->declarators[0].declarator->IdName();
+		}
+		if (!id || id->parts.size() < 2)
+			throw OutsideBoundary("explicit specialization form");
+		Scope* declaring = ResolvePrefixScope(*id);
+		if (!declaring || declaring->kind != SCOPE_CLASS)
+			throw OutsideBoundary("explicit specialization form");
+		try
+		{
+			CaptureQualifiedMemberTemplate(inner, *leaf, declaring);
+		}
+		catch (const std::exception& e)
+		{
+			if (string(e.what()).compare(
+			        0, 33, "redefinition of function template") != 0)
+				throw;
+			// 14.7.3: this definition replaces the member definition
+			// the enclosing specialization instantiated from the
+			// primary's pattern.
+			const string member =
+				DeclaredFunctionName(id->parts.back());
+			if (ScopeBinding* fn = FindOwnBinding(*declaring, member))
+				for (size_t t = 0; t < fn->fn_templates.size(); t++)
+					fn->fn_templates[t]->has_definition = false;
+			CaptureQualifiedMemberTemplate(inner, *leaf, declaring);
+		}
+		return;
+	}
 	default:
-		throw OutsideBoundary("explicit specialization form");
+		throw runtime_error("explicit specialization form kind " +
+		                    std::to_string((int)inner.kind) +
+		                    " is outside the PA19 boundary");
 	}
 }
 

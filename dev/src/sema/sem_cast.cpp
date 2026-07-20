@@ -396,7 +396,9 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 		vector<SemValue> values;
 		AnalyzeArgumentList(arguments, values);
 		if (values.size() > 1)
-			throw OutsideBoundary("multi-argument functional cast");
+			throw runtime_error("multi-argument functional cast to " +
+			                    DescribeType(dest) + " in " +
+			                    host_.CurrentFunctionName());
 		if (values.size() == 1)
 		{
 			// Direct-initialization of the scalar from the expanded
@@ -413,7 +415,9 @@ SemValue SemExprAnalyzer::AnalyzeFunctionalCast(
 	else if (arguments.size() == 1)
 		return AnalyzeCastTo(dest, *arguments[0], false, OP_LPAREN, "");
 	else if (!arguments.empty())
-		throw OutsideBoundary("multi-argument functional cast");
+		throw runtime_error("multi-argument functional cast to " +
+		                    DescribeType(dest) + " in " +
+		                    host_.CurrentFunctionName());
 	// 5.2.3p2: T() value-initializes; the supported scalar subset dumps
 	// as a zero literal.
 	TypePtr to = RemoveTopCv(dest);

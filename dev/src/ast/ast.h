@@ -143,6 +143,10 @@ struct AstDecl
 	bool no_unique_address = false;
 	// PA34 using_if_exists attribute: a missing target binds nothing.
 	bool using_if_exists = false;
+	// PA35: __attribute__((gnu_inline/always_inline)) on a function
+	// definition (hosted intrinsic wrappers demote to declarations
+	// when their builtin bodies are outside the implemented surface).
+	bool gnu_inline = false;
 
 	// namespace-definition / namespace-alias / alias-declaration
 	std::string name;

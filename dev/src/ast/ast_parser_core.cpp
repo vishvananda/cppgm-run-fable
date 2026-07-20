@@ -655,6 +655,14 @@ bool AstParser::SkipAttributeParens(std::vector<std::string>* abi_tags)
 			continue;
 		}
 		if (depth == 2 &&
+		    (AtIdentifierSpelled("__gnu_inline__") ||
+		     AtIdentifierSpelled("gnu_inline") ||
+		     AtIdentifierSpelled("__always_inline__") ||
+		     AtIdentifierSpelled("always_inline")))
+			// Recorded for the hosted intrinsic-wrapper concession
+			// (see ParseFunctionDefinition).
+			saw_gnu_inline_ = true;
+		if (depth == 2 &&
 		    (AtIdentifierSpelled("__abi_tag__") ||
 		     AtIdentifierSpelled("abi_tag")) &&
 		    AtSimple(OP_LPAREN, 1))

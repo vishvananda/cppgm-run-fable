@@ -1075,7 +1075,33 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	current_return_ = composed.type->target;
 	auto_return_pattern_ = TypeContainsAutoPlaceholder(current_return_)
 		? current_return_ : TypePtr();
-	DeclBinder::BindFunctionBody(decl, composed, name);
+	try
+	{
+		DeclBinder::BindFunctionBody(decl, composed, name);
+	}
+	catch (const std::exception& e)
+	{
+		// Hosted intrinsic wrappers (mmintrin's _mm_empty and friends)
+		// call target builtins and vector forms this compiler does not
+		// implement. Such a gnu_inline/always_inline wrapper demotes to
+		// a declaration; a call to it is then an ordinary
+		// undefined-function reference instead of a hosted header
+		// failing to compile at all.
+		if (!decl.gnu_inline &&
+		    string(e.what()).compare(0, 31,
+		                             "undeclared name __builtin_ia32_") != 0)
+			throw;
+		current_return_ = saved_return;
+		auto_return_pattern_ = saved_pattern;
+		method_ = saved_method;
+		range_hidden_counter_ = saved_hidden;
+		parents_.pop_back();
+		vector<SemNodePtr>& list =
+			parents_.empty() ? unit_.items : parents_.back()->children;
+		if (!list.empty() && list.back().get() == item)
+			list.pop_back();
+		return;
+	}
 	TypePtr deduced_return = current_return_;
 	current_return_ = saved_return;
 	auto_return_pattern_ = saved_pattern;

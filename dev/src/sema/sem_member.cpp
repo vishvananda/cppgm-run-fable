@@ -942,7 +942,8 @@ SemValue SemExprAnalyzer::AnalyzeMethodCall(
 	catch (const NoViableOverloadError&)
 	{
 		throw NoViableOverloadError(
-			"no matching function for member call to " + binding.name);
+			"no matching function for member call to " + binding.name +
+			" of " + object.type->named->display);
 	}
 	const FunctionSpecialization* spec =
 		winner < set.ordinary ? 0 : set.specs[winner];

@@ -581,6 +581,7 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 {
 	State state = Save();
 	AstDeclPtr decl = MakeDecl(DK_FUNCTION);
+	saw_gnu_inline_ = false;
 	if (!ParseSpecifierSeq(decl->specifiers, kDeclSpecifierSeq))
 	{
 		Restore(state);
@@ -591,6 +592,7 @@ AstDeclPtr AstParser::ParseFunctionDefinition()
 		Restore(state);
 		return AstDeclPtr();
 	}
+	decl->gnu_inline = saw_gnu_inline_;
 	bool has_params = DeclaratorHasParameterClause(*decl->declarator);
 	if (!has_params || !(AtSimple(OP_LBRACE) || AtSimple(KW_TRY)))
 	{

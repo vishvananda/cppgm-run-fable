@@ -773,6 +773,13 @@ AstDeclPtr AstParser::ParseMemberDeclarationForms()
 	}
 	if (MatchSimple(OP_SEMICOLON))
 		return MakeDecl(DK_EMPTY);
+	// GNU __extension__ prefixes any member declaration (it only
+	// suppresses extension diagnostics).
+	if (AtIdentifierSpelled("__extension__"))
+	{
+		Advance();
+		return ParseMemberDeclarationForms();
+	}
 	// A leading [[...]] attribute (7.6.1) - [[no_unique_address]] is
 	// captured onto the member declaration, the rest discard.
 	bool no_unique_address = false;

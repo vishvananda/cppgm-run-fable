@@ -322,7 +322,15 @@ ImplicitConversion ClassifyValueConversion(const ConversionSource& source,
 			const ClassCtor& ctor = cls.ctors[i];
 			if (ctor.is_explicit || ctor.deleted ||
 			    ctor.kind != CK_ORDINARY ||
-			    ctor.type->parameters.size() != 1)
+			    ctor.type->parameters.empty())
+				continue;
+			// 12.3.1: a constructor callable with one argument converts
+			// (trailing defaulted parameters synthesize at the call).
+			size_t required = ctor.type->parameters.size();
+			while (required > 0 && required <= ctor.defaults.size() &&
+			       ctor.defaults[required - 1])
+				required--;
+			if (required > 1 || ctor.type->parameters.size() < 1)
 				continue;
 			const TypePtr& param = ctor.type->parameters[0];
 			// One *standard* conversion reaches the parameter: the

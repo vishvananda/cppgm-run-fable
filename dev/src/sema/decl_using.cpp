@@ -90,6 +90,17 @@ void DeclBinder::BindUsingDeclaration(const AstDecl& decl)
 		// own function declarations and the imported overloads form
 		// one set; repeated imports merge idempotently (hosted
 		// <cstdlib> re-imports ::div beside std's own overloads).
+		// 7.3.3p10/3.3.10: importing a type name over an existing alias
+		// for the same type is a harmless redeclaration (the hosted
+		// stdlib.h wrapper's `using std::div_t;` beside glibc's own
+		// typedef).
+		if ((existing->kind == SB_TYPE ||
+		     existing->kind == SB_TYPE_ALIAS) &&
+		    (imported.kind == SB_TYPE ||
+		     imported.kind == SB_TYPE_ALIAS) &&
+		    existing->type && imported.type &&
+		    TypeEquals(existing->type, imported.type))
+			return;
 		if ((current_->kind != SCOPE_CLASS &&
 		     current_->kind != SCOPE_NAMESPACE) ||
 		    existing->kind != SB_FUNCTION ||
