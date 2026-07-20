@@ -1,7 +1,8 @@
 # PA36 Plan: Hosted Header Emission Link/Runtime Compatibility
 
-Status: in progress (loop 82 end: 59/69 pa36 link tests passing,
-through-pa36 at 3330/3340 with every failure inside pa36).
+Status: in progress (loop 83: 59/69 pa36 link tests passing,
+through-pa36 at 3330/3340 with every failure inside pa36; current
+work: dynamic exception specifications, 15.4/15.5.2 host EH).
 
 PA36 asks whether hosted header-generated code (inline, template, and
 header-emitted definitions) links and runs through the plain host
@@ -67,11 +68,48 @@ spelling, and runtime behavior of the emitted objects.
 9. **Empty if-branches.** `if (x) ; else ;` binds empty branch
    wrappers; LowerIf accepts them (vector<bool> move ctor).
 
-## Remaining failures (loop 82 end triage)
+## Loop 83: dynamic exception specifications (15.4, 15.5.2)
 
-- `600-hosted-dynamic-exception-spec-runtime` (impl 1): compiles
-  standalone; harness failure needs staging (inspect facts file drives
-  dump_host_eh_object_facts.pl — likely EH object shape).
+`600-hosted-dynamic-exception-spec-runtime` fails its inspect: the
+object never references `__cxa_call_unexpected` because `throw(T...)`
+specifications are parsed (AST `throw_types`) and then dropped by
+sema. Design, ownership boundaries by layer:
+
+- **Sema owns the spec as typed state.** `DeclaratorInfo` gains
+  `throw_spec_types` (resolved via `ResolveTypeId`, with the 15.4p2
+  array->pointer / function->pointer adjustment); `SemNode` carries it
+  on `SN_FUNCTION_DEFINITION` (copied at the namespace-scope, member
+  -body, and instantiated-body build sites, beside `unwind_no`).
+- **Lowering (host mode only) arms a whole-body filter region**, the
+  same shape as the 15.4p9 noexcept terminate region: `eh_try
+  ^eh_spec_dispatch` after parameter stores; the dispatch block
+  publishes an `eh_filter @_ZTI...` marker (spec types by
+  `ThrowRttiRef`, references stripped like handlers) and calls
+  `__cxa_call_unexpected(exception ptr)` (new external runtime ref).
+  `EmitUnwindLeave` — the single frame-escape funnel — branches on
+  `exception_selector < 0` (the personality's filter-match switch
+  value) to an inlined call-unexpected route, else resumes; this
+  avoids the same resume-loop hazard the terminate region documents.
+  Whole-program mode keeps its pinned region-free shapes (specs stay
+  inert there, as before).
+- **MIR region analysis** turns `eh_filter` markers into `HC_FILTER`
+  clauses (type-symbol list already modeled on `HostEhClause`).
+- **LSDA**: `EhAction` gains `EH_SPEC`. Encode assigns ttype slots
+  above the catch filters to spec types, appends the null-terminated
+  uleb spec lists after ttbase, and emits the action filter as
+  `-(spec offset + 1)`; decode reads them back symmetrically
+  (`spec_filters` -> `elf_reader` rewrites to symbols like catch
+  entries). The private-link table builder ignores `EH_SPEC` records
+  (the private runtime has no unexpected support; matches the
+  previous ignore-spec semantics of whole-program mode).
+
+Runtime behavior comes from the host: `__gxx_personality_v0` treats a
+thrown type absent from the spec list as a handler match with a
+negative switch value, and `__cxa_call_unexpected` runs the
+`std::unexpected` handler, re-checks any replacement exception
+against the cached spec, and propagates/terminates per 15.5.2.
+
+## Remaining failures (loop 82 end triage)
 - `600-hosted-std-function-call-link-smoke` (prog 139) and
   `600-hosted-vector-string-substitution-link-smoke` (prog 139):
   runtime crashes in emitted header code; re-diagnose with gdb next

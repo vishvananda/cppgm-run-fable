@@ -424,6 +424,19 @@ void RecoverEhFacts(ObjectModule & module, const ElfFile & elf,
 			for (size_t a = 0; a < eh.chains[c].size(); a++)
 			{
 				EhAction & action = eh.chains[c][a];
+				if (action.kind == EhAction::EH_SPEC)
+				{
+					for (size_t s = 0;
+					     s < action.spec_filters.size(); s++)
+					{
+						map<long long, int>::const_iterator entry =
+							filter_symbol.find(action.spec_filters[s]);
+						action.spec_type_symbols.push_back(
+							entry == filter_symbol.end()
+								? -1 : entry->second);
+					}
+					continue;
+				}
 				if (action.kind != EhAction::EH_CATCH)
 					continue;
 				map<long long, int>::const_iterator known =

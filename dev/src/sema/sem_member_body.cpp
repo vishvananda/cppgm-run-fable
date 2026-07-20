@@ -163,6 +163,7 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 	item->entity_scope = body.declaring;
 	item->entity_name = body.name;
 	item->unwind_no = body.composed.noexcept_simple;
+	item->throw_spec = body.composed.throw_spec_types;
 	item->inline_def = !body.out_of_class;
 	item->is_method = is_method;
 	item->special = special;

@@ -10,6 +10,12 @@ using std::string;
 // signedness, and scalar conversion operators so every lowering site
 // agrees with the PA13 LowIR contract.
 
+// A declared type with any reference layer removed (the referee).
+inline TypePtr StripReference(const TypePtr& type)
+{
+	return IsReferenceType(type) ? type->target : type;
+}
+
 // Value spelling: i8/u8/i16/u16/i32/u32/i64/f32/f64/f80/ptr/void.
 // Enumerations use the signed iN spelling of their underlying width;
 // references, pointers, nullptr_t, and function values are ptr; 64-bit

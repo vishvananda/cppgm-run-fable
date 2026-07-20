@@ -222,6 +222,10 @@ struct SemNode
 	// implicit) exception specification is non-throwing; the noexcept
 	// operator walk reads this instead of the derived `unwind_no`.
 	bool noexcept_decl = false;
+	// PA36 15.4 SN_FUNCTION_DEFINITION: the non-empty dynamic
+	// exception-specification type list (15.4p2-adjusted); host-mode
+	// lowering arms the whole-body filter region from it.
+	std::vector<TypePtr> throw_spec;
 
 	// --- PA15 object-model facts (never printed by the PA12 dump) ---
 	// SN_MEMBER_EXPRESSION: resolved layout of the named field. The

@@ -162,6 +162,12 @@ private:
 	bool SubtreeMayUnwind(const SemNode& node) const;
 	void ArmNoexceptTerminateRegion();
 	void EmitNoexceptTerminateDispatch();
+	// PA36 15.4/15.5.2 (host mode): a body declared with a non-empty
+	// dynamic exception-specification arms a whole-body filter region
+	// whose pad calls __cxa_call_unexpected (lower_eh.cpp).
+	void ArmExceptionSpecRegion();
+	void EmitExceptionSpecDispatch();
+	void EmitCallUnexpected();
 
 	// --- statements (lower_function.cpp) ---
 	// PA16: picks the single top-level local every class-valued return
@@ -680,9 +686,15 @@ private:
 	// PA33: the noexcept whole-body terminate dispatch label ("" when
 	// this body arms none).
 	string terminate_dispatch_;
+	// PA36 15.4: the exception-spec whole-body filter dispatch label
+	// ("" when this body arms none) and the spec's RTTI references.
+	string spec_dispatch_;
+	vector<string> spec_rtti_refs_;
 	// The unwind leaves this frame: routes to the terminate dispatch
 	// under the armed noexcept region (the host unwinder would re-land
-	// the same pad forever on a bare resume), else resumes.
+	// the same pad forever on a bare resume), branches negative
+	// selectors to __cxa_call_unexpected under the armed exception-spec
+	// region (same re-land hazard), else resumes.
 	void EmitUnwindLeave();
 	// Class return-value construction into the result object never
 	// opens unwind regions (the reference's final-action form).

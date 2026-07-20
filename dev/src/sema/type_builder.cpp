@@ -546,6 +546,18 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		if ((item.qual.kind == FQ_NOEXCEPT && !item.qual.has_expr) ||
 		    (item.qual.kind == FQ_THROW && item.qual.throw_types.empty()))
 			out.noexcept_simple = true;
+		else if (item.qual.kind == FQ_THROW)
+			// PA36 15.4: keep the dynamic spec's types as typed state
+			// (adjusted per 15.4p2) for the host filter-region lowering.
+			for (size_t i = 0; i < item.qual.throw_types.size(); i++)
+			{
+				TypePtr spec = ResolveTypeId(*item.qual.throw_types[i]);
+				if (spec->kind == TK_ARRAY)
+					spec = MakePointerType(spec->target, false, false);
+				else if (spec->kind == TK_FUNCTION)
+					spec = MakePointerType(spec, false, false);
+				out.throw_spec_types.push_back(spec);
+			}
 		else if (item.qual.kind == FQ_NOEXCEPT && item.qual.has_expr &&
 		         item.qual.expr)
 		{

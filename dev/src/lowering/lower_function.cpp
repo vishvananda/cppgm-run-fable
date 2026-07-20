@@ -20,11 +20,6 @@ runtime_error OutsideBoundary(const char* what)
 	                     " is outside the PA14 assignment boundary");
 }
 
-TypePtr StripReference(const TypePtr& type)
-{
-	return IsReferenceType(type) ? type->target : type;
-}
-
 }  // namespace
 
 FunctionLowerer::FunctionLowerer(LowerProgram& program,
@@ -113,6 +108,7 @@ string FunctionLowerer::Lower()
 	}
 	EmitParameterStores();
 	ArmNoexceptTerminateRegion();
+	ArmExceptionSpecRegion();
 	CollectDtorEpilogue(first_statement);
 	// Label contexts are relative to the body baseline (parameter
 	// cleanups may already occupy a scope).
@@ -127,6 +123,7 @@ string FunctionLowerer::Lower()
 		EmitDeletingEpilogue();
 	TerminateOpenEnd();
 	EmitNoexceptTerminateDispatch();
+	EmitExceptionSpecDispatch();
 	return Render();
 }
 

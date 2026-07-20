@@ -59,11 +59,12 @@ std::vector<int> MeetStacks(const std::vector<int> & a,
 }  // namespace
 
 // The catch clauses a landing pad publishes: its leading eh_catch /
-// eh_catch_all classification markers. Filter markers carry no
-// host-EH action; a bare eh_cleanup marker means the pad also runs
-// cleanup work, so the region's action chain needs a cleanup record
-// (or the host personality skips the frame in phase 2 when no catch
-// clause matches).
+// eh_catch_all / eh_filter classification markers (a filter lists the
+// exception-spec's allowed types; the LSDA encoder turns it into a
+// negative-filter action). A bare eh_cleanup marker means the pad
+// also runs cleanup work, so the region's action chain needs a
+// cleanup record (or the host personality skips the frame in phase 2
+// when no catch clause matches).
 std::vector<mir_model::HostEhClause> FunctionLowering::CollectEhClauses(
 	const std::string & label, bool & has_cleanup) const
 {
@@ -89,10 +90,14 @@ std::vector<mir_model::HostEhClause> FunctionLowering::CollectEhClauses(
 			clause.catch_all = true;
 			clause.selector = ins.eh_selector;
 		}
+		else if(ins.operation == "eh_filter") {
+			clause.kind = mir_model::HostEhClause::HC_FILTER;
+			clause.filter_type_symbols = ins.eh_types;
+		}
 		else {
 			if(ins.operation == "eh_cleanup")
 				has_cleanup = true;
-			continue;   // eh_filter / bare eh_cleanup markers
+			continue;   // bare eh_cleanup markers
 		}
 		clauses.push_back(clause);
 	}

@@ -165,6 +165,10 @@ struct DeclaratorInfo
 	// PA14: bare `noexcept` or empty `throw()` on the declarator (the
 	// cheap non-unwinding markings; expressions are not evaluated).
 	bool noexcept_simple;
+	// PA36 15.4: the dynamic-exception-specification type list of a
+	// non-empty `throw(T...)`, resolved and 15.4p2-adjusted (array ->
+	// pointer to element, function -> pointer to function).
+	vector<TypePtr> throw_spec_types;
 	// PA17 virt-specifiers on a member function declarator (10.3).
 	bool has_override;
 	bool has_final;

@@ -95,13 +95,33 @@ bool ChainHasCatch(const vector<EhAction> & chain)
 
 EhTableBytes EncodeEhTable(const EhFunctionInfo & eh)
 {
+	// Exception-spec filters allocate ttype slots above every catch
+	// filter, so the catch maximum must be known before the first spec
+	// action encodes.
+	long long max_filter = 0;
+	bool has_spec = false;
+	for (size_t c = 0; c < eh.chains.size(); c++)
+		for (size_t a = 0; a < eh.chains[c].size(); a++)
+		{
+			const EhAction & action = eh.chains[c][a];
+			if (action.kind == EhAction::EH_SPEC)
+				has_spec = true;
+			else if (action.kind != EhAction::EH_CLEANUP &&
+			         action.filter > max_filter)
+				max_filter = action.filter;
+		}
+
 	// Action table: one record run per catch-bearing chain, in chain
 	// order; records are consecutive {sleb filter, sleb next=1} with a
-	// zero next on the last record.
+	// zero next on the last record. Spec actions carry the negative
+	// filter -(offset+1) into the spec area that trails the ttype
+	// table: null-terminated uleb runs of allowed-type indices.
 	vector<unsigned char> actions;
+	vector<unsigned char> spec_area;
 	vector<long long> chain_action(eh.chains.size(), 0);   // 1-based
-	long long max_filter = 0;
 	std::map<long long, int> filter_symbol;   // filter -> type symbol
+	std::map<int, long long> spec_slot;       // spec symbol -> filter
+	std::map<vector<int>, long long> spec_offset;   // list -> offset
 	for (size_t c = 0; c < eh.chains.size(); c++)
 	{
 		const vector<EhAction> & chain = eh.chains[c];
@@ -111,14 +131,41 @@ EhTableBytes EncodeEhTable(const EhFunctionInfo & eh)
 		for (size_t a = 0; a < chain.size(); a++)
 		{
 			const EhAction & action = chain[a];
-			long long filter =
-				action.kind == EhAction::EH_CLEANUP ? 0 : action.filter;
-			if (action.kind != EhAction::EH_CLEANUP)
+			long long filter = 0;
+			if (action.kind == EhAction::EH_SPEC)
 			{
+				std::map<vector<int>, long long>::iterator list =
+					spec_offset.find(action.spec_type_symbols);
+				if (list == spec_offset.end())
+				{
+					list = spec_offset.insert(std::make_pair(
+						action.spec_type_symbols,
+						static_cast<long long>(spec_area.size()))).first;
+					for (size_t t = 0;
+					     t < action.spec_type_symbols.size(); t++)
+					{
+						int symbol = action.spec_type_symbols[t];
+						std::map<int, long long>::iterator slot =
+							spec_slot.find(symbol);
+						if (slot == spec_slot.end())
+						{
+							slot = spec_slot.insert(std::make_pair(
+								symbol, ++max_filter)).first;
+							filter_symbol[slot->second] = symbol;
+						}
+						AppendUleb(spec_area,
+						           static_cast<unsigned long long>(
+							           slot->second));
+					}
+					spec_area.push_back(0);
+				}
+				filter = -(list->second + 1);
+			}
+			else if (action.kind != EhAction::EH_CLEANUP)
+			{
+				filter = action.filter;
 				if (filter <= 0)
 					throw runtime_error("eh catch filter must be positive");
-				if (filter > max_filter)
-					max_filter = filter;
 				int symbol = action.kind == EhAction::EH_CATCH
 					? action.type_symbol : -1;
 				std::map<long long, int>::iterator known =
@@ -170,7 +217,7 @@ EhTableBytes EncodeEhTable(const EhFunctionInfo & eh)
 
 	EhTableBytes out;
 	out.bytes.push_back(0xff);   // LPStart omitted: function-relative
-	if (max_filter == 0)
+	if (max_filter == 0 && !has_spec)
 	{
 		// cleanup-only table: no type table
 		out.bytes.push_back(0xff);
@@ -220,6 +267,8 @@ EhTableBytes EncodeEhTable(const EhFunctionInfo & eh)
 		for (int b = 0; b < 4; b++)
 			out.bytes.push_back(0);
 	}
+	// exception-spec lists grow forward from ttbase
+	out.bytes.insert(out.bytes.end(), spec_area.begin(), spec_area.end());
 	return out;
 }
 
@@ -333,7 +382,24 @@ bool DecodeEhTable(const vector<unsigned char> & bytes,
 			}
 			else
 			{
-				return false;   // filter specs are out of profile
+				// exception-spec filter: -(offset+1) into the
+				// null-terminated uleb index lists after ttbase
+				if (ttype_encoding != 0x9b)
+					return false;
+				action.kind = EhAction::EH_SPEC;
+				action.filter = filter;
+				size_t spec_pos =
+					ttype_base + static_cast<size_t>(-filter - 1);
+				for (int entries = 0; entries < 1024; entries++)
+				{
+					unsigned long long index = 0;
+					if (!ReadUleb(bytes, spec_pos, index))
+						return false;
+					if (index == 0)
+						break;
+					action.spec_filters.push_back(
+						static_cast<long long>(index));
+				}
 			}
 			chain.push_back(action);
 			if (next == 0)
@@ -353,9 +419,15 @@ bool DecodeEhTable(const vector<unsigned char> & bytes,
 		long long max_filter = 0;
 		for (size_t c = 0; c < eh.chains.size(); c++)
 			for (size_t a = 0; a < eh.chains[c].size(); a++)
-				if (eh.chains[c][a].kind == EhAction::EH_CATCH &&
-				    eh.chains[c][a].filter > max_filter)
-					max_filter = eh.chains[c][a].filter;
+			{
+				const EhAction & action = eh.chains[c][a];
+				if (action.kind == EhAction::EH_CATCH &&
+				    action.filter > max_filter)
+					max_filter = action.filter;
+				for (size_t s = 0; s < action.spec_filters.size(); s++)
+					if (action.spec_filters[s] > max_filter)
+						max_filter = action.spec_filters[s];
+			}
 		if (ttype_base < 4 * static_cast<size_t>(max_filter))
 			return false;
 		for (long long j = 1; j <= max_filter; j++)

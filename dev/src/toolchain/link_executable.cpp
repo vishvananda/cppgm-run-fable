@@ -387,13 +387,27 @@ void AppendTableAddress(ImageItem & item, int label, long long offset)
 
 // True when a chain carries no catch actions - the row is a pure
 // cleanup and its action pointer is null, mirroring an LSDA call-site
-// row with action 0.
+// row with action 0. Exception-spec records count as cleanup-like:
+// the private runtime has no unexpected machinery, so specs stay
+// inert (the semantics whole-program mode has always had).
 bool ChainIsPureCleanup(const vector<EhAction> & chain)
 {
 	for (size_t a = 0; a < chain.size(); a++)
-		if (chain[a].kind != EhAction::EH_CLEANUP)
+		if (chain[a].kind != EhAction::EH_CLEANUP &&
+		    chain[a].kind != EhAction::EH_SPEC)
 			return false;
 	return true;
+}
+
+// The record count the private table stores for a chain: every action
+// except the ignored exception-spec filters.
+size_t ChainRecordActions(const vector<EhAction> & chain)
+{
+	size_t count = 0;
+	for (size_t a = 0; a < chain.size(); a++)
+		if (chain[a].kind != EhAction::EH_SPEC)
+			count++;
+	return count;
 }
 
 // The private unwinder's flat region table, synthesized in global
@@ -466,7 +480,8 @@ ImageItem BuildEhRegionTable(const vector<LinkInput> & linked,
 				{
 					chain_offsets[key] = record_cursor;
 					record_cursor +=
-						3 * 8 * (eh.chains[chain].size() + 1);
+						3 * 8 *
+						(ChainRecordActions(eh.chains[chain]) + 1);
 					ChainRef ref;
 					ref.module = m;
 					ref.chain = &eh.chains[chain];
@@ -484,6 +499,8 @@ ImageItem BuildEhRegionTable(const vector<LinkInput> & linked,
 		for (size_t a = 0; a < chain.size(); a++)
 		{
 			const EhAction & action = chain[a];
+			if (action.kind == EhAction::EH_SPEC)
+				continue;
 			if (action.kind == EhAction::EH_CLEANUP)
 			{
 				AppendTableWord(item, 3);

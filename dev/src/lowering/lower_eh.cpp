@@ -1,5 +1,6 @@
 #include "lowering/lower_function.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "lowering/lower_types.h"
@@ -15,11 +16,6 @@ using std::to_string;
 // lower_function.cpp and lower_expr.cpp.
 
 namespace {
-
-TypePtr StripReference(const TypePtr& type)
-{
-	return IsReferenceType(type) ? type->target : type;
-}
 
 // The computation type of a node: declared type with references and
 // top-level cv stripped.
@@ -829,7 +825,12 @@ void FunctionLowerer::EmitCatchHandler(EhContext& context,
 // terminate catch-all made this the handler frame in phase 1), which
 // would loop forever - and a landing pad cannot double as a jump
 // target, so the terminate route inlines rather than jumping to the
-// dispatch block.
+// dispatch block. Under the armed exception-spec region (15.4p8) the
+// same hazard applies when the personality matched the filter (a
+// negative selector: the escaping exception violates the spec), so
+// that route inlines __cxa_call_unexpected; a non-negative selector
+// is a phase-2 cleanup visit of a spec-allowed exception, which
+// resumes normally.
 void FunctionLowerer::EmitUnwindLeave()
 {
 	if (!terminate_dispatch_.empty())
@@ -840,8 +841,87 @@ void FunctionLowerer::EmitUnwindLeave()
 		     ")");
 		EmitZeroValueReturn();
 	}
+	else if (!spec_dispatch_.empty())
+	{
+		string selector = NewTemp();
+		Emit(selector + " = exception_selector i32");
+		string violates = NewTemp();
+		Emit(violates + " = cmp lt i32 " + selector + ", 0");
+		string unexpected_label = NewLabel("spec_unexpected");
+		string resume_label = NewLabel("spec_resume");
+		ReferenceLabel(unexpected_label);
+		ReferenceLabel(resume_label);
+		Terminate("branch " + violates + ", ^" + unexpected_label +
+		          ", ^" + resume_label);
+		OpenBlock(unexpected_label);
+		EmitCallUnexpected();
+		OpenBlock(resume_label);
+		Terminate("resume");
+	}
 	else
 		Terminate("resume");
+}
+
+// 15.4p8/15.5.2 host mode: a body with a non-empty dynamic
+// exception-specification arms one whole-body filter region. The
+// personality routine treats a thrown type outside the spec list as a
+// handler match with a negative switch value, and
+// __cxa_call_unexpected runs std::unexpected with the violating
+// exception entered, re-checking any replacement exception against
+// the cached spec. Whole-program mode keeps the pinned region-free
+// shapes (the private runtime has no unexpected surface).
+void FunctionLowerer::ArmExceptionSpecRegion()
+{
+	if (!program_.SeparateCompilation())
+		return;
+	if (def_.throw_spec.empty() || def_.unwind_no || def_.noexcept_decl)
+		return;
+	if (!SubtreeMayUnwind(def_))
+		return;
+	program_.RequireEhRuntime();
+	for (size_t i = 0; i < def_.throw_spec.size(); i++)
+	{
+		string rtti = program_.ThrowRttiRef(
+			RemoveTopCv(StripReference(def_.throw_spec[i])));
+		if (std::find(spec_rtti_refs_.begin(), spec_rtti_refs_.end(),
+		              rtti) == spec_rtti_refs_.end())
+			spec_rtti_refs_.push_back(rtti);
+	}
+	spec_dispatch_ = NewLabel("eh_spec_dispatch");
+	ReferenceLabel(spec_dispatch_);
+	Emit("eh_try ^" + spec_dispatch_);
+}
+
+// The spec region's landing pad: the eh_filter marker publishes the
+// allowed types for the LSDA, and a direct landing always means the
+// filter matched (phase-2 handler entry), so the pad enters the
+// violating exception into __cxa_call_unexpected unconditionally.
+void FunctionLowerer::EmitExceptionSpecDispatch()
+{
+	if (spec_dispatch_.empty())
+		return;
+	OpenBlock(spec_dispatch_);
+	string types;
+	for (size_t i = 0; i < spec_rtti_refs_.size(); i++)
+		types += (i ? ", " : " ") + spec_rtti_refs_[i];
+	Emit("eh_filter" + types);
+	EmitCallUnexpected();
+}
+
+// __cxa_call_unexpected never returns normally: it either terminates
+// or propagates a spec-allowed replacement exception by unwinding
+// from this call site.
+void FunctionLowerer::EmitCallUnexpected()
+{
+	string exc = NewTemp();
+	Emit(exc + " = exception ptr");
+	Emit("call void " +
+	     program_.ExternalRuntimeFnRef(
+			"__cxa_call_unexpected",
+			"(%arg0 : ptr) -> void [return=noreturn, linkage=c, "
+			"binding=strong, object=__cxa_call_unexpected]") +
+	     "(" + exc + ")");
+	EmitZeroValueReturn();
 }
 
 // The selector missed every handler of this try: continue to the

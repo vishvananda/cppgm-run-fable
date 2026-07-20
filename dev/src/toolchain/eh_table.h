@@ -21,6 +21,9 @@
 // - Action records are {sleb filter, sleb next}: catches carry their
 //   positive selector filter, cleanups filter 0, chains list the
 //   armed regions' actions innermost-first.
+// - PA36 exception-spec records carry the negative filter -(offset+1)
+//   into the spec area that trails the ttype table: null-terminated
+//   uleb runs of the spec's allowed-type ttype indices.
 
 namespace toolchain {
 

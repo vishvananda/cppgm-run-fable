@@ -50,21 +50,29 @@ struct ObjectSymbol
 };
 
 // One LSDA action-chain record: a typed catch (type_symbol indexes the
-// module symbols), a catch-all, or a cleanup marker. A call site's
-// chain lists the actions of every region armed around it,
-// innermost-first.
+// module symbols), a catch-all, a cleanup marker, or a PA36 15.4
+// exception-spec filter (a negative LSDA filter naming a
+// null-terminated ttype-index list of the spec's allowed types). A
+// call site's chain lists the actions of every region armed around
+// it, innermost-first.
 struct EhAction
 {
 	enum Kind
 	{
 		EH_CATCH,
 		EH_CATCH_ALL,
-		EH_CLEANUP
+		EH_CLEANUP,
+		EH_SPEC
 	};
 
 	Kind kind = EH_CATCH;
 	long long filter = 0;   // ttype index for catch/catch-all
 	int type_symbol = -1;   // module symbol of the _ZTI record
+	// EH_SPEC allowed types: module symbols on encode; the decoder
+	// fills `spec_filters` with the ttype indices it read and the
+	// reader resolves them back into `spec_type_symbols`.
+	std::vector<int> spec_type_symbols;
+	std::vector<long long> spec_filters;
 };
 
 // One call-site row with a landing pad. Offsets are relative to the

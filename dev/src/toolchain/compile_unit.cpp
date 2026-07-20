@@ -221,7 +221,17 @@ vector<EhAction> BuildEhChain(ObjectModule & module,
 			const mir_model::HostEhClause & clause = q.clauses[c];
 			EhAction action;
 			action.filter = clause.selector;
-			if (clause.catch_all)
+			if (clause.kind == mir_model::HostEhClause::HC_FILTER)
+			{
+				action.kind = EhAction::EH_SPEC;
+				for (size_t t = 0;
+				     t < clause.filter_type_symbols.size(); t++)
+					action.spec_type_symbols.push_back(
+						FindOrAddTypeSymbol(
+							module, by_low_name, info,
+							clause.filter_type_symbols[t]));
+			}
+			else if (clause.catch_all)
 			{
 				action.kind = EhAction::EH_CATCH_ALL;
 			}
