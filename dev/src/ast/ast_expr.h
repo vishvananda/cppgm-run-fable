@@ -201,6 +201,10 @@ struct AstStmt
 	// PA34 hosted C++17 `if constexpr`: the condition is a constant
 	// expression and only the taken branch is analyzed.
 	bool constexpr_if = false;
+	// PA34 hosted coroutine concession: SK_RETURN parsed from a
+	// contextual `co_return` (parse-level acceptance only; binding an
+	// instantiated one is outside the stage boundary).
+	bool co_return = false;
 	AstExprPtr iteration;           // SK_FOR third clause
 	// SK_FOR range form (6.5.4): the for-range-declaration (one
 	// uninitialized declarator) and the for-range-initializer.

@@ -43,7 +43,16 @@ protected:
 	// The builtin typedef names of the 128-bit extended integer types
 	// resolve when no declaration shadows them; null otherwise. One
 	// owner for the PA11 and PA12+ type-name resolvers.
-	static TypePtr ResolveBuiltinTypeName(const AstName& name);
+	TypePtr ResolveBuiltinTypeName(const AstName& name);
+	// PA34 hosted collapse: bumped when a _FloatN/__float128 spelling
+	// resolved to a standard floating type. The duplicate-definition
+	// tolerances key on "a collapsed spelling was involved" so plain
+	// redefinitions keep erroring.
+	size_t collapsed_alias_uses_ = 0;
+	// Whether the function definition being bound composed its
+	// signature through a collapsed alias spelling (set by
+	// BindFunctionDefinition for BindFunctionBody to record).
+	bool composed_alias_collapsed_ = false;
 
 	// --- declarations ---
 	void BindDeclarations(const std::vector<AstDeclPtr>& decls);

@@ -639,6 +639,7 @@ AstStmtPtr AstParser::ParseStatement()
 		{
 			AstStmtPtr co_stmt = MakeStmt(SK_RETURN);
 			co_stmt->expr = move(value);
+			co_stmt->co_return = true;
 			return co_stmt;
 		}
 		Restore(state);

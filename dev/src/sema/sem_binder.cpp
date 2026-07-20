@@ -275,6 +275,50 @@ bool SemBinder::NothrowTraitShorthand(const AstName& name,
 	bool is_move = id.identifier == "is_nothrow_move_constructible";
 	if (!is_default && !is_copy && !is_move)
 		return false;
+	// Only the standard library's trait answers as the builtin: the
+	// spelling must resolve to a class template declared inside
+	// namespace std (a user's same-named trait keeps its own - loud -
+	// evaluation). The prefix walk handles the qualified spellings;
+	// an unresolvable prefix keeps the original loud error.
+	const ScopeBinding* trait = 0;
+	size_t tmpl_index = name.parts.size() - 2;
+	if (tmpl_index == 0 && !name.global_scope)
+		trait = UnqualifiedLookup(current_, id.identifier, SLF_ANY);
+	else
+	{
+		Scope* scope = name.global_scope ? model_.global() : 0;
+		size_t index = 0;
+		if (!scope)
+		{
+			if (name.parts[0].kind != NP_IDENTIFIER)
+				return false;
+			const ScopeBinding* root = UnqualifiedLookup(
+				current_, name.parts[0].identifier, SLF_SCOPE_NAMES);
+			if (!root)
+				return false;
+			scope = ScopeOfBinding(*root);
+			index = 1;
+		}
+		for (; scope && index < tmpl_index; index++)
+		{
+			if (name.parts[index].kind != NP_IDENTIFIER)
+				return false;
+			const ScopeBinding* next = QualifiedLookup(
+				*scope, name.parts[index].identifier, SLF_SCOPE_NAMES);
+			scope = next ? ScopeOfBinding(*next) : 0;
+		}
+		if (!scope)
+			return false;
+		trait = QualifiedLookup(*scope, id.identifier, SLF_ANY);
+	}
+	if (!trait || trait->kind != SB_CLASS_TEMPLATE || !trait->templ)
+		return false;
+	bool in_std = false;
+	for (const Scope* s = trait->templ->declaring; s; s = s->parent)
+		if (s->kind == SCOPE_NAMESPACE && s->name == "std")
+			in_std = true;
+	if (!in_std)
+		return false;
 	TypePtr type = builder_.ResolveTypeId(*id.arguments[0].type);
 	vector<TypePtr> types;
 	types.push_back(type);
@@ -976,6 +1020,7 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	item->entity_scope = declaring;
 	item->entity_name = name;
 	item->unwind_no = composed.noexcept_simple;
+	item->alias_collapsed = composed_alias_collapsed_;
 	// 7.1.2p4: an inline function emits weak and only where used;
 	// 7.1.5p2: constexpr functions are implicitly inline.
 	for (size_t i = 0; i < decl.specifiers.size(); i++)

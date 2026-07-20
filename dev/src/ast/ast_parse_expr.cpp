@@ -752,6 +752,44 @@ bool AstParser::MatchFoldOperator(ETokenType& op, string& spelling)
 	return true;
 }
 
+// Whether an `...` sits at parenthesis depth zero before the matching
+// close paren: the fold-tail parse re-reads the parenthesized span, so
+// the paren primary only attempts it when a fold is possible (a
+// failing nested-paren span stays linear instead of doubling per
+// level). Over-approximation (dots inside brackets) is harmless - the
+// tail parse just fails as before.
+bool AstParser::FoldDotsAhead() const
+{
+	int depth = 0;
+	for (size_t k = 0; ; k++)
+	{
+		const ParseToken& token = Peek(k);
+		if (token.kind == PTOK_EOF)
+			return false;
+		if (token.kind != PTOK_SIMPLE)
+			continue;
+		switch (token.simple_type)
+		{
+		case OP_LPAREN:
+			depth++;
+			break;
+		case OP_RPAREN:
+			if (depth == 0)
+				return false;
+			depth--;
+			break;
+		case OP_DOTS:
+			if (depth == 0)
+				return true;
+			break;
+		case OP_SEMICOLON: case OP_LBRACE: case OP_RBRACE:
+			return false;  // statement boundary: malformed span
+		default:
+			break;
+		}
+	}
+}
+
 // PA34 fold-expression body after the opening paren: `... op pattern )`
 // (left fold), `pattern op ... )` (unary right fold), or
 // `a op ... op b )` (binary fold). Null with the position restored when
@@ -1012,17 +1050,25 @@ AstExprPtr AstParser::ParsePrimaryExpression()
 				Restore(state);
 				return AstExprPtr();
 			}
-			if (AstExprPtr fold = ParseFoldExpressionTail())
-				return fold;
+			// The ordinary parenthesized read runs first: a fold-tail
+			// attempt would re-parse the same operand and double per
+			// nesting level. A right/binary fold fails this read at
+			// its `...` (never an expression), so the guarded tail
+			// parse below still sees it.
+			State inner_state = Save();
 			AstExprPtr inner = ParseExpression();
-			if (!inner || !MatchSimple(OP_RPAREN))
+			if (inner && MatchSimple(OP_RPAREN))
 			{
-				Restore(state);
-				return AstExprPtr();
+				AstExprPtr node = MakeExpr(EK_PAREN);
+				node->operands.push_back(move(inner));
+				return node;
 			}
-			AstExprPtr node = MakeExpr(EK_PAREN);
-			node->operands.push_back(move(inner));
-			return node;
+			Restore(inner_state);
+			if (FoldDotsAhead())
+				if (AstExprPtr fold = ParseFoldExpressionTail())
+					return fold;
+			Restore(state);
+			return AstExprPtr();
 		}
 		case OP_LSQUARE:
 			return ParseLambdaExpression();

@@ -655,6 +655,8 @@ private:
 	SemValue MakeFunctionNameLiteral(const string& text);
 	bool TryAnalyzeAtomicBuiltin(const AstExpr& expr, const string& name,
 	                             SemValue& out);
+	SemValue AnalyzeAtomicLockFreeQuery(const AstExpr& expr,
+	                                    const string& name);
 	SemValue AnalyzeBuiltinInvoke(const AstExpr& expr);
 	SemValue AnalyzeBuiltinComplex(const AstExpr& expr);
 	SemValue AnalyzeComplexPart(const AstExpr& expr);

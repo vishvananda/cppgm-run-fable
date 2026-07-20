@@ -768,37 +768,38 @@ SemValue SemExprAnalyzer::AnalyzeFold(const AstExpr& expr)
 		                    " is outside the constant fold subset");
 	bool conjunction = expr.op == OP_LAND;
 	bool result = conjunction;  // 14.5.3p9 empty-pack identity
-	bool have_nonconstant = false;
+	SemValue init_value;
 	if (init)
 	{
-		SemValue value = Analyze(*init);
-		RequireContextualBool(value, "fold operand");
-		if (!value.node || !value.node->has_value)
-			have_nonconstant = true;
-		else if (conjunction)
-			result = result && value.node->value.bits != 0;
-		else
-			result = result || value.node->value.bits != 0;
+		init_value = Analyze(*init);
+		RequireContextualBool(init_value, "fold operand");
 	}
 	for (size_t i = 0; i < elements.size(); i++)
+		RequireContextualBool(elements[i], "fold operand");
+	// The operands combine in the expanded expression's left-to-right
+	// evaluation order (a written init operand is leftmost only in
+	// the `(init op ... op pack)` form). Short-circuiting skips only
+	// the operands after a deciding constant, so a non-constant
+	// reached before the decision stays a runtime fold, outside the
+	// constant subset.
+	vector<SemValue*> order;
+	if (init && init == expr.operands[0].get())
+		order.push_back(&init_value);
+	for (size_t i = 0; i < elements.size(); i++)
+		order.push_back(&elements[i]);
+	if (init && init != expr.operands[0].get())
+		order.push_back(&init_value);
+	bool decided = false;
+	for (size_t i = 0; i < order.size() && !decided; i++)
 	{
-		SemValue& value = elements[i];
-		RequireContextualBool(value, "fold operand");
+		const SemValue& value = *order[i];
 		if (!value.node || !value.node->has_value)
-		{
-			have_nonconstant = true;
-			continue;
-		}
-		if (conjunction)
-			result = result && value.node->value.bits != 0;
-		else
-			result = result || value.node->value.bits != 0;
+			throw runtime_error("non-constant fold element is outside "
+			                    "the constant fold subset");
+		bool truth = value.node->value.bits != 0;
+		result = conjunction ? result && truth : result || truth;
+		decided = conjunction ? !truth : truth;
 	}
-	// Short-circuit rescue: a non-constant element only matters when
-	// the constant elements have not already decided the result.
-	if (have_nonconstant && result == conjunction)
-		throw runtime_error("non-constant fold element is outside the "
-		                    "constant fold subset");
 	SemValue out;
 	out.type = MakeFundamentalType(FT_BOOL);
 	out.category = VC_PRVALUE;

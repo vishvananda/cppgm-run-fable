@@ -71,6 +71,10 @@ struct LowFunctionInfo
 	bool weak;
 	bool demand_strong = false;
 	bool is_method;
+	// PA34 hosted collapse: some registered definition of this entry
+	// spelled its signature through a collapsed _FloatN alias; scopes
+	// the duplicate-inline-definition tolerance.
+	bool alias_collapsed = false;
 	// Constructor/destructor ABI entry: "C1"/"C2"/"D1"/"D2" ("" for
 	// ordinary functions); C1/D1 definitions emit an alias for the
 	// identical base entry.

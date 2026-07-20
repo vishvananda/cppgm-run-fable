@@ -168,6 +168,12 @@ TypePtr SemBinder::DeduceAutoVariableType(const TypePtr& type,
 
 void SemBinder::BindReturnStatement(const AstStmt& stmt)
 {
+	// The PA34 co_return concession is parse-level only: an
+	// instantiated coroutine body stays outside the stage boundary
+	// (mirrors the EK_COROUTINE_OP analysis rejection).
+	if (stmt.co_return)
+		throw runtime_error("coroutine return binding is outside the "
+		                    "PA34 assignment boundary");
 	SemNode* item = AppendItem(SN_RETURN_STATEMENT);
 	if (!stmt.expr)
 	{

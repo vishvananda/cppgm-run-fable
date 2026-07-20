@@ -605,7 +605,12 @@ Preprocessor::IncludeResolution Preprocessor::ResolveIncludeFile(
 			return result;
 		}
 	}
-	if (from_chain_index < 0 && GetPreprocFileId(name, result.fileid))
+	// Hosted angle includes skip the working-directory fallback too: a
+	// stray file in the compile CWD must not shadow a system header
+	// (gcc never searches CWD for angle includes). The unhosted PA5
+	// order keeps it.
+	if (from_chain_index < 0 && !(hosted_ && angled) &&
+	    GetPreprocFileId(name, result.fileid))
 	{
 		result.found = true;
 		result.path = name;

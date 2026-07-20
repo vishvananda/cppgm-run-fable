@@ -24,6 +24,12 @@ Scope* GlobalScopeOf(Scope* scope)
 	return scope;
 }
 
+runtime_error OutsideBoundary(const char* what)
+{
+	return runtime_error(string(what) +
+	                     " is outside the PA34 assignment boundary");
+}
+
 }  // namespace
 
 // The shared call-node shape of a magic builtin: a global-scope
@@ -92,6 +98,35 @@ bool SemExprAnalyzer::TryAnalyzeMagicBuiltin(const AstExpr& expr,
 	return true;
 }
 
+// The lock-free size queries fold from their constant size operand.
+// x86-64: power-of-two sizes through 8 bytes are lock-free; 16
+// answers false like host g++ without -mcx16 (and no 16-byte atomic
+// codegen exists here to back a true).
+SemValue SemExprAnalyzer::AnalyzeAtomicLockFreeQuery(const AstExpr& expr,
+                                                     const string& name)
+{
+	TypePtr bool_type = MakeFundamentalType(FT_BOOL);
+	if (expr.arguments.empty() || expr.arguments.size() > 2)
+		throw runtime_error(name + " argument count");
+	ConstValue size;
+	if (!host_.TryEvaluateConstant(*expr.arguments[0], size))
+		throw runtime_error(name + " requires a constant size");
+	if (expr.arguments.size() > 1)
+		Analyze(*expr.arguments[1]);
+	bool lock_free = size.bits == 1 || size.bits == 2 ||
+		size.bits == 4 || size.bits == 8;
+	SemValue value;
+	value.type = bool_type;
+	value.category = VC_PRVALUE;
+	value.node = MakeSemNode(SN_LITERAL);
+	value.node->token = lock_free ? "true" : "false";
+	value.node->type = bool_type;
+	value.node->category = VC_PRVALUE;
+	value.node->has_value = true;
+	value.node->value = ConstValue(FT_BOOL, lock_free ? 1 : 0);
+	return value;
+}
+
 // The GNU/C11 atomic operator families: each form's parameter list
 // derives from the first argument's pointee type; the lowering maps
 // them onto the LowIR atomic instructions.
@@ -106,26 +141,7 @@ bool SemExprAnalyzer::TryAnalyzeAtomicBuiltin(const AstExpr& expr,
 	    name == "__atomic_is_lock_free" ||
 	    name == "__c11_atomic_is_lock_free")
 	{
-		// x86-64: power-of-two sizes through 16 bytes are lock-free.
-		if (expr.arguments.empty() || expr.arguments.size() > 2)
-			throw runtime_error(name + " argument count");
-		ConstValue size;
-		if (!host_.TryEvaluateConstant(*expr.arguments[0], size))
-			throw runtime_error(name + " requires a constant size");
-		if (expr.arguments.size() > 1)
-			Analyze(*expr.arguments[1]);
-		bool lock_free = size.bits == 1 || size.bits == 2 ||
-			size.bits == 4 || size.bits == 8 || size.bits == 16;
-		SemValue value;
-		value.type = bool_type;
-		value.category = VC_PRVALUE;
-		value.node = MakeSemNode(SN_LITERAL);
-		value.node->token = lock_free ? "true" : "false";
-		value.node->type = bool_type;
-		value.node->category = VC_PRVALUE;
-		value.node->has_value = true;
-		value.node->value = ConstValue(FT_BOOL, lock_free ? 1 : 0);
-		out = std::move(value);
+		out = AnalyzeAtomicLockFreeQuery(expr, name);
 		return true;
 	}
 	vector<SemValue> args;
@@ -281,8 +297,10 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinBitCountG(const AstExpr& expr,
 	return MakeBuiltinCallResult(name, fn_type, args, true);
 }
 
-// __builtin_{add,sub,mul}_overflow(a, b, out): the same-type family;
-// operands compute in the result object's type.
+// __builtin_{add,sub,mul}_overflow(a, b, out): each operand keeps its
+// own promoted integer type; the lowering computes exactly in 128 bits
+// and checks representability in the result object's type (the GCC
+// infinite-precision semantics for every <= 64-bit combination).
 SemValue SemExprAnalyzer::AnalyzeBuiltinOverflow(const AstExpr& expr,
                                                  const string& name)
 {
@@ -297,9 +315,23 @@ SemValue SemExprAnalyzer::AnalyzeBuiltinOverflow(const AstExpr& expr,
 	if (!IsIntegralType(result) ||
 	    result->fundamental == FT_BOOL)
 		throw runtime_error(name + " requires an integer result");
+	// The 128-bit widening scheme cannot check 128-bit values exactly;
+	// that stays a loud boundary rather than a silent never-overflows.
+	if (result->fundamental == FT_INT128 ||
+	    result->fundamental == FT_UINT128)
+		throw OutsideBoundary("128-bit overflow-builtin result");
 	vector<TypePtr> params;
-	params.push_back(result);
-	params.push_back(result);
+	for (size_t i = 0; i < 2; i++)
+	{
+		TypePtr promoted = PromoteForArithmetic(RemoveTopCv(args[i].type));
+		if (!IsIntegralType(promoted) ||
+		    promoted->fundamental == FT_BOOL)
+			throw runtime_error(name + " requires integer operands");
+		if (promoted->fundamental == FT_INT128 ||
+		    promoted->fundamental == FT_UINT128)
+			throw OutsideBoundary("128-bit overflow-builtin operand");
+		params.push_back(promoted);
+	}
 	params.push_back(MakePointerType(result, false, false));
 	TypePtr fn_type = MakeFunctionType(MakeFundamentalType(FT_BOOL),
 	                                   params, false);

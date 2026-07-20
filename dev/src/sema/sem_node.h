@@ -261,6 +261,11 @@ struct SemNode
 	int vtable_slot;
 	// SN_FUNCTION_DEFINITION: defined in-class (weak, demand-emitted).
 	bool inline_def;
+	// PA34 SN_FUNCTION_DEFINITION: the signature spelled a collapsed
+	// _FloatN alias, so a glibc per-format overload set can define one
+	// collapsed signature twice (first inline definition wins). Plain
+	// duplicate definitions stay redefinition errors.
+	bool alias_collapsed = false;
 	// SN_FUNCTION_DEFINITION: an out-of-class member spelled `inline`
 	// emits weak but unconditionally (the reference prints it unused).
 	bool inline_root = false;

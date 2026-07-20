@@ -31,6 +31,7 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	// 7.5p7 applies to the definition itself, not to declarations
 	// nested inside its body.
 	in_linkage_single_ = false;
+	size_t collapse_before = collapsed_alias_uses_;
 	DeclSpecifierInfo specs =
 		builder_.ProcessSpecifiers(decl.specifiers, true);
 	if (specs.is_typedef)
@@ -69,6 +70,7 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	if (member_signature)
 		OnMemberSignatureEnd();
 	current_ = saved_compose;
+	composed_alias_collapsed_ = collapsed_alias_uses_ != collapse_before;
 	if (!composed.id || composed.id->parts.empty())
 		throw OutsideBoundary("function definition declarator");
 	if (!composed.declares_function || composed.type->kind != TK_FUNCTION)

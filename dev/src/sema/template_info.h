@@ -109,6 +109,11 @@ struct ClassSpecialization
 	// definitions do not apply then).
 	bool explicit_spec = false;
 	bool from_partial = false;
+	// PA34 hosted collapse: some explicit specialization of this key
+	// spelled a collapsed _FloatN alias, so glibc's per-format sets can
+	// land twice on one key (first definition wins). Plain duplicate
+	// explicit specializations stay redefinition errors.
+	bool alias_collapsed = false;
 	// PA19 14.7.1: static-data-member definitions instantiate on
 	// demand (odr-use of the member, or definition of an object of
 	// this specialization); set once an object definition demanded

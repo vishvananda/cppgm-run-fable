@@ -55,6 +55,10 @@ string HostedBuiltinName(const SemNode& node)
 	    callee.entity_scope->parent)
 		return string();
 	const string& name = callee.entity_name;
+	// Every recognized family starts with "__": ordinary calls skip
+	// the table scans on this hot path.
+	if (name.compare(0, 2, "__") != 0)
+		return string();
 	if (name == "__c11_atomic_thread_fence" ||
 	    name == "__c11_atomic_signal_fence")
 		return name;
@@ -169,11 +173,18 @@ LowerValue FunctionLowerer::LowerBuiltinAtomic(const SemNode& node,
 	LowerValue result;
 	result.type = NodeType(node);
 	// The trailing int arguments are memory orders (constant when
-	// the caller spelled a macro; seq_cst otherwise).
+	// the caller spelled a macro; seq_cst otherwise, with the runtime
+	// order expression still evaluated for its effects). The __sync_*
+	// forms and __c11_atomic_init carry no order tail - their last
+	// child is an operand the paths below lower themselves.
 	size_t last = node.children.size() - 1;
 	long long order = 5;
+	bool order_tail = name.compare(0, 7, "__sync_") != 0 &&
+		name != "__c11_atomic_init";
 	if (node.children[last]->has_value)
 		order = (long long)node.children[last]->value.bits;
+	else if (order_tail)
+		LowerEffect(*node.children[last]);
 	if (order < 0 || order > 5)
 		order = 5;
 	string order_text = to_string(order);
@@ -246,6 +257,8 @@ LowerValue FunctionLowerer::LowerBuiltinAtomic(const SemNode& node,
 		long long success = 5;
 		if (node.children[last - 1]->has_value)
 			success = (long long)node.children[last - 1]->value.bits;
+		else
+			LowerEffect(*node.children[last - 1]);
 		if (failure < 0 || failure > 5)
 			failure = 5;
 		if (success < 0 || success > 5)
@@ -570,10 +583,12 @@ LowerValue FunctionLowerer::BuiltinFloatImage(const TypePtr& type,
 		Emit(mantissa + " = binary shl i64 " + one + ", 63");
 		if (low)
 		{
-			// The signaling mantissa: integer bit plus bit 61 (quiet
-			// bit 62 clear).
+			// `low` selects the extra mantissa bit over the integer
+			// bit: 62 is the quiet NaN, 61 the signaling one (quiet
+			// bit clear); 0 leaves the infinity image.
 			string extra = NewTemp();
-			Emit(extra + " = binary shl i64 " + one + ", 61");
+			Emit(extra + " = binary shl i64 " + one + ", " +
+			     to_string(low));
 			string merged = NewTemp();
 			Emit(merged + " = binary or i64 " + mantissa + ", " + extra);
 			mantissa = merged;
@@ -613,8 +628,9 @@ LowerValue FunctionLowerer::LowerBuiltinFloatConstant(const SemNode& node,
 	bool signaling = name.compare(0, 4, "nans") == 0;
 	bool quiet_nan = !signaling && name.compare(0, 3, "nan") == 0;
 	if (spell == "f80")
-		return BuiltinFloatImage(type, signaling ? 1 : 0,
-		                         quiet_nan ? 0 : 32767);
+		return BuiltinFloatImage(type,
+		                         signaling ? 61 : quiet_nan ? 62 : 0,
+		                         32767);
 	if (quiet_nan)
 		return BuiltinFloatImage(type, spell == "f32"
 		                         ? 2143289344ull
@@ -847,36 +863,45 @@ LowerValue FunctionLowerer::LowerBuiltinFloatQuery(const SemNode& node,
 	return result;
 }
 
-// __builtin_{add,sub,mul}_overflow(a, b, out): compute exactly in
-// 128 bits, truncate to the result width, and compare the
-// re-extension against the exact value.
+// __builtin_{add,sub,mul}_overflow(a, b, out): widen each operand by
+// its own signedness, compute exactly in 128 bits, truncate to the
+// result width, and compare the result-signed re-extension against
+// the exact value (sema bounds every type to 64 bits, so the 128-bit
+// compute is exact - a u64*u64 product may wrap i128, but its bit
+// pattern stays exact mod 2^128 and the re-extension can never
+// collide with a wrapped high half).
 LowerValue FunctionLowerer::LowerBuiltinOverflow(const SemNode& node,
                                                  const string& name)
 {
 	LowerValue lhs = BuiltinArgument(node, 1);
 	LowerValue rhs = BuiltinArgument(node, 2);
 	LowerValue out = BuiltinArgument(node, 3);
-	TypePtr bare = RemoveTopCv(lhs.type);
-	string spell = LowerValueType(bare);
-	string extend = LowerUnsignedOps(bare) ? "zext" : "sext";
+	TypePtr lhs_bare = RemoveTopCv(lhs.type);
+	TypePtr rhs_bare = RemoveTopCv(rhs.type);
+	TypePtr result_bare = RemoveTopCv(RemoveTopCv(out.type)->target);
+	string result_spell = LowerValueType(result_bare);
+	string result_extend = LowerUnsignedOps(result_bare) ? "zext"
+	                                                     : "sext";
 	string wide_l = NewTemp();
-	Emit(wide_l + " = convert " + extend + " i128 " + spell + " " +
-	     lhs.text);
+	Emit(wide_l + " = convert " +
+	     (LowerUnsignedOps(lhs_bare) ? "zext" : "sext") + " i128 " +
+	     LowerValueType(lhs_bare) + " " + lhs.text);
 	string wide_r = NewTemp();
-	Emit(wide_r + " = convert " + extend + " i128 " + spell + " " +
-	     rhs.text);
+	Emit(wide_r + " = convert " +
+	     (LowerUnsignedOps(rhs_bare) ? "zext" : "sext") + " i128 " +
+	     LowerValueType(rhs_bare) + " " + rhs.text);
 	string op = name == "add_overflow" ? "add"
 	            : name == "sub_overflow" ? "sub" : "mul";
 	string wide = NewTemp();
 	Emit(wide + " = binary " + op + " i128 " + wide_l + ", " + wide_r);
 	string narrow = NewTemp();
-	Emit(narrow + " = convert trunc " + spell + " i128 " + wide);
+	Emit(narrow + " = convert trunc " + result_spell + " i128 " + wide);
 	string replay = NewTemp();
-	Emit(replay + " = convert " + extend + " i128 " + spell + " " +
-	     narrow);
+	Emit(replay + " = convert " + result_extend + " i128 " +
+	     result_spell + " " + narrow);
 	string overflow = NewTemp();
 	Emit(overflow + " = cmp ne i128 " + wide + ", " + replay);
-	Emit("store " + spell + " " + narrow + ", " + out.text);
+	Emit("store " + result_spell + " " + narrow + ", " + out.text);
 	LowerValue result;
 	result.type = NodeType(node);
 	result.text = NewTemp();

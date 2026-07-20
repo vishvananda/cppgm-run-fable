@@ -715,12 +715,15 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 			// resolve to the standard floating types, so glibc's
 			// per-format inline overload sets (iscanonical and
 			// friends) can define one signature twice. The first
-			// inline definition wins; non-inline duplicates stay
-			// ill-formed.
-			if (item.inline_def && info.weak)
+			// inline definition wins - only when either landing
+			// spelled a collapsed alias; plain duplicates and
+			// non-inline duplicates stay ill-formed.
+			if (item.inline_def && info.weak &&
+			    (item.alias_collapsed || info.alias_collapsed))
 				return;
 			throw runtime_error("redefinition of " + item.entity_name);
 		}
+		info.alias_collapsed |= item.alias_collapsed;
 		info.defined = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;

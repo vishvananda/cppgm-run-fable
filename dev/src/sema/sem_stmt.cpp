@@ -397,12 +397,41 @@ void SemBinder::BindConstexprIfStatement(const AstStmt& stmt)
 		                    "expression");
 	const AstStmt* taken = ConstValueIsNonZero(cond)
 		? stmt.then_branch.get() : stmt.else_branch.get();
-	if (!taken)
-		return;
+	const AstStmt* discarded = ConstValueIsNonZero(cond)
+		? stmt.else_branch.get() : stmt.then_branch.get();
 	Scope* saved = current_;
-	current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
-	BindStatement(*taken);
-	current_ = saved;
+	if (taken)
+	{
+		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+		BindStatement(*taken);
+		current_ = saved;
+	}
+	// 6.4.1: only during the instantiation of a templated entity is
+	// the discarded substatement skipped; elsewhere it is still a
+	// fully checked (never executed) statement. The check binds into
+	// a detached holder, outside return-type deduction (discarded
+	// return statements do not participate).
+	if (discarded && !instantiating_)
+	{
+		SemNodePtr holder = MakeSemNode(SN_COMPOUND_STATEMENT);
+		parents_.push_back(holder.get());
+		current_ = model_.CreateScope(SCOPE_BLOCK, "", saved);
+		TypePtr saved_return = current_return_;
+		try
+		{
+			BindStatement(*discarded);
+		}
+		catch (...)
+		{
+			current_return_ = saved_return;
+			current_ = saved;
+			parents_.pop_back();
+			throw;
+		}
+		current_return_ = saved_return;
+		current_ = saved;
+		parents_.pop_back();
+	}
 }
 
 void SemBinder::BindWhileStatement(const AstStmt& stmt)

@@ -908,7 +908,9 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 		throw runtime_error(part.identifier +
 		                    " does not name a class template");
 	TemplateInfo& tmpl = *found->templ;
+	size_t collapse_before = collapsed_alias_uses_;
 	vector<TemplateArg> args = ResolveTemplateArgumentList(tmpl, part);
+	bool collapse_now = collapsed_alias_uses_ != collapse_before;
 	string key = TemplateArgumentKey(args);
 	unique_ptr<ClassSpecialization>& slot = tmpl.class_specs[key];
 	if (!slot)
@@ -937,7 +939,10 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 	}
 	ClassSpecialization& spec = *slot.get();
 	bool was_explicit = spec.explicit_spec;
+	bool collapse_involved = collapse_now || spec.alias_collapsed;
 	spec.explicit_spec = true;
+	if (collapse_now)
+		spec.alias_collapsed = true;
 	if (inner.kind == DK_CLASS_FORWARD)
 		return;  // a declaration reserves the key
 	if (spec.instantiated && (was_explicit || spec.hard_used))
@@ -945,9 +950,11 @@ void SemBinder::BindClassExplicitSpecialization(const AstDecl& inner)
 		// PA34 hosted alias collapse: the _FloatN spellings resolve
 		// to the standard floating types, so glibc's per-format
 		// specialization sets (the iseqsig helpers) can land twice on
-		// one key. The first explicit definition wins; a use before
+		// one key. The first explicit definition wins - only when a
+		// collapsed alias spelling was involved on either landing; a
+		// plain duplicate stays a redefinition error, and a use before
 		// the specialization stays ill-formed.
-		if (was_explicit)
+		if (was_explicit && collapse_involved)
 			return;
 		throw runtime_error("explicit specialization of " + tmpl.name +
 		                    " after its instantiation");
