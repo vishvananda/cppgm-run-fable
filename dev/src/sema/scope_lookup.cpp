@@ -1,5 +1,6 @@
 #include "sema/scope_lookup.h"
 
+#include <algorithm>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -60,8 +61,11 @@ const ScopeBinding* ClassChainSearch(const Scope& scope, const string& name,
 	if (own && BindingPassesFilter(*own, filter))
 		return own;
 	// PA18 14.6.2p3: an unqualified name does not search a base that
-	// was dependent in the template pattern.
-	if (skip_dependent_base && scope.base_dependent)
+	// was dependent in the template pattern. With per-base links
+	// recorded only the dependent-spelled bases skip; the whole-scope
+	// flag stands in when no links were recorded.
+	if (skip_dependent_base && scope.base_dependent &&
+	    scope.dependent_base_links.empty())
 		return 0;
 	const ScopeBinding* found = 0;
 	for (size_t b = 0; b < scope.class_extra_bases.size() + 1; b++)
@@ -69,6 +73,11 @@ const ScopeBinding* ClassChainSearch(const Scope& scope, const string& name,
 		const Scope* base = b == 0 ? scope.class_base
 		                           : scope.class_extra_bases[b - 1];
 		if (!base)
+			continue;
+		if (skip_dependent_base &&
+		    std::find(scope.dependent_base_links.begin(),
+		              scope.dependent_base_links.end(),
+		              base) != scope.dependent_base_links.end())
 			continue;
 		const ScopeBinding* member = ClassChainSearch(
 			*base, name, filter, skip_dependent_base, visited);

@@ -237,6 +237,11 @@ struct Scope
 	// unqualified lookup does not search it (qualified and member
 	// -access lookup still do).
 	bool base_dependent;
+	// PA35: the member scopes of exactly the dependent-spelled bases.
+	// A class with one dependent and one concrete base keeps
+	// unqualified lookup into the concrete one (std::function's
+	// _Function_base beside its dependent arity base).
+	vector<const Scope*> dependent_base_links;
 	// PA18: the named-type entity this member scope belongs to (set by
 	// SetMemberScope; null for non-member scopes). The lowering's
 	// symbol mangling reads the entity's template identity from here.

@@ -33,6 +33,7 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 				base_types.push_back(ResolveTypeName(spec.name));
 			base_specs.resize(base_types.size(), &spec);
 		}
+		(void)0;
 	}
 	catch (...)
 	{
@@ -108,6 +109,11 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 		}
 		else
 			scope->class_extra_bases.push_back(row.cls->members);
+		// 14.6.2p3 applies per base: only a dependent-spelled base is
+		// invisible to the pattern's unqualified lookup.
+		if (instantiating_ && b < base_specs.size() &&
+		    BaseClauseIsDependent(base_specs[b]->name))
+			scope->dependent_base_links.push_back(row.cls->members);
 	}
 	// 8.5.1p1: a class with bases is not an aggregate.
 	cls->is_aggregate = false;
