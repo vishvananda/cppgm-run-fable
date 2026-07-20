@@ -822,6 +822,21 @@ TemplateInfo* SemBinder::ResolveMemberOwnerTemplate(const AstName& id,
 
 static string MemberDefName(const AstDecl& decl);
 
+bool DeclSpellsInline(const AstDecl& decl);
+
+// 14.7.2p10: whether an extern-template declaration leaves this member
+// definition to another translation unit. Inline (and constexpr,
+// which implies inline) member definitions still instantiate; local
+// references to a suppressed member resolve as external symbols.
+static bool ExternSuppressedMemberDef(const ClassSpecialization& spec,
+                                      const AstDecl& decl)
+{
+	if (!spec.extern_declared || !decl.inner)
+		return false;
+	return !DeclSpellsInline(*decl.inner) &&
+		!DeclHasConstexpr(*decl.inner);
+}
+
 void SemBinder::RegisterTemplateMember(const AstDecl& decl,
                                        const AstName& id)
 {
@@ -895,6 +910,9 @@ void SemBinder::InstantiateReadyPartialMembers(TemplateInfo& tmpl)
 			spec.partial_members_done[i] = true;
 			const AstDecl& def = *partial.member_defs[i];
 			if (spec.member_spec_names.count(MemberDefName(def)))
+				continue;
+			// 14.7.2p10: extern-template members stay external.
+			if (ExternSuppressedMemberDef(spec, def))
 				continue;
 			if (instantiation_depth_ >=
 			    kTemplateInstantiationDepthLimit)
@@ -982,6 +1000,7 @@ static bool MemberDefIsStaticData(const AstDecl& decl)
 		*inner.declarators[0].declarator);
 }
 
+
 // The terminal declared name of a member definition (empty when it
 // has none).
 static string MemberDefName(const AstDecl& decl)
@@ -1026,6 +1045,14 @@ void SemBinder::InstantiateReadyMembers(TemplateInfo& tmpl)
 				spec.members_done[i] = true;
 				continue;
 			}
+			// 14.7.2p10: an extern-template declaration owns the
+			// non-inline member definitions elsewhere.
+			if (ExternSuppressedMemberDef(spec,
+			                              *tmpl.member_defs[i]))
+			{
+				spec.members_done[i] = true;
+				continue;
+			}
 			// An object demand covers non-constexpr statics only;
 			// constexpr members wait for odr-use even when their
 			// definition registers after the demand (the same policy
@@ -1064,6 +1091,9 @@ void SemBinder::InstantiateStaticMembers(TemplateInfo& tmpl,
 		// 14.7.3: an explicit member specialization owns its name.
 		spec.members_done[i] = true;
 		if (spec.member_spec_names.count(MemberDefName(decl)))
+			continue;
+		// 14.7.2p10: extern-template statics stay external.
+		if (ExternSuppressedMemberDef(spec, decl))
 			continue;
 		InstantiateMemberDefinition(tmpl, spec, i);
 	}
