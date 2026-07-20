@@ -324,6 +324,13 @@ private:
 	int ResolveClassConstructor(const ClassInfo& cls,
 	                            vector<SemValue>& args, bool copy_init,
 	                            const char* what);
+	// PA36 13.3.1.7 first phase: with a braced initializer, an
+	// initializer-list constructor takes the whole list before any
+	// flattened element pass. Returns the constructor index with the
+	// materialized list (and trailing defaults) in `out_args`, or -1
+	// when none is viable.
+	int SelectListCtorInit(const ClassInfo& cls, const AstExpr& braced,
+	                       vector<SemValue>& out_args);
 	// 13.3.1.4 copy-initialization: converts a differing-class source
 	// through its conversion functions when no converting constructor
 	// is usable (true when the argument was converted in place).

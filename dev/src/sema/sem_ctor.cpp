@@ -1309,6 +1309,68 @@ bool SemBinder::TryCopyInitSourceConversion(const ClassInfo& cls,
 	return true;
 }
 
+int SemBinder::SelectListCtorInit(const ClassInfo& cls,
+                                  const AstExpr& braced,
+                                  vector<SemValue>& out_args)
+{
+	int best = -1;
+	ImplicitConversion best_conv;
+	SemValue list_value;
+	bool analyzed = false;
+	for (size_t i = 0; i < cls.ctors.size(); i++)
+	{
+		const ClassCtor& ctor = cls.ctors[i];
+		if (ctor.ignore_in_overload || ctor.tmpl_spec || ctor.deleted ||
+		    ctor.kind != CK_ORDINARY || ctor.type->parameters.empty())
+			continue;
+		const vector<TypePtr>& params = ctor.type->parameters;
+		bool tail_defaulted = true;
+		for (size_t j = 1; tail_defaulted && j < params.size(); j++)
+			if (j >= ctor.defaults.size() || !ctor.defaults[j])
+				tail_defaulted = false;
+		if (!tail_defaulted)
+			continue;
+		TypePtr first = params[0];
+		if (IsReferenceType(first))
+			first = first->target;
+		if (!IsStdInitializerList(RemoveTopCv(first), 0))
+			continue;
+		// The elements analyze once, on the first list-constructor
+		// candidate (a class without one skips the whole phase).
+		if (!analyzed)
+		{
+			analyzed = true;
+			list_value.braced_list = true;
+			vector<const AstExpr*> items;
+			for (size_t a = 0; a < braced.arguments.size(); a++)
+				items.push_back(braced.arguments[a].get());
+			AnalyzeInitArguments(items, list_value.list_values);
+		}
+		ImplicitConversion conv = ClassifyConversionEx(
+			MakeConversionSource(list_value), params[0], false);
+		if (!conv.viable)
+			continue;
+		if (best >= 0)
+		{
+			if (conv.rank == best_conv.rank)
+				throw runtime_error(
+					"ambiguous initializer-list constructor for " +
+					cls.entity->display);
+			if (conv.rank > best_conv.rank)
+				continue;
+		}
+		best = (int)i;
+		best_conv = conv;
+	}
+	if (best < 0)
+		return -1;
+	analyzer_.ApplyConversion(list_value, best_conv,
+	                          cls.ctors[best].type->parameters[0]);
+	out_args.push_back(std::move(list_value));
+	FillCtorDefaultArguments(cls, cls.ctors[best], out_args);
+	return best;
+}
+
 int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
                                        vector<SemValue>& args,
                                        bool copy_init, const char* what)

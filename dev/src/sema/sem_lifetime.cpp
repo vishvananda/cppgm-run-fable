@@ -888,12 +888,23 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		return;
 	}
 	vector<SemValue> values;
+	int index = -1;
+	bool list_ctor = false;
 	if (braced)
 	{
-		vector<const AstExpr*> items;
-		for (size_t i = 0; i < braced->arguments.size(); i++)
-			items.push_back(braced->arguments[i].get());
-		AnalyzeInitArguments(items, values);
+		// PA36 13.3.1.7: an initializer-list constructor takes the
+		// whole braced list first; the flattened element pass runs
+		// only when none is viable.
+		index = SelectListCtorInit(cls, *braced, values);
+		if (index >= 0)
+			list_ctor = true;
+		else
+		{
+			vector<const AstExpr*> items;
+			for (size_t i = 0; i < braced->arguments.size(); i++)
+				items.push_back(braced->arguments[i].get());
+			AnalyzeInitArguments(items, values);
+		}
 	}
 	else
 		AnalyzeInitArguments(args, values);
@@ -907,7 +918,7 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		analyzer_.CopyInitialize(values[0],
 		                         MakeNamedType(TK_CLASS, cls.entity),
 		                         "initialization");
-	if (values.size() == 1 && values[0].node &&
+	if (!list_ctor && values.size() == 1 && values[0].node &&
 	    values[0].node->kind == SN_CONSTRUCTOR_ACTION &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
 	    RemoveTopCv(values[0].type)->named == cls.entity)
@@ -916,7 +927,7 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		                       std::move(values[0].node));
 		return;
 	}
-	if (values.size() == 1 && values[0].node &&
+	if (!list_ctor && values.size() == 1 && values[0].node &&
 	    values[0].category == VC_PRVALUE &&
 	    RemoveTopCv(values[0].type)->kind == TK_CLASS &&
 	    RemoveTopCv(values[0].type)->named == cls.entity)
@@ -926,8 +937,9 @@ void SemBinder::AppendClassObjectInit(SemNode& item, ScopeBinding& binding,
 		item.children.push_back(std::move(values[0].node));
 		return;
 	}
-	int index = ResolveClassConstructor(cls, values, copy_init,
-	                                    binding.name.c_str());
+	if (!list_ctor)
+		index = ResolveClassConstructor(cls, values, copy_init,
+		                                binding.name.c_str());
 	vector<SemNodePtr> arg_nodes;
 	for (size_t i = 0; i < values.size(); i++)
 		arg_nodes.push_back(std::move(values[i].node));
@@ -1153,6 +1165,7 @@ bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
 		if (!inner)
 			return false;
 		bool address = false;
+		bool call_form = false;
 		size_t id_at = 0;
 		if (inner->items.size() == 2 && inner->items[0].kind == DI_PTR &&
 		    inner->items[0].token == OP_AMP)
@@ -1160,6 +1173,17 @@ bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
 			address = true;
 			id_at = 1;
 		}
+		else if (inner->items.size() == 2 &&
+		         inner->items[0].kind == DI_ID &&
+		         inner->items[1].kind == DI_PARAMS &&
+		         inner->items[1].params &&
+		         inner->items[1].params->parameters.empty() &&
+		         !inner->items[1].params->variadic)
+			// `f(g());`: the function declarator `g()` re-reads as
+			// the argument call `g()` (the deque `clear()` shape,
+			// `_M_erase_at_end(begin())` with the callee member
+			// declared later in the class).
+			call_form = true;
 		else if (inner->items.size() != 1)
 			return false;
 		if (inner->items[id_at].kind != DI_ID ||
@@ -1178,6 +1202,12 @@ bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
 			take->op_spelling = "&";
 			take->operands.push_back(std::move(argument));
 			argument = std::move(take);
+		}
+		else if (call_form)
+		{
+			AstExprPtr invoke(new AstExpr(EK_CALL));
+			invoke->operands.push_back(std::move(argument));
+			argument = std::move(invoke);
 		}
 		arguments.push_back(std::move(argument));
 	}
