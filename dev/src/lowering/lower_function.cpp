@@ -181,10 +181,30 @@ void FunctionLowerer::EmitNoexceptTerminateDispatch()
 
 string FunctionLowerer::Header() const
 {
-	string params;
+	// PA36 host ABI: the construction-table pointer renders right
+	// after `this` (the Itanium C2/D2 position); whole-program keeps
+	// the pinned trailing form. Body references are name-based, so
+	// only the signature order changes.
+	vector<size_t> order;
 	for (size_t i = 0; i < params_.size(); i++)
+		order.push_back(i);
+	if (program_.SeparateCompilation())
+		for (size_t i = declared_param_count_; i < params_.size(); i++)
+			if (hidden_params_[i - declared_param_count_].kind ==
+			    HP_VTT)
+			{
+				size_t lead = indirect_ret_ ? 1 : 0;
+				order.erase(order.begin() +
+				            static_cast<long>(i));
+				order.insert(order.begin() +
+				             static_cast<long>(lead + 1), i);
+				break;
+			}
+	string params;
+	for (size_t at = 0; at < order.size(); at++)
 	{
-		if (i)
+		size_t i = order[at];
+		if (at)
 			params += ", ";
 		params += "%" + params_[i].low_name + " : " +
 			params_[i].type_text;
@@ -1316,15 +1336,33 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 		if (!pass.empty())
 			params += " [pass=" + pass + "]";
 	}
-	// PA27: the hidden trailing vbase pointers keep their names.
+	// PA27: the hidden trailing vbase pointers keep their names. PA36
+	// host mode places the construction-table pointer right after the
+	// object parameter (the Itanium C2/D2 position).
 	{
 		const vector<HiddenParam>& hidden =
 			HiddenSignatureParams(const_cast<LowFunctionInfo&>(info),
 			                      SeparateCompilation());
 		for (size_t i = 0; i < hidden.size(); i++)
 		{
-			params += (at ? ", " : "") + string("%") +
-				hidden[i].low_name + " : ptr";
+			string piece = string("%") + hidden[i].low_name + " : ptr";
+			if (SeparateCompilation() &&
+			    hidden[i].kind == HP_VTT && at >= 1)
+			{
+				// after the object parameter (%arg0, or %ret then
+				// %arg0 under an indirect result)
+				size_t object_piece = indirect_result ? 2 : 1;
+				size_t cut = 0;
+				for (size_t p = 0; p < object_piece && cut != string::npos;
+				     p++)
+					cut = params.find(", ", cut ? cut + 2 : 0);
+				if (cut == string::npos)
+					params += ", " + piece;
+				else
+					params.insert(cut, ", " + piece);
+			}
+			else
+				params += (at ? ", " : "") + piece;
 			at++;
 		}
 	}

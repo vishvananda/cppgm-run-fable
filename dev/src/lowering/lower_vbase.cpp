@@ -260,15 +260,20 @@ const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info,
 				vtt.low_name = "__vtt";
 				info.hidden.push_back(vtt);
 			}
-			for (size_t i = 0; i < method_class->vbases.size(); i++)
-			{
-				HiddenParam hidden;
-				hidden.kind = HP_VBPTR;
-				hidden.vbase_index = i;
-				hidden.cls = method_class;
-				hidden.low_name = "__vbptr" + to_string(i);
-				info.hidden.push_back(hidden);
-			}
+			// PA36 host ABI: a polymorphic base entry carries only
+			// the Itanium VTT (the body reads virtual-base offsets
+			// from the installed vtable header); non-polymorphic
+			// classes keep the carried rows in both modes.
+			if (!separate_compilation || !method_class->is_polymorphic)
+				for (size_t i = 0; i < method_class->vbases.size(); i++)
+				{
+					HiddenParam hidden;
+					hidden.kind = HP_VBPTR;
+					hidden.vbase_index = i;
+					hidden.cls = method_class;
+					hidden.low_name = "__vbptr" + to_string(i);
+					info.hidden.push_back(hidden);
+				}
 		}
 		else if (info.special_code.empty() &&
 		         !method_class->is_polymorphic)
@@ -598,6 +603,19 @@ void FunctionLowerer::AppendHiddenArguments(
 	for (size_t h = 0; h < hidden.size(); h++)
 	{
 		const HiddenParam& hp = hidden[h];
+		if (hp.kind == HP_VTT && program_.SeparateCompilation())
+		{
+			// Host ABI: the construction-table pointer rides second,
+			// right after `this` (the Itanium C2/D2 position);
+			// whole-program keeps the pinned trailing form.
+			string value = SupplyVttArgument(*hp.cls);
+			size_t comma = arguments.find(", ");
+			if (comma == string::npos)
+				arguments += ", " + value;
+			else
+				arguments.insert(comma, ", " + value);
+			continue;
+		}
 		string value;
 		switch (hp.kind)
 		{

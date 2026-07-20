@@ -221,6 +221,9 @@ public:
 
 	// Registers one bound translation unit's namespace-scope items.
 	void AddUnit(const SemUnit& unit);
+	// PA21 14.7.2: emission roots for explicit-instantiation
+	// definitions naming one member of a specialization.
+	void DemandExplicitMemberInstantiations(const SemUnit& unit);
 	// PA32: demand-marks destructors whose effect-free invocations
 	// emitted no cleanup code (separate compilation only).
 	void DemandElidedDtorUses(const SemUnit& unit);
@@ -406,10 +409,13 @@ private:
 	                                     const string& name,
 	                                     const TypePtr& type,
 	                                     const string& special_code);
-	// The variant-independent definition key of a member function.
+	// The variant-independent definition key of a member function
+	// (`ctor_template` keys a constructor-template instantiation apart
+	// from a same-signature plain constructor).
 	string MemberDefinitionKey(const Scope* scope, const string& name,
 	                           const TypePtr& type,
-	                           ESpecialFunction special) const;
+	                           ESpecialFunction special,
+	                           bool ctor_template) const;
 	void DemandFunction(LowFunctionInfo& info);
 	void LowerUsedFunctions();
 	void BuildLifetimeHelpers();

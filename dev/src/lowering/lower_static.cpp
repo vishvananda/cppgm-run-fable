@@ -2,8 +2,10 @@
 
 #include "lowering/lower_const.h"
 
+#include <cstdio>
 #include <stdexcept>
 
+#include "lowering/lower_name.h"
 #include "lowering/lower_types.h"
 
 using std::runtime_error;
@@ -256,3 +258,51 @@ string LowerProgram::DsoHandleRef()
 	return "@" + dso_handle_name_;
 }
 
+// PA20: the per-scope identity of a function-local static (also
+// spelled in lower_unit.cpp beside the other global-entry keys).
+static string LocalStaticIdentity(const Scope* scope, const string& name)
+{
+	char suffix[32];
+	std::snprintf(suffix, sizeof(suffix), "#%p", (const void*)scope);
+	return LowerScopeKey(scope) + name + suffix;
+}
+
+// PA20: whether a (block-scope) entity resolved to a hoisted
+// function-local static.
+bool LowerProgram::HasGlobal(const Scope* scope, const string& name) const
+{
+	return global_index_.count(LocalStaticIdentity(scope, name)) > 0;
+}
+
+// PA20: hoists a function-local static object to an internal global
+// under its per-scope key, named from the declarator's token span
+// (the reference presentation).
+LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
+                                                 const string& base_name,
+                                                 bool weak)
+{
+	string key = LocalStaticIdentity(item.entity_scope,
+	                                 item.entity_name);
+	map<string, size_t>::iterator found = global_index_.find(key);
+	if (found != global_index_.end())
+		return globals_[found->second];
+	LowGlobalInfo info;
+	info.defined = true;
+	info.internal = !weak;
+	info.weak = weak;
+	info.node = &item;
+	info.type = item.type;
+	// Host mode gives block-scope thread_local objects real TLS
+	// storage (and the wrapper the tls_addr routing expects);
+	// whole-program mode keeps the single-threaded direct model.
+	info.is_thread_local =
+		item.is_thread_local_decl && separate_compilation_;
+	info.low_name = UniqueSymbol(base_name);
+	// The weak copies merge by the symbol itself (no Itanium _ZZ...E
+	// spelling in the LowIR contract).
+	if (weak)
+		info.object_name = "@" + info.low_name;
+	global_index_[key] = globals_.size();
+	globals_.push_back(info);
+	return globals_.back();
+}

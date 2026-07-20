@@ -124,37 +124,11 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 				                      item.entity_name, item.type,
 				                      item.fn_spec);
 			info->object_root = true;
+			info->extern_suppressed = false;
 			DemandFunction(*info);
 		}
 	}
-	// PA21 14.7.2: an explicit-instantiation definition naming one
-	// member of a specialization emits that member unconditionally.
-	for (size_t e = 0; e < unit.explicit_member_instantiations.size();
-	     e++)
-	{
-		const SemUnit::ExplicitMemberInstantiation& record =
-			unit.explicit_member_instantiations[e];
-		for (size_t i = 0; i < unit.deferred.size(); i++)
-		{
-			const SemNode& item = *unit.deferred[i];
-			if (item.kind != SN_FUNCTION_DEFINITION ||
-			    item.synthesized || item.special != SF_NONE ||
-			    item.entity_scope != record.scope ||
-			    item.entity_name != record.name)
-				continue;
-			LowFunctionInfo* info;
-			if (item.is_method)
-				info = &MemberFunctionEntry(item.entity_scope,
-				                            item.entity_name,
-				                            item.type, "");
-			else
-				info = &FunctionEntry(item.entity_scope,
-				                      item.entity_name, item.type,
-				                      item.fn_spec);
-			info->object_root = true;
-			DemandFunction(*info);
-		}
-	}
+	DemandExplicitMemberInstantiations(unit);
 	// PA21 14.7.2 function forms: explicit-instantiation definitions
 	// are unconditional emission roots; extern-template declarations
 	// suppress the local weak body in favor of an external declare.
@@ -192,18 +166,51 @@ void LowerProgram::AddUnit(const SemUnit& unit)
 		}
 }
 
+// PA21 14.7.2: an explicit-instantiation definition naming one
+// member of a specialization emits that member unconditionally.
+void LowerProgram::DemandExplicitMemberInstantiations(const SemUnit& unit)
+{
+	for (size_t e = 0; e < unit.explicit_member_instantiations.size();
+	     e++)
+	{
+		const SemUnit::ExplicitMemberInstantiation& record =
+			unit.explicit_member_instantiations[e];
+		for (size_t i = 0; i < unit.deferred.size(); i++)
+		{
+			const SemNode& item = *unit.deferred[i];
+			if (item.kind != SN_FUNCTION_DEFINITION ||
+			    item.synthesized || item.special != SF_NONE ||
+			    item.entity_scope != record.scope ||
+			    item.entity_name != record.name)
+				continue;
+			LowFunctionInfo* info;
+			if (item.is_method)
+				info = &MemberFunctionEntry(item.entity_scope,
+				                            item.entity_name,
+				                            item.type, "");
+			else
+				info = &FunctionEntry(item.entity_scope,
+				                      item.entity_name, item.type,
+				                      item.fn_spec);
+			info->object_root = true;
+			info->extern_suppressed = false;
+			DemandFunction(*info);
+		}
+	}
+}
+
 // A deferred in-class definition (method, hidden friend, constructor,
 // destructor): registered as a weak definition, emitted on demand.
 void LowerProgram::RegisterDeferred(const SemNode& item)
 {
 	if (item.special != SF_NONE)
 	{
-		string key = MemberDefinitionKey(item.entity_scope,
-		                                 item.entity_name, item.type,
-		                                 item.special);
-		member_defs_[key] = &item;
 		bool is_ctor = item.special == SF_CONSTRUCTOR ||
 			item.special == SF_CONSTRUCTOR_BASE;
+		string key = MemberDefinitionKey(
+			item.entity_scope, item.entity_name, item.type,
+			item.special, is_ctor && item.member_template_body);
+		member_defs_[key] = &item;
 		if (!item.inline_def)
 		{
 			// An out-of-class constructor or destructor prints both
@@ -228,7 +235,7 @@ void LowerProgram::RegisterDeferred(const SemNode& item)
 	{
 		string key = MemberDefinitionKey(item.entity_scope,
 		                                 item.entity_name, item.type,
-		                                 SF_NONE);
+		                                 SF_NONE, false);
 		member_defs_[key] = &item;
 		return;
 	}
@@ -330,45 +337,6 @@ LowGlobalInfo& LowerProgram::GlobalEntry(const Scope* scope,
 	else
 		info.object_name = MangleVariableObjectName(
 			scope, name, binding->is_thread_local);
-	global_index_[key] = globals_.size();
-	globals_.push_back(info);
-	return globals_.back();
-}
-
-// PA20: whether a (block-scope) entity resolved to a hoisted
-// function-local static.
-bool LowerProgram::HasGlobal(const Scope* scope, const string& name) const
-{
-	return global_index_.count(LocalStaticKey(scope, name)) > 0;
-}
-
-// PA20: hoists a function-local static object to an internal global
-// under its per-scope key, named from the declarator's token span
-// (the reference presentation).
-LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
-                                                 const string& base_name,
-                                                 bool weak)
-{
-	string key = LocalStaticKey(item.entity_scope, item.entity_name);
-	map<string, size_t>::iterator found = global_index_.find(key);
-	if (found != global_index_.end())
-		return globals_[found->second];
-	LowGlobalInfo info;
-	info.defined = true;
-	info.internal = !weak;
-	info.weak = weak;
-	info.node = &item;
-	info.type = item.type;
-	// Host mode gives block-scope thread_local objects real TLS
-	// storage (and the wrapper the tls_addr routing expects);
-	// whole-program mode keeps the single-threaded direct model.
-	info.is_thread_local =
-		item.is_thread_local_decl && separate_compilation_;
-	info.low_name = UniqueSymbol(base_name);
-	// The weak copies merge by the symbol itself (no Itanium _ZZ...E
-	// spelling in the LowIR contract).
-	if (weak)
-		info.object_name = "@" + info.low_name;
 	global_index_[key] = globals_.size();
 	globals_.push_back(info);
 	return globals_.back();
@@ -493,7 +461,8 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 string LowerProgram::MemberDefinitionKey(const Scope* scope,
                                          const string& name,
                                          const TypePtr& type,
-                                         ESpecialFunction special) const
+                                         ESpecialFunction special,
+                                         bool ctor_template) const
 {
 	const char* kind = "fn";
 	if (special == SF_CONSTRUCTOR || special == SF_CONSTRUCTOR_BASE)
@@ -503,10 +472,14 @@ string LowerProgram::MemberDefinitionKey(const Scope* scope,
 	// Constructor/destructor keys drop the spelled name: the class
 	// scope and kind identify them, and a specialization's definitions
 	// carry the pattern spelling while call sites spell the
-	// specialization ("RefPair" vs "RefPair<int>").
+	// specialization ("RefPair" vs "RefPair<int>"). PA36: a
+	// constructor-template instantiation keys apart from a plain
+	// constructor with the same signature (allocator<char>'s
+	// converting template vs its copy constructor), so the two
+	// definitions and their ABI spellings never collide.
 	string spelled = special == SF_NONE ? name : string();
 	return LowerScopeKey(scope) + spelled + "#" + DescribeType(type) +
-		"#" + kind;
+		"#" + kind + (ctor_template ? "#tmpl" : "");
 }
 
 // PA21: whether a declared constructor type matches a this-adjusted
@@ -522,6 +495,28 @@ static bool CtorEntryMatches(const TypePtr& declared,
 		                adjusted->parameters[i + 1]))
 			return false;
 	return true;
+}
+
+// PA21: a constructor-template specialization entry mangles with its
+// template-argument list (C1I<args>E). PA36: a plain constructor with
+// the same signature owns the entry (the template's converting
+// instantiation only spells the template-id form when no plain
+// constructor matches - allocator<char>'s copy constructor vs its
+// converting template).
+static const FunctionSpecialization* CtorTemplateSpecFor(
+	const ClassInfo* cls, const TypePtr& type)
+{
+	if (!cls)
+		return 0;
+	for (size_t i = 0; i < cls->ctors.size(); i++)
+		if (!cls->ctors[i].tmpl_spec &&
+		    CtorEntryMatches(cls->ctors[i].type, type))
+			return 0;
+	for (size_t i = 0; i < cls->ctors.size(); i++)
+		if (cls->ctors[i].tmpl_spec &&
+		    CtorEntryMatches(cls->ctors[i].type, type))
+			return cls->ctors[i].tmpl_spec;
+	return 0;
 }
 
 LowFunctionInfo& LowerProgram::MemberFunctionEntry(
@@ -551,15 +546,9 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		base += "__deleting_entry";
 	info.low_name = UniqueSymbol(base);
 	info.internal = LowerInUnnamedNamespace(scope);
-	// PA21: a constructor-template specialization entry mangles with
-	// its template-argument list (C1I<args>E).
-	const FunctionSpecialization* ctor_spec = 0;
-	if (special_code == "C1" || special_code == "C2")
-		if (const ClassInfo* cls = MethodClass(type))
-			for (size_t i = 0; !ctor_spec && i < cls->ctors.size(); i++)
-				if (cls->ctors[i].tmpl_spec &&
-				    CtorEntryMatches(cls->ctors[i].type, type))
-					ctor_spec = cls->ctors[i].tmpl_spec;
+	const FunctionSpecialization* ctor_spec =
+		special_code == "C1" || special_code == "C2"
+			? CtorTemplateSpecFor(MethodClass(type), type) : 0;
 	if (ctor_spec)
 	{
 		info.fn_spec = ctor_spec;
@@ -615,22 +604,30 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	         special_code == "D0")
 		special = SF_DESTRUCTOR;
 	map<string, const SemNode*>::iterator def = member_defs_.find(
-		MemberDefinitionKey(scope, name, type, special));
+		MemberDefinitionKey(scope, name, type, special,
+		                    ctor_spec != 0));
+	if (def == member_defs_.end() && ctor_spec)
+		// A constructor-template entry whose instantiated body has
+		// not registered yet still finds a matching plain definition
+		// (the template-keyed registration replaces it on arrival).
+		def = member_defs_.find(
+			MemberDefinitionKey(scope, name, type, special, false));
 	if (def != member_defs_.end())
 	{
 		info.defined = true;
 		info.weak = def->second->inline_def;
 		info.definition = def->second;
 		info.unwind_no = def->second->unwind_no;
-		// PA36 14.7.2p10 note: in-class (inline) members of an
-		// extern-declared specialization keep their local weak
-		// emission (the standard's inline carve-out). Suppressing
-		// them like GCC does requires per-constructor entry
-		// identities first: a converting-constructor-template
-		// specialization can share the plain copy constructor's
-		// signature, and the shared entry then declares the wrong
-		// symbol. Out-of-class members are suppressed at the
-		// instantiation layer (sem_template.cpp).
+		// PA36 14.7.2p10 host mode: in-class members of an
+		// extern-declared specialization reference the owning TU's
+		// copy like the host compiler does (an explicit-instantiation
+		// definition lifts the suppression in AddUnit). The
+		// per-constructor entry identities above keep the declared
+		// ABI spelling right when a constructor-template
+		// specialization shares a plain constructor's signature.
+		if (separate_compilation_ && def->second->inline_def &&
+		    extern_member_scopes_.count(scope))
+			info.extern_suppressed = true;
 	}
 	info.index = functions_.size();
 	function_index_[key] = functions_.size();
@@ -754,7 +751,7 @@ const SemNode* LowerProgram::MemberDefinitionFor(const SemNode& callee)
 {
 	map<string, const SemNode*>::iterator def = member_defs_.find(
 		MemberDefinitionKey(callee.entity_scope, callee.entity_name,
-		                    callee.type, SF_NONE));
+		                    callee.type, SF_NONE, false));
 	return def == member_defs_.end() ? 0 : def->second;
 }
 

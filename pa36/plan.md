@@ -1,13 +1,19 @@
 # PA36 Plan: Hosted Header Emission Link/Runtime Compatibility
 
-Status: in progress (loop 83: 63/69 pa36 link tests passing,
-through-pa36 at 3334/3340 with every failure inside pa36). Landed
-this loop: dynamic exception specifications (15.4/15.5.2 LSDA
-filters + __cxa_call_unexpected), the host data-addressing model
-(pcrel data access, GOT-mediated imports, course _Z spelling for
-unscoped non-TLS variables), and destructible function-local statics
-(__cxa_atexit/__cxa_thread_atexit registration, weak/TLS guard
-mirroring, lowering/lower_static.cpp).
+Status: COMPLETE (loop 83: 69/69 pa36 link tests, through-pa36 at
+3340/3340). Landed this loop: dynamic exception specifications
+(15.4/15.5.2 LSDA filters + __cxa_call_unexpected), the host
+data-addressing model (pcrel data access, GOT-mediated imports,
+course _Z spelling for unscoped non-TLS variables), destructible
+function-local statics (__cxa_atexit/__cxa_thread_atexit, weak/TLS
+guard mirroring, lowering/lower_static.cpp), unqualified
+member-template-id calls binding *this, function-reference call
+results without lvalue-to-rvalue loads, host call-ABI classification
+via the Itanium non-trivial-for-calls rule (union-bearing fpos),
+whole-base-DAG 14.8.2.1p4 deduction, storage-width-guarded fused
+branch compares, per-constructor lowering entry identities, in-class
+extern-template member suppression, and the Itanium second-position
+VTT convention at host boundaries.
 
 PA36 asks whether hosted header-generated code (inline, template, and
 header-emitted definitions) links and runs through the plain host
@@ -114,36 +120,33 @@ negative switch value, and `__cxa_call_unexpected` runs the
 `std::unexpected` handler, re-checks any replacement exception
 against the cached spec, and propagates/terminates per 15.5.2.
 
-## Remaining failures (loop 82 end triage)
-- `600-hosted-std-function-call-link-smoke` (prog 139) and
-  `600-hosted-vector-string-substitution-link-smoke` (prog 139):
-  runtime crashes in emitted header code; re-diagnose with gdb next
-  (the vbase fixes changed the landscape; old notes are stale).
-- `700-hosted-global-istringstream-init-link-smoke`,
-  `700-hosted-ostringstream-tellp-runtime-smoke` (now 139),
-  `700-hosted-stringstream-insertion-runtime-smoke`: stringstream
-  runtime behavior/stdout; likely one shared stringbuf defect.
-- `700-hosted-imported-global-got-load-link-smoke` and
-  `700-hosted-pcrel-data-reloc-link-smoke` (impl 255): object
-  inspections expecting GOT-mediated loads (`imported_data_got`) and
-  PC-relative data relocations (`data_pcrel`) for imported globals;
-  belongs to the x86 encoder's relocation-class selection.
-- `700-hosted-inline-thread-local-deque-destructor-once` (impl 1):
-  function-local static/thread_local with destructor needs
-  __cxa_atexit/__cxa_thread_atexit registration in host lowering
-  (currently outside the PA14 boundary error).
-- `700-hosted-ofstream-file-runtime-smoke` (impl 1): the inspect wants
-  in-class members of extern-template classes (basic_ofstream's
-  constructors) referenced externally like GCC emits them. Blocked on
-  per-constructor lowering entry identities: a converting-constructor
-  -template specialization (allocator<char>'s) shares the plain copy
-  constructor's signature, so the shared scope+name+type entry
-  declares the wrong symbol when suppressed. The facts are recorded
-  (SemUnit::extern_class_scopes, SemNode::member_template_body,
-  LowerProgram::extern_member_scopes_); the consumption site in
-  MemberFunctionEntry documents the constraint. Related latent issue:
-  the same shared entry means the selected plain copy ctor and the
-  ctor-template instance overwrite each other's member_defs_ slot.
+## Loop 83 closing design notes (for later stages)
+
+- **Extern-template member suppression (14.7.2p10 host mode).**
+  In-class members of extern-declared specializations reference the
+  owning TU (`extern_suppressed` on the entry, set at the def-found
+  site in MemberFunctionEntry; explicit-instantiation definitions
+  lift it in AddUnit). Per-constructor entry identities keep the
+  spellings right: MemberDefinitionKey carries a `#tmpl` marker for
+  constructor-template instantiations, and CtorTemplateSpecFor only
+  spells the template-id form when no plain constructor matches.
+  Unused vtables/typeinfo then stay un-demanded, so no local _ZTV /
+  _ZTI appears for extern-declared stream classes.
+- **Itanium VTT position (host boundaries).** Host mode places the
+  construction-table pointer second (right after `this`) in rendered
+  C2/D2 signatures, declares, and call argument rows; polymorphic
+  base entries drop the carried __vbptr rows (bodies read
+  virtual-base offsets from the installed vtable header).
+  Whole-program keeps the pinned trailing form; body references are
+  name-based, so only signature order flips.
+- **Host call ABI.** ClassParamDirectHost/ClassReturnDirectHost apply
+  the Itanium non-trivial-for-calls rule (unions classify like
+  structs; polymorphic classes keep the memory path for now).
+- **Data addressing.** -c objects use rip-relative access for
+  unit-defined data and GOT loads (OP_GOT operands,
+  X86_PATCH_PCREL_DATA/GOTPCREL) for imported globals; the private
+  linker synthesizes GOT slots. lowir2native keeps absolute
+  addressing and its pinned encodings.
 
 ## Validation
 
