@@ -513,6 +513,7 @@ AstDeclPtr AstParser::ParseSimpleDeclaration()
 {
 	State state = Save();
 	AstDeclPtr decl = MakeDecl(DK_SIMPLE);
+	saw_vector_size_ = false;
 	if (!ParseSpecifierSeq(decl->specifiers, kDeclSpecifierSeq))
 	{
 		Restore(state);
@@ -551,6 +552,7 @@ AstDeclPtr AstParser::ParseSimpleDeclaration()
 		Restore(state);
 		return AstDeclPtr();
 	}
+	decl->vector_size = saw_vector_size_;
 	RegisterDeclaratorIds(*decl);
 	return decl;
 }

@@ -33,7 +33,6 @@ void SemBinder::BindBaseClause(const AstDecl& decl, NamedTypeInfo* info,
 				base_types.push_back(ResolveTypeName(spec.name));
 			base_specs.resize(base_types.size(), &spec);
 		}
-		(void)0;
 	}
 	catch (...)
 	{

@@ -97,6 +97,10 @@ protected:
 	// deterministic local-static object names derive from it.
 	size_t current_declarator_begin_token_ = 0;
 	size_t current_decl_end_token_ = 0;
+	// PA35: the declaration being bound spelled
+	// __attribute__((vector_size)); its typedefs bind as GNU vector
+	// spellings (ScopeBinding::vector_spelled).
+	bool current_decl_vector_size_ = false;
 	void BindTypeAlias(const string& name, const TypePtr& type);
 	void BindVariable(const string& name, const TypePtr& type,
 	                  const AstInitializer* init,

@@ -1,7 +1,5 @@
 #include "sema/sem_binder.h"
 
-#include <cstdio>
-#include <cstdlib>
 #include <stdexcept>
 
 using std::runtime_error;
@@ -185,7 +183,11 @@ const ScopeBinding* SemBinder::ResolveValue(const AstName& name,
 		const ScopeBinding* found =
 			UnqualifiedLookup(current_, terminal, SLF_ANY);
 		if (!found)
+		{
+			if (terminal.compare(0, 10, "__builtin_") == 0)
+				throw UnimplementedBuiltinError(terminal);
 			throw runtime_error("undeclared name " + terminal);
+		}
 		return found;
 	}
 	Scope* scope = ResolvePrefixScope(name);
@@ -197,16 +199,44 @@ const ScopeBinding* SemBinder::ResolveValue(const AstName& name,
 	return found;
 }
 
+// PA35: an expression-position type spelled as a GNU vector typedef -
+// the scalar the alias resolves to would miscompile the vector form
+// (a (__m128){...} literal as a float cast), so the use faults typed
+// and the hosted wrapper demotion catches it. A failed probe defers
+// to the real resolution's own diagnosis.
+static void RejectVectorSpelledType(const Scope* from, const AstName& name)
+{
+	if (name.global_scope || name.parts.size() != 1 ||
+	    name.parts[0].kind != NP_IDENTIFIER || name.parts[0].tilde)
+		return;
+	const ScopeBinding* found = 0;
+	try
+	{
+		found = UnqualifiedLookup(from, name.parts[0].identifier,
+		                          SLF_SCOPE_NAMES);
+	}
+	catch (const std::exception&)
+	{
+		return;
+	}
+	if (found && found->kind == SB_TYPE_ALIAS && found->vector_spelled)
+		throw UnsupportedVectorForm(name.parts[0].identifier);
+}
+
 TypePtr SemBinder::TryResolveCalleeType(const AstName& name)
 {
 	if (!name.global_scope && name.parts.size() == 1 &&
 	    name.parts[0].kind == NP_DECLTYPE)
 		return ResolveDecltype(*name.parts[0].decltype_expr);
+	RejectVectorSpelledType(current_, name);
 	return TryResolveTypeFromName(name);
 }
 
 TypePtr SemBinder::ResolveCastTypeId(const AstTypeId& type_id)
 {
+	for (size_t i = 0; i < type_id.specifiers.size(); i++)
+		if (type_id.specifiers[i].kind == SPEC_TYPE_NAME)
+			RejectVectorSpelledType(current_, type_id.specifiers[i].name);
 	return builder_.ResolveTypeId(type_id);
 }
 
@@ -1057,6 +1087,21 @@ void SemBinder::EmitConstructorAction(SemNode& item, const string& var_name,
 	item.children.push_back(std::move(action));
 }
 
+// Whether a failed body bind demotes the definition to a declaration:
+// only the typed outside-the-surface faults qualify - an unimplemented
+// target builtin (in a gnu_inline wrapper, or the ia32 vector family
+// anywhere) or a GNU vector form in a gnu_inline wrapper. A genuine
+// semantic error in a wrapper body still propagates.
+static bool WrapperBodyDemotes(const AstDecl& decl, const std::exception& e)
+{
+	if (const UnimplementedBuiltinError* builtin =
+	        dynamic_cast<const UnimplementedBuiltinError*>(&e))
+		return decl.gnu_inline ||
+			builtin->builtin.compare(0, 15, "__builtin_ia32_") == 0;
+	return decl.gnu_inline &&
+		dynamic_cast<const UnsupportedVectorForm*>(&e);
+}
+
 void SemBinder::BindFunctionBody(const AstDecl& decl,
                                  const DeclaratorInfo& composed,
                                  const string& name)
@@ -1139,14 +1184,11 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	catch (const std::exception& e)
 	{
 		// Hosted intrinsic wrappers (mmintrin's _mm_empty and friends)
-		// call target builtins and vector forms this compiler does not
-		// implement. Such a gnu_inline/always_inline wrapper demotes to
-		// a declaration; a call to it is then an ordinary
-		// undefined-function reference instead of a hosted header
-		// failing to compile at all.
-		if (!decl.gnu_inline &&
-		    string(e.what()).compare(0, 31,
-		                             "undeclared name __builtin_ia32_") != 0)
+		// call target builtins and GNU vector forms this compiler does
+		// not implement; such a wrapper demotes to a declaration, so a
+		// call to it is an ordinary undefined-function reference
+		// instead of a hosted header failing to compile at all.
+		if (!WrapperBodyDemotes(decl, e))
 			throw;
 		current_return_ = saved_return;
 		auto_return_pattern_ = saved_pattern;

@@ -466,7 +466,11 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	}
 	AppendAdlCandidates(name, args, candidates, seen, explicit_part);
 	if (candidates.empty())
+	{
+		if (name.compare(0, 10, "__builtin_") == 0)
+			throw UnimplementedBuiltinError(name);
 		throw runtime_error("undeclared name " + name);
+	}
 	vector<TypePtr> declared;
 	for (size_t c = 0; c < candidates.size(); c++)
 		declared.push_back(candidates[c].declared);

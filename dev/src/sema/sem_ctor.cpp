@@ -1,6 +1,5 @@
 #include "sema/sem_binder.h"
 
-#include <cstdlib>
 #include <stdexcept>
 
 #include "ast/ast_text.h"

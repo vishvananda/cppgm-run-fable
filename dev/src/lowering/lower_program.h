@@ -309,7 +309,8 @@ public:
 		RTTI_VT_POINTER,
 		RTTI_VT_VMI_CLASS,
 		RTTI_VT_FUNCTION,
-		RTTI_VT_ENUM
+		RTTI_VT_ENUM,
+		RTTI_VT_KIND_COUNT
 	};
 	// PA25: the "@name" of an external runtime helper, declared on
 	// first use with the given signature/metadata suffix.
@@ -544,7 +545,7 @@ private:
 	// incomplete or non-simple template classes) and the external
 	// __cxxabiv1 vtable declares, by ERttiVtableKind.
 	map<string, string> rtti_type_names_;
-	string external_rtti_vtable_names_[7];
+	string external_rtti_vtable_names_[RTTI_VT_KIND_COUNT];
 	// PA25: external runtime helper declares (__cxa_bad_typeid,
 	// __dynamic_cast, ...), keyed by their object name.
 	map<string, string> runtime_fn_names_;

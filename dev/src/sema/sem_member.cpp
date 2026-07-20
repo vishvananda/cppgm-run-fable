@@ -1,14 +1,11 @@
 #include "sema/sem_expr.h"
 
-#include <cstdio>
-#include <cstdlib>
 #include <stdexcept>
 
 #include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
-using std::to_string;
 
 // PA15 member access and method calls: the `.` / `->` / implicit-this
 // resolution paths of the expression analyzer, including the implicit

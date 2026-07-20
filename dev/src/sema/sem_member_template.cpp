@@ -533,7 +533,8 @@ static string ConversionTypeIdSpelling(const AstTypeId& id,
 // there, pairing with the in-class declaration.
 void SemBinder::CaptureQualifiedMemberTemplate(const AstDecl& decl,
                                                const AstDecl& inner,
-                                               Scope* declaring)
+                                               Scope* declaring,
+                                               bool replace_instantiated)
 {
 	Scope* saved = current_;
 	current_ = declaring;
@@ -555,7 +556,8 @@ void SemBinder::CaptureQualifiedMemberTemplate(const AstDecl& decl,
 		case DK_FUNCTION:
 		case DK_SIMPLE:
 		{
-			TemplateInfo* tmpl = CaptureFunctionTemplate(decl, inner);
+			TemplateInfo* tmpl = CaptureFunctionTemplate(
+				decl, inner, false, 0, replace_instantiated);
 			if (tmpl)
 			{
 				tmpl->member_of = model_.ScopeEntity(declaring);

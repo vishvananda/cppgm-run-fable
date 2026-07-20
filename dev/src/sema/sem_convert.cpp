@@ -723,7 +723,6 @@ ImplicitConversion ClassifySourceConversionFunction(
 		                         from->named, dest);
 	if (!from->named->class_record)
 		return result;
-	bool dest_bool = !IsReferenceType(dest) && IsBoolType(RemoveTopCv(dest));
 	ImplicitConversion best_object;
 	// 13.3.3.1p10: two conversion functions no better than each other
 	// make the user-defined sequence ambiguous; the source then has no

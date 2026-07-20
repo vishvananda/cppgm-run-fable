@@ -1,6 +1,7 @@
 #pragma once
 
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,38 @@ using std::vector;
 // category) facts the enclosing context composes with. The analyzer
 // reaches the binder through ISemExprHost - name and type resolution
 // stay in the binder, the clause 4/5/13 rules stay here.
+
+// PA35: an undeclared name in the reserved __builtin_ namespace - a
+// target intrinsic outside the implemented builtin surface. Typed so
+// hosted intrinsic-wrapper demotion recovers only from this (a genuine
+// semantic error in a wrapper body still propagates).
+struct UnimplementedBuiltinError : std::runtime_error
+{
+	explicit UnimplementedBuiltinError(const string& name)
+		: std::runtime_error("undeclared name " + name), builtin(name)
+	{}
+
+	~UnimplementedBuiltinError() throw()
+	{}
+
+	string builtin;
+};
+
+// PA35: an expression-position use of a GNU vector typedef
+// (__attribute__((vector_size)), the __m128 family) - the type model
+// has no vector types, so casts and vector literals over such a name
+// are outside the implemented builtin surface. Typed for the same
+// wrapper-demotion recovery as UnimplementedBuiltinError.
+struct UnsupportedVectorForm : std::runtime_error
+{
+	explicit UnsupportedVectorForm(const string& name)
+		: std::runtime_error("GNU vector type " + name +
+		                     " is outside the implemented surface")
+	{}
+
+	~UnsupportedVectorForm() throw()
+	{}
+};
 
 struct SemValue;
 

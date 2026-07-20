@@ -740,8 +740,10 @@ void DeclBinder::BindSimpleDeclaration(const AstDecl& decl)
 	// the init-declarator's terminal token span (begin through the
 	// terminating semicolon).
 	current_decl_end_token_ = decl.end_token ? decl.end_token - 1 : 0;
+	current_decl_vector_size_ = decl.vector_size;
 	for (size_t i = 0; i < decl.declarators.size(); i++)
 		BindInitDeclarator(specs, decl.declarators[i]);
+	current_decl_vector_size_ = false;
 }
 
 void DeclBinder::BindInitDeclarator(const DeclSpecifierInfo& specs,
@@ -873,6 +875,8 @@ void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 			 current_->kind != SCOPE_CLASS);
 		if (!redeclarable || !TypeEquals(existing->type, type))
 			throw runtime_error("conflicting type alias " + name);
+		if (current_decl_vector_size_)
+			existing->vector_spelled = true;
 		OnTypeAliasBound(name, type);
 		return;
 	}
@@ -880,6 +884,7 @@ void DeclBinder::BindTypeAlias(const string& name, const TypePtr& type)
 	binding.kind = SB_TYPE_ALIAS;
 	binding.name = name;
 	binding.type = type;
+	binding.vector_spelled = current_decl_vector_size_;
 	binding.access = current_access_;
 	AddBinding(*current_, binding);
 	OnTypeAliasBound(name, type);

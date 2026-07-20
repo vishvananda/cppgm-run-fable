@@ -182,12 +182,12 @@ string LowerProgram::VTableRef(const ClassInfo* cls)
 
 string LowerProgram::ExternalRttiVtableRef(ERttiVtableKind kind)
 {
-	static const char* const tails[7] = {
+	static const char* const tails[] = {
 		"__class_type_info", "__si_class_type_info",
 		"__fundamental_type_info", "__pointer_type_info",
 		"__vmi_class_type_info", "__function_type_info",
 		"__enum_type_info"};
-	static const char* const objects[7] = {
+	static const char* const objects[] = {
 		"_ZTVN10__cxxabiv117__class_type_infoE",
 		"_ZTVN10__cxxabiv120__si_class_type_infoE",
 		"_ZTVN10__cxxabiv123__fundamental_type_infoE",
@@ -195,6 +195,11 @@ string LowerProgram::ExternalRttiVtableRef(ERttiVtableKind kind)
 		"_ZTVN10__cxxabiv121__vmi_class_type_infoE",
 		"_ZTVN10__cxxabiv120__function_type_infoE",
 		"_ZTVN10__cxxabiv116__enum_type_infoE"};
+	static_assert(sizeof(tails) / sizeof(tails[0]) == RTTI_VT_KIND_COUNT,
+	              "one tail per ERttiVtableKind");
+	static_assert(sizeof(objects) / sizeof(objects[0]) ==
+	                  RTTI_VT_KIND_COUNT,
+	              "one object symbol per ERttiVtableKind");
 	string& name = external_rtti_vtable_names_[kind];
 	if (name.empty())
 	{

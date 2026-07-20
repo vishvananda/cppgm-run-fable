@@ -1,7 +1,5 @@
 #include "sema/sem_expr.h"
 
-
-#include <cstdio>
 #include <stdexcept>
 
 #include "sema/scope_lookup.h"

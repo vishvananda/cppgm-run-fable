@@ -150,6 +150,10 @@ private:
 	// reset (ParseFunctionDefinition marks such definitions as hosted
 	// intrinsic-style wrappers).
 	bool saw_gnu_inline_ = false;
+	// __attribute__((vector_size(N))) seen since the last reset
+	// (ParseSimpleDeclaration marks such typedefs as GNU vector
+	// spellings).
+	bool saw_vector_size_ = false;
 
 	// --- names (ast_parse_names.cpp) --------------------------------
 	// Template-id attempt policy for `name <`, from the name table:

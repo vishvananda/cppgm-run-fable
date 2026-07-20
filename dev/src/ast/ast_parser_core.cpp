@@ -664,6 +664,13 @@ bool AstParser::SkipAttributeParens(std::vector<std::string>* abi_tags)
 			// (see ParseFunctionDefinition).
 			saw_gnu_inline_ = true;
 		if (depth == 2 &&
+		    (AtIdentifierSpelled("__vector_size__") ||
+		     AtIdentifierSpelled("vector_size")))
+			// Recorded so a typedef of a GNU vector type carries the
+			// fact; expression uses of such a name are outside the
+			// implemented builtin surface (see BindTypeAlias).
+			saw_vector_size_ = true;
+		if (depth == 2 &&
 		    (AtIdentifierSpelled("__abi_tag__") ||
 		     AtIdentifierSpelled("abi_tag")) &&
 		    AtSimple(OP_LPAREN, 1))

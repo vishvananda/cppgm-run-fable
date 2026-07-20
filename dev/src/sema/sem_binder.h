@@ -409,10 +409,17 @@ private:
 	// `friend_home` is the enclosing instantiation's argument-alias
 	// scope: friends captured under different instantiations are
 	// distinct templates (14.5.4) and never merge across it.
+	// `replace_instantiated` permits the 14.7.3p18 replacement of a
+	// pattern-instantiated definition by an explicit member definition.
 	TemplateInfo* CaptureFunctionTemplate(const AstDecl& decl,
 	                                      const AstDecl& inner,
 	                                      bool as_friend = false,
-	                                      Scope* friend_home = 0);
+	                                      Scope* friend_home = 0,
+	                                      bool replace_instantiated = false);
+	void AdoptFunctionTemplateDefinition(
+		TemplateInfo& merged, const AstDecl& decl, const AstDecl& inner,
+		vector<TemplateParam>& params, const string& name,
+		bool replace_instantiated);
 	// --- PA21 member templates (sem_member_template.cpp) ---
 	// Class-scope template-declaration dispatch (member function /
 	// constructor / class / alias / friend templates).
@@ -460,7 +467,11 @@ private:
 	// scope.
 	void CaptureQualifiedMemberTemplate(const AstDecl& decl,
 	                                    const AstDecl& inner,
-	                                    Scope* declaring);
+	                                    Scope* declaring,
+	                                    bool replace_instantiated = false);
+	// 14.7.3p18: `template<> template<...>` member of one concrete
+	// specialization.
+	void BindMemberTemplateOfSpecialization(const AstDecl& inner);
 	void CaptureQualifiedMemberClassTemplate(const AstDecl& decl,
 	                                         const AstDecl& inner);
 	// The instantiated (weak, demand-emitted) body of a selected

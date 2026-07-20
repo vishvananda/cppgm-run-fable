@@ -103,6 +103,12 @@ struct ScopeBinding
 	TypePtr type;    // entity / alias target type (null for namespaces)
 	Scope* target;   // SB_NAMESPACE / SB_NAMESPACE_ALIAS
 	bool has_value;  // SB_ENUMERATOR and constant SB_VARIABLE
+	// PA35: an SB_TYPE_ALIAS spelled with __attribute__((vector_size))
+	// (a GNU vector typedef like __m128). The type model has no vector
+	// types, so an expression-position use of the name is a typed
+	// outside-the-surface fault (hosted intrinsic wrappers then demote
+	// to declarations instead of miscompiling as the scalar).
+	bool vector_spelled = false;
 	// PA23 14.6.4.1: the constant arrived with an instantiated
 	// out-of-class member definition, which sits after every
 	// parse-scope use in instantiation order. Only instantiated

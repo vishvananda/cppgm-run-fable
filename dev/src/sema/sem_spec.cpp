@@ -262,10 +262,73 @@ void SemBinder::CaptureClassTemplate(const AstDecl& decl,
 	}
 }
 
+// A merged redeclaration's definition adoption: the declaration's
+// defaults accumulate onto the definition head (14.1p10), renamed
+// template parameters re-alias in existing specializations' argument
+// scopes, and pending bodies instantiate against the new pattern.
+void SemBinder::AdoptFunctionTemplateDefinition(
+	TemplateInfo& merged, const AstDecl& decl, const AstDecl& inner,
+	vector<TemplateParam>& params, const string& name,
+	bool replace_instantiated)
+{
+	// 14.7.3p18: an explicit member definition replaces only a
+	// definition the enclosing specialization instantiated from the
+	// primary's pattern; a duplicate explicit definition is an ODR
+	// redefinition either way.
+	if (merged.has_definition &&
+	    !(replace_instantiated && merged.definition_instantiated))
+		throw runtime_error("redefinition of function template " + name);
+	merged.decl = &decl;
+	merged.pattern_decl = &inner;
+	merged.has_definition = true;
+	merged.definition_instantiated = instantiating_;
+	// 14.1p10: default template arguments accumulate across
+	// declarations; the definition keeps the declaration's.
+	for (size_t i = 0; i < params.size() && i < merged.params.size(); i++)
+	{
+		if (!params[i].default_type && merged.params[i].default_type)
+			params[i].default_type = merged.params[i].default_type;
+		if (!params[i].default_expr && merged.params[i].default_expr)
+			params[i].default_expr = merged.params[i].default_expr;
+	}
+	// The definition may rename template parameters; existing
+	// specializations bound the declaration's names, so each renamed
+	// parameter re-aliases in their argument scopes before any pending
+	// body composes against the new names.
+	for (map<string, unique_ptr<FunctionSpecialization>>::iterator it =
+	         merged.fn_specs.begin();
+	     it != merged.fn_specs.end(); ++it)
+	{
+		FunctionSpecialization* spec = it->second.get();
+		if (!spec || !spec->param_scope)
+			continue;
+		for (size_t i = 0; i < params.size() && i < merged.params.size();
+		     i++)
+		{
+			const string& fresh = params[i].name;
+			const string& old = merged.params[i].name;
+			if (fresh.empty() || fresh == old)
+				continue;
+			map<string, size_t>::const_iterator at =
+				spec->param_scope->binding_index.find(old);
+			if (at == spec->param_scope->binding_index.end() ||
+			    spec->param_scope->binding_index.count(fresh))
+				continue;
+			ScopeBinding alias = spec->param_scope->bindings[at->second];
+			alias.name = fresh;
+			AddBinding(*spec->param_scope, alias);
+		}
+	}
+	merged.params = params;
+	merged.pattern_ready = false;
+	InstantiatePendingFunctions(merged);
+}
+
 TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
                                                  const AstDecl& inner,
                                                  bool as_friend,
-                                                 Scope* friend_home)
+                                                 Scope* friend_home,
+                                                 bool replace_instantiated)
 {
 	const AstName* id = inner.kind == DK_FUNCTION
 		? inner.declarator->IdName()
@@ -304,13 +367,16 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 		}
 		// An out-of-class definition may spell a template-head type
 		// through the class's own typedefs; pair it with the unique
-		// definition-less declaration that matches everywhere else.
+		// definition-less declaration that matches everywhere else (a
+		// pattern-instantiated definition is replaceable, 14.7.3p18).
 		if (!merged && definition)
 			for (size_t i = 0; i < binding->fn_templates.size(); i++)
 			{
 				TemplateInfo* other = binding->fn_templates[i];
 				if (other->params.size() != params.size() ||
-				    other->has_definition)
+				    (other->has_definition &&
+				     !(replace_instantiated &&
+				       other->definition_instantiated)))
 					continue;
 				if (as_friend && other->declaring != home)
 					continue;
@@ -325,61 +391,8 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	if (merged)
 	{
 		if (definition && merged->pattern_decl != &inner)
-		{
-			if (merged->has_definition)
-				throw runtime_error("redefinition of function template " +
-				                    name);
-			merged->decl = &decl;
-			merged->pattern_decl = &inner;
-			merged->has_definition = true;
-			// 14.1p10: default template arguments accumulate across
-			// declarations; the definition keeps the declaration's.
-			for (size_t i = 0;
-			     i < params.size() && i < merged->params.size(); i++)
-			{
-				if (!params[i].default_type &&
-				    merged->params[i].default_type)
-					params[i].default_type =
-						merged->params[i].default_type;
-				if (!params[i].default_expr &&
-				    merged->params[i].default_expr)
-					params[i].default_expr =
-						merged->params[i].default_expr;
-			}
-			// The definition may rename template parameters; existing
-			// specializations bound the declaration's names, so each
-			// renamed parameter re-aliases in their argument scopes
-			// before any pending body composes against the new names.
-			for (map<string, unique_ptr<FunctionSpecialization>>::
-			         iterator it = merged->fn_specs.begin();
-			     it != merged->fn_specs.end(); ++it)
-			{
-				FunctionSpecialization* spec = it->second.get();
-				if (!spec || !spec->param_scope)
-					continue;
-				for (size_t i = 0;
-				     i < params.size() && i < merged->params.size();
-				     i++)
-				{
-					const string& fresh = params[i].name;
-					const string& old = merged->params[i].name;
-					if (fresh.empty() || fresh == old)
-						continue;
-					map<string, size_t>::const_iterator at =
-						spec->param_scope->binding_index.find(old);
-					if (at == spec->param_scope->binding_index.end() ||
-					    spec->param_scope->binding_index.count(fresh))
-						continue;
-					ScopeBinding alias =
-						spec->param_scope->bindings[at->second];
-					alias.name = fresh;
-					AddBinding(*spec->param_scope, alias);
-				}
-			}
-			merged->params = params;
-			merged->pattern_ready = false;
-			InstantiatePendingFunctions(*merged);
-		}
+			AdoptFunctionTemplateDefinition(*merged, decl, inner, params,
+			                                name, replace_instantiated);
 		// A real namespace-scope redeclaration makes a hidden friend
 		// template visible (7.3.1.2p3).
 		if (!as_friend && binding && !binding->fn_adl_only.empty() &&
@@ -394,6 +407,7 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 	tmpl->decl = &decl;
 	tmpl->pattern_decl = &inner;
 	tmpl->has_definition = definition;
+	tmpl->definition_instantiated = definition && instantiating_;
 	// Slot names follow the first declaration (unnamed definition
 	// parameters fall back to them).
 	if (const AstDeclarator* first_declarator =
@@ -787,6 +801,37 @@ TypePtr SemBinder::ResolveDependentAliasUse(const TypePtr& pattern,
 
 // --- explicit specialization entry -------------------------------------------
 
+// 14.7.3p18: `template<> template<...> R Owner<args>::member` declares
+// (or defines) a member template of one concrete specialization; the
+// inner template captures against the owner's member scope.
+void SemBinder::BindMemberTemplateOfSpecialization(const AstDecl& inner)
+{
+	const AstDecl* leaf = inner.inner.get();
+	const AstName* id = 0;
+	if (leaf)
+	{
+		if (leaf->kind == DK_CLASS || leaf->kind == DK_CLASS_FORWARD)
+			id = &leaf->class_name;
+		else if (leaf->kind == DK_FUNCTION ||
+		         leaf->kind == DK_SPECIAL_MEMBER_DEFINITION ||
+		         leaf->kind == DK_SPECIAL_MEMBER_DECLARATION)
+			id = leaf->declarator ? leaf->declarator->IdName() : 0;
+		else if (leaf->kind == DK_SIMPLE &&
+		         leaf->declarators.size() == 1 &&
+		         leaf->declarators[0].declarator)
+			id = leaf->declarators[0].declarator->IdName();
+	}
+	if (!id || id->parts.size() < 2)
+		throw OutsideBoundary("explicit specialization form");
+	Scope* declaring = ResolvePrefixScope(*id);
+	if (!declaring || declaring->kind != SCOPE_CLASS)
+		throw OutsideBoundary("explicit specialization form");
+	// 14.7.3p18: this definition replaces the member definition the
+	// enclosing specialization instantiated from the primary's pattern
+	// (the capture rejects a duplicate explicit definition).
+	CaptureQualifiedMemberTemplate(inner, *leaf, declaring, true);
+}
+
 void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 {
 	if (!decl.inner)
@@ -878,52 +923,8 @@ void SemBinder::BindExplicitSpecialization(const AstDecl& decl)
 		throw OutsideBoundary("explicit specialization form");
 	}
 	case DK_TEMPLATE:
-	{
-		// 14.7.3p18: `template<> template<...> R Owner<args>::member`
-		// declares (or defines) a member template of one concrete
-		// specialization; the inner template captures against the
-		// owner's member scope.
-		const AstDecl* leaf = inner.inner.get();
-		const AstName* id = 0;
-		if (leaf)
-		{
-			if (leaf->kind == DK_CLASS || leaf->kind == DK_CLASS_FORWARD)
-				id = &leaf->class_name;
-			else if (leaf->kind == DK_FUNCTION ||
-			         leaf->kind == DK_SPECIAL_MEMBER_DEFINITION ||
-			         leaf->kind == DK_SPECIAL_MEMBER_DECLARATION)
-				id = leaf->declarator ? leaf->declarator->IdName() : 0;
-			else if (leaf->kind == DK_SIMPLE &&
-			         leaf->declarators.size() == 1 &&
-			         leaf->declarators[0].declarator)
-				id = leaf->declarators[0].declarator->IdName();
-		}
-		if (!id || id->parts.size() < 2)
-			throw OutsideBoundary("explicit specialization form");
-		Scope* declaring = ResolvePrefixScope(*id);
-		if (!declaring || declaring->kind != SCOPE_CLASS)
-			throw OutsideBoundary("explicit specialization form");
-		try
-		{
-			CaptureQualifiedMemberTemplate(inner, *leaf, declaring);
-		}
-		catch (const std::exception& e)
-		{
-			if (string(e.what()).compare(
-			        0, 33, "redefinition of function template") != 0)
-				throw;
-			// 14.7.3: this definition replaces the member definition
-			// the enclosing specialization instantiated from the
-			// primary's pattern.
-			const string member =
-				DeclaredFunctionName(id->parts.back());
-			if (ScopeBinding* fn = FindOwnBinding(*declaring, member))
-				for (size_t t = 0; t < fn->fn_templates.size(); t++)
-					fn->fn_templates[t]->has_definition = false;
-			CaptureQualifiedMemberTemplate(inner, *leaf, declaring);
-		}
+		BindMemberTemplateOfSpecialization(inner);
 		return;
-	}
 	default:
 		throw runtime_error("explicit specialization form kind " +
 		                    std::to_string((int)inner.kind) +

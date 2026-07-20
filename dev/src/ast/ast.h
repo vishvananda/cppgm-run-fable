@@ -147,6 +147,10 @@ struct AstDecl
 	// definition (hosted intrinsic wrappers demote to declarations
 	// when their builtin bodies are outside the implemented surface).
 	bool gnu_inline = false;
+	// PA35: __attribute__((vector_size(N))) on a simple declaration -
+	// a GNU vector typedef (__m128); expression uses of such a name
+	// are outside the implemented builtin surface.
+	bool vector_size = false;
 
 	// namespace-definition / namespace-alias / alias-declaration
 	std::string name;

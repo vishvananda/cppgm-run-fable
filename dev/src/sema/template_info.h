@@ -234,6 +234,12 @@ struct TemplateInfo
 	// The declaration inside `decl` (DK_CLASS / DK_FUNCTION / DK_SIMPLE).
 	const AstDecl* pattern_decl;
 	bool has_definition;
+	// PA35 14.7.3p18: the definition was captured while instantiating
+	// the enclosing specialization's pattern. Only such a definition
+	// may be replaced by an explicit `template<> template<...>` member
+	// definition; a second explicit definition stays an ODR
+	// redefinition error.
+	bool definition_instantiated = false;
 	vector<TemplateParam> params;
 	// The template's identity entity: TK_TEMPLATE_SPEC pattern types
 	// name it, and instantiated entities point back through
