@@ -262,6 +262,10 @@ void SemBinder::BindConditionDeclaration(const AstCondition& condition,
 		type = MakeCvQualifiedType(type, true, false);
 	const string& var_name = composed.id->parts[0].identifier;
 	BindVariable(var_name, type, condition.init.get(), specs);
+	// `auto` deduces inside BindVariable; the condition reads the
+	// variable's bound type, not the placeholder.
+	if (const ScopeBinding* bound = FindOwnBinding(*current_, var_name))
+		type = bound->type;
 
 	// 6.4p4: the condition value is the (converted) declared variable.
 	SemValue value;

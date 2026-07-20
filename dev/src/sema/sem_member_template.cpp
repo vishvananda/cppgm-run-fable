@@ -111,8 +111,13 @@ void SemBinder::BindMemberTemplateDeclaration(const AstDecl& decl,
 		    !DeclaratorDeclaresFunction(*declarator))
 		{
 			// A static data member template is a class-scope variable
-			// template.
-			CaptureVariableTemplate(decl, inner);
+			// template; a template-id declarator is an in-class
+			// partial specialization of it (which must not overwrite
+			// the primary's parameter list).
+			if (id->parts.back().kind == NP_TEMPLATE_ID)
+				RegisterVariablePartial(decl, inner);
+			else
+				CaptureVariableTemplate(decl, inner);
 			return;
 		}
 		CaptureMemberFunctionTemplate(decl, inner);

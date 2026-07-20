@@ -1,5 +1,7 @@
 #include "sema/sem_expr.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 
 #include "ast/ast_text.h"
@@ -649,7 +651,7 @@ SemValue SemExprAnalyzer::AnalyzeMemberCall(const AstExpr& expr,
 	const ScopeBinding* member =
 		FindMemberBinding(host_.Model(), lookup_entity, name);
 	if (!member)
-		throw runtime_error("no member named " + name);
+			throw runtime_error("no member named " + name);
 	if (member->kind == SB_VARIABLE)
 	{
 		// A data member holding a function pointer: the call is

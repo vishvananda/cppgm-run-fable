@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include <cstdlib>
 #include <stdexcept>
 
 #include "sema/scope_lookup.h"
@@ -1174,16 +1175,31 @@ void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in,
 // copy/move construction from the converted value finishes the
 // initialization (elided for trivial copies by the lowering).
 bool SemBinder::TryCopyInitSourceConversion(const ClassInfo& cls,
-                                            SemValue& arg)
+                                            SemValue& arg, bool direct)
 {
 	TypePtr from = arg.type ? RemoveTopCv(arg.type) : TypePtr();
 	if (!from || from->kind != TK_CLASS || from->named == cls.entity)
 		return false;
+	// A deferred nested class (14.7.1p1) completes here so its
+	// conversion functions are visible to the classification.
+	try
+	{
+		RequireCompleteType(from->named);
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
 	TypePtr dest = MakeNamedType(TK_CLASS, cls.entity);
 	ImplicitConversion conv;
 	try
 	{
-		conv = ClassifyConversion(MakeConversionSource(arg), dest);
+		// 13.3.3.1.2p2: the source's explicit conversion functions are
+		// candidates only for direct-initialization.
+		conv = direct
+			? ClassifyConversionEx(MakeConversionSource(arg), dest,
+			                       true)
+			: ClassifyConversion(MakeConversionSource(arg), dest);
 	}
 	catch (const std::exception&)
 	{
@@ -1264,8 +1280,17 @@ int SemBinder::ResolveClassConstructor(const ClassInfo& cls,
 		if (copy_init && args.size() == 1 &&
 		    TryCopyInitSourceConversion(cls, args[0]))
 			return ResolveClassConstructor(cls, args, copy_init, what);
+		// 8.5p16: direct-initialization also reaches the source's
+		// explicit conversion functions.
+		if (!copy_init && args.size() == 1 &&
+		    TryCopyInitSourceConversion(cls, args[0], true))
+			return ResolveClassConstructor(cls, args, copy_init, what);
+		string arg_text;
+		for (size_t i = 0; i < args.size(); i++)
+			arg_text += (i ? ", " : "") + DescribeType(args[i].type);
 		throw NoViableOverloadError(
-			"no matching constructor for " + cls.entity->display);
+			"no matching constructor for " + cls.entity->display +
+			" from (" + arg_text + ")");
 	}
 	// PA21: a selected constructor-template specialization's body
 	// instantiates at this first use (which may append further ctor

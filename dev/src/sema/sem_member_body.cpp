@@ -64,6 +64,24 @@ void SemBinder::BindMemberFunctionBody(const AstDecl& decl,
 	    !cls->key_name.empty() && cls->key_name == name &&
 	    TypeEquals(cls->key_type, composed.type))
 		cls->key_defined_in_tu = true;
+	// 14.7.1: an instantiated member body is ill-formed only if a use
+	// requires it. An eagerly-bound member definition may run while
+	// another class is still mid-bind in an outer context (a
+	// base-clause completeness demand instantiating a sibling's
+	// registered members), so a failure poisons this one body - the
+	// end-of-unit re-bind retries it once every class is complete.
+	if (instantiating_)
+	{
+		try
+		{
+			AnalyzeDeferredBody(body);
+		}
+		catch (const std::exception& error)
+		{
+			AppendPoisonedBody(body, error.what());
+		}
+		return;
+	}
 	AnalyzeDeferredBody(body);
 }
 

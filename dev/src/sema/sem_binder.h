@@ -315,7 +315,8 @@ private:
 	// 13.3.1.4 copy-initialization: converts a differing-class source
 	// through its conversion functions when no converting constructor
 	// is usable (true when the argument was converted in place).
-	bool TryCopyInitSourceConversion(const ClassInfo& cls, SemValue& arg);
+	bool TryCopyInitSourceConversion(const ClassInfo& cls, SemValue& arg,
+	                                 bool direct = false);
 	// The synthesized implicit default constructor / destructor
 	// definitions, built on first demand into unit_.deferred (an
 	// out-of-class `= default` builds them as strong definitions).

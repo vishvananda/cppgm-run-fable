@@ -732,9 +732,10 @@ ImplicitConversion ClassifySourceConversionFunction(
 		for (size_t i = 0; i < link->conversions.size(); i++)
 		{
 			const ClassConversion& conv = link->conversions[i];
-			// 12.3.2p2: explicit conversion functions participate only
-			// in direct-initialization / contextual-bool contexts.
-			if (conv.is_explicit && !(contextual && dest_bool))
+			// 12.3.2p2/13.3.3.1.2p2: explicit conversion functions
+			// participate only in direct-initialization (which the
+			// contextual-bool conversion shares).
+			if (conv.is_explicit && !contextual)
 				continue;
 			// The implicit object parameter binds the source.
 			TypePtr object_class = MakeNamedType(TK_CLASS, from->named);

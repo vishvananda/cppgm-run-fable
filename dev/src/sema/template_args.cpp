@@ -1,5 +1,6 @@
 #include "sema/sem_binder.h"
 
+#include <cstdio>
 #include <stdexcept>
 
 #include "sema/const_expr.h"
