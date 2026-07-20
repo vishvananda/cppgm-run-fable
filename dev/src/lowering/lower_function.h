@@ -179,6 +179,10 @@ private:
 	void LowerStatement(const SemNode& node);
 	void LowerLocalDeclaration(const SemNode& node);
 	void LowerLocalVariable(const SemNode& node);
+	// PA36 3.6.3 host mode: register a local static's destructor with
+	// the CRT inside its first-use guard.
+	void EmitLocalStaticDtorRegistration(const SemNode& node,
+	                                     const string& base);
 	// PA20 function-local statics: the hoisted internal global, the
 	// constant-init shortcut, and the first-use guard around the
 	// declaration-point initialization.

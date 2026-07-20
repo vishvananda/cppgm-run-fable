@@ -62,6 +62,10 @@ void LowerProgram::AppendTlsWrapperDeclares(vector<string>& declares)
 		if (!info.is_thread_local || (!info.defined && !info.used))
 			continue;
 		string object = info.object_name;
+		// A leading '@' marks "the low name is the object name"
+		// (weak local statics); the wrapper derives from that name.
+		if (!object.empty() && object[0] == '@')
+			object = object.substr(1);
 		if (object.compare(0, 2, "_Z") == 0)
 			object = "_ZTW" + object.substr(2);
 		else if (!object.empty())

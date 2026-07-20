@@ -359,6 +359,11 @@ LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
 	info.weak = weak;
 	info.node = &item;
 	info.type = item.type;
+	// Host mode gives block-scope thread_local objects real TLS
+	// storage (and the wrapper the tls_addr routing expects);
+	// whole-program mode keeps the single-threaded direct model.
+	info.is_thread_local =
+		item.is_thread_local_decl && separate_compilation_;
 	info.low_name = UniqueSymbol(base_name);
 	// The weak copies merge by the symbol itself (no Itanium _ZZ...E
 	// spelling in the LowIR contract).
@@ -367,24 +372,6 @@ LowGlobalInfo& LowerProgram::RegisterLocalStatic(const SemNode& item,
 	global_index_[key] = globals_.size();
 	globals_.push_back(info);
 	return globals_.back();
-}
-
-// The i64 first-use guard beside a dynamically initialized
-// function-local static; returns its symbol.
-string LowerProgram::LocalStaticGuard(const string& object_name)
-{
-	string key = "#local_static_guard#" + object_name;
-	map<string, size_t>::iterator found = global_index_.find(key);
-	if (found != global_index_.end())
-		return globals_[found->second].low_name;
-	LowGlobalInfo guard;
-	guard.type = MakeFundamentalType(FT_LONG_INT);
-	guard.low_name = UniqueSymbol(object_name + "__guard");
-	guard.internal = true;
-	guard.defined = true;
-	global_index_[key] = globals_.size();
-	globals_.push_back(guard);
-	return globals_.back().low_name;
 }
 
 LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,

@@ -272,8 +272,15 @@ public:
 	LowGlobalInfo& RegisterLocalStatic(const SemNode& item,
 	                                   const string& base_name,
 	                                   bool weak);
-	// The i64 first-use guard global beside `object_name`.
-	string LocalStaticGuard(const string& object_name);
+	// The i64 first-use guard global beside `object_name`. In host
+	// mode the guard mirrors a weak (vague-linkage) or thread-local
+	// object so every translation unit's copy shares one first-use
+	// fact; whole-program mode keeps the pinned internal shape.
+	string LocalStaticGuard(const string& object_name, bool weak,
+	                        bool thread_local_storage);
+	// PA36: the host CRT's per-image __dso_handle anchor
+	// (__cxa_atexit / __cxa_thread_atexit registration cookie).
+	string DsoHandleRef();
 	// PA15: a lowered function registered an automatic-object cleanup;
 	// the unwind runtime declares are emitted once.
 	void RequireEhRuntime();
@@ -556,6 +563,8 @@ private:
 	// __cxxabiv1 vtable declares, by ERttiVtableKind.
 	map<string, string> rtti_type_names_;
 	string external_rtti_vtable_names_[RTTI_VT_KIND_COUNT];
+	// PA36: the external __dso_handle declare ("" until first demand).
+	string dso_handle_name_;
 	// PA25: external runtime helper declares (__cxa_bad_typeid,
 	// __dynamic_cast, ...), keyed by their object name.
 	map<string, string> runtime_fn_names_;
