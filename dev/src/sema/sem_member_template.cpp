@@ -395,17 +395,36 @@ void SemBinder::BindFriendTemplate(const AstDecl& decl,
 		try
 		{
 			const AstName* name = 0;
+			const AstDecl* forward = 0;
 			if (inner.kind == DK_CLASS_FORWARD)
+			{
 				name = &inner.class_name;
+				forward = &inner;
+			}
 			else
 				for (size_t i = 0; i < inner.specifiers.size(); i++)
 					if (inner.specifiers[i].kind == SPEC_NESTED_DECL &&
 					    inner.specifiers[i].nested_decl)
+					{
 						name = &inner.specifiers[i].nested_decl->class_name;
+						forward =
+							inner.specifiers[i].nested_decl.get();
+					}
 			if (name && name->IsPlainIdentifier())
 			{
 				const ScopeBinding* found = UnqualifiedLookup(
 					current_, name->parts[0].identifier, SLF_ANY);
+				// 11.3p1: a first-declaration friend template also
+				// declares the class template in the enclosing
+				// namespace.
+				if (!found && forward &&
+				    (forward->kind == DK_CLASS_FORWARD ||
+				     forward->kind == DK_CLASS))
+				{
+					CaptureClassTemplate(decl, *forward, false);
+					found = UnqualifiedLookup(
+						current_, name->parts[0].identifier, SLF_ANY);
+				}
 				if (found && found->kind == SB_CLASS_TEMPLATE &&
 				    found->templ && found->templ->anchor)
 					cls->friend_classes.push_back(found->templ->anchor);

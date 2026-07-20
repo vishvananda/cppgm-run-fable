@@ -537,10 +537,10 @@ ConstValue EvaluateGnuAlignof(const AstExpr& expr,
 	    (callee->name.parts[0].identifier != "__alignof" &&
 	     callee->name.parts[0].identifier != "__alignof__") ||
 	    expr.arguments.size() != 1)
-		{ static int h; if (expr.kind == EK_CALL && getenv("CPPGM_ABORT_CE") && ++h == atoi(getenv("CPPGM_ABORT_CE"))) abort(); throw runtime_error("expression form kind " +
+		throw runtime_error("expression form kind " +
 		                    std::to_string((int)expr.kind) +
 		                    " is outside the PA11 constant-expression "
-		                    "subset"); }
+		                    "subset");
 	const AstName* name = UnparenthesizedIdName(*expr.arguments[0]);
 	TypePtr named = name ? context.TryResolveTypeFromName(*name)
 	                     : TypePtr();
@@ -770,10 +770,10 @@ ConstValue EvaluateConstExpr(const AstExpr& expr, IConstExprContext& context)
 	case EK_BUILTIN_TRAIT:
 		return EvaluateBuiltinTraitExpr(expr, context);
 	default:
-		{ static int h; if (expr.kind == EK_CALL && getenv("CPPGM_ABORT_CE") && ++h == atoi(getenv("CPPGM_ABORT_CE"))) abort(); throw runtime_error("expression form kind " +
+		throw runtime_error("expression form kind " +
 		                    std::to_string((int)expr.kind) +
 		                    " is outside the PA11 constant-expression "
-		                    "subset"); }
+		                    "subset");
 	}
 }
 
