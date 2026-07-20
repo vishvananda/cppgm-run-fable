@@ -71,3 +71,34 @@ de-duplicate work), never as harness/test budget problems.
 - New regression tests for language bugs found here go under
   `cppgm.tests/course/paN/` of the owning stage when they are not
   header-specific; header-pressure cases stay in `pa35/tests/`.
+
+## Status (loop 79)
+
+55/77 pa35 tests pass; through-pa35 is 3244/3266 with all failures
+pa35-local (no earlier-stage regressions). Landed this loop: GNU
+named-variadic macros and hosted empty __VA_ARGS__; typename-braced
+casts; base-name import and inline-namespace tables in the parser;
+out-of-class member body scope; local-class member mangling (Z..E);
+hosted atomic builtins and memset/vsnprintf; enum underlying-type
+widening and lazy successors; defaulted-default-ctor and converting-ctor
+default-argument fixes; direct-init explicit conversion functions;
+member variable-template partials; 14.7.3p18 member-of-spec
+definitions; explicit-spec function prototypes; gnu_inline intrinsic
+wrapper demotion; failed-instantiation rollback; typeid postfix
+suffixes; template-id friends.
+
+Remaining 22 failures cluster on:
+- `__test<_Tp>(0)` SFINAE member-template calls resolving to
+  "member function __test called without an object" (nothrow traits,
+  std::function): implicit static member-template call candidates.
+- "function template operator >> has no definition": istream.tcc
+  operator-template definition pairing with the extern-template
+  declarations (istream/getline family).
+- "expression form is outside the PA11 constant-expression subset"
+  (piecewise/index_sequence family): const-eval gap.
+- "ambiguous partial specializations of __common_type_fold"
+  (shared_ptr/chrono): partial-ordering gap.
+- "member initializer names no member or base" (regex): mem-init
+  against a dependent/aliased base spelling.
+- locale facet/codecvt and map iterator families: undiagnosed, retest
+  after the above land.
