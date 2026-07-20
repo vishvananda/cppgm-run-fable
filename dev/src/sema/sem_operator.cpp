@@ -33,6 +33,8 @@ bool BuiltinCandidateOp(const string& spelling)
 // (null when none or ambiguous); other operands pass through.
 TypePtr BuiltinOperandType(const SemValue& value)
 {
+	if (!value.type)
+		return TypePtr();  // a template-only overload set
 	TypePtr bare = RemoveTopCv(value.type);
 	if (bare->kind != TK_CLASS)
 		return IsArithmeticType(bare) || bare->kind == TK_ENUM
@@ -643,6 +645,11 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 			CandidateSignature(candidates[c], operands[0]));
 		viable_arity.push_back(ranking.back()->parameters.size());
 	}
+	// 13.4/14.8.2.2: an operand naming a function-template set gains
+	// the specializations the candidate parameter types deduce
+	// (`cout << endl` selects endl<char> against the manipulator
+	// parameter) - the same augmentation the call path runs.
+	DeduceFunctionSetArguments(operands, ranking, sources);
 	size_t builtin_pos = AppendBuiltinCandidate(
 		spelling, operands, member_only, ranking, viable_arity);
 	vector<bool> is_template;

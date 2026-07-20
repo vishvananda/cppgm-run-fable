@@ -1003,6 +1003,10 @@ SemValue SemExprAnalyzer::AnalyzeBinary(const AstExpr& expr)
 		if (TryBinaryOperator(expr.op_spelling, lhs, rhs, overloaded))
 			return overloaded;
 	}
+	// A function set no candidate parameter resolved has no type; the
+	// built-in forms below cannot take it (13.6 lists no such operand).
+	if (!lhs.type || !rhs.type)
+		throw runtime_error("unresolved overloaded function operand");
 	// 13.6: class operands reach the built-in forms through their
 	// conversion functions once user-declared operators are rejected.
 	if (lhs.type->kind == TK_CLASS)

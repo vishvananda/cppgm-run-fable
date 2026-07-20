@@ -495,11 +495,23 @@ const FunctionSpecialization* SemBinder::ResolveExplicitInstantiationSpec(
 		if (!declared)
 			throw runtime_error("explicit instantiation of a "
 			                    "non-function");
-		// Deduce the template arguments from the declared types.
-		for (size_t t = 0;
-		     t < binding.fn_templates.size() && !resolved; t++)
-			resolved = DeduceFunctionTemplateFromTarget(
-				*binding.fn_templates[t], declared);
+		// 14.8.2.6: deduce the template arguments from the declared
+		// types against every candidate template; several matches
+		// reduce by partial ordering (`extern template ostream&
+		// operator<<(ostream&, const char*)` names the char-stream
+		// overload, not the generic one declared before it).
+		for (size_t t = 0; t < binding.fn_templates.size(); t++)
+		{
+			const FunctionSpecialization* deduced =
+				DeduceFunctionTemplateFromTarget(
+					*binding.fn_templates[t], declared);
+			if (!deduced)
+				continue;
+			if (!resolved ||
+			    TemplateCandidateMoreSpecialized(
+			        deduced, resolved, declared->parameters.size()))
+				resolved = deduced;
+		}
 		return resolved;
 	}
 	for (size_t t = 0; t < binding.fn_templates.size() && !resolved; t++)

@@ -1192,14 +1192,16 @@ void FunctionLowerer::LowerIf(const SemNode& node)
 	string end_label = NewLabel("if_end");
 	LowerConditionInto(*node.children[0], then_label, else_label);
 	OpenBlock(then_label);
-	LowerStatement(*node.children[1]->children[0]);
+	// An empty statement binds an empty branch wrapper (6.2p3).
+	if (!node.children[1]->children.empty())
+		LowerStatement(*node.children[1]->children[0]);
 	if (!blocks_.back().terminated)
 	{
 		ReferenceLabel(end_label);
 		Terminate("jump ^" + end_label);
 	}
 	OpenBlock(else_label);
-	if (node.children.size() > 2)
+	if (node.children.size() > 2 && !node.children[2]->children.empty())
 		LowerStatement(*node.children[2]->children[0]);
 	if (!blocks_.back().terminated)
 	{
