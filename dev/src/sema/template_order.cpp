@@ -296,9 +296,22 @@ bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
 	for (size_t i = 0; i < a.params.size(); i++)
 		uniques.push_back(OrderingUniqueType(i));
 	vector<TemplateArg> transformed;
+	vector<TemplateArg> b_pattern;
 	for (size_t i = 0; i < a.pattern.size(); i++)
 	{
 		TemplateArg arg = a.pattern[i];
+		// A deferred alias slot (`__void_t<typename _CTp::type>`,
+		// spelled either as a raw deferred type-id or as an unresolved
+		// alias-anchor specialization) is a non-deduced position: it
+		// constrains matching, not ordering, so the pair drops from
+		// the comparison (both partials of __common_type_fold spell
+		// `void` there when they resolve).
+		bool deferred_slot = !arg.is_value &&
+			((!arg.type && arg.dependent_type) ||
+			 (arg.type && arg.type->kind == TK_TEMPLATE_SPEC &&
+			  arg.type->named && arg.type->named->is_template_anchor));
+		if (deferred_slot && i < b.pattern.size())
+			continue;
 		if (!arg.is_value && arg.type)
 		{
 			arg.type = SubstituteOrderingTypes(arg.type, uniques);
@@ -308,11 +321,15 @@ bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
 		else if (arg.pack_pattern && !arg.is_value)
 			return false;
 		transformed.push_back(arg);
+		if (i < b.pattern.size())
+			b_pattern.push_back(b.pattern[i]);
 	}
+	for (size_t i = a.pattern.size(); i < b.pattern.size(); i++)
+		b_pattern.push_back(b.pattern[i]);
 	vector<TemplateArg> bound(b.params.size());
 	for (size_t i = 0; i < b.params.size(); i++)
 		bound[i].is_pack_slot = b.params[i].pack;
-	if (!DeduceTemplateArgs(b.pattern, transformed, bound, false))
+	if (!DeduceTemplateArgs(b_pattern, transformed, bound, false))
 		return false;
 	// A pack pattern in `b` deducing from a fixed run in `a` (or the
 	// reverse absorption) already decided; a leftover fixed slot in
