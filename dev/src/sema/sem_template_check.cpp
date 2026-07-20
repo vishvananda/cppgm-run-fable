@@ -470,11 +470,8 @@ void SemBinder::RetryDeferredBodies()
 		{
 			AnalyzeDeferredBody(body);
 		}
-		catch (const std::exception& retry_error)
+		catch (const std::exception&)
 		{
-			if (getenv("CPPGM_DEBUG_RETRY"))
-				fprintf(stderr, "RETRY-FAIL %s: %s\n",
-				        body.name.c_str(), retry_error.what());
 			instantiating_ = saved_instantiating;
 			continue;
 		}

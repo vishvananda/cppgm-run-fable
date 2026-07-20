@@ -215,6 +215,9 @@ private:
 	LowerValue ConvertPointerValue(LowerValue value,
 	                               const TypePtr& source,
 	                               const TypePtr& target);
+	LowerValue ConvertMemberPointerValue(LowerValue value,
+	                                     const TypePtr& source,
+	                                     const TypePtr& target);
 	LowerValue ConvertIntegralImmediate(LowerValue value,
 	                                    const TypePtr& source,
 	                                    const TypePtr& target);

@@ -319,16 +319,10 @@ private:
 	// Overload resolution over the class's declared constructors;
 	// -1 when initialization uses the implicit default constructor.
 	void FillCtorDefaultArguments(const ClassInfo& cls,
-	                              const ClassCtor& ctor,
-	                              vector<SemValue>& args);
-	int ResolveClassConstructor(const ClassInfo& cls,
-	                            vector<SemValue>& args, bool copy_init,
-	                            const char* what);
-	// PA36 13.3.1.7 first phase: with a braced initializer, an
-	// initializer-list constructor takes the whole list before any
-	// flattened element pass. Returns the constructor index with the
-	// materialized list (and trailing defaults) in `out_args`, or -1
-	// when none is viable.
+	                              const ClassCtor& ctor, vector<SemValue>& args);
+	int ResolveClassConstructor(const ClassInfo& cls, vector<SemValue>& args,
+	                            bool copy_init, const char* what);
+	// PA36 13.3.1.7 first phase: -1 unless a list ctor takes the list.
 	int SelectListCtorInit(const ClassInfo& cls, const AstExpr& braced,
 	                       vector<SemValue>& out_args);
 	// 13.3.1.4 copy-initialization: converts a differing-class source
@@ -1202,6 +1196,5 @@ public:
 	virtual const NamedTypeInfo* StdTypeInfoEntity();
 	virtual void OnMemberSignatureBegin(Scope* class_scope);
 	virtual void OnMemberSignatureEnd();
-	virtual void OnParameterComposed(const string& name,
-	                                 const TypePtr& type);
+	virtual void OnParameterComposed(const string& name, const TypePtr& type);
 };

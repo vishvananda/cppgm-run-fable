@@ -334,6 +334,94 @@ string FunctionLowerer::AdjustPointerGuarded(const string& value,
 	return result;
 }
 
+
+// PA26: member pointer conversions (null, qualification, 4.11p2
+// base-to-derived) keep the value; a data member pointer converted
+// to a derived class at a non-zero base offset adds the offset.
+LowerValue FunctionLowerer::ConvertMemberPointerValue(
+	LowerValue value, const TypePtr& source, const TypePtr& target)
+{
+	if (value.imm_null && value.text.empty())
+		value.text = "nullptr";
+	// 4.11p2 function member pointers: the base subobject's offset
+	// folds into the value's this-adjustment half (the high 64
+	// bits); call sites of displaced-base classes apply it. Null
+	// (0) survives unchanged.
+	if (source->kind == TK_MEMBER_POINTER &&
+	    target->target->kind == TK_FUNCTION &&
+	    target->named != source->named && !value.imm_null)
+	{
+		int hops = 0;
+		unsigned long long offset = 0;
+		if (BaseSubobjectPath(target->named, source->named, hops,
+		                      offset) == BP_UNIQUE && offset)
+		{
+			string slot = AddMatSlot("pmadj", "i128");
+			Emit("store i128 " + value.text + ", $" + slot);
+			string is_null = NewTemp();
+			Emit(is_null + " = cmp eq i128 " + value.text + ", 0");
+			string shift_label = NewLabel("pmadj_shift");
+			string end_label = NewLabel("pmadj_end");
+			ReferenceLabel(end_label);
+			ReferenceLabel(shift_label);
+			Terminate("branch " + is_null + ", ^" + end_label +
+			          ", ^" + shift_label);
+			OpenBlock(shift_label);
+			string delta = NewTemp();
+			Emit(delta + " = const i64 " + to_string(offset));
+			string wide = NewTemp();
+			Emit(wide + " = convert zext i128 i64 " + delta);
+			string high = NewTemp();
+			Emit(high + " = binary shl i128 " + wide + ", 64");
+			string adjusted = NewTemp();
+			Emit(adjusted + " = binary add i128 " + value.text +
+			     ", " + high);
+			Emit("store i128 " + adjusted + ", $" + slot);
+			ReferenceLabel(end_label);
+			Terminate("jump ^" + end_label);
+			OpenBlock(end_label);
+			value.text = NewTemp();
+			Emit(value.text + " = load i128 $" + slot);
+		}
+	}
+	if (source->kind == TK_MEMBER_POINTER &&
+	    target->target->kind != TK_FUNCTION &&
+	    target->named != source->named && !value.imm_null)
+	{
+		int hops = 0;
+		unsigned long long offset = 0;
+		if (BaseSubobjectPath(target->named, source->named, hops,
+		                      offset) == BP_UNIQUE && offset)
+		{
+			// The null value (0) survives the conversion (4.11p2),
+			// so the displacement applies on the non-null path.
+			string slot = AddMatSlot("pmadj", "i64");
+			Emit("store i64 " + value.text + ", $" + slot);
+			string is_null = NewTemp();
+			Emit(is_null + " = cmp eq i64 " + value.text + ", 0");
+			string shift_label = NewLabel("pmadj_shift");
+			string end_label = NewLabel("pmadj_end");
+			ReferenceLabel(end_label);
+			ReferenceLabel(shift_label);
+			Terminate("branch " + is_null + ", ^" + end_label +
+			          ", ^" + shift_label);
+			OpenBlock(shift_label);
+			string temp = NewTemp();
+			Emit(temp + " = binary add i64 " + value.text + ", " +
+			     to_string(offset));
+			Emit("store i64 " + temp + ", $" + slot);
+			ReferenceLabel(end_label);
+			Terminate("jump ^" + end_label);
+			OpenBlock(end_label);
+			value.text = NewTemp();
+			Emit(value.text + " = load i64 $" + slot);
+			value.imm_int = false;
+		}
+	}
+	value.type = target;
+	return value;
+}
+
 LowerValue FunctionLowerer::ConvertValue(LowerValue value,
                                          const TypePtr& dest,
                                          ELowerConvertContext context)
@@ -342,91 +430,9 @@ LowerValue FunctionLowerer::ConvertValue(LowerValue value,
 	TypePtr source = RemoveTopCv(StripRef(value.type));
 	if (target->kind == TK_POINTER || IsNullPtrType(target))
 		return ConvertPointerValue(std::move(value), source, target);
-	// PA26: member pointer conversions (null, qualification, 4.11p2
-	// base-to-derived) keep the value; a data member pointer converted
-	// to a derived class at a non-zero base offset adds the offset.
 	if (target->kind == TK_MEMBER_POINTER)
-	{
-		if (value.imm_null && value.text.empty())
-			value.text = "nullptr";
-		// 4.11p2 function member pointers: the base subobject's offset
-		// folds into the value's this-adjustment half (the high 64
-		// bits); call sites of displaced-base classes apply it. Null
-		// (0) survives unchanged.
-		if (source->kind == TK_MEMBER_POINTER &&
-		    target->target->kind == TK_FUNCTION &&
-		    target->named != source->named && !value.imm_null)
-		{
-			int hops = 0;
-			unsigned long long offset = 0;
-			if (BaseSubobjectPath(target->named, source->named, hops,
-			                      offset) == BP_UNIQUE && offset)
-			{
-				string slot = AddMatSlot("pmadj", "i128");
-				Emit("store i128 " + value.text + ", $" + slot);
-				string is_null = NewTemp();
-				Emit(is_null + " = cmp eq i128 " + value.text + ", 0");
-				string shift_label = NewLabel("pmadj_shift");
-				string end_label = NewLabel("pmadj_end");
-				ReferenceLabel(end_label);
-				ReferenceLabel(shift_label);
-				Terminate("branch " + is_null + ", ^" + end_label +
-				          ", ^" + shift_label);
-				OpenBlock(shift_label);
-				string delta = NewTemp();
-				Emit(delta + " = const i64 " + to_string(offset));
-				string wide = NewTemp();
-				Emit(wide + " = convert zext i128 i64 " + delta);
-				string high = NewTemp();
-				Emit(high + " = binary shl i128 " + wide + ", 64");
-				string adjusted = NewTemp();
-				Emit(adjusted + " = binary add i128 " + value.text +
-				     ", " + high);
-				Emit("store i128 " + adjusted + ", $" + slot);
-				ReferenceLabel(end_label);
-				Terminate("jump ^" + end_label);
-				OpenBlock(end_label);
-				value.text = NewTemp();
-				Emit(value.text + " = load i128 $" + slot);
-			}
-		}
-		if (source->kind == TK_MEMBER_POINTER &&
-		    target->target->kind != TK_FUNCTION &&
-		    target->named != source->named && !value.imm_null)
-		{
-			int hops = 0;
-			unsigned long long offset = 0;
-			if (BaseSubobjectPath(target->named, source->named, hops,
-			                      offset) == BP_UNIQUE && offset)
-			{
-				// The null value (0) survives the conversion (4.11p2),
-				// so the displacement applies on the non-null path.
-				string slot = AddMatSlot("pmadj", "i64");
-				Emit("store i64 " + value.text + ", $" + slot);
-				string is_null = NewTemp();
-				Emit(is_null + " = cmp eq i64 " + value.text + ", 0");
-				string shift_label = NewLabel("pmadj_shift");
-				string end_label = NewLabel("pmadj_end");
-				ReferenceLabel(end_label);
-				ReferenceLabel(shift_label);
-				Terminate("branch " + is_null + ", ^" + end_label +
-				          ", ^" + shift_label);
-				OpenBlock(shift_label);
-				string temp = NewTemp();
-				Emit(temp + " = binary add i64 " + value.text + ", " +
-				     to_string(offset));
-				Emit("store i64 " + temp + ", $" + slot);
-				ReferenceLabel(end_label);
-				Terminate("jump ^" + end_label);
-				OpenBlock(end_label);
-				value.text = NewTemp();
-				Emit(value.text + " = load i64 $" + slot);
-				value.imm_int = false;
-			}
-		}
-		value.type = target;
-		return value;
-	}
+		return ConvertMemberPointerValue(std::move(value), source,
+		                                 target);
 	bool to_bool = target->kind == TK_FUNDAMENTAL &&
 		target->fundamental == FT_BOOL;
 	bool from_bool = source->kind == TK_FUNDAMENTAL &&
