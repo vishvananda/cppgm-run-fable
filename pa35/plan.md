@@ -110,3 +110,21 @@ Remaining 22 failures cluster on:
   against a dependent/aliased base spelling.
 - locale facet/codecvt and map iterator families: undiagnosed, retest
   after the above land.
+
+### forward_as_tuple ambiguity diagnosis (loop 79 cont.)
+
+`tuple<S&&>(S&&)` finds TWO identical `void(S&&)` ctor candidates: the
+_ImplicitCtor/_ExplicitCtor pair (tuple:1486/1495). They are mutually
+exclusive via defaulted constraint params
+`_ImplicitCtor<_Valid, _UElements...> = true` where _ImplicitCtor =
+`__enable_if_t<_TCC<_Cond>::__is_implicitly_constructible<_Args...>(),
+bool>`. Exclusion requires resolving that alias with the constexpr
+QUALIFIED static member-template call evaluated concretely during ctor
+template deduction; today the constraint parameter type stays deferred
+(dependent alias spec), so enable_if never fails and both candidates
+survive. Fix direction: make the ctor-template deduction path resolve
+defaulted constraint parameter types concretely (the value argument is
+`_TCC<_Cond>::template __is_...<_UElements...>()` with all names bound
+in the deduction partial scope), sharing TryFullValueArgument; verify
+is_convertible<S&&,S&&> evaluates true so implicit wins and explicit
+drops.
