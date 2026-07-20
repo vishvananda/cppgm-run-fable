@@ -236,6 +236,7 @@ const char * const kBuiltinTraits[] = {
 	"__is_nothrow_destructible",
 	"__is_trivially_destructible",
 	"__has_trivial_constructor",
+	"__has_trivial_destructor",
 	"__is_pod",
 	"__is_trivial",
 	"__is_trivially_copyable",

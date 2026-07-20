@@ -813,10 +813,42 @@ void SemBinder::AnalyzeVariableInit(SemNode& item, ScopeBinding& binding,
 			expr = init->expr.get();
 		break;
 	case INIT_PAREN:
+	{
+		// 14.5.3: `T __x(args...)` expands its packs first; the
+		// expanded run then initializes like the written arity.
+		bool has_pack = false;
+		for (size_t i = 0; i < init->args.size(); i++)
+			if (init->args[i]->kind == EK_PACK_EXPANSION)
+				has_pack = true;
+		if (has_pack)
+		{
+			vector<const AstExpr*> items;
+			for (size_t i = 0; i < init->args.size(); i++)
+				items.push_back(init->args[i].get());
+			vector<SemValue> values;
+			AnalyzeInitArguments(items, values);
+			if (values.empty())
+			{
+				// 8.5p10: an empty expanded list value-initializes.
+				item.children.push_back(
+					ZeroValue(RemoveTopCv(binding.type)).node);
+				return;
+			}
+			if (values.size() != 1)
+				throw OutsideBoundary("paren-initializer form");
+			ImplicitConversion conv = ClassifyConversionEx(
+				MakeConversionSource(values[0]), binding.type, true);
+			if (!conv.viable)
+				throw runtime_error("no conversion for initialization");
+			analyzer_.ApplyConversion(values[0], conv, binding.type);
+			item.children.push_back(std::move(values[0].node));
+			return;
+		}
 		if (init->args.size() != 1)
 			throw OutsideBoundary("paren-initializer form");
 		expr = init->args[0].get();
 		break;
+	}
 	case INIT_BRACED:
 		braced = init->expr.get();
 		break;

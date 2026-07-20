@@ -167,6 +167,7 @@ bool IsSemaProbeTraitName(const string& name)
 		name == "__is_nothrow_destructible" ||
 		name == "__is_trivially_destructible" ||
 		name == "__has_trivial_constructor" ||
+		name == "__has_trivial_destructor" ||
 		name == "__is_pod" ||
 		name == "__is_trivial" ||
 		name == "__is_trivially_copyable" ||
@@ -315,12 +316,14 @@ bool SemExprAnalyzer::EvaluateSemaProbeTrait(const string& name,
 	}
 	if (name == "__is_destructible" ||
 	    name == "__is_nothrow_destructible" ||
-	    name == "__is_trivially_destructible")
+	    name == "__is_trivially_destructible" ||
+	    name == "__has_trivial_destructor")
 	{
 		bool can = ProbeTraitDestructible(types[0], no_throw, trivial);
 		if (name == "__is_nothrow_destructible")
 			return can && no_throw;
-		if (name == "__is_trivially_destructible")
+		if (name == "__is_trivially_destructible" ||
+		    name == "__has_trivial_destructor")
 			return can && trivial;
 		return can;
 	}
