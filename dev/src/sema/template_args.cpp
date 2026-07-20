@@ -445,12 +445,7 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 				return arg;
 			}
 			if (!InAbstractTemplateContext())
-			{
-				if (expr && getenv("CPPGM_TRACE_SA"))  // TEMP DEBUG
-					fprintf(stderr, "DEBUG valarg rethrow expr=%s\n",
-					        FlattenExpr(*expr).c_str());
 				throw;
-			}
 		}
 	}
 	else if (!InAbstractTemplateContext())
@@ -1147,10 +1142,8 @@ bool SemBinder::TryFullValueArgument(const AstExpr& expr,
 		out = result.ival;
 		return true;
 	}
-	catch (const std::exception& e)
+	catch (const std::exception&)
 	{
-		if (getenv("CPPGM_TRACE_SA"))  // TEMP DEBUG
-			fprintf(stderr, "DEBUG fullvalarg failed: %s\n", e.what());
 		return false;
 	}
 }

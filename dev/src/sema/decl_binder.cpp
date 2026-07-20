@@ -1,7 +1,5 @@
 #include "sema/decl_binder.h"
 
-#include <cstdio>
-#include <cstdlib>
 #include <stdexcept>
 
 #include "ast/ast_text.h"
@@ -711,18 +709,12 @@ void DeclBinder::BindStaticAssert(const AstDecl& decl)
 	{
 		value = EvaluateConstExpr(*decl.assert_expr, *this);
 	}
-	catch (const std::exception& e)
+	catch (...)
 	{
 		// Outside the PA11 subset: the full PA20 engine evaluates the
 		// analyzed condition (constexpr calls, object values).
 		if (!TryFullConstant(*decl.assert_expr, value))
-		{
-			if (getenv("CPPGM_TRACE_SA"))  // TEMP DEBUG
-				fprintf(stderr, "DEBUG static_assert %s expr=%s: %s\n",
-				        decl.message.c_str(),
-				        FlattenExpr(*decl.assert_expr).c_str(), e.what());
 			throw;
-		}
 	}
 	if (!ConstValueIsNonZero(value))
 		throw runtime_error("static_assert failed " + decl.message);
