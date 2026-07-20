@@ -361,8 +361,10 @@ bool SemBinder::TryFullConstant(const AstExpr& expr, ConstValue& out)
 			return true;
 		}
 	}
-	catch (const std::exception&)
+	catch (const std::exception& e)
 	{
+		if (getenv("CPPGM_TRACE_SA"))  // TEMP DEBUG
+			fprintf(stderr, "DEBUG fullconst failed: %s\n", e.what());
 		return false;
 	}
 }

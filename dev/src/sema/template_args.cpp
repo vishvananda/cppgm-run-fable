@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "sema/const_expr.h"
+#include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -444,7 +445,12 @@ TemplateArg SemBinder::ResolveValueArgument(const AstTemplateArgument& argument,
 				return arg;
 			}
 			if (!InAbstractTemplateContext())
+			{
+				if (expr && getenv("CPPGM_TRACE_SA"))  // TEMP DEBUG
+					fprintf(stderr, "DEBUG valarg rethrow expr=%s\n",
+					        FlattenExpr(*expr).c_str());
 				throw;
+			}
 		}
 	}
 	else if (!InAbstractTemplateContext())
@@ -1133,8 +1139,10 @@ bool SemBinder::TryFullValueArgument(const AstExpr& expr,
 		out = result.ival;
 		return true;
 	}
-	catch (const std::exception&)
+	catch (const std::exception& e)
 	{
+		if (getenv("CPPGM_TRACE_SA"))  // TEMP DEBUG
+			fprintf(stderr, "DEBUG fullvalarg failed: %s\n", e.what());
 		return false;
 	}
 }
@@ -1391,22 +1399,52 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 		if (ExplicitArgumentIsExpansion(argument))
 		{
 			const AstName* pname = ExpansionPackName(argument);
-			if (!pname)
-				return false;
-			const ScopeBinding* pack = UnqualifiedLookup(
-				current_, pname->parts[0].identifier, SLF_ANY);
-			if (!pack || !pack->is_pack || pack->param_index >= 0)
-				return false;
-			for (size_t k = 0; k < pack->pack_args.size(); k++)
+			if (pname)
 			{
-				const TemplateArg& element = pack->pack_args[k];
-				if (TemplateArgIsDependent(element))
+				const ScopeBinding* pack = UnqualifiedLookup(
+					current_, pname->parts[0].identifier, SLF_ANY);
+				if (!pack || !pack->is_pack || pack->param_index >= 0)
+					return false;
+				for (size_t k = 0; k < pack->pack_args.size(); k++)
+				{
+					const TemplateArg& element = pack->pack_args[k];
+					if (TemplateArgIsDependent(element))
+						return false;
+					if (cursor < tmpl.params.size() &&
+					    !tmpl.params[cursor].pack)
+						bound[cursor++] = element;
+					else
+						pack_elements.push_back(element);
+				}
+				continue;
+			}
+			// A pattern expansion (`const _Elements&...`) resolves
+			// through the shared per-element machinery.
+			vector<TemplateArg> expanded;
+			Scope* partial = 0;
+			try
+			{
+				ExpandTemplateArgumentPack(
+					tmpl,
+					tmpl.params[cursor < tmpl.params.size()
+					                ? cursor
+					                : tmpl.params.size() - 1],
+					argument, expanded, partial);
+			}
+			catch (const std::exception&)
+			{
+				return false;
+			}
+			for (size_t k = 0; k < expanded.size(); k++)
+			{
+				if (TemplateArgIsDependent(expanded[k]) ||
+				    expanded[k].pack_pattern)
 					return false;
 				if (cursor < tmpl.params.size() &&
 				    !tmpl.params[cursor].pack)
-					bound[cursor++] = element;
+					bound[cursor++] = expanded[k];
 				else
-					pack_elements.push_back(element);
+					pack_elements.push_back(expanded[k]);
 			}
 			continue;
 		}

@@ -1138,7 +1138,10 @@ size_t SelectBestOverload(const vector<TypePtr>& candidates,
 			best = i;
 	for (size_t i = 0; i < viable.size(); i++)
 		if (i != best && !better(viable[best], viable[i]))
-			throw runtime_error("ambiguous overloaded call");
+			throw runtime_error(
+				"ambiguous overloaded call: " +
+				DescribeType(candidates[viable[best].index]) + " vs " +
+				DescribeType(candidates[viable[i].index]));
 	conversions = viable[best].conversions;
 	return viable[best].index;
 }
