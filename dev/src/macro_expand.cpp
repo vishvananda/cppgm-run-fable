@@ -131,8 +131,11 @@ vector<vector<PPToken>> MacroExpander::CollectArguments(
 				args.clear();
 			if (macro.variadic)
 			{
-				// GNU named variadic tail may be absent entirely
-				if (macro.named_variadic && args.size() == named)
+				// GNU named variadic tail may be absent entirely; the
+				// hosted mode extends the same concession to
+				// __VA_ARGS__ (empty when omitted).
+				if ((macro.named_variadic || gnu_empty_va_) &&
+				    args.size() == named)
 					args.push_back(vector<PPToken>());
 				// 16.3p4: more arguments than named parameters
 				if (args.size() <= named)

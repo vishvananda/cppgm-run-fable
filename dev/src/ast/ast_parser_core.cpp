@@ -589,7 +589,8 @@ void AstParser::SkipDeclAdornments(std::vector<std::string>* abi_tags)
 	for (;;)
 	{
 		State state = Save();
-		if (AtIdentifierSpelled("__attribute__"))
+		if ((AtIdentifierSpelled("__attribute__") ||
+		    AtIdentifierSpelled("__attribute")))
 		{
 			Advance();
 			if (SkipAttributeParens(abi_tags))

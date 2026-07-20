@@ -45,8 +45,13 @@ public:
 	// class, which has none) makes invoking one a logic error.
 	explicit MacroExpander(const MacroTable& table,
 	                       IBuiltinTokenSource* builtins = 0)
-		: table_(table), builtins_(builtins)
+		: table_(table), builtins_(builtins), gnu_empty_va_(false)
 	{}
+
+	// GNU/C++20 concession for the hosted headers: a variadic
+	// invocation may omit the variadic arguments entirely
+	// (`F(a)` for `#define F(x, ...)` leaves __VA_ARGS__ empty).
+	void EnableGnuEmptyVaArgs() { gnu_empty_va_ = true; }
 
 	// New-lines must already be folded into ws_before by the caller.
 	// Arguments are expanded with the same entry point ("as if the
@@ -72,5 +77,6 @@ private:
 
 	const MacroTable& table_;
 	IBuiltinTokenSource* builtins_;
+	bool gnu_empty_va_;
 	PaintInterner paints_;
 };

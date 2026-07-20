@@ -79,6 +79,7 @@ void Preprocessor::EnableHostedMode()
 	if (hosted_)
 		return;
 	hosted_ = true;
+	expander_.EnableGnuEmptyVaArgs();
 	for (const char* const* probe = kHostedProbeNames; *probe; probe++)
 		table_.DefineBuiltin(*probe, kBuiltinHostedProbe);
 	// The source-location builtin operators expand at their spelling

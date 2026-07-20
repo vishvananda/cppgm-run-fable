@@ -90,7 +90,8 @@ void AstParser::ParseClassAdornments(AstDecl& decl)
 	for (;;)
 	{
 		State state = Save();
-		if (AtIdentifierSpelled("__attribute__"))
+		if ((AtIdentifierSpelled("__attribute__") ||
+		    AtIdentifierSpelled("__attribute")))
 		{
 			Advance();
 			if (SkipBalancedParens())
@@ -394,6 +395,12 @@ AstDeclPtr AstParser::ParseEnumSpecifier()
 		decl->enum_key_spelling = Peek().spelling;
 		Advance();
 	}
+	// GNU/[[...]] adornments between the enum key and the name
+	// (`enum __attribute__((__flag_enum__)) _Ios_Openmode`).
+	SkipDeclAdornments();
+	while (SkipSquareAttribute())
+	{
+	}
 	if (AtIdentifier())
 	{
 		decl->name = Peek().spelling;
@@ -425,6 +432,12 @@ AstDeclPtr AstParser::ParseEnumSpecifier()
 			AstEnumerator enumerator;
 			enumerator.name = Peek().spelling;
 			Advance();
+			// GNU/[[...]] adornments on the enumerator
+			// (`_S_end __attribute__((__unused__)) = ...`).
+			SkipDeclAdornments();
+			while (SkipSquareAttribute())
+			{
+			}
 			if (MatchSimple(OP_ASS))
 			{
 				enumerator.value = ParseAssignmentExpression();

@@ -190,7 +190,8 @@ AstDeclPtr AstParser::ParseUsingDeclarationOrDirective()
 	}
 	// Clang using_if_exists: a missing target binds nothing. Other
 	// trailing attributes are discarded.
-	while (AtIdentifierSpelled("__attribute__"))
+	while ((AtIdentifierSpelled("__attribute__") ||
+		    AtIdentifierSpelled("__attribute")))
 	{
 		if (AtSimple(OP_LPAREN, 1) && AtSimple(OP_LPAREN, 2) &&
 		    (Peek(3).spelling == "__using_if_exists__" ||

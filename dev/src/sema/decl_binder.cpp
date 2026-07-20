@@ -1365,13 +1365,19 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
 	// 7.2p10: earlier enumerators are in scope inside the list.
 	current_ = target;
 	vector<ConstValue> raws;
-	ConstValue next(underlying, 0);
+	bool have_prev = false;
+	ConstValue prev(underlying, 0);
 	for (size_t i = 0; i < decl.enumerators.size(); i++)
 	{
 		const AstEnumerator& enumerator = decl.enumerators[i];
-		ConstValue raw = next;
+		// 7.2p5: the successor computes only when this enumerator has
+		// no initializer (a predecessor at the type maximum followed
+		// by an initialized enumerator is fine).
+		ConstValue raw(underlying, 0);
 		if (enumerator.value)
 			raw = EvaluateConstExpr(*enumerator.value, *this);
+		else if (have_prev)
+			raw = SuccessorValue(prev, underlying);
 		raws.push_back(raw);
 		ConstValue value = ConvertConstValue(raw, underlying);
 		if (!SameIntegerValue(raw, value))
@@ -1425,7 +1431,8 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
 		binding.has_value = true;
 		binding.value = value;
 		AddBinding(*target, binding);
-		next = SuccessorValue(value, underlying);
+		prev = value;
+		have_prev = true;
 	}
 	current_ = saved;
 }
