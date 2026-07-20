@@ -72,6 +72,68 @@ de-duplicate work), never as harness/test budget problems.
   `cppgm.tests/course/paN/` of the owning stage when they are not
   header-specific; header-pressure cases stay in `pa35/tests/`.
 
+## Architecture Review
+
+How the shipped implementation maps onto the ownership boundaries
+above, from the loop-80 audit of the actual code:
+
+- **Preprocessor**: GNU named-variadic parameters live in the macro
+  layer as planned — `MacroDefinition` carries `named_variadic` beside
+  `variadic`, `SameDefinition` compares both plus the parameter names,
+  and `__VA_ARGS__` inside a named-variadic replacement list stays a
+  definition-time error. The paste pass stays operand-driven
+  (placemarkers), with nothing keyed on header or macro names.
+- **Sema/templates**: the frontier fixes landed in their true owners.
+  Injected-class-names (9p2/14.6.1p1) are synthesized lazily in
+  `scope_lookup.cpp` and cached per scope, with sibling-specialization
+  collapse decided from typed `spec_template` identity; 14.6.2p3
+  dependent-base skipping is per-base links recorded by `sem_bases.cpp`
+  at instantiation; 11.2 access contexts for instantiated out-of-class
+  members are an RAII stack in `sem_template.cpp`; 14.7.2/14.7.3
+  extern/explicit emission control is the typed `extern_suppressed`
+  flag with symmetric set/clear. The one deliberate stringly artifact
+  is the 14.5.7 alias-expanded return key (`template_spelling.cpp`):
+  a last-resort conservative identity behind the typed comparisons,
+  where an unrenderable form yields an empty key and claims nothing.
+- **Failure handling**: tentative work rolls back typed. A failed
+  class-specialization bind resets the entity/record so the next
+  demand re-instantiates (and rethrows); overload probes catch only
+  `NoViableOverloadError`; the hosted intrinsic-wrapper demotion is
+  gated on typed faults (`UnimplementedBuiltinError`,
+  `UnsupportedVectorForm`) rather than message prefixes, so genuine
+  errors in wrapper bodies propagate (hardened in the audit).
+- **Performance**: heavy-header cost was addressed with caches and
+  representation (injected-name binding cached per scope, spelling
+  keys bounded by a depth limit, specialization records keyed by
+  canonical argument keys), not with limits or budget edits. The
+  worst pa35 compile is 7.9s against the 45s harness budget.
+- **Driver/object path**: unchanged contract — `-c` still lowers
+  through the one LowIR route and writes a real relocatable object;
+  the only lowering-side PA35 changes are the two new RTTI record
+  kinds (now sized structurally off `ERttiVtableKind`) and local-class
+  member mangling from typed scope facts.
+
+## Final Architecture Review
+
+Post-audit state (loop 80): the three blockers found — the gnu_inline
+catch-all demotion, the dropped `vector_size` fact behind it, and the
+string-matched member-specialization retry — are fixed at their
+owners: typed faults in `sem_expr.h` thrown by name resolution, the
+vector-typedef fact carried parser → `AstDecl` → `ScopeBinding`, and
+14.7.3p18 replacement decided at the capture-merge site from the
+`definition_instantiated` provenance flag with duplicates rejected.
+Five course regression tests pin the fixed behaviors. File audit is
+clean after splitting `AdoptFunctionTemplateDefinition` and
+`BindMemberTemplateOfSpecialization` out of the two functions the
+fixes had grown. No fixture gates, no hosted-only sema switches, no
+test/harness edits, no timeout workarounds; `make
+test-report-through-pa35` is green (3271/3271 including the new pins).
+Remaining known debts, accepted deliberately: the 14.5.7 spelling key
+(typed alias-expansion composition would replace it), and GNU vector
+types are represented only as an outside-the-surface fact — real
+vector-type support is future work for whichever stage first needs
+the intrinsics to execute rather than demote.
+
 ## Status (complete)
 
 77/77 pa35 tests pass; through-pa35 green with the file audit clean.
