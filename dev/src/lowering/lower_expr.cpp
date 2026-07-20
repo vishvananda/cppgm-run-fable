@@ -1003,6 +1003,21 @@ string FunctionLowerer::LowerAddressExpr(const SemNode& node)
 	case SN_LITERAL:
 		if (node.is_string_literal)
 			return LowerLiteralValue(node).text;
+		if (node.has_value)
+		{
+			// PA36: a folded constant lvalue (a reference bound to
+			// std::string::npos) materializes its value in a local
+			// slot; the binding observes the value, not the folded
+			// entity's storage identity.
+			LowerValue value = LowerLiteralValue(node);
+			string slot = AddMatSlot(
+				"tmpconst", LowerSlotType(RemoveTopCv(node.type)));
+			Emit("store " + LowerValueType(value.type) + " " +
+			     value.text + ", $" + slot);
+			string address = NewTemp();
+			Emit(address + " = addr $" + slot);
+			return address;
+		}
 		throw OutsideBoundary("address form");
 	default:
 		throw OutsideBoundary("address form");

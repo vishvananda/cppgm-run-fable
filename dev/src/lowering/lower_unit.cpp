@@ -409,11 +409,17 @@ void LowerProgram::RegisterGlobal(const SemNode& item)
 	TopCv(info.type, is_const, is_volatile);
 	if (binding->has_value && is_const)
 		info.folded_const = true;
+	if (item.is_extern_decl)
+		info.extern_declared = true;
 	if (item.weak_def)
 		info.weak = true;
 	else if (item.is_static_decl ||
 	         LowerInUnnamedNamespace(item.entity_scope) ||
-	         (is_const && !item.is_extern_decl))
+	         (is_const && !item.is_extern_decl &&
+	          !info.extern_declared))
+		// 3.5p3: a const object is internal unless some declaration
+		// spelled extern (a prior `extern const` declaration keeps the
+		// later initializing definition external).
 		info.internal = true;
 	if (item.is_thread_local_decl)
 		info.is_thread_local = true;

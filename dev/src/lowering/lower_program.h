@@ -146,6 +146,9 @@ struct LowGlobalInfo
 	bool defined;
 	bool used;
 	bool internal;
+	// PA36 3.5p3: some declaration spelled `extern`, so a later const
+	// definition keeps external linkage.
+	bool extern_declared = false;
 	// PA18: an instantiated static-data-member definition (weak,
 	// external).
 	bool weak = false;

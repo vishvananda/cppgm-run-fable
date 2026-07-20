@@ -559,6 +559,9 @@ void SemBinder::BindQualifiedDestructor(const AstDecl& decl,
 	body.declaring = declaring;
 	body.cls = &cls;
 	body.out_of_class = true;
+	// 7.1.2p4: a spelled-inline out-of-class destructor emits weak
+	// (the hosted exception_ptr shape); it still prints both entries.
+	body.spelled_inline = DeclSpellsInline(decl);
 	cls.dtor_definition = &decl;
 	cls.has_user_dtor = true;
 	InvalidateClassFacts();

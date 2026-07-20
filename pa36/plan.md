@@ -139,11 +139,48 @@ the x86 encoder; semantic bugs (9) go wherever the defect is (lookup,
 instantiation).
 
 Progress notes (loop 81):
-- Fixes 1-4 implemented and committed; failures 33 -> 24.
-- The `__try_use_facet` family stays unresolved at host link: GCC 13
-  libstdc++ declares them `always_inline` so they are never exported;
-  our compile-acceptance concession must not leave real calls behind.
-  Emitting their bodies is the correct demand-driven behavior.
+- Fixes 1-4 (symbol spellings) committed; pa36 33 -> 25 failures.
+- Demand-closure gaps (5) root-caused and committed, three parts:
+  probe traits (__is_trivially_copyable family) reached from the PA11
+  constant-expression walker now route to the analyzer via
+  IConstExprContext::ProbeTraitConstant (hosted __memcpyable enum
+  initializers were silently poisoning instantiations); the retry and
+  pending-instantiation passes alternate until both queues drain; and
+  out-of-class member-template definition pairing accepts the
+  self-qualified return spelling (9.3p5) with the definition's renamed
+  outer parameters kept resolvable through the replay alias scope
+  recorded as the member template's lookup scope. pa36 at 46/69.
+- Fix 6 (inline emission): out-of-class spelled-inline destructors now
+  carry spelled_inline (BindQualifiedDestructor), fixing the strong
+  `.text` exception_ptr dtor ODR clash. Fix 7 (extern const): a prior
+  extern declaration keeps a later const definition external
+  (LowGlobalInfo.extern_declared). Also: a folded constant lvalue
+  (std::string::npos bound to a reference) materializes into a local
+  slot instead of failing the PA14 address boundary.
+
+Remaining failures by root cause (loop 81 end-state triage):
+- `std::hash<T*>` invocability: static_assert "hash function must be
+  invocable" (unordered_set/unordered_map probes).
+- `__remove_reference_t` (GCC builtin alias template) unparsed
+  (dependent-alias-pack-invoke-result).
+- `basic_streambuf does not name a type` during <streambuf> member
+  instantiation (header-inline-unemitted-callee-signature).
+- `_M_erase_at_end does not name a type`: statement decl/expr
+  disambiguation inside instantiated deque bodies (deque-move-assign).
+- vector<Box> brace-init: initializer_list constructor not viable
+  (vector-class-brace-init-ref-capture).
+- Function-local static/thread_local with destructor outside the PA14
+  boundary (inline-thread-local-deque-destructor-once); needs
+  __cxa_atexit/__cxa_thread_atexit registration in lowering.
+- Runtime crashes (139/134): std-function-call,
+  vector-string-substitution, iostream-move-assign,
+  iostream-runtime-symbol, ostream-reference-getloc-vbase,
+  vector-bool-move, plus stdout mismatches (global-istringstream-init,
+  ostringstream-tellp, stringstream-insertion).
+- Relocation-class inspections: imported-global-got-load (GOT),
+  pcrel-data-reloc.
+- ofstream inspect: extern-template member ownership (fix planned as
+  ClassSpecialization extern_declared suppression, task not started).
 
 ## Validation
 
