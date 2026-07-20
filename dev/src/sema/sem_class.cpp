@@ -566,8 +566,10 @@ void SemBinder::BindQualifiedDestructor(const AstDecl& decl,
 	cls.has_user_dtor = true;
 	InvalidateClassFacts();
 	// PA17: an out-of-class destructor definition anchors the
-	// vtable when the destructor is the class's key function.
-	if (cls.is_polymorphic && cls.key_is_dtor)
+	// vtable when the destructor is the class's key function. An
+	// instantiated destructor anchors nothing: specialization
+	// vtables stay weak (14.7.1).
+	if (!instantiating_ && cls.is_polymorphic && cls.key_is_dtor)
 		cls.key_defined_in_tu = true;
 	AnalyzeDeferredBody(body);
 }

@@ -822,6 +822,12 @@ void SemBinder::EnsureSpecialCtor(const ClassInfo& cls_in, int index,
 	AddBinding(*fn_scope, param_binding);
 	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
 	item->synthesized = true;
+	// 14.7.1: a member of an instantiated specialization emits weak on
+	// demand even when its defaulted definition sits out of class
+	// (streambuf's 'basic_streambuf(const basic_streambuf&) = default').
+	if (out_of_class && cls.entity && cls.entity->spec_template &&
+	    !cls.entity->is_template_anchor)
+		item->inline_def = true;
 	SemNode* node = item.get();
 
 	Scope* saved_scope = current_;
@@ -957,7 +963,13 @@ void SemBinder::BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
 	// implicit exception specification (15.4p14).
 	if (overload_index < binding->fn_noexcept_decl.size())
 		binding->fn_noexcept_decl[overload_index] = !may_throw;
-	if (out_of_class)
+	// 14.7.1: an instantiated specialization's member emits weak on
+	// demand even from an out-of-class defaulted definition.
+	bool instantiated_member = cls.entity && cls.entity->spec_template &&
+		!cls.entity->is_template_anchor;
+	if (out_of_class && instantiated_member)
+		node->inline_def = true;
+	if (out_of_class && !instantiated_member)
 		// A source-owned defaulted definition prints unconditionally.
 		AppendItem(std::move(item));
 	else

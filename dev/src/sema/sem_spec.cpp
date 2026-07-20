@@ -978,11 +978,12 @@ void SemBinder::BindMemberExplicitSpecialization(const AstDecl& inner,
 		for (size_t i = 0; i < inner.declarators.size(); i++)
 			if (inner.declarators[i].init)
 				any_init = true;
-		bool declares_function = inner.declarators.size() == 1 &&
-			inner.declarators[0].declarator &&
-			DeclaratorHasParameterClause(
-				*inner.declarators[0].declarator);
-		if (!any_init && declares_function)
+		// 14.7.3p15: without an initializer the explicit
+		// specialization is a declaration, not a definition - a
+		// static data member's symbol stays external (the hosted
+		// __timepunct_cache<char>::_S_timezones shape) and the
+		// generic pattern stops instantiating for the name.
+		if (!any_init)
 			return;
 	}
 	BindDeclaration(inner);
