@@ -6,6 +6,7 @@
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
+using std::to_string;
 
 namespace {
 
@@ -206,7 +207,9 @@ SemValue SemExprAnalyzer::Analyze(const AstExpr& expr)
 	case EK_OFFSETOF:
 		return AnalyzeOffsetof(expr);
 	default:
-		throw OutsideBoundary("expression form");
+		throw runtime_error(
+			"expression form kind " + to_string((int)expr.kind) +
+			" is outside the PA12 assignment boundary");
 	}
 }
 

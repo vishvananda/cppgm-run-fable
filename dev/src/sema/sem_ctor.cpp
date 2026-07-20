@@ -220,7 +220,41 @@ void SemBinder::AppendMemberInit(const ClassInfo& cls,
 			// 8.5p10: `arr()` value-initializes every element.
 			TypePtr element = RemoveTopCv(bare->target);
 			if (element->kind == TK_CLASS)
-				throw OutsideBoundary("class array member initializer");
+			{
+				const ClassInfo* ecls =
+					unit_.classes.Find(element->named);
+				if (!ecls)
+					throw OutsideBoundary(
+						"class array member initializer");
+				for (unsigned long long i = 0; i < bare->bound; i++)
+				{
+					vector<SemValue> no_args;
+					int index = ResolveClassConstructor(
+						*ecls, no_args, false, field.name.c_str());
+					SemNodePtr action = MakeConstructorCall(
+						*ecls, index, false,
+						AddressOfNode(SubscriptNode(
+							ThisFieldExpr(field), i)),
+						vector<SemNodePtr>());
+					// 8.5p7: zero-initialization precedes a
+					// non-user-provided default constructor.
+					bool user_provided = index >= 0 &&
+						!ecls->ctors[index].implicit &&
+						!ecls->ctors[index].defaulted;
+					if (!user_provided)
+					{
+						action->has_value = true;
+						action->value = ConstValue(
+							FT_UNSIGNED_LONG_INT, ecls->size);
+					}
+					ArmSubobjectCleanup(
+						*action, *ecls, false,
+						AddressOfNode(SubscriptNode(
+							ThisFieldExpr(field), i)));
+					out.push_back(std::move(action));
+				}
+				return;
+			}
 			for (unsigned long long i = 0; i < bare->bound; i++)
 			{
 				ClassField element_field;
@@ -352,7 +386,46 @@ void SemBinder::AppendArrayMemberInit(const ClassField& field,
 	TypePtr array = RemoveTopCv(field.type);
 	TypePtr element = RemoveTopCv(array->target);
 	if (element->kind == TK_CLASS)
-		throw OutsideBoundary("class array member initializer");
+	{
+		// 8.5.1: braced elements copy-initialize the leading array
+		// elements; the rest value-initialize.
+		const ClassInfo* ecls = unit_.classes.Find(element->named);
+		if (!ecls)
+			throw OutsideBoundary("class array member initializer");
+		if (braced->arguments.size() > array->bound)
+			throw runtime_error("too many initializers for " +
+			                    field.name);
+		for (unsigned long long i = 0; i < array->bound; i++)
+		{
+			vector<SemValue> ctor_args;
+			if (i < braced->arguments.size())
+				ctor_args.push_back(
+					analyzer_.Analyze(*braced->arguments[i]));
+			int index = ResolveClassConstructor(
+				*ecls, ctor_args, true, field.name.c_str());
+			vector<SemNodePtr> arg_nodes;
+			for (size_t a = 0; a < ctor_args.size(); a++)
+				arg_nodes.push_back(std::move(ctor_args[a].node));
+			SemNodePtr action = MakeConstructorCall(
+				*ecls, index, false,
+				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)),
+				std::move(arg_nodes));
+			bool user_provided = index >= 0 &&
+				!ecls->ctors[index].implicit &&
+				!ecls->ctors[index].defaulted;
+			if (arg_nodes.empty() && !user_provided)
+			{
+				action->has_value = true;
+				action->value =
+					ConstValue(FT_UNSIGNED_LONG_INT, ecls->size);
+			}
+			ArmSubobjectCleanup(
+				*action, *ecls, false,
+				AddressOfNode(SubscriptNode(ThisFieldExpr(field), i)));
+			out.push_back(std::move(action));
+		}
+		return;
+	}
 	if (braced->arguments.size() > array->bound)
 		throw runtime_error("too many initializers for " + field.name);
 	for (unsigned long long i = 0; i < array->bound; i++)
