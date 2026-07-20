@@ -694,7 +694,15 @@ Scope* SemBinder::EnsureArgBindingScope(TemplateInfo& tmpl,
 		                             TemplateLookupScope(tmpl));
 		for (size_t i = 0; i < so_far.size() && i < tmpl.params.size();
 		     i++)
-			BindParamAlias(*partial, tmpl.params[i], so_far[i]);
+		{
+			// A deduced pack slot binds as the pack alias, so later
+			// defaults can expand it (`_Valid = __valid_args<_U...>()`).
+			if (tmpl.params[i].pack && so_far[i].is_pack_slot)
+				BindPackAliasElements(*partial, tmpl.params[i],
+				                      so_far[i].pack_elements);
+			else
+				BindParamAlias(*partial, tmpl.params[i], so_far[i]);
+		}
 	}
 	return partial;
 }

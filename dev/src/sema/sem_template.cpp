@@ -588,7 +588,11 @@ Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
 			if (args[i].is_pack_slot)
 				BindPackAliasElements(*scope, tmpl.params[i],
 				                      args[i].pack_elements);
-			else
+			// A still-unbound slot (a later defaulted parameter mid
+			// -deduction) binds nothing: a valueless placeholder would
+			// make the scope read as an abstract pattern and defer
+			// every default that must evaluate concretely.
+			else if (ArgBound(args[i]))
 				BindParamAlias(*scope, tmpl.params[i], args[i]);
 		}
 		return scope;
@@ -608,7 +612,11 @@ Scope* SemBinder::MakeArgumentAliasScope(const TemplateInfo& tmpl,
 		if (tmpl.params[i].pack)
 			BindPackAlias(*scope, tmpl.params[i], args,
 			              spans[i].first, spans[i].second);
-		else if (spans[i].first < spans[i].second)
+		// An unbound slot (a later defaulted parameter mid-deduction)
+		// binds nothing: a valueless placeholder would make the scope
+		// read as an abstract pattern.
+		else if (spans[i].first < spans[i].second &&
+		         ArgBound(args[spans[i].first]))
 			BindParamAlias(*scope, tmpl.params[i],
 			               args[spans[i].first]);
 	}
