@@ -1169,6 +1169,15 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, spec.args);
 	InstantiationContext context(*this, alias_scope, true);
+	// 11.2: the definition is access-checked as a member of the
+	// specialization (its return type may name protected members
+	// before the binder enters the class scope).
+	struct AccessContextGuard
+	{
+		vector<const ClassInfo*>& stack;
+		~AccessContextGuard() { stack.pop_back(); }
+	} guard = {access_class_contexts_};
+	access_class_contexts_.push_back(unit_.classes.Find(spec.entity));
 	BindDeclaration(*decl.inner);
 	FlushDeferredBodies();
 }

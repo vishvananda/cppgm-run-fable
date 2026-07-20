@@ -1081,6 +1081,12 @@ void SemBinder::CheckMemberAccess(const Scope* owner, EMemberAccess access,
 		contexts.push_back(method_.cls);
 	if (method_.lexical_cls)
 		contexts.push_back(method_.lexical_cls);
+	// 11.2: an out-of-class member definition checks access as a
+	// member of its class (its return type resolves before the class
+	// scope is entered).
+	for (size_t i = 0; i < access_class_contexts_.size(); i++)
+		if (access_class_contexts_[i])
+			contexts.push_back(access_class_contexts_[i]);
 	for (const Scope* scope = current_; scope; scope = scope->parent)
 		if (scope->kind == SCOPE_CLASS)
 			if (const NamedTypeInfo* entity = model_.ScopeEntity(scope))

@@ -1099,6 +1099,11 @@ private:
 	void ClassifyUserAssignOperators(ClassInfo& cls);
 	// Saved method contexts around member-signature composition.
 	vector<MethodContext> signature_contexts_;
+	// 11.2: an out-of-class member definition is access-checked as a
+	// member of its class; the owning class is pushed here for the
+	// whole definition (the return type resolves before the binder
+	// enters the class scope).
+	vector<const ClassInfo*> access_class_contexts_;
 	bool in_bit_field_;
 
 	// --- PA18 template state (sem_template.cpp / template_deduce.cpp) ---
