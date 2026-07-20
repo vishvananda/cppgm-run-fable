@@ -53,6 +53,18 @@ struct IConstExprContext
 		(void)out;
 		return false;
 	}
+	// PA36: the would-it-compile trait family (__is_trivially_copyable
+	// and friends) needs the expression analyzer's probe machinery;
+	// contexts without one leave those traits outside the PA11 subset.
+	virtual bool ProbeTraitConstant(const string& name,
+	                                const std::vector<TypePtr>& types,
+	                                bool& out)
+	{
+		(void)name;
+		(void)types;
+		(void)out;
+		return false;
+	}
 	// PA19: the constant value of a class-typed functional cast
 	// (`B{}` / `B(x)`) through a conversion function whose body is a
 	// single return of a constant expression. False when the name is

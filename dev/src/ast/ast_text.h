@@ -17,6 +17,11 @@ std::string FlattenName(const AstName& name);
 // a leading `typename` keyword is dropped.
 std::string FlattenNameTopLevel(const AstName& name);
 
+// Renders one name component as it appears after a
+// nested-name-specifier (a qualified conversion-function-id spells
+// `operator type` with a space).
+std::string FlattenQualifiedNamePart(const AstNamePart& part);
+
 // Renders the "[...]" capture text of a lambda-introducer.
 std::string FlattenLambdaIntroducer(const AstLambda& lambda);
 

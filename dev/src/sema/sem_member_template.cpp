@@ -563,6 +563,12 @@ void SemBinder::CaptureQualifiedMemberTemplate(const AstDecl& decl,
 				tmpl->member_of = model_.ScopeEntity(declaring);
 				if (!tmpl->member_pattern)
 					tmpl->member_pattern = &decl;
+				// PA36: an out-of-class definition replayed under an
+				// argument-alias scope (renamed enclosing parameters,
+				// 9.3p5) keeps resolving its spellings there.
+				if (inner.kind == DK_FUNCTION && !tmpl->lookup_scope &&
+				    saved && saved->kind == SCOPE_TEMPLATE_PARAMS)
+					tmpl->lookup_scope = saved;
 			}
 			break;
 		}

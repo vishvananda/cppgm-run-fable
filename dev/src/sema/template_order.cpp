@@ -570,6 +570,51 @@ static string SignatureReturnSpelling(const AstSpecifierSeq& specifiers)
 	return text;
 }
 
+// 9.3p5: an out-of-class member definition may spell its return type
+// through the owning class's own qualified name (`typename
+// C<Args>::_Base_ptr` for the in-class `_Base_ptr`), and the
+// qualifier may rename the enclosing template's parameters, so the
+// spelling never matches the in-class form textually. The pairing
+// comparison strips that self-qualifier (with its typename
+// disambiguator); "" when the return carries no such qualifier.
+static string StripReturnSelfQualifier(const AstSpecifierSeq& specifiers,
+                                       const TemplateInfo& tmpl)
+{
+	const NamedTypeInfo* owner = tmpl.member_of;
+	if (!owner)
+		return string();
+	const string& owner_name = owner->spec_template
+		? owner->spec_template->name : owner->name;
+	string text;
+	bool stripped = false;
+	for (size_t i = 0; i < specifiers.size(); i++)
+	{
+		const AstSpecifier& spec = specifiers[i];
+		if (spec.kind == SPEC_KEYWORD &&
+		    (spec.keyword == KW_FRIEND || spec.keyword == KW_INLINE))
+			continue;
+		string piece;
+		if (!stripped && spec.kind == SPEC_TYPE_NAME &&
+		    spec.name.parts.size() > 1 &&
+		    spec.name.parts[0].identifier == owner_name)
+		{
+			stripped = true;
+			for (size_t p = 1; p < spec.name.parts.size(); p++)
+			{
+				if (p > 1)
+					piece += "::";
+				piece += FlattenQualifiedNamePart(spec.name.parts[p]);
+			}
+		}
+		else
+			piece = FlattenSpecifier(spec);
+		if (!text.empty())
+			text += " ";
+		text += piece;
+	}
+	return stripped ? text : string();
+}
+
 bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
                                               const AstDecl& decl,
                                               const AstDecl& inner,
@@ -635,6 +680,20 @@ bool SemBinder::SameFunctionTemplateSignature(TemplateInfo& tmpl,
 	        SignatureReturnSpelling(tmpl.pattern_decl->specifiers),
 	        tmpl.params))
 		return true;
+	// 9.3p5: a definition-pairing comparison additionally accepts the
+	// return spelled through the owning class's qualified name.
+	if (!match_head_spelling)
+	{
+		string stripped = StripReturnSelfQualifier(inner.specifiers,
+		                                           tmpl);
+		if (!stripped.empty() &&
+		    PositionalizeTemplateNames(stripped, params) ==
+		        PositionalizeTemplateNames(
+		            SignatureReturnSpelling(
+		                tmpl.pattern_decl->specifiers),
+		            tmpl.params))
+			return true;
+	}
 	// Differing written returns may still spell one type through
 	// alias templates (14.5.7): the alias-expanded keys decide.
 	string left = AliasExpandedReturnKey(inner.specifiers, params,

@@ -450,20 +450,13 @@ void SemBinder::FinishTemplateChecks()
 	}
 }
 
-void SemBinder::BindTranslationUnit(const AstDecl& unit)
+// PA21 14.6.4.1: an instantiated body that failed mid-instantiation
+// (a sibling specialization still open) re-binds once every class is
+// complete; a still-failing body keeps its poisoned definition.
+// Retried bodies only ever come from instantiation, so they keep
+// binding as instantiated bodies (14.7.1 demand semantics).
+void SemBinder::RetryDeferredBodies()
 {
-	DeclBinder::BindTranslationUnit(unit);
-	// PA25 5.2.8: record the unit's std::type_info entity (when
-	// declared) for the lowering's comparison fold.
-	FindStdTypeInfo();
-	// PA25 14.6.4.1p3: specializations odr-used inside other
-	// instantiations bind after the forward pass, in odr-use order.
-	DrainPendingInstantiations();
-	// PA21 14.6.4.1: an instantiated body that failed mid-instantiation
-	// (a sibling specialization still open) re-binds once every class
-	// is complete; a still-failing body keeps its poisoned definition.
-	// Retried bodies only ever come from instantiation, so they keep
-	// binding as instantiated bodies (14.7.1 demand semantics).
 	for (size_t i = 0; i < retry_bodies_.size(); i++)
 	{
 		// The re-bind may poison further bodies, appending retry
@@ -492,6 +485,26 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 				retry_bodies_[j].deferred_index = deferred_index;
 	}
 	retry_bodies_.clear();
+}
+
+void SemBinder::BindTranslationUnit(const AstDecl& unit)
+{
+	DeclBinder::BindTranslationUnit(unit);
+	// PA25 5.2.8: record the unit's std::type_info entity (when
+	// declared) for the lowering's comparison fold.
+	FindStdTypeInfo();
+	// PA25 14.6.4.1p3: specializations odr-used inside other
+	// instantiations bind after the forward pass, in odr-use order.
+	// PA36: retried member bodies odr-use further specializations
+	// (vector<char>::assign reaching std::__copy_move_a2), and those
+	// bodies can poison more members - the two passes alternate until
+	// both queues drain.
+	DrainPendingInstantiations();
+	while (!retry_bodies_.empty())
+	{
+		RetryDeferredBodies();
+		DrainPendingInstantiations();
+	}
 	// PA22: the mangler spells specialization object names from the
 	// composed pattern pieces, and explicit-argument calls can create
 	// specializations without a deduction pass. Compose the missing

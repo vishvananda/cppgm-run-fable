@@ -1166,6 +1166,17 @@ void SemBinder::InstantiateMemberDefinition(TemplateInfo& tmpl,
 	TemplateInfo shadow;
 	shadow.params = params;
 	shadow.declaring = tmpl.declaring;
+	// PA36: a member-template definition may rename the enclosing
+	// class template's parameters (`_KoV` for `_KeyOfValue`), and its
+	// signature/body keep resolving through those names after this
+	// replay. The alias scope parents inside the class (9.3p5) and
+	// the capture records it as the member template's lookup scope.
+	if (decl.inner && decl.inner->kind == DK_TEMPLATE)
+	{
+		const ClassInfo* cls = unit_.classes.Find(spec.entity);
+		if (cls && cls->members)
+			shadow.declaring = cls->members;
+	}
 	shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, spec.args);
 	InstantiationContext context(*this, alias_scope, true);

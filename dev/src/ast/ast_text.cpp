@@ -428,3 +428,8 @@ string FlattenExpr(const AstExpr& expr)
 	}
 	return string();
 }
+
+string FlattenQualifiedNamePart(const AstNamePart& part)
+{
+	return FlattenNamePart(part, true);
+}

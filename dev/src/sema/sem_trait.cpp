@@ -4,6 +4,7 @@
 
 #include "sema/class_info.h"
 #include "sema/const_eval.h"
+#include "sema/sem_binder.h"
 #include "sema/sem_expr.h"
 
 using std::runtime_error;
@@ -814,4 +815,19 @@ SemValue SemExprAnalyzer::AnalyzeFold(const AstExpr& expr)
 	out.node->token = RenderConstValue(out.node->value);
 	out.node->materialize_const = true;
 	return out;
+}
+
+// PA36: probe traits reached from the PA11 constant-expression walker
+// (hosted helper classes spell __is_trivially_copyable and friends in
+// enumerator initializers) evaluate through an analyzer over the
+// binder, exactly like the expression-level trait path.
+bool SemBinder::ProbeTraitConstant(const string& name,
+                                   const vector<TypePtr>& types,
+                                   bool& out)
+{
+	if (!IsSemaProbeTraitName(name))
+		return false;
+	SemExprAnalyzer analyzer(*this);
+	out = analyzer.EvaluateSemaProbeTrait(name, types);
+	return true;
 }

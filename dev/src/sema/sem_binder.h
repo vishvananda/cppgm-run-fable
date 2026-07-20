@@ -1032,6 +1032,9 @@ private:
 	// instantiation, bound after the unit's forward pass.
 	vector<FunctionSpecialization*> pending_instantiations_;
 	void DrainPendingInstantiations();
+	// PA21 14.6.4.1: one pass over the poisoned member bodies awaiting
+	// re-bind (alternates with the drain until both queues empty).
+	void RetryDeferredBodies();
 	// PA25 5.1.7: prior closure operator parameter lists per enclosing
 	// function body (the mangled local-name prefix context); the
 	// Itanium <lambda-sig> discriminator counts earlier same-signature
@@ -1149,6 +1152,11 @@ public:
 	// PA22 dialect intrinsic (template_args.cpp): the libstdc++
 	// tuple-constraints gate.
 	virtual bool TupleConstraintGate(const AstName& name, ConstValue& out);
+	// PA36 probe traits in constant expressions (sem_trait.cpp): the
+	// would-it-compile family evaluates through the analyzer.
+	virtual bool ProbeTraitConstant(const string& name,
+	                                const std::vector<TypePtr>& types,
+	                                bool& out);
 	// ISemExprHost template hooks.
 	virtual const FunctionSpecialization* DeduceFunctionTemplate(
 		TemplateInfo& tmpl, const vector<SemValue>& args,

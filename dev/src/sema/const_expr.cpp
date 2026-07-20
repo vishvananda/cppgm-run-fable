@@ -808,6 +808,12 @@ static ConstValue EvaluateBuiltinTraitExpr(const AstExpr& expr,
 		}
 		return ConstValue(FT_UNSIGNED_LONG_INT, rank);
 	}
+	// PA36: the probe-trait family routes through the context's
+	// analyzer (the enum initializers of hosted helper classes spell
+	// __is_trivially_copyable and friends).
+	bool probed = false;
+	if (context.ProbeTraitConstant(expr.op_spelling, types, probed))
+		return MakeBool(probed);
 	bool value = EvaluateBuiltinTraitOnTypes(
 		expr.op_spelling, types,
 		[&context](const TypePtr& type) {
