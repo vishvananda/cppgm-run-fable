@@ -60,6 +60,24 @@ const ScopeBinding* ClassChainSearch(const Scope& scope, const string& name,
 	const ScopeBinding* own = FindOwnBinding(scope, name);
 	if (own && BindingPassesFilter(*own, filter))
 		return own;
+	// 9p2: the injected-class-name, synthesized outside `bindings` so
+	// the pinned scope dumps stay unchanged (`T : L::facet` spells its
+	// base as `facet`).
+	if (!own && scope.entity && scope.entity->name == name)
+	{
+		if (!scope.injected_self)
+		{
+			scope.injected_self.reset(new ScopeBinding());
+			scope.injected_self->kind = SB_TYPE;
+			scope.injected_self->name = name;
+			scope.injected_self->type =
+				MakeNamedType(TK_CLASS, scope.entity);
+			scope.injected_self->owner = &scope;
+			scope.injected_self->home = &scope;
+		}
+		if (BindingPassesFilter(*scope.injected_self, filter))
+			return scope.injected_self.get();
+	}
 	// PA18 14.6.2p3: an unqualified name does not search a base that
 	// was dependent in the template pattern. With per-base links
 	// recorded only the dependent-spelled bases skip; the whole-scope

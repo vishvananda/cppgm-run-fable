@@ -237,6 +237,9 @@ struct Scope
 	// unqualified lookup does not search it (qualified and member
 	// -access lookup still do).
 	bool base_dependent;
+	// PA35 9p2: the lazily-synthesized injected-class-name binding
+	// (kept out of `bindings` so the pinned scope dumps are unchanged).
+	mutable std::unique_ptr<ScopeBinding> injected_self;
 	// PA35: the member scopes of exactly the dependent-spelled bases.
 	// A class with one dependent and one concrete base keeps
 	// unqualified lookup into the concrete one (std::function's

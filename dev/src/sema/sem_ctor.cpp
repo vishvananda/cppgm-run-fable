@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <stdexcept>
 
+#include "ast/ast_text.h"
 #include "sema/scope_lookup.h"
 
 using std::runtime_error;
@@ -718,7 +719,9 @@ bool SemBinder::CollectMemberInits(const DeferredBody& body, SemNode& item,
 						}
 				if (base_index == cls.direct_bases.size())
 					throw runtime_error(
-						"member initializer names no member or base");
+					"member initializer " + FlattenName(mem.id) +
+					" names no member or base of " +
+					cls.entity->display);
 				if (plan.base_inits[base_index])
 					throw runtime_error("duplicate base initializer");
 				plan.base_inits[base_index] = &mem;
@@ -783,7 +786,9 @@ bool SemBinder::CollectMemberInits(const DeferredBody& body, SemNode& item,
 			plan.base_init_count++;
 			continue;
 		}
-		throw runtime_error("member initializer names no member or base");
+		throw runtime_error(
+			"member initializer " + FlattenName(mem.id) +
+			" names no member or base of " + cls.entity->display);
 	}
 	return false;
 }
