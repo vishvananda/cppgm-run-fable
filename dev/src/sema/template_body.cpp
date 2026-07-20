@@ -103,11 +103,27 @@ void SemBinder::AttachMemberBodyThis(const ClassInfo& cls,
 // odr-used specializations that never gained one.
 void SemBinder::OnSpecializationOdrUsed(const FunctionSpecialization* spec)
 {
-	// 3.2p2: names in unevaluated operands are not odr-used.
-	if (!spec || in_unevaluated_operand_)
+	if (!spec)
 		return;
 	FunctionSpecialization& used =
 		*const_cast<FunctionSpecialization*>(spec);
+	// 3.2p2: names in unevaluated operands are not odr-used. A
+	// constexpr callee still instantiates (14.7.1p3: constant
+	// evaluation may need its body, e.g. pair's enable_if
+	// constraints probed inside decltype).
+	if (in_unevaluated_operand_)
+	{
+		if (used.owner && used.owner->has_definition &&
+		    !used.body_emitted)
+		{
+			const AstDecl* pattern = used.explicit_def
+				? used.explicit_def
+				: used.owner->pattern_decl;
+			if (pattern && DeclHasConstexpr(*pattern))
+				InstantiateFunctionBody(*used.owner, used);
+		}
+		return;
+	}
 	used.odr_used = true;
 	if (!used.owner || !used.owner->has_definition || used.body_emitted)
 		return;
