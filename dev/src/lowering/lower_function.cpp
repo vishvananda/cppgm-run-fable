@@ -82,7 +82,8 @@ string FunctionLowerer::Lower()
 	// PA27: the hidden trailing vbase pointers of the signature.
 	declared_param_count_ = params_.size();
 	hidden_params_ =
-		HiddenSignatureParams(const_cast<LowFunctionInfo&>(info_));
+		HiddenSignatureParams(const_cast<LowFunctionInfo&>(info_),
+		                      program_.SeparateCompilation());
 	for (size_t i = 0; i < hidden_params_.size(); i++)
 	{
 		const HiddenParam& hp = hidden_params_[i];
@@ -1464,7 +1465,8 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 	// PA27: the hidden trailing vbase pointers keep their names.
 	{
 		const vector<HiddenParam>& hidden =
-			HiddenSignatureParams(const_cast<LowFunctionInfo&>(info));
+			HiddenSignatureParams(const_cast<LowFunctionInfo&>(info),
+			                      SeparateCompilation());
 		for (size_t i = 0; i < hidden.size(); i++)
 		{
 			params += (at ? ", " : "") + string("%") +

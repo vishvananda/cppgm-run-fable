@@ -90,13 +90,28 @@ string FunctionLowerer::AdjustToBase(const string& address,
 	unsigned long long offset = 0;
 	if (BaseSubobjectPath(from, to, hops, offset) == BP_UNIQUE)
 		return AdjustToBaseHops(address, hops, offset);
-	// PA27: a shared virtual-base target projects its static
-	// complete-object offset (the supported binding contexts view
-	// complete objects).
-	unsigned long long complete = 0;
-	if (from && from->class_record &&
-	    CompleteObjectOffset(*from->class_record, to, complete))
-		return AdjustToBaseHops(address, 1, complete);
+	if (from && from->class_record)
+	{
+		// PA36 host mode: the bound object need not be a complete
+		// `from` (a basic_istream& inside an iostream binds to
+		// basic_ios&), so a polymorphic class reads the virtual-base
+		// offset from its installed vtable.
+		size_t index = 0;
+		unsigned long long remainder = 0;
+		if (program_.SeparateCompilation() &&
+		    from->class_record->is_polymorphic &&
+		    VirtualBasePath(*from->class_record, to, index, remainder))
+			return VBaseRemainderHops(
+				DynamicVBaseAddress(address, index),
+				*from->class_record->vbases[index].cls, to, remainder,
+				true);
+		// PA27: a shared virtual-base target projects its static
+		// complete-object offset (the supported binding contexts view
+		// complete objects).
+		unsigned long long complete = 0;
+		if (CompleteObjectOffset(*from->class_record, to, complete))
+			return AdjustToBaseHops(address, 1, complete);
+	}
 	// Sema accepted the conversion, so the path resolves; a non-unique
 	// result here is a desync between the layers, not a valid program.
 	throw std::runtime_error(
@@ -422,7 +437,8 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	// subobject row from the enclosing complete object).
 	{
 		const vector<HiddenParam>& hidden =
-			HiddenSignatureParams(program_.CalleeEntryInfo(callee));
+			HiddenSignatureParams(program_.CalleeEntryInfo(callee),
+			                      program_.SeparateCompilation());
 		if (!hidden.empty())
 			AppendHiddenArguments(hidden, arg_nodes, arg_texts, 0,
 			                      this_text, arguments);
@@ -1416,7 +1432,8 @@ string FunctionLowerer::IndirectCallSignature(const TypePtr& fn_type,
 	// PA27: hidden trailing vbase pointers keep their names.
 	{
 		vector<HiddenParam> hidden;
-		HiddenParamsForType(fn_type, method_object, hidden);
+		HiddenParamsForType(fn_type, method_object,
+		                    program_.SeparateCompilation(), hidden);
 		for (size_t i = 0; i < hidden.size(); i++, at++)
 			signature += (at ? ", " : "") + string("%") +
 				hidden[i].low_name + " : ptr";

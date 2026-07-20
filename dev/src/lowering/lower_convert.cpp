@@ -225,9 +225,76 @@ LowerValue FunctionLowerer::ConvertPointerValue(LowerValue value,
 				value.text = AdjustPointerGuarded(value.text,
 				                                  -(long long)offset);
 		}
+		else if (program_.SeparateCompilation() && from->class_record)
+		{
+			// PA36: 4.10p3 into a shared virtual base - the value has
+			// no carrier node, so the address adjusts directly (the
+			// dynamic vtable read for polymorphic classes).
+			size_t vbase_index = 0;
+			unsigned long long remainder = 0;
+			if (VirtualBasePath(*from->class_record, to, vbase_index,
+			                    remainder))
+				value.text = AdjustPointerToVBase(
+					value.text, from, to, vbase_index, remainder,
+					value.known_nonnull);
+		}
 	}
 	value.type = target;
 	return value;
+}
+
+string FunctionLowerer::AdjustPointerToVBase(const string& value,
+                                             const NamedTypeInfo* from,
+                                             const NamedTypeInfo* to,
+                                             size_t vbase_index,
+                                             unsigned long long remainder,
+                                             bool known_nonnull)
+{
+	const ClassInfo& record = *from->class_record;
+	if (!record.is_polymorphic)
+	{
+		// No vpointer to read: the static complete-object offset (the
+		// whole-program PA27 convention for supported contexts).
+		unsigned long long complete = 0;
+		if (!CompleteObjectOffset(record, to, complete))
+			throw std::runtime_error(
+				"virtual-base adjustment lost its path");
+		if (known_nonnull || !complete)
+			return AdjustToBaseHops(value, 1, complete);
+		return AdjustPointerGuarded(value, (long long)complete);
+	}
+	const ClassInfo& carrier = *record.vbases[vbase_index].cls;
+	if (known_nonnull)
+		return VBaseRemainderHops(DynamicVBaseAddress(value, vbase_index),
+		                          carrier, to, remainder, true);
+	// The null guard mirrors AdjustPointerGuarded: the vtable read
+	// happens on the non-null arm only.
+	const_cast<LowFunctionInfo&>(info_).guarded_body = true;
+	string slot = AddMatSlot("basecast", "ptr");
+	string is_null = NewTemp();
+	Emit(is_null + " = cmp eq ptr " + value + ", 0");
+	string null_label = NewLabel("basecast_null");
+	string adjust_label = NewLabel("basecast_adjust");
+	string end_label = NewLabel("basecast_end");
+	ReferenceLabel(null_label);
+	ReferenceLabel(adjust_label);
+	Terminate("branch " + is_null + ", ^" + null_label + ", ^" +
+	          adjust_label);
+	OpenBlock(null_label);
+	Emit("store ptr 0, $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(adjust_label);
+	string adjusted = VBaseRemainderHops(
+		DynamicVBaseAddress(value, vbase_index), carrier, to, remainder,
+		true);
+	Emit("store ptr " + adjusted + ", $" + slot);
+	ReferenceLabel(end_label);
+	Terminate("jump ^" + end_label);
+	OpenBlock(end_label);
+	string result = NewTemp();
+	Emit(result + " = load ptr $" + slot);
+	return result;
 }
 
 // A runtime class-pointer adjustment across a displaced base: null

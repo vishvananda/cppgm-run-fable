@@ -175,6 +175,7 @@ bool ScopeInInstantiation(const Scope* scope)
 
 void AppendParamCarried(const TypePtr& fn_type, bool is_method,
                         const VBaseDemands* demands,
+                        bool separate_compilation,
                         vector<HiddenParam>& out)
 {
 	size_t counter = 0;
@@ -185,6 +186,11 @@ void AppendParamCarried(const TypePtr& fn_type, bool is_method,
 		const ClassInfo* cls =
 			ParamVBaseClass(fn_type->parameters[p], collapsed);
 		if (!cls)
+			continue;
+		// PA36 host mode: a polymorphic class reads its virtual-base
+		// offsets from the installed vtable, so its parameters carry
+		// nothing and the signature matches the host ABI exactly.
+		if (separate_compilation && cls->is_polymorphic)
 			continue;
 		vector<size_t> entries;
 		ParamCarriedEntries(*cls, collapsed, entries);
@@ -207,6 +213,7 @@ void AppendParamCarried(const TypePtr& fn_type, bool is_method,
 }  // namespace
 
 void HiddenParamsForType(const TypePtr& fn_type, bool is_method,
+                         bool separate_compilation,
                          vector<HiddenParam>& out)
 {
 	out.clear();
@@ -227,10 +234,11 @@ void HiddenParamsForType(const TypePtr& fn_type, bool is_method,
 				out.push_back(hidden);
 			}
 	}
-	AppendParamCarried(fn_type, is_method, 0, out);
+	AppendParamCarried(fn_type, is_method, 0, separate_compilation, out);
 }
 
-const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info)
+const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info,
+                                                 bool separate_compilation)
 {
 	if (info.hidden_ready)
 		return info.hidden;
@@ -315,7 +323,8 @@ const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info)
 			                    demands);
 		filter = &demands;
 	}
-	AppendParamCarried(info.type, info.is_method, filter, info.hidden);
+	AppendParamCarried(info.type, info.is_method, filter,
+	                   separate_compilation, info.hidden);
 	return info.hidden;
 }
 
@@ -365,6 +374,11 @@ void FunctionLowerer::EmitParamVBasePointers(size_t param_pos,
 	bool collapsed = false;
 	const ClassInfo* cls = ParamVBaseClass(child.type, collapsed);
 	if (!cls)
+		return;
+	// PA36 host mode: polymorphic classes carry nothing; their access
+	// paths read offsets from the installed vtable, which stays right
+	// when the parameter views a non-complete object.
+	if (program_.SeparateCompilation() && cls->is_polymorphic)
 		return;
 	VBaseParamMap& map = vbase_params_[params_[param_pos].low_name];
 	map.cls = cls;
@@ -715,18 +729,25 @@ string FunctionLowerer::VBaseSubobjectAddress(const SemNode& object,
 		return projected;
 	}
 	// Dynamic carrier: the vbase offset lives in the vtable header.
+	return VBaseRemainderHops(DynamicVBaseAddress(base, vbase_index),
+	                          *carrier.cls,
+	                          owner,
+	                          remainder, with_projection);
+}
+
+string FunctionLowerer::DynamicVBaseAddress(const string& address,
+                                            size_t vbase_index)
+{
 	string vpointer = NewTemp();
-	Emit(vpointer + " = load ptr " + base);
+	Emit(vpointer + " = load ptr " + address);
 	string slot = NewTemp();
 	Emit(slot + " = index i8 " + vpointer + ", -" +
 	     to_string(24 + 8 * (unsigned long long)vbase_index));
 	string offset = NewTemp();
 	Emit(offset + " = load i64 " + slot);
 	string at = NewTemp();
-	Emit(at + " = index i8 " + base + ", " + offset);
-	return VBaseRemainderHops(at, *carrier.cls,
-	                          owner,
-	                          remainder, with_projection);
+	Emit(at + " = index i8 " + address + ", " + offset);
+	return at;
 }
 
 // The hops from a carrier virtual base down to the owner subobject:
@@ -786,12 +807,13 @@ void FunctionLowerer::AppendCallHiddenArguments(
 	vector<HiddenParam> type_hidden;
 	const vector<HiddenParam>* hidden = 0;
 	if (direct)
-		hidden = &HiddenSignatureParams(program_.CalleeEntryInfo(callee));
+		hidden = &HiddenSignatureParams(program_.CalleeEntryInfo(callee),
+		                                program_.SeparateCompilation());
 	else
 	{
 		HiddenParamsForType(
 			pm_call ? MemberPointerCallSignature(fn_type) : fn_type,
-			pm_call, type_hidden);
+			pm_call, program_.SeparateCompilation(), type_hidden);
 		hidden = &type_hidden;
 	}
 	if (hidden->empty())

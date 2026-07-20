@@ -121,11 +121,15 @@ void ParamCarriedEntries(const ClassInfo& cls, bool collapsed,
                          vector<size_t>& out);
 
 // The hidden trailing pointers of a function's signature (cached).
-const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info);
+// PA36 host mode drops the carried entries of polymorphic classes
+// (their offsets read from the installed vtable instead).
+const vector<HiddenParam>& HiddenSignatureParams(LowFunctionInfo& info,
+                                                 bool separate_compilation);
 
 // The type-only variant for indirect call signatures (function
 // pointers, member pointers, vtable dispatch).
 void HiddenParamsForType(const TypePtr& fn_type, bool is_method,
+                         bool separate_compilation,
                          vector<HiddenParam>& out);
 
 struct LowGlobalInfo

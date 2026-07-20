@@ -364,10 +364,22 @@ private:
 	                          const NamedTypeInfo* owner,
 	                          unsigned long long remainder,
 	                          bool with_projection);
+	// PA36: a virtual-base subobject address read through the object's
+	// installed vpointer (header entry k at addresspoint - 24 - 8k) -
+	// correct for non-complete objects, unlike the static collapse.
+	string DynamicVBaseAddress(const string& address, size_t vbase_index);
 	// A runtime class-pointer adjustment across a displaced base:
 	// branches so null stays null (4.10p3 / 5.2.9p11); the PA27 shape
 	// stores 0 / the shifted address into one $basecast slot.
 	string AdjustPointerGuarded(const string& value, long long delta);
+	// PA36: the pointer form of a conversion into a shared virtual
+	// base - dynamic vtable-read for polymorphic host-mode classes,
+	// static complete-object offset otherwise; null stays null.
+	string AdjustPointerToVBase(const string& value,
+	                            const NamedTypeInfo* from,
+	                            const NamedTypeInfo* to, size_t vbase_index,
+	                            unsigned long long remainder,
+	                            bool known_nonnull);
 	// PA26 member pointers (lower_member_pointer.cpp): `&C::member`
 	// constants, `.*` / `->*` data-member access, and the bound
 	// member-pointer call pieces.
