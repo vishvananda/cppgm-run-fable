@@ -2,7 +2,6 @@
 
 #include "sema/sem_trait.h"
 
-#include <cstdlib>
 #include <stdexcept>
 
 #include "numeric_literals.h"

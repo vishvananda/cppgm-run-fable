@@ -309,7 +309,9 @@ bool SemBinder::PartialAtLeastAsSpecialized(const PartialSpecialization& a,
 		bool deferred_slot = !arg.is_value &&
 			((!arg.type && arg.dependent_type) ||
 			 (arg.type && arg.type->kind == TK_TEMPLATE_SPEC &&
-			  arg.type->named && arg.type->named->is_template_anchor));
+			  arg.type->named && arg.type->named->is_template_anchor &&
+			  arg.type->named->spec_template &&
+			  arg.type->named->spec_template->kind == TMPL_ALIAS));
 		if (deferred_slot && i < b.pattern.size())
 			continue;
 		if (!arg.is_value && arg.type)
