@@ -25,6 +25,7 @@ mir_model::Operand MakeReg(X64Register reg);
 mir_model::Operand MakeXmm(XmmRegister xmm);
 mir_model::Operand MakeImm(long long value);
 mir_model::Operand MakeSymbol(const std::string & name, bool global);
+mir_model::Operand MakeGot(const std::string & name);
 mir_model::Operand MakeLabel(const std::string & label);
 mir_model::Operand MakeDeref(X64Register reg, long long offset);
 mir_model::Operand MakeFloatImm(const LowIROperand & literal,
@@ -100,6 +101,8 @@ struct ProgramFacts
 	const LowIRProgramInfo * info = 0;
 	// thread-local global name -> declared wrapper symbol
 	std::map<std::string, std::string> tls_wrapper_of_global;
+	// PA36 host data model (see LowerLowIRProgramToMir).
+	bool host_object = false;
 };
 
 // Shared LowIR fact predicates (single owners; see lowir_to_mir_value.cpp,

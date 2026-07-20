@@ -79,6 +79,21 @@ void EmitModRM(const ModRMForm& form, const X86Instruction& instr,
 
 	if (!instr.mem.has_base)
 	{
+		if (instr.mem.abs_mode != X86Mem::AM_ABS)
+		{
+			// mod=00 with rm=101: [rip + disp32]. The field patches
+			// pc-relative to the label (or its GOT slot); Append folds
+			// any trailing immediate bytes into the addend.
+			out.push_back(reg_bits | 5);
+			code.has_patch = true;
+			code.patch.offset = out.size();
+			code.patch.size = 4;
+			code.patch.kind = instr.mem.abs_mode == X86Mem::AM_GOT
+				? X86_PATCH_GOTPCREL : X86_PATCH_PCREL_DATA;
+			code.patch.imm = instr.mem.abs;
+			PutLittleEndian(out, 0, 4);
+			return;
+		}
 		// mod=00 with SIB base=101 and no index: absolute [disp32].
 		out.push_back(reg_bits | 4);
 		out.push_back(0x25);
@@ -551,6 +566,14 @@ void X86CodeBuffer::Append(const X86Instruction& instr)
 	X86MachineCode code = EncodeX86Instruction(instr);
 	if (code.has_patch)
 	{
+		// The CPU resolves a rip-relative field against the end of the
+		// whole instruction, so trailing immediate bytes fold into the
+		// addend (the patch arithmetic ends at the field itself).
+		if (code.patch.kind == X86_PATCH_PCREL_DATA ||
+		    code.patch.kind == X86_PATCH_GOTPCREL)
+			code.patch.imm.addend -= code.bytes.size() -
+				(code.patch.offset +
+				 static_cast<size_t>(code.patch.size));
 		code.patch.offset += bytes_.size();
 		patches_.push_back(code.patch);
 	}

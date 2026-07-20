@@ -1206,14 +1206,17 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 	return "_Z" + MangleFunctionEncoding(scope, name, type, subs);
 }
 
-string MangleVariableObjectName(const Scope* scope, const string& name)
+string MangleVariableObjectName(const Scope* scope, const string& name,
+                                bool thread_local_storage)
 {
 	Substitutions subs;
 	vector<NameComponent> parts = ScopeComponents(scope);
-	// An unscoped variable's symbol is its unmangled source name
-	// (5.1.1: only nested and std-scoped names get an encoding).
+	// An unscoped variable encodes as the course `_Z<name>` spelling
+	// (the PA30 abi layer and the PA36 relocation fixtures pin it) -
+	// except host TLS, whose g++-parity interop (_ZTW/_ZTH wrappers,
+	// host-built providers) needs the unmangled source name.
 	if (parts.empty())
-		return name;
+		return thread_local_storage ? name : "_Z" + SourceName(name);
 	if (parts.size() == 1 && !parts[0].args && parts[0].name == "std")
 		// 5.1.4.2: the abbreviation St spells the std prefix.
 		return "_ZSt" + SourceName(name);

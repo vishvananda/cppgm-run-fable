@@ -320,11 +320,13 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		callee.name = ins.callee;
 		if(!ins.callee_is_temp) {
 			// pointer-valued global cell: call through the stored pointer
+			mir_model::Operand cell =
+				global_mem_operand(ins.callee, XR_R10);
 			mir_model::Instruction & load =
 				emit(mir_model::Instruction::MI_LOAD);
 			load.type = "ptr";
 			load.operands.push_back(MakeReg(XR_R10));
-			load.operands.push_back(MakeSymbol(ins.callee, true));
+			load.operands.push_back(cell);
 		}
 		else {
 			const ValueInfo & info = values_[ins.callee];
@@ -338,12 +340,13 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			   !facts_.info->is_function(def->operands[0].name) &&
 			   !storage_is_tls(def->operands[0])) {
 				// pointer stored in the named cell, not the cell address
+				mir_model::Operand cell = global_mem_operand(
+					def->operands[0].name, XR_R10);
 				mir_model::Instruction & load =
 					emit(mir_model::Instruction::MI_LOAD);
 				load.type = "ptr";
 				load.operands.push_back(MakeReg(XR_R10));
-				load.operands.push_back(
-					MakeSymbol(def->operands[0].name, true));
+				load.operands.push_back(cell);
 			}
 			else if(location.kind == ValueLocation::VL_FRAME) {
 				mir_model::Instruction & load =
@@ -437,9 +440,11 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 				}
 			}
 			else if(arg.kind == LOWIR_OPERAND_GLOBAL) {
-				emit_mov(MakeReg(target),
-				         MakeSymbol(arg.name,
-				                    !facts_.info->is_function(arg.name)));
+				if(facts_.info->is_function(arg.name))
+					emit_mov(MakeReg(target),
+					         MakeSymbol(arg.name, false));
+				else
+					emit_global_address(target, arg.name);
 			}
 			else if(operand_is_pending(arg)) {
 				const LowIRInstruction * load = take_pending(arg);
@@ -1273,9 +1278,10 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 	}
 	else if(source.kind == LOWIR_OPERAND_GLOBAL) {
 		invalidate_rax();
-		emit_mov(MakeReg(XR_RAX),
-		         MakeSymbol(source.name,
-		                    !facts_.info->is_function(source.name)));
+		if(facts_.info->is_function(source.name))
+			emit_mov(MakeReg(XR_RAX), MakeSymbol(source.name, false));
+		else
+			emit_global_address(XR_RAX, source.name);
 	}
 	else if(operand_is_pending(source)) {
 		const LowIRInstruction * load = take_pending(source);

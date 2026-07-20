@@ -176,6 +176,11 @@ void ProgramImage::Layout(vector<unsigned char>& payload,
 		for (size_t p = 0; p < items_[i].patches.size(); p++)
 		{
 			const X86Patch& patch = items_[i].patches[p];
+			if (patch.kind == X86_PATCH_GOTPCREL)
+				// The private linker rewrites GOT references to
+				// synthesized slots before layout.
+				throw runtime_error(
+					"GOT reference reached private image layout");
 			unsigned long long value = patch.imm.addend;
 			if (patch.imm.has_label)
 			{
@@ -190,7 +195,8 @@ void ProgramImage::Layout(vector<unsigned char>& payload,
 						label_value[static_cast<size_t>(patch.imm.label)];
 			}
 			size_t at = body_offset[i] + patch.offset;
-			if (patch.kind == X86_PATCH_PCREL)
+			if (patch.kind == X86_PATCH_PCREL ||
+			    patch.kind == X86_PATCH_PCREL_DATA)
 				value -= payload_base + at + patch.size;
 			if (patch.kind != X86_PATCH_TRUNC &&
 			    !SignExtendsFromField(value, patch.size))

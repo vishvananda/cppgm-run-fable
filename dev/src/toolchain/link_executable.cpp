@@ -655,9 +655,58 @@ void LinkExecutable(vector<LinkInput> linked, const string & outfile,
 		}
 	}
 
+	// PA36 host data model: GOT-mediated references (imported globals
+	// in -c objects) resolve through synthesized 8-byte address slots
+	// - the static image's stand-in for the dynamic linker's GOT.
+	// Rewritten fields become ordinary pc-relative data references.
+	vector<ImageItem> got_slots;
+	map<std::pair<int, unsigned long long>, int> got_slot_labels;
+	for (size_t m = 0; m < linked.size(); m++)
+	{
+		ObjectModule & module = linked[m].module;
+		for (size_t i = 0; i < module.items.size(); i++)
+		{
+			ImageItem & item = module.items[i];
+			for (size_t p = 0; p < item.patches.size(); p++)
+			{
+				X86Patch & patch = item.patches[p];
+				if (patch.kind != X86_PATCH_GOTPCREL)
+					continue;
+				std::pair<int, unsigned long long> key(
+					patch.imm.label, patch.imm.addend);
+				map<std::pair<int, unsigned long long>, int>::
+					const_iterator known = got_slot_labels.find(key);
+				int slot_label;
+				if (known != got_slot_labels.end())
+				{
+					slot_label = known->second;
+				}
+				else
+				{
+					ImageItem slot;
+					slot.align = 8;
+					slot.bytes.assign(8, 0);
+					X86Patch address;
+					address.offset = 0;
+					address.size = 8;
+					address.kind = X86_PATCH_ABS;
+					address.imm = patch.imm;
+					slot.patches.push_back(address);
+					slot_label = static_cast<int>(
+						total_items + got_slots.size());
+					got_slots.push_back(slot);
+					got_slot_labels[key] = slot_label;
+				}
+				patch.kind = X86_PATCH_PCREL_DATA;
+				patch.imm = X86Imm::Label(slot_label, 0);
+			}
+		}
+	}
+
 	// The private unwinder's region table, plus the support module's
 	// pointer slot aimed at it (both already in global label space).
-	int table_label = static_cast<int>(total_items);
+	int table_label =
+		static_cast<int>(total_items + got_slots.size());
 	ImageItem region_table =
 		BuildEhRegionTable(linked, item_base, definitions, table_label);
 	{
@@ -685,12 +734,15 @@ void LinkExecutable(vector<LinkInput> linked, const string & outfile,
 	}
 
 	ProgramImage image;
-	image.SetLabelCount(static_cast<int>(total_items) + 1);
+	size_t total_labels = total_items + got_slots.size() + 1;
+	image.SetLabelCount(static_cast<int>(total_labels));
 	for (size_t m = 0; m < linked.size(); m++)
 		for (size_t i = 0; i < linked[m].module.items.size(); i++)
 			image.AddItem(linked[m].module.items[i]);
+	for (size_t s = 0; s < got_slots.size(); s++)
+		image.AddItem(got_slots[s]);
 	image.AddItem(region_table);
-	for (size_t i = 0; i <= total_items; i++)
+	for (size_t i = 0; i < total_labels; i++)
 		image.BindLabel(static_cast<int>(i), i);
 	image.WriteExecutable(outfile);
 }

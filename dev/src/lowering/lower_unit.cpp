@@ -328,7 +328,8 @@ LowGlobalInfo& LowerProgram::GlobalEntry(const Scope* scope,
 			scope, *binding->var_spec_template,
 			binding->var_spec_args);
 	else
-		info.object_name = MangleVariableObjectName(scope, name);
+		info.object_name = MangleVariableObjectName(
+			scope, name, binding->is_thread_local);
 	global_index_[key] = globals_.size();
 	globals_.push_back(info);
 	return globals_.back();

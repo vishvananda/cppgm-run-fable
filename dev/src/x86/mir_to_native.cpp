@@ -479,7 +479,18 @@ X86Mem FunctionEncoder::MemOperand(const Op & op, long long extra)
 	case Op::OP_DEREF:
 		return X86Mem(Reg(op), static_cast<int>(op.offset + extra));
 	case Op::OP_GLOBAL:
+		// PA36 host data model: -c objects address data rip-relative
+		// (R_X86_64_PC32); the private executable keeps the absolute
+		// [disp32] form its pinned encodings expect.
+		if (env_.program().host_tls)
+			return X86Mem::RipLabel(X86Imm::Label(
+				env_.SymbolLabel(op.text),
+				static_cast<unsigned long long>(extra)));
 		return X86Mem::Absolute(X86Imm::Label(
+			env_.SymbolLabel(op.text),
+			static_cast<unsigned long long>(extra)));
+	case Op::OP_GOT:
+		return X86Mem::GotLabel(X86Imm::Label(
 			env_.SymbolLabel(op.text),
 			static_cast<unsigned long long>(extra)));
 	default:
@@ -520,6 +531,11 @@ void FunctionEncoder::EmitMov(const Ins & ins)
 	else if (src.kind == Op::OP_IMM)
 		code_.MovRegImm(Reg(dst), X86Imm::Constant(
 			static_cast<unsigned long long>(src.imm)));
+	else if (src.kind == Op::OP_GLOBAL && env_.program().host_tls)
+		// PA36 host data model: data addresses materialize
+		// rip-relative like the accesses (R_X86_64_PC32).
+		code_.Lea(Reg(dst), X86Mem::RipLabel(
+			X86Imm::Label(env_.SymbolLabel(src.text), 0)));
 	else if (src.kind == Op::OP_SYMBOL || src.kind == Op::OP_GLOBAL)
 		code_.MovRegImm(Reg(dst),
 		                X86Imm::Label(env_.SymbolLabel(src.text), 0));

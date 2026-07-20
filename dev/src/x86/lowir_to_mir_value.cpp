@@ -321,6 +321,14 @@ mir_model::Operand MakeSymbol(const std::string & name, bool global)
 	return operand;
 }
 
+mir_model::Operand MakeGot(const std::string & name)
+{
+	mir_model::Operand operand;
+	operand.kind = mir_model::Operand::OP_GOT;
+	operand.text = name;
+	return operand;
+}
+
 mir_model::Operand MakeLabel(const std::string & label)
 {
 	mir_model::Operand operand;
@@ -465,13 +473,60 @@ mir_model::Operand FunctionLowering::gpr_read(const LowIROperand & operand)
 	                       operand.name + " in @" + function_.name);
 }
 
+// PA36 host data model: a data global the unit only declares takes
+// its address from the GOT (host objects spell the access
+// R_X86_64_REX_GOTPCRELX; the private linker synthesizes the slot).
+// TLS globals keep their wrapper-call path, and functions their
+// direct symbol spelling.
+bool FunctionLowering::imported_data_global(const std::string & name) const
+{
+	if(!facts_.host_object)
+		return false;
+	if(facts_.tls_wrapper_of_global.count(name))
+		return false;
+	if(facts_.info->is_function(name))
+		return false;
+	std::map<std::string, const LowIRGlobal *>::const_iterator global =
+		facts_.info->globals.find(name);
+	return global == facts_.info->globals.end() ||
+	       !global->second->is_definition;
+}
+
+void FunctionLowering::emit_global_address(X64Register reg,
+                                           const std::string & name)
+{
+	if(imported_data_global(name)) {
+		mir_model::Instruction & load =
+			emit(mir_model::Instruction::MI_LOAD);
+		load.type = "ptr";
+		load.operands.push_back(MakeReg(reg));
+		load.operands.push_back(MakeGot(name));
+		return;
+	}
+	emit_mov(MakeReg(reg), MakeSymbol(name, true));
+}
+
+mir_model::Operand FunctionLowering::global_mem_operand(
+	const std::string & name, X64Register staging)
+{
+	if(imported_data_global(name)) {
+		mir_model::Instruction & load =
+			emit(mir_model::Instruction::MI_LOAD);
+		load.type = "ptr";
+		load.operands.push_back(MakeReg(staging));
+		load.operands.push_back(MakeGot(name));
+		return MakeDeref(staging, 0);
+	}
+	return MakeSymbol(name, true);
+}
+
 // Memory operand for a load/store address. `staging` receives lea/load
 // materializations for slot-address temps and frame-spilled pointers.
 mir_model::Operand FunctionLowering::address_operand(
 	const LowIROperand & operand, X64Register staging)
 {
 	if(operand.kind == LOWIR_OPERAND_GLOBAL)
-		return MakeSymbol(operand.name, true);
+		return global_mem_operand(operand.name, staging);
 	if(operand.kind == LOWIR_OPERAND_SLOT) {
 		const SlotInfo & slot = slots_[operand.name];
 		return frame_operand(slot.frame_offset);
@@ -669,7 +724,7 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 		}
 	}
 	else if(lhs.kind == LOWIR_OPERAND_GLOBAL) {
-		emit_mov(MakeReg(out_reg), MakeSymbol(lhs.name, true));
+		emit_global_address(out_reg, lhs.name);
 	}
 	else if(lhs.kind == LOWIR_OPERAND_SLOT) {
 		mir_model::Instruction & load =

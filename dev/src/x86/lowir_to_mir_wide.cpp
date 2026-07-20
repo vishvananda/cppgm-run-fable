@@ -424,7 +424,7 @@ void FunctionLowering::LowerWideLoad(const LowIRInstruction & ins)
 	if (source.kind == LOWIR_OPERAND_GLOBAL)
 	{
 		// a global pair: materialize the symbol address, copy halves
-		emit_mov(MakeReg(XR_RCX), MakeSymbol(source.name, true));
+		emit_global_address(XR_RCX, source.name);
 		mir_model::Instruction & lo =
 			emit(mir_model::Instruction::MI_LOAD);
 		lo.type = "i64";
@@ -454,7 +454,7 @@ void FunctionLowering::LowerWideStore(const LowIRInstruction & ins)
 	    target.kind == LOWIR_OPERAND_GLOBAL)
 	{
 		if (target.kind == LOWIR_OPERAND_GLOBAL)
-			emit_mov(MakeReg(XR_RCX), MakeSymbol(target.name, true));
+			emit_global_address(XR_RCX, target.name);
 		else
 		{
 			mir_model::Operand pointer = gpr_read(target);

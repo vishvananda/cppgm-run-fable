@@ -68,7 +68,7 @@ void FunctionLowering::LowerAtomicAddFetch(const LowIRInstruction & ins)
 			slots_[locations_[pointer.name].slot_name].frame_offset));
 	}
 	else if(pointer.kind == LOWIR_OPERAND_GLOBAL) {
-		emit_mov(MakeReg(XR_RCX), MakeSymbol(pointer.name, true));
+		emit_global_address(XR_RCX, pointer.name);
 	}
 	else {
 		emit_mov(MakeReg(XR_RCX), gpr_read(pointer));
@@ -101,7 +101,7 @@ void FunctionLowering::LowerAtomicCompareExchange(
 	const LowIROperand & expected = ins.operands[1];
 	const LowIROperand & desired = ins.operands[2];
 	if(pointer.kind == LOWIR_OPERAND_GLOBAL)
-		emit_mov(MakeReg(XR_RCX), MakeSymbol(pointer.name, true));
+		emit_global_address(XR_RCX, pointer.name);
 	else
 		emit_mov(MakeReg(XR_RCX), gpr_read(pointer));
 	mir_model::Operand expected_address =

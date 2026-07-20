@@ -82,7 +82,15 @@ enum EX86PatchKind
 	X86_PATCH_TRUNC,  // little-endian value truncated to size (data)
 	X86_PATCH_ABS,    // absolute address; must survive sign-extension
 	X86_PATCH_PCREL,  // value minus the address after the field
-	X86_PATCH_TPOFF   // PA32: thread-pointer offset (R_X86_64_TPOFF32)
+	X86_PATCH_TPOFF,  // PA32: thread-pointer offset (R_X86_64_TPOFF32)
+	// PA36 host data model: rip-relative data reference (same
+	// arithmetic as PCREL; host objects spell it R_X86_64_PC32 where
+	// PCREL code fields spell R_X86_64_PLT32).
+	X86_PATCH_PCREL_DATA,
+	// PA36: rip-relative reference to the symbol's GOT address slot
+	// (host objects: R_X86_64_REX_GOTPCRELX; the private linker
+	// synthesizes the slot and rewrites to PCREL_DATA).
+	X86_PATCH_GOTPCREL
 };
 
 // A pending little-endian fixup: write the resolved immediate, as
@@ -97,13 +105,17 @@ struct X86Patch
 	X86Imm imm;
 };
 
-// Memory operand: [base register + displacement], or an absolute
+// Memory operand: [base register + displacement], an absolute
 // [disp32] form (no base register) whose address may be a label
-// resolved at layout.
+// resolved at layout, or a rip-relative [rip + disp32] form naming a
+// label directly (PCREL_DATA) or through its GOT slot (GOTPCREL).
 struct X86Mem
 {
-	X86Mem() : has_base(true), base(X86_RAX), disp(0) {}
-	X86Mem(int base, int disp) : has_base(true), base(base), disp(disp) {}
+	enum EAbsMode { AM_ABS, AM_RIP, AM_GOT };
+
+	X86Mem() : has_base(true), base(X86_RAX), disp(0), abs_mode(AM_ABS) {}
+	X86Mem(int base, int disp)
+		: has_base(true), base(base), disp(disp), abs_mode(AM_ABS) {}
 
 	static X86Mem Absolute(const X86Imm& addr)
 	{
@@ -113,9 +125,24 @@ struct X86Mem
 		return mem;
 	}
 
+	static X86Mem RipLabel(const X86Imm& addr)
+	{
+		X86Mem mem = Absolute(addr);
+		mem.abs_mode = AM_RIP;
+		return mem;
+	}
+
+	static X86Mem GotLabel(const X86Imm& addr)
+	{
+		X86Mem mem = Absolute(addr);
+		mem.abs_mode = AM_GOT;
+		return mem;
+	}
+
 	bool has_base;
 	int base;
 	int disp;
+	EAbsMode abs_mode;
 	X86Imm abs;
 };
 

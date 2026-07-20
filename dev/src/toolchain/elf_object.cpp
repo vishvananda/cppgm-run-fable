@@ -45,6 +45,7 @@ const unsigned kRelocAbs32 = 10;        // R_X86_64_32
 const unsigned kRelocAbs32Signed = 11;  // R_X86_64_32S
 const unsigned kRelocPc64 = 24;         // R_X86_64_PC64
 const unsigned kRelocTpoff32 = 23;      // R_X86_64_TPOFF32
+const unsigned kRelocRexGotPcrelx = 42; // R_X86_64_REX_GOTPCRELX
 
 struct ElfReloc
 {
@@ -481,6 +482,19 @@ ElfReloc ElfObjectWriter::ConvertOnePatch(const X86Patch & patch)
 		}
 		else
 			throw runtime_error("unencodable pc-relative patch width");
+		break;
+	case X86_PATCH_PCREL_DATA:
+		if (patch.size != 4)
+			throw runtime_error("unencodable pc-relative patch width");
+		reloc.kind = kRelocPc32;
+		addend -= 4;
+		break;
+	case X86_PATCH_GOTPCREL:
+		// always the relaxable REX'd `mov r64, [rip+disp32]` form
+		if (patch.size != 4)
+			throw runtime_error("unencodable pc-relative patch width");
+		reloc.kind = kRelocRexGotPcrelx;
+		addend -= 4;
 		break;
 	case X86_PATCH_ABS:
 		reloc.kind = patch.size == 8 ? kRelocAbs64

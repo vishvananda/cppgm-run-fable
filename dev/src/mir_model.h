@@ -107,7 +107,11 @@ struct Operand
     OP_FRAME,
     OP_GLOBAL,
     OP_DEREF,
-    OP_LABEL
+    OP_LABEL,
+    // PA36 host data model: the GOT address slot of an imported
+    // (declared, not defined here) global; a load through it yields
+    // the symbol's address (R_X86_64_REX_GOTPCRELX in host objects).
+    OP_GOT
   } kind = OP_IMM;
 
   X64Register reg = XR_RAX;

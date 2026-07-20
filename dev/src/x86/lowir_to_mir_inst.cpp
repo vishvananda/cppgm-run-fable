@@ -294,7 +294,7 @@ mir_model::Operand FunctionLowering::stage_store_value(
 		return MakeReg(XR_RAX);
 	}
 	if(operand.kind == LOWIR_OPERAND_GLOBAL) {
-		emit_mov(MakeReg(XR_RAX), MakeSymbol(operand.name, true));
+		emit_global_address(XR_RAX, operand.name);
 		return MakeReg(XR_RAX);
 	}
 	if(operand.kind == LOWIR_OPERAND_SLOT) {
@@ -471,11 +471,17 @@ void FunctionLowering::LowerAddr(const LowIRInstruction & ins)
 	bool is_global = !facts_.info->is_function(target.name);
 	if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
 		invalidate_rax();
-		emit_mov(MakeReg(XR_RAX), MakeSymbol(target.name, is_global));
+		if(is_global)
+			emit_global_address(XR_RAX, target.name);
+		else
+			emit_mov(MakeReg(XR_RAX), MakeSymbol(target.name, false));
 		commit_frame_result(ins.result);
 		return;
 	}
-	emit_mov(MakeReg(reg), MakeSymbol(target.name, is_global));
+	if(is_global)
+		emit_global_address(reg, target.name);
+	else
+		emit_mov(MakeReg(reg), MakeSymbol(target.name, false));
 }
 
 void FunctionLowering::LowerLoad(const LowIRInstruction & ins)

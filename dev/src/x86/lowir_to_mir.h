@@ -18,9 +18,15 @@
 // are pre-assigned pool slots in declaration order and stay pinned for the
 // whole function; rax/rcx/rdx/rsi/rdi/r10/r11 are fixed staging registers.
 
+// `host_object` selects the PA36 host data-addressing model for `-c`
+// objects: rip-relative access to unit-defined globals and
+// GOT-mediated addresses for imported ones. The whole-program
+// executable path (lowir2native) keeps absolute addressing and its
+// pinned encodings.
 mir_model::MirProgram LowerLowIRProgramToMir(const LowIRProgram & program,
                                              const LowIRProgramInfo & info,
-                                             const std::string & target);
+                                             const std::string & target,
+                                             bool host_object);
 
 namespace lowir_to_mir {
 
@@ -108,6 +114,16 @@ private:
 	mir_model::Operand gpr_read(const LowIROperand & operand);
 	mir_model::Operand address_operand(const LowIROperand & operand,
 	                                   X64Register staging);
+	// PA36 host data model: an imported (declared, not defined here)
+	// non-TLS data global; its address comes from the GOT.
+	bool imported_data_global(const std::string & name) const;
+	// Materialize a data global's address into `reg` (a GOT load for
+	// imported globals, the plain symbol mov otherwise).
+	void emit_global_address(X64Register reg, const std::string & name);
+	// Memory operand naming a data global directly (imported globals
+	// stage their GOT address through `staging`).
+	mir_model::Operand global_mem_operand(const std::string & name,
+	                                      X64Register staging);
 	mir_model::Operand frame_operand(long long offset) const;
 	mir_model::Instruction & emit(mir_model::Instruction::Opcode opcode);
 	void emit_mov(const mir_model::Operand & dst,

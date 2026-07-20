@@ -973,12 +973,14 @@ void BuildStartup(const LowIRProgramInfo & info,
 
 mir_model::MirProgram LowerLowIRProgramToMir(const LowIRProgram & program,
                                              const LowIRProgramInfo & info,
-                                             const std::string & target)
+                                             const std::string & target,
+                                             bool host_object)
 {
 	mir_model::MirProgram result;
 	result.target = target;
 	ProgramFacts facts;
 	facts.info = &info;
+	facts.host_object = host_object;
 	for(size_t f = 0; f < program.functions.size(); f++) {
 		const LowIRFunction & function = program.functions[f];
 		std::string tls_for = function.metadata.find("tls_for");

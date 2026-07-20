@@ -51,7 +51,11 @@ string MangleFunctionObjectName(const Scope* scope, const string& name,
 // (`_Z1fIiEvT_`): template-argument list and pattern-based signature
 // with the return type included.
 string MangleFunctionTemplateObjectName(const FunctionSpecialization& spec);
-string MangleVariableObjectName(const Scope* scope, const string& name);
+// `thread_local_storage` keeps an unscoped variable's unmangled host
+// spelling (the PA32 host-TLS _ZTW/_ZTH interop derives from it);
+// other unscoped variables use the course `_Z<name>` encoding.
+string MangleVariableObjectName(const Scope* scope, const string& name,
+                                bool thread_local_storage);
 
 // PA23: the Itanium spelling of a variable-template specialization
 // (`_ZN4propILi0EE14static_query_vI2exS0_EE`): the terminal is a

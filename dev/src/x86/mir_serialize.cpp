@@ -100,6 +100,8 @@ std::string operand_text(const Operand & operand)
       return "@" + operand.text;
     case Operand::OP_GLOBAL:
       return "@" + operand.text;
+    case Operand::OP_GOT:
+      return "got(@" + operand.text + ")";
     case Operand::OP_FRAME:
       return frame_ref(operand.offset);
     case Operand::OP_DEREF:

@@ -191,7 +191,7 @@ int run_lowir2native_mode(const vector<string> & args)
   LowIRProgram program = ParseLowIRProgram(source);
   LowIRProgramInfo info = ValidateLowIRProgram(program, false);
   mir_model::MirProgram machine_ir =
-      LowerLowIRProgramToMir(program, info, target);
+      LowerLowIRProgramToMir(program, info, target, false);
 
   if(!invocation.machine_ir_file.empty()) {
     mir_model::write_mir_program_file(invocation.machine_ir_file,
