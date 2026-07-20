@@ -397,12 +397,29 @@ void SemBinder::AppendArrayMemberInit(const ClassField& field,
 			                    field.name);
 		for (unsigned long long i = 0; i < array->bound; i++)
 		{
+			const AstExpr* el = i < braced->arguments.size()
+				? braced->arguments[i].get() : 0;
+			if (el && el->kind == EK_BRACED && ecls->is_aggregate)
+			{
+				// A braced element aggregate-initializes in place.
+				SemNodePtr proto =
+					SubscriptNode(ThisFieldExpr(field), i);
+				AppendAggregateInit(*ecls, *proto, *el, out);
+				continue;
+			}
 			vector<SemValue> ctor_args;
-			if (i < braced->arguments.size())
-				ctor_args.push_back(
-					analyzer_.Analyze(*braced->arguments[i]));
+			bool list_form = false;
+			if (el && el->kind == EK_BRACED)
+			{
+				list_form = true;
+				for (size_t a = 0; a < el->arguments.size(); a++)
+					ctor_args.push_back(
+						analyzer_.Analyze(*el->arguments[a]));
+			}
+			else if (el)
+				ctor_args.push_back(analyzer_.Analyze(*el));
 			int index = ResolveClassConstructor(
-				*ecls, ctor_args, true, field.name.c_str());
+				*ecls, ctor_args, !list_form, field.name.c_str());
 			vector<SemNodePtr> arg_nodes;
 			for (size_t a = 0; a < ctor_args.size(); a++)
 				arg_nodes.push_back(std::move(ctor_args[a].node));
