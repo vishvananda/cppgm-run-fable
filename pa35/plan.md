@@ -72,59 +72,32 @@ de-duplicate work), never as harness/test budget problems.
   `cppgm.tests/course/paN/` of the owning stage when they are not
   header-specific; header-pressure cases stay in `pa35/tests/`.
 
-## Status (loop 79)
+## Status (complete)
 
-55/77 pa35 tests pass; through-pa35 is 3244/3266 with all failures
-pa35-local (no earlier-stage regressions). Landed this loop: GNU
-named-variadic macros and hosted empty __VA_ARGS__; typename-braced
-casts; base-name import and inline-namespace tables in the parser;
-out-of-class member body scope; local-class member mangling (Z..E);
-hosted atomic builtins and memset/vsnprintf; enum underlying-type
-widening and lazy successors; defaulted-default-ctor and converting-ctor
-default-argument fixes; direct-init explicit conversion functions;
-member variable-template partials; 14.7.3p18 member-of-spec
-definitions; explicit-spec function prototypes; gnu_inline intrinsic
-wrapper demotion; failed-instantiation rollback; typeid postfix
-suffixes; template-id friends.
+77/77 pa35 tests pass; through-pa35 green with the file audit clean.
+Beyond the loop-79 list (macros, parser tables, mangling, atomics,
+enum widening, ctor/conversion fixes, rollback, friends), the final
+frontier fixes were:
 
-Remaining 22 failures cluster on:
-- `__test<_Tp>(0)` SFINAE member-template calls resolving to
-  "member function __test called without an object" (nothrow traits,
-  std::function). Diagnosed: explicit args bind fine
-  (BindExplicitDeductionArgs accepts); DeduceFunctionTemplate then
-  returns null for BOTH overloads only when the enclosing class
-  INHERITS __test and the explicit arg is a class-template
-  specialization (repro: /tmp/sf9.cpp shape - base with
-  `template<typename T> static BC<noexcept(declval<T&>().~T())>
-  __test(int);`, derived typedef `decltype(__test<_Tp>(0))`,
-  _Tp=P<int>). Failure is after explicit binding, likely the dependent
-  return-type (noexcept dtor eval) composition in the deduce seam.
-- "function template operator >> has no definition": istream.tcc
-  operator-template definition pairing with the extern-template
-  declarations (istream/getline family).
-- "expression form is outside the PA11 constant-expression subset"
-  (piecewise/index_sequence family): const-eval gap.
-- "ambiguous partial specializations of __common_type_fold"
-  (shared_ptr/chrono): partial-ordering gap.
-- "member initializer names no member or base" (regex): mem-init
-  against a dependent/aliased base spelling.
-- locale facet/codecvt and map iterator families: undiagnosed, retest
-  after the above land.
-
-### forward_as_tuple ambiguity diagnosis (loop 79 cont.)
-
-`tuple<S&&>(S&&)` finds TWO identical `void(S&&)` ctor candidates: the
-_ImplicitCtor/_ExplicitCtor pair (tuple:1486/1495). They are mutually
-exclusive via defaulted constraint params
-`_ImplicitCtor<_Valid, _UElements...> = true` where _ImplicitCtor =
-`__enable_if_t<_TCC<_Cond>::__is_implicitly_constructible<_Args...>(),
-bool>`. Exclusion requires resolving that alias with the constexpr
-QUALIFIED static member-template call evaluated concretely during ctor
-template deduction; today the constraint parameter type stays deferred
-(dependent alias spec), so enable_if never fails and both candidates
-survive. Fix direction: make the ctor-template deduction path resolve
-defaulted constraint parameter types concretely (the value argument is
-`_TCC<_Cond>::template __is_...<_UElements...>()` with all names bound
-in the deduction partial scope), sharing TryFullValueArgument; verify
-is_convertible<S&&,S&&> evaluates true so implicit wins and explicit
-drops.
+- Alias-transparent redeclaration identity (14.5.7,
+  template_spelling.cpp): `_Require<...>` vs
+  `typename enable_if<...>::type` spellings of std::swap's return
+  merge through an alias-expanded canonical key.
+- 11.2 access contexts for instantiated out-of-class member
+  definitions (_Rb_tree's protected _Base_ptr in return types).
+- 14.2p2: template-id member callees exclude non-template overloads
+  (std::function's _M_access<T>() assignments).
+- __function_type_info/__enum_type_info RTTI records (typeid through
+  function-pointer pointees).
+- Qualified operator-function member callees and template-id member
+  qualifiers via ResolvePrefixScope (shared_ptr rvalue assignment).
+- Paren-init pack expansion in variable initializers
+  (deque::_M_insert_aux) and the __has_trivial_destructor trait.
+- Body-less explicit specializations suppress local instantiation and
+  reference the external symbol (14.7.3p6, basic_string's
+  operator>> declaration).
+- Constexpr specializations instantiate inside unevaluated operands
+  (14.7.1p3, pair's enable_if constraint probes under decltype).
+- A specialization's injected-class-name is its template's name
+  (14.6.1p1, codecvt mem-inits), with sibling injected names of one
+  template collapsing to the template (pa26 diamond).
