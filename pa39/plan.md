@@ -1,14 +1,12 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA9 pass; failures 12-21 fixed/in progress.
-The pa10 rung's remaining blockers are resource-shaped: the ladder
-runs inside a 64 GiB cgroup at -j32 while heavy sema TUs peaked at
-~3.4 GiB each (cgroup OOM kills, exit 137), and two TUs
-(toolchain/compile_unit.cpp 10.2 GiB, cppgm++.cpp 8.4 GiB) exceeded
-the harness's 8 GiB per-command RSS cap even alone (EXIT_OOM, 125).
-Failure 21 attacks the underlying compiler memory bug. Next: finish
-the memory reduction, rerun the pa10 rung, then the pptoken/cppgm++
-inception compares.
+Status: `make -C pa39 test-through-pa10` GREEN (pa10 tests 134/134
+self-built) after failures 20-25; `make test-report-through-pa38`
+green (3454/3454); file audit passes. The frontier is failure 26:
+cppgm++-self mis-executes sema on real compiles (the pptoken
+inception stage segfaults on every TU), reduced to tiny inputs below.
+Next: root-cause failure 26, then rerun compare-pptoken-inception and
+compare-cppgm++-inception.
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -789,6 +787,57 @@ Reducer: `cppgm.tests/course/pa36/link/600-hosted-conditional-
 operand-temp-lifetime-runtime-smoke` (long heap strings so SSO
 cannot mask the free; double free before, correct concatenations
 after; ref-generated fixtures).
+
+### Failure 26 (frontier, diagnosed not yet root-caused): self-built
+### sema double-destroys owning handles
+
+test-through-pa10 is green, but compare-pptoken-inception fails
+immediately: every cppgm++-self compile segfaults (Error 139).
+Reductions, smallest first (all pass under host-seeded
+`../dev/cppgm++`, all break under `cppgm++-self`):
+
+- `pa15/tests/general/100-default-member-initializer-class-member.t`
+  (struct X { Y y = Y(); }) trips libstdc++'s
+  "unique_ptr operator*: get() != pointer()" assertion inside
+  `SemBinder::NodeMayThrow` recursing over a children vector holding
+  a NULL entry, reached from EnsureImplicitDefaultCtor <-
+  MakeConstructorCall <- AppendClassDefaultInit. Found by walking the
+  per-assignment suites with the self binary
+  (`make -C pa39 test-pa11..` : pa11 49/49, pa12 126/126, pa14 68/68
+  pass; pa15 fails at test 5).
+- `#include <bits/exception_ptr.h>` (or <exception>, <stdexcept>)
+  with an empty main segfaults destroying a vector<ConversionSource>
+  in AnalyzeStaticMethodCall (valgrind: _M_release on control block
+  0x10 - a small-constant-corrupted shared_ptr), via
+  ResolveDecltype of the is_destructible-style
+  `decltype(__test<_Tp>(0))` trait shape (freestanding form in the
+  session notes: struct Probe { template<typename T, typename =
+  decltype(T().~T())> static TrueType test(int); ... };
+  typedef decltype(Probe::test<X>(0)) Result;).
+
+Signature across crashes: owning handles (SemNodePtr children,
+TypePtr control blocks) destroyed twice or left null mid-tree -
+the same cleanup-discipline family as failures 24/25 but in code the
+HOST compiler emitted for the sema TUs. Localization so far:
+replacing single suspect objects with -O0/-O1 rebuilds (sem_ctor,
+sem_binder, sem_class, sem_special, sem_node) does NOT fix the pa15
+reducer, so the miscompiled function is either level-independent or
+lives in another TU / a weak template instantiation (single-object
+replacement cannot displace comdat copies stamped into many TUs -
+the failure-24 lesson). Bulk g++-object mixing is blocked by an
+abi-tag mangling divergence (our objects reference
+string-returning free functions like FlattenName/FundamentalTypeName
+without g++'s [abi:cxx11] tag - itself a latent host-interop gap
+worth a look). By-value unique_ptr/vector<unique_ptr> parameter
+passing and the bare DMI shape both pass host-compiled runtime
+reducers, so the trigger is more specific than either.
+
+Suggested next steps: build the full self compiler at
+INCEPTION_SELFHOST_OPT_LEVEL=0 into a scratch object root to split
+optimizer-dependent vs level-independent; if level-independent, binary
+-search the sema TUs in halves with -O1 rebuilds (same-compiler mixes
+link cleanly); once the TU is known, diff its host-compiled LowIR
+function-by-function against behavior under gdb on the pa15 reducer.
 
 ## Validation plan
 
