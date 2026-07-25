@@ -1,0 +1,12 @@
+#include "600-hosted-aggregate-array-member-runtime-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  if (check_namespace_levels() != 102100)
+    return 1;
+  if (check_local_levels() != 9300)
+    return 2;
+  std::printf("aggregate-array-member ok\n");
+  return 0;
+}

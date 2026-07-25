@@ -224,11 +224,39 @@ handling — "no conversion for member initializer". Pre-existing for
 locals too (not introduced by the namespace-array routing fix).
 Reducers ready in /tmp/pa39probe/agg3.cpp (namespace) and agg4.cpp
 (local): a `struct { const char* name; T ops[4]; int num; }` array
-with `{ "or", { T_A }, 1 }` elements. Fix direction: the aggregate
-constructor body's array-member initialization must lower the braced
-sub-list element-wise (see `AppendAggregateInit`'s member-wise
-handling), or the array member's parameter/argument contract must
-materialize the sub-list into an array temp before the call.
+with `{ "or", { T_A }, 1 }` elements. The in-place single-object path
+(`ConsumeAggregateItems`/`ConsumeArrayItems`) already handles array
+members; only the synthesized-constructor form (arrays of aggregates)
+lacks the contract.
+
+Confirmed reference contract (cppgm++-ref --emit-lowir on both
+reducers): the synthesized aggregate ctor keeps the ARRAY type in its
+signature (mangles `A4_4ETok`) but passes it as `ptr [pass=decay]`
+(`decay` is already in the LowIR validator's kPasses); the caller
+materializes each braced sub-list into an `$argarr__N` slot exactly
+like our existing `LowerLocalArrayInit` shape (byte-identical on a
+plain local array) and passes its address; the ctor body raw-copies
+`copyobj <span> <param>, <member>`. The reference emits a dead
+member-address recompute after the copyobj; whole-program shapes
+already legitimately diverge (alias vs ov2 bodies, function order), so
+this is a behavior fix, not a byte-parity one.
+
+Fix (earliest owning surface, the PA24-era aggregate ctor machinery):
+- `EnsureAggregateCtor` keeps array field types unadjusted in the
+  signature; the body's parameter reference is typed pointer-to-element
+  (the decayed spill slot holds a pointer).
+- `MemberAssignAction` accepts an array member from a matching decayed
+  pointer (no CopyInitialize; the lowering raw-copies).
+- `LowerMemberAssignment` gains a TK_ARRAY branch: member address,
+  pointer value, `copyobj`.
+- `LowerAbiParameter` maps TK_ARRAY to `ptr [pass=decay]`.
+- `AppendAggregateArrayInit` routes a braced sub-list aimed at an array
+  parameter through `AnalyzeBracedInit` (SN_BRACED_INIT_LIST), and
+  zero-fills omitted array members with an empty braced list;
+  `LowerCallArgument` materializes SN_BRACED_INIT_LIST for array
+  parameters into an `argarr` slot via `LowerLocalArrayInit` (the
+  existing reference-to-array shape, minus the reference binding).
+- `MakeAggregateTemporary` gets the same omitted-tail handling.
 
 ## Validation plan
 

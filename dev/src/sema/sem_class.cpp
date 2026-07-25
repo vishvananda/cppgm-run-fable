@@ -1175,6 +1175,17 @@ SemNodePtr SemBinder::MemberAssignAction(const ClassField& field,
 		    !DerivedToBaseClass(value.type, referee))
 			throw runtime_error("reference member binding mismatch");
 	}
+	else if (RemoveTopCv(field.type)->kind == TK_ARRAY)
+	{
+		// The synthesized aggregate constructor's array member arrives
+		// as the decayed pointer to the caller-materialized argument
+		// array; the assignment lowers as a raw span copy.
+		TypePtr value_type = RemoveTopCv(value.type);
+		if (value_type->kind != TK_POINTER ||
+		    !TypeEquals(RemoveTopCv(value_type->target),
+		                RemoveTopCv(RemoveTopCv(field.type)->target)))
+			throw runtime_error("array member initializer mismatch");
+	}
 	else
 		analyzer_.CopyInitialize(value, RemoveTopCv(field.type),
 		                         "member initializer");

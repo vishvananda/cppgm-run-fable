@@ -51,6 +51,16 @@ string FunctionLowerer::LowerCallArgument(const SemNode& node,
 	}
 	if (IsReferenceType(param))
 		return LowerReferenceArgument(node, param->target);
+	if (RemoveTopCv(param)->kind == TK_ARRAY &&
+	    node.kind == SN_BRACED_INIT_LIST)
+	{
+		// A synthesized aggregate constructor's array member: the
+		// braced argument materializes its array and passes the
+		// decayed address.
+		TypePtr bare = RemoveTopCv(param);
+		string slot = AddMatSlot("argarr", LowerSlotType(bare));
+		return LowerLocalArrayInit(node, slot, bare);
+	}
 	if (RemoveTopCv(param)->kind == TK_CLASS)
 	{
 		TypePtr bare = RemoveTopCv(param);

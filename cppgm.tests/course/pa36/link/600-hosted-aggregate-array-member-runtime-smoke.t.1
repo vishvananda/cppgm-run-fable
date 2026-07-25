@@ -1,0 +1,37 @@
+#include "600-hosted-aggregate-array-member-runtime-smoke.shared.h"
+
+namespace {
+
+enum ETok { T_A, T_B, T_C, T_D };
+
+struct Level {
+  const char* name;
+  ETok ops[4];
+  int num;
+};
+
+const Level kLevels[] = {
+  { "or", { T_A }, 1 },
+  { "and", { T_B, T_C }, 2 },
+  { "tail" },
+};
+
+}  // namespace
+
+int check_namespace_levels() {
+  int total = 0;
+  for (const Level* at = kLevels; at != kLevels + 3; at++)
+    total = total * 100 + at->num * 10 + (int)at->ops[0] + (int)at->ops[3];
+  return total;
+}
+
+int check_local_levels() {
+  const Level kLocal[] = {
+    { "full", { T_B, T_C, T_D }, 9 },
+    { "mid", { T_C } },
+  };
+  int total = 0;
+  for (const Level* at = kLocal; at != kLocal + 2; at++)
+    total = total * 100 + at->num * 10 + (int)at->ops[2] + (int)at->ops[3];
+  return total;
+}

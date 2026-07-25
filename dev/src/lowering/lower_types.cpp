@@ -268,6 +268,15 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 		return;
 	}
 	TypePtr bare = RemoveTopCv(param);
+	if (bare->kind == TK_ARRAY)
+	{
+		// A synthesized aggregate constructor's array member
+		// parameter: the caller materializes the argument array and
+		// passes its decayed address.
+		type_text = "ptr";
+		pass = "decay";
+		return;
+	}
 	if (bare->kind == TK_CLASS)
 	{
 		if (LowerClassDirect(bare, host_abi))

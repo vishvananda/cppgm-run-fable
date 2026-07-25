@@ -83,7 +83,13 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 	vector<string> names;
 	for (size_t i = 0; i < cover; i++)
 	{
-		params.push_back(AdjustParameterType(named[i]->type));
+		// An array member keeps its array type in the signature (the
+		// deterministic mangled identity); the ABI layer passes it as a
+		// decayed pointer to the caller-materialized argument array.
+		TypePtr bare = RemoveTopCv(named[i]->type);
+		params.push_back(bare->kind == TK_ARRAY
+		                 ? bare
+		                 : AdjustParameterType(named[i]->type));
 		names.push_back(named[i]->name);
 	}
 	TypePtr ctor_type = MakeFunctionType(MakeFundamentalType(FT_VOID),
@@ -110,7 +116,11 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 		ScopeBinding param_binding;
 		param_binding.kind = SB_PARAMETER;
 		param_binding.name = parameter.name;
-		param_binding.type = parameter.type;
+		// 8.3.5p5: within the body an array parameter is its adjusted
+		// pointer (the decayed spill slot holds the caller's address).
+		param_binding.type = parameter.type->kind == TK_ARRAY
+			? MakePointerType(parameter.type->target, false, false)
+			: parameter.type;
 		AddBinding(*fn_scope, param_binding);
 	}
 	SemNodePtr item = BuildFunctionNode(body, SF_CONSTRUCTOR);
@@ -137,14 +147,19 @@ TypePtr SemBinder::EnsureAggregateCtor(const ClassInfo& cls_in,
 		SemValue value;
 		if (i < cover)
 		{
+			// An array parameter's spill slot holds the decayed
+			// pointer; the body reads it as pointer-to-element.
+			TypePtr read_type = params[i]->kind == TK_ARRAY
+				? MakePointerType(params[i]->target, false, false)
+				: params[i];
 			value.node = MakeSemNode(SN_ID_EXPRESSION);
 			value.node->name = names[i];
-			value.node->type = params[i];
+			value.node->type = read_type;
 			value.node->category = VC_LVALUE;
 			value.node->entity_scope = fn_scope;
 			value.node->entity_name = names[i];
-			value.type = IsReferenceType(params[i])
-				? params[i]->target : params[i];
+			value.type = IsReferenceType(read_type)
+				? read_type->target : read_type;
 			value.category = VC_LVALUE;
 		}
 		else
@@ -249,6 +264,186 @@ void SemBinder::RealignDesignatedArguments(const ClassInfo& cls_in,
 	args.swap(aligned);
 }
 
+void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
+                                     const AstInitializer* init,
+                                     const ClassInfo& cls)
+{
+	TypePtr type = binding.type;
+
+	if (init)
+	{
+		const AstExpr* braced = 0;
+		if (init->kind == INIT_BRACED)
+			braced = init->expr.get();
+		else if (init->kind == INIT_EQ &&
+		         init->expr->kind == EK_BRACED)
+			braced = init->expr.get();
+		if (!braced)
+			throw OutsideBoundary("class array initializer form");
+		if (!cls.has_user_ctor && cls.is_aggregate)
+		{
+			AppendAggregateArrayInit(item, binding, cls, *braced);
+			return;
+		}
+		// Elements list-initialize through their constructors at
+		// subscripted addresses.
+		TypePtr completed = binding.type;
+		if (!completed->bound_known)
+		{
+			completed = MakeArrayType(completed->target, true,
+			                          braced->arguments.size());
+			binding.type = completed;
+			item.type = completed;
+		}
+		if (braced->arguments.size() > completed->bound)
+			throw runtime_error("too many initializers for " +
+			                    binding.name);
+		for (size_t i = 0; i < braced->arguments.size(); i++)
+			AppendArrayElementInit(item, binding, cls, i,
+			                       braced->arguments[i].get());
+		// 8.5.1p7: elements beyond the initializer list
+		// value-initialize.
+		for (unsigned long long i = braced->arguments.size();
+		     i < completed->bound; i++)
+			AppendArrayElementInit(item, binding, cls, i, 0);
+		return;
+	}
+	if (!cls.has_user_ctor && !unit_.classes.NeedsConstruction(cls))
+		return;
+	for (unsigned long long i = 0; i < type->bound; i++)
+	{
+		vector<SemValue> no_args;
+		int index = ResolveClassConstructor(cls, no_args, false,
+		                                    binding.name.c_str());
+		vector<SemNodePtr> arg_nodes;
+		for (size_t j = 0; j < no_args.size(); j++)
+			arg_nodes.push_back(std::move(no_args[j].node));
+		item.children.push_back(MakeConstructorCall(
+			cls, index, false,
+			AddressOfNode(SubscriptNode(VariableObjectExpr(binding),
+			                            i)),
+			std::move(arg_nodes)));
+	}
+	return;
+}
+
+// An array of aggregates: each element calls the shared full-cover
+// constructor (member/local contexts ride one base address with an
+// offset; a namespace-scope array's actions carry their subscripted
+// element address explicitly).
+void SemBinder::AppendAggregateArrayInit(SemNode& item,
+                                         ScopeBinding& binding,
+                                         const ClassInfo& cls,
+                                         const AstExpr& braced)
+{
+	TypePtr array = binding.type;
+	if (!array->bound_known)
+	{
+		array = MakeArrayType(array->target, true,
+		                      braced.arguments.size());
+		binding.type = array;
+		item.type = array;
+	}
+	if (braced.arguments.size() > array->bound)
+		throw runtime_error("too many initializers for " + binding.name);
+	// Array elements share one full-cover signature; omitted element
+	// members pad with zero arguments at the call sites.
+	TypePtr adjusted = EnsureAggregateCtor(cls, (size_t)-1);
+	unsigned long long size = cls.size;
+	const string& base_name = cls.members->name;
+	string qualified = QualifiedScopePath(cls.members->parent) +
+		base_name + "::" + base_name;
+	for (size_t i = 0; i < braced.arguments.size(); i++)
+	{
+		const AstExpr* element = braced.arguments[i].get();
+		if (element->kind != EK_BRACED)
+			throw OutsideBoundary("array aggregate element form");
+		vector<SemValue> values;
+		size_t value_at = 0;
+		SemNodePtr action = MakeSemNode(SN_CONSTRUCTOR_ACTION);
+		action->name = qualified;
+		action->special = SF_CONSTRUCTOR;
+		action->has_value = true;
+		action->value = ConstValue(FT_UNSIGNED_LONG_INT, i * size);
+		SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
+		call->type = MakeFundamentalType(FT_VOID);
+		call->category = VC_PRVALUE;
+		SemNodePtr callee = MakeSemNode(SN_CALLEE);
+		callee->name = qualified;
+		callee->type = adjusted;
+		callee->entity_scope = cls.members;
+		callee->entity_name = base_name;
+		callee->is_method = true;
+		callee->special = SF_CONSTRUCTOR;
+		callee->unwind_no = true;
+		call->children.push_back(std::move(callee));
+		for (size_t j = 0; j < element->arguments.size(); j++)
+		{
+			const AstExpr& arg = *element->arguments[j];
+			TypePtr param = value_at + 1 < adjusted->parameters.size()
+				? adjusted->parameters[value_at + 1] : TypePtr();
+			SemValue value;
+			if (param && RemoveTopCv(param)->kind == TK_ARRAY &&
+			    arg.kind == EK_BRACED)
+			{
+				// An array member's braced sub-list materializes an
+				// argument array the call passes by decayed address.
+				TypePtr dest = RemoveTopCv(param);
+				value.node = analyzer_.AnalyzeBracedInit(
+					arg.arguments, dest);
+				value.type = dest;
+				value.category = VC_LVALUE;
+			}
+			else
+			{
+				value = analyzer_.Analyze(arg);
+				if (param)
+					analyzer_.CopyInitialize(value, param,
+					                         "aggregate element");
+			}
+			value_at++;
+			call->children.push_back(std::move(value.node));
+		}
+		if (element->arguments.size() + 1 > adjusted->parameters.size())
+			throw runtime_error("too many initializers for array "
+			                    "element");
+		// Trailing fields value-initialize through zero arguments.
+		for (size_t j = element->arguments.size() + 1;
+		     j < adjusted->parameters.size(); j++)
+		{
+			TypePtr param = adjusted->parameters[j];
+			if (RemoveTopCv(param)->kind == TK_ARRAY)
+			{
+				// An omitted array member zero-fills its argument
+				// array (an empty braced list).
+				SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+				list->type = RemoveTopCv(param);
+				list->category = VC_LVALUE;
+				call->children.push_back(std::move(list));
+				continue;
+			}
+			SemValue zero = ZeroValue(
+				IsReferenceType(param) ? param->target
+				                       : RemoveTopCv(param));
+			call->children.push_back(std::move(zero.node));
+		}
+		// The shared-base offset form serves member/local contexts;
+		// a namespace-scope array's init-helper actions carry their
+		// subscripted element address explicitly.
+		if (binding.home && binding.home->kind == SCOPE_NAMESPACE)
+		{
+			call->children.insert(
+				call->children.begin() + 1,
+				AddressOfNode(SubscriptNode(
+					VariableObjectExpr(binding), i)));
+			action->ctor_addressed = true;
+			action->has_value = false;
+		}
+		action->children.push_back(std::move(call));
+		item.children.push_back(std::move(action));
+	}
+}
+
 SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
                                              vector<SemValue> args)
 {
@@ -288,6 +483,16 @@ SemNodePtr SemBinder::MakeAggregateTemporary(const ClassInfo& cls_in,
 		TypePtr param = adjusted->parameters[i];
 		if (IsReferenceType(param))
 			throw runtime_error("reference member is not initialized");
+		if (RemoveTopCv(param)->kind == TK_ARRAY)
+		{
+			// An omitted array member zero-fills its argument array
+			// (an empty braced list).
+			SemNodePtr list = MakeSemNode(SN_BRACED_INIT_LIST);
+			list->type = RemoveTopCv(param);
+			list->category = VC_LVALUE;
+			call->children.push_back(std::move(list));
+			continue;
+		}
 		if (RemoveTopCv(param)->kind == TK_CLASS)
 		{
 			// 8.5.1p7: an omitted class member value-initializes; the

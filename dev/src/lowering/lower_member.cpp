@@ -308,6 +308,21 @@ LowerValue FunctionLowerer::LowerMemberAssignment(const SemNode& node)
 	if (lhs.is_bit_field)
 		return LowerBitFieldAssignment(node);
 	TypePtr type = RemoveTopCv(StripRef(lhs.type));
+	if (type->kind == TK_ARRAY)
+	{
+		// The synthesized aggregate constructor's array member: the
+		// rhs is the decayed pointer to the caller-materialized
+		// argument array; raw-copy the member span.
+		string storage = lhs.kind == SN_MEMBER_EXPRESSION
+			? MemberAddress(lhs) : LowerAddressExpr(lhs);
+		string value = LowerValueExpr(rhs).text;
+		Emit("copyobj " + LowerObjSpan(type) + " " + value + ", " +
+		     storage);
+		LowerValue result;
+		result.type = type;
+		result.text = storage;
+		return result;
+	}
 	if (type->kind == TK_CLASS &&
 	    (rhs.kind == SN_CALL_EXPRESSION ||
 	     rhs.kind == SN_CONSTRUCTOR_ACTION ||
