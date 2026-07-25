@@ -3,7 +3,6 @@
 // operand normalization and reversible compare directions. Handler
 // blocks only receive expressions available at the region push point.
 
-#include "lowir/lowir_dump.h"
 #include "lowir/lowir_opt_internal.h"
 
 namespace {
@@ -34,8 +33,29 @@ string ReversedPredicate(const string & op)
 	return "";
 }
 
+string OperandKey(const LowIROperand & op)
+{
+	string out = std::to_string(op.kind);
+	out += op.negated ? '-' : '+';
+	if(op.kind == LOWIR_OPERAND_LITERAL)
+		out += std::to_string(op.literal_class) + ':' + op.literal;
+	else
+		out += op.name;
+	return out;
+}
+
+string TypeKey(const LowIRType & type)
+{
+	string out = std::to_string(type.kind);
+	if(type.is_obj())
+		out += 'x' + std::to_string(type.obj_bytes) + 'x' +
+			std::to_string(type.obj_align);
+	return out;
+}
+
 // Canonical matching key of a reusable pure expression ("" when the
-// instruction is not a reuse candidate).
+// instruction is not a reuse candidate). Built from the semantic
+// fields directly so identity never depends on the dump presentation.
 string ExpressionKey(const LowIRInstruction & ins)
 {
 	switch(ins.opcode)
@@ -50,25 +70,28 @@ string ExpressionKey(const LowIRInstruction & ins)
 	default:
 		return "";
 	}
-	LowIRInstruction key = ins;
-	key.result = "";
-	if(key.opcode == LOWIR_INS_CMP)
+	string operation = ins.operation;
+	string a = OperandKey(ins.operands[0]);
+	string b = ins.operands.size() > 1 ? OperandKey(ins.operands[1])
+	                                   : string();
+	if(ins.opcode == LOWIR_INS_CMP)
 	{
-		string reversed = ReversedPredicate(key.operation);
+		string reversed = ReversedPredicate(operation);
 		if(!reversed.empty())
 		{
-			key.operation = reversed;
-			std::swap(key.operands[0], key.operands[1]);
+			operation = reversed;
+			std::swap(a, b);
 		}
 	}
-	if(CommutativeBinary(key))
-	{
-		string a = LowIROperandText(key.operands[0]);
-		string b = LowIROperandText(key.operands[1]);
-		if(b < a)
-			std::swap(key.operands[0], key.operands[1]);
-	}
-	return LowIRInstructionText(key);
+	if(CommutativeBinary(ins) && b < a)
+		std::swap(a, b);
+	string key = std::to_string(ins.opcode) + '|' + operation + '|' +
+		TypeKey(ins.type) + '|' + TypeKey(ins.type2);
+	for(size_t m = 0; m < ins.metadata.items.size(); m++)
+		key += '|' + ins.metadata.items[m].first + '=' +
+			ins.metadata.items[m].second;
+	key += '|' + a + '|' + b;
+	return key;
 }
 
 void IntersectInto(AvailMap & into, const AvailMap & from)
@@ -94,15 +117,35 @@ struct CsePass
 	vector<char> has_out;
 	vector<AvailMap> handler_contrib;
 	vector<char> has_handler_contrib;
+	vector<vector<size_t> > preds;   // normal-edge predecessors
 
 	explicit CsePass(OptFunction & v) : view(v), fn(*v.fn) {}
 
+	void BuildPredecessors();
 	bool ComputeIn(size_t b, AvailMap & in) const;
 	void WalkBlock(size_t b, AvailMap state, bool record,
-	               OptSubstitution * subst,
-	               set<std::pair<size_t, size_t> > * dups);
+	               OptSubstitution * subst);
 	bool Run();
 };
+
+void CsePass::BuildPredecessors()
+{
+	preds.assign(fn.blocks.size(), vector<size_t>());
+	for(size_t p = 0; p < fn.blocks.size(); p++)
+	{
+		if(fn.blocks[p].instructions.empty())
+			continue;
+		vector<string> targets;
+		TerminatorTargets(fn.blocks[p].instructions.back(), targets);
+		for(size_t t = 0; t < targets.size(); t++)
+		{
+			map<string, size_t>::const_iterator succ =
+				view.block_index.find(targets[t]);
+			if(succ != view.block_index.end())
+				preds[succ->second].push_back(p);
+		}
+	}
+}
 
 // in[b] = intersection over normal predecessor outs plus handler
 // contributions; false while every input is still TOP.
@@ -114,28 +157,18 @@ bool CsePass::ComputeIn(size_t b, AvailMap & in) const
 		return true;
 	}
 	bool have = false;
-	for(size_t p = 0; p < fn.blocks.size(); p++)
+	for(size_t t = 0; t < preds[b].size(); t++)
 	{
-		if(fn.blocks[p].instructions.empty())
+		size_t p = preds[b][t];
+		if(!has_out[p])
 			continue;
-		vector<string> targets;
-		TerminatorTargets(fn.blocks[p].instructions.back(), targets);
-		for(size_t t = 0; t < targets.size(); t++)
+		if(!have)
 		{
-			map<string, size_t>::const_iterator succ =
-				view.block_index.find(targets[t]);
-			if(succ == view.block_index.end() || succ->second != b)
-				continue;
-			if(!has_out[p])
-				continue;
-			if(!have)
-			{
-				in = out_map[p];
-				have = true;
-			}
-			else
-				IntersectInto(in, out_map[p]);
+			in = out_map[p];
+			have = true;
 		}
+		else
+			IntersectInto(in, out_map[p]);
 	}
 	if(has_handler_contrib[b])
 	{
@@ -151,8 +184,7 @@ bool CsePass::ComputeIn(size_t b, AvailMap & in) const
 }
 
 void CsePass::WalkBlock(size_t b, AvailMap state, bool record,
-                        OptSubstitution * subst,
-                        set<std::pair<size_t, size_t> > * dups)
+                        OptSubstitution * subst)
 {
 	LowIRBlock & block = fn.blocks[b];
 	for(size_t k = 0; k < block.instructions.size(); k++)
@@ -188,7 +220,6 @@ void CsePass::WalkBlock(size_t b, AvailMap state, bool record,
 				replacement.kind = LOWIR_OPERAND_TEMP;
 				replacement.name = known->second;
 				(*subst)[ins.result] = replacement;
-				dups->insert(std::make_pair(b, k));
 			}
 			continue;
 		}
@@ -209,8 +240,12 @@ bool CsePass::Run()
 	has_out.assign(count, 0);
 	handler_contrib.assign(count, AvailMap());
 	has_handler_contrib.assign(count, 0);
+	BuildPredecessors();
 
-	for(int iter = 0; iter < 64; iter++)
+	// The descent is monotone from TOP; an unconverged capped run
+	// over-approximates availability, so no rewrites happen then.
+	bool converged = false;
+	for(int iter = 0; iter < 64 && !converged; iter++)
 	{
 		bool changed = false;
 		vector<AvailMap> prior_out = out_map;
@@ -220,25 +255,25 @@ bool CsePass::Run()
 			AvailMap in;
 			if(!ComputeIn(b, in) && b != 0)
 				continue;
-			WalkBlock(b, in, true, nullptr, nullptr);
+			WalkBlock(b, in, true, nullptr);
 		}
 		for(size_t b = 0; b < count; b++)
 			if(has_out[b] != prior_has[b] ||
 			   (has_out[b] && out_map[b] != prior_out[b]))
 				changed = true;
-		if(!changed)
-			break;
+		converged = !changed;
 	}
+	if(!converged)
+		return false;
 
 	// Rewrite duplicates against the stable availability.
 	OptSubstitution subst;
-	set<std::pair<size_t, size_t> > dups;
 	for(size_t b = 0; b < count; b++)
 	{
 		AvailMap in;
 		if(!ComputeIn(b, in) && b != 0)
 			continue;
-		WalkBlock(b, in, false, &subst, &dups);
+		WalkBlock(b, in, false, &subst);
 	}
 	if(subst.empty())
 		return false;

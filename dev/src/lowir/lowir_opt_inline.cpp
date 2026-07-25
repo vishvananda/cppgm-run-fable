@@ -169,6 +169,20 @@ bool Inliner::CalleeEligible(const LowIRInstruction & call, size_t b,
 		   BodyMayTransfer(context, *callee))
 			return false;
 	}
+	// The paste substitutes by name, so the callee must keep the
+	// single-definition temp discipline (no redefined params/temps).
+	set<string> defined;
+	for(size_t p = 0; p < callee->params.size(); p++)
+		defined.insert(callee->params[p].name);
+	for(size_t cb = 0; cb < callee->blocks.size(); cb++)
+		for(size_t ck = 0;
+		    ck < callee->blocks[cb].instructions.size(); ck++)
+		{
+			const string & result =
+				callee->blocks[cb].instructions[ck].result;
+			if(!result.empty() && !defined.insert(result).second)
+				return false;
+		}
 	return true;
 }
 
@@ -217,9 +231,18 @@ bool Inliner::PlanParamSpills(InlinePlan & plan) const
 		const string & slot = ins.operands[1].name;
 		if(store_counts[slot] != 1 || hard_slots.count(slot))
 			continue;
-		plan.forwarded_slots.insert(slot);
+		// Forwarding replaces loads with the stored value, so every
+		// load must read the slot back at the spilled type (a
+		// mixed-width reload is a bit-image read, not the value).
 		const vector<const LowIRInstruction *> & slot_loads =
 			loads[slot];
+		bool typed_ok = true;
+		for(size_t l = 0; l < slot_loads.size(); l++)
+			if(slot_loads[l]->type.kind != ins.type.kind)
+				typed_ok = false;
+		if(!typed_ok)
+			continue;
+		plan.forwarded_slots.insert(slot);
 		for(size_t l = 0; l < slot_loads.size(); l++)
 			plan.slot_loads[slot_loads[l]->result] = param->second;
 	}
@@ -320,8 +343,14 @@ bool Inliner::RenameInstruction(const InlinePlan & plan,
 		ins.result = plan.prefix + ins.result;
 	}
 	for(size_t o = 0; o < ins.operands.size(); o++)
+	{
 		if(!RenameOperand(plan, ins.operands[o]))
 			return false;
+		// A literal argument must not land in an address position.
+		if(ins.operands[o].kind == LOWIR_OPERAND_LITERAL &&
+		   LiteralBarredPosition(ins, o))
+			return false;
+	}
 	for(size_t o = 0; o < ins.switch_values.size(); o++)
 		if(!RenameOperand(plan, ins.switch_values[o]))
 			return false;
@@ -372,7 +401,6 @@ bool Inliner::Expand(const InlinePlan & plan)
 
 	// Copy and rename the callee body.
 	vector<LowIRBlock> body = callee.blocks;
-	vector<size_t> drops;  // forwarded spill instructions in entry
 	for(size_t b = 0; b < body.size(); b++)
 	{
 		body[b].label = plan.prefix + body[b].label;
@@ -394,7 +422,6 @@ bool Inliner::Expand(const InlinePlan & plan)
 		}
 		body[b].instructions.swap(kept);
 	}
-	(void)drops;
 
 	// Merge slot and result plumbing.
 	string merge_slot;
@@ -533,6 +560,10 @@ bool Inliner::Expand(const InlinePlan & plan)
 
 bool Inliner::RunOnce()
 {
+	// Use counts of call results for the object gate; the body only
+	// changes when an expansion succeeds, which ends this scan.
+	map<string, size_t> result_uses;
+	bool uses_ready = false;
 	for(size_t b = 0; b < fn.blocks.size(); b++)
 		for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
 		{
@@ -550,30 +581,10 @@ bool Inliner::RunOnce()
 					call.operands[p];
 			if(!PlanParamSpills(plan))
 				continue;
-			map<string, size_t> result_uses;
+			if(!uses_ready)
 			{
-				// Use counts of the call result for the object gate.
-				map<string, size_t> uses;
-				for(size_t bb = 0; bb < fn.blocks.size(); bb++)
-					for(size_t kk = 0;
-					    kk < fn.blocks[bb].instructions.size(); kk++)
-					{
-						const LowIRInstruction & ins =
-							fn.blocks[bb].instructions[kk];
-						for(size_t o = 0; o < ins.operands.size(); o++)
-							if(ins.operands[o].kind ==
-							   LOWIR_OPERAND_TEMP)
-								uses[ins.operands[o].name]++;
-						for(size_t o = 0;
-						    o < ins.switch_values.size(); o++)
-							if(ins.switch_values[o].kind ==
-							   LOWIR_OPERAND_TEMP)
-								uses[ins.switch_values[o].name]++;
-						if(ins.opcode == LOWIR_INS_CALL &&
-						   ins.callee_is_temp)
-							uses[ins.callee]++;
-					}
-				result_uses = uses;
+				CountTempUses(fn, result_uses);
+				uses_ready = true;
 			}
 			if(!PlanReturns(plan, result_uses))
 				continue;
@@ -652,9 +663,22 @@ bool ForwardCallerParamSpills(OptFunction & view)
 		const string & slot = ins.operands[1].name;
 		if(store_counts[slot] != 1 || hard_slots.count(slot))
 			continue;
+		// Every load must read back at the spilled type; a mixed-width
+		// reload keeps the slot (bit-image read, not the value).
+		const vector<OptInsRef> & slot_loads = loads[slot];
+		bool typed_ok = true;
+		for(size_t l = 0; l < slot_loads.size(); l++)
+		{
+			const LowIRInstruction & load =
+				fn.blocks[slot_loads[l].block]
+					.instructions[slot_loads[l].index];
+			if(load.type.kind != ins.type.kind)
+				typed_ok = false;
+		}
+		if(!typed_ok)
+			continue;
 		dropped.insert(slot);
 		marks.insert(std::make_pair((size_t)0, k));
-		const vector<OptInsRef> & slot_loads = loads[slot];
 		for(size_t l = 0; l < slot_loads.size(); l++)
 		{
 			const LowIRInstruction & load =

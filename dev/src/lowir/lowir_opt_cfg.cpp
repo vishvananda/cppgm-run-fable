@@ -280,11 +280,9 @@ bool CfgPass::MergePairs()
 		block.instructions.insert(block.instructions.end(),
 		                          succ.instructions.begin(),
 		                          succ.instructions.end());
-		succ.instructions.clear();
-		succ.instructions.push_back(LowIRInstruction());
-		succ.instructions.back().opcode = LOWIR_INS_RETURN;
-		// The emptied successor is now unreachable; the removal sweep
-		// below drops it.
+		// The successor's only predecessor was the merged jump, so the
+		// block is gone outright; the caller rebuilds the view.
+		fn.blocks.erase(fn.blocks.begin() + static_cast<long>(s));
 		return true;
 	}
 	return false;
@@ -326,13 +324,30 @@ struct RegionScan
 	set<std::pair<size_t, size_t> > body;    // instructions inside
 	set<std::pair<size_t, size_t> > ends;    // matching eh_end sites
 	bool valid = true;
+	int max_depth = 0;                       // total region pushes
 
-	explicit RegionScan(OptFunction & v) : view(v) {}
+	explicit RegionScan(OptFunction & v) : view(v)
+	{
+		for(size_t b = 0; b < v.fn->blocks.size(); b++)
+			for(size_t k = 0; k < v.fn->blocks[b].instructions.size();
+			    k++)
+				if(RegionDelta(v.fn->blocks[b].instructions[k]) > 0)
+					max_depth++;
+	}
 
 	void Walk(size_t block, size_t start, int depth,
 	          set<std::pair<size_t, int> > & seen)
 	{
-		if(!valid ||
+		// The initial call scans a block tail (start > 0) and is not
+		// memoized: a back edge re-entering that block at the same
+		// depth must still scan its leading instructions. Depths past
+		// the total push count mean a pushing cycle: irregular shape.
+		if(!valid || depth > max_depth)
+		{
+			valid = false;
+			return;
+		}
+		if(start == 0 &&
 		   !seen.insert(std::make_pair(block, depth)).second)
 			return;
 		const LowIRBlock & at = view.fn->blocks[block];

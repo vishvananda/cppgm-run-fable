@@ -28,58 +28,108 @@ const LowIRFunction * LowIROptContext::FindFunction(
 
 // Call-graph cycle detection over the current bodies: any function on
 // a directed cycle of direct calls (including self recursion) is never
-// an inline candidate.
+// an inline candidate. One iterative Tarjan SCC pass: members of a
+// multi-node component, plus self-loop nodes, are cyclic.
 void LowIROptContext::RefreshInlineCycles()
 {
-	map<string, set<string> > callees;
+	inline_cycle.clear();
+	vector<const LowIRFunction *> defs;
+	map<string, int> ids;
 	for(size_t i = 0; i < program->functions.size(); i++)
-	{
-		const LowIRFunction & fn = program->functions[i];
-		if(!fn.is_definition)
-			continue;
-		set<string> & out = callees[fn.name];
-		for(size_t b = 0; b < fn.blocks.size(); b++)
-			for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
+		if(program->functions[i].is_definition)
+		{
+			ids[program->functions[i].name] =
+				static_cast<int>(defs.size());
+			defs.push_back(&program->functions[i]);
+		}
+	size_t count = defs.size();
+	vector<vector<int> > out(count);
+	vector<bool> self_loop(count, false);
+	for(size_t i = 0; i < count; i++)
+		for(size_t b = 0; b < defs[i]->blocks.size(); b++)
+			for(size_t k = 0;
+			    k < defs[i]->blocks[b].instructions.size(); k++)
 			{
 				const LowIRInstruction & ins =
-					fn.blocks[b].instructions[k];
-				if(ins.opcode == LOWIR_INS_CALL && !ins.callee_is_temp)
-					out.insert(ins.callee);
+					defs[i]->blocks[b].instructions[k];
+				if(ins.opcode != LOWIR_INS_CALL || ins.callee_is_temp)
+					continue;
+				map<string, int>::const_iterator target =
+					ids.find(ins.callee);
+				if(target == ids.end())
+					continue;
+				if(target->second == static_cast<int>(i))
+					self_loop[i] = true;
+				else
+					out[i].push_back(target->second);
 			}
-	}
 
-	inline_cycle.clear();
-	for(map<string, set<string> >::const_iterator it = callees.begin();
-	    it != callees.end(); ++it)
+	vector<int> index(count, -1), low(count, 0);
+	vector<bool> on_stack(count, false);
+	vector<int> scc_stack;
+	int next_index = 0;
+	// Explicit DFS frames: node and next out-edge to visit.
+	vector<std::pair<int, size_t> > frames;
+	for(size_t root = 0; root < count; root++)
 	{
-		// Reachability from each callee of `f` back to `f`.
-		const string & from = it->first;
-		vector<string> work(it->second.begin(), it->second.end());
-		set<string> seen(it->second.begin(), it->second.end());
-		bool cyclic = seen.count(from) != 0;
-		while(!cyclic && !work.empty())
+		if(index[root] >= 0)
+			continue;
+		frames.push_back(std::make_pair(static_cast<int>(root),
+		                                (size_t)0));
+		while(!frames.empty())
 		{
-			string at = work.back();
-			work.pop_back();
-			map<string, set<string> >::const_iterator next =
-				callees.find(at);
-			if(next == callees.end())
-				continue;
-			for(set<string>::const_iterator c = next->second.begin();
-			    c != next->second.end(); ++c)
+			int at = frames.back().first;
+			size_t & edge = frames.back().second;
+			if(edge == 0)
 			{
-				if(*c == from)
+				index[at] = low[at] = next_index++;
+				scc_stack.push_back(at);
+				on_stack[at] = true;
+			}
+			bool descended = false;
+			while(edge < out[at].size())
+			{
+				int next = out[at][edge++];
+				if(index[next] < 0)
 				{
-					cyclic = true;
+					frames.push_back(std::make_pair(next, (size_t)0));
+					descended = true;
 					break;
 				}
-				if(seen.insert(*c).second)
-					work.push_back(*c);
+				if(on_stack[next] && index[next] < low[at])
+					low[at] = index[next];
+			}
+			if(descended)
+				continue;
+			if(low[at] == index[at])
+			{
+				// Pop the component rooted at `at`.
+				vector<int> members;
+				for(;;)
+				{
+					int member = scc_stack.back();
+					scc_stack.pop_back();
+					on_stack[member] = false;
+					members.push_back(member);
+					if(member == at)
+						break;
+				}
+				if(members.size() > 1)
+					for(size_t m = 0; m < members.size(); m++)
+						inline_cycle.insert(defs[members[m]]->name);
+			}
+			frames.pop_back();
+			if(!frames.empty())
+			{
+				int parent = frames.back().first;
+				if(low[at] < low[parent])
+					low[parent] = low[at];
 			}
 		}
-		if(cyclic)
-			inline_cycle.insert(from);
 	}
+	for(size_t i = 0; i < count; i++)
+		if(self_loop[i])
+			inline_cycle.insert(defs[i]->name);
 }
 
 void TerminatorTargets(const LowIRInstruction & ins,
@@ -217,41 +267,64 @@ bool OptimizeFunction(LowIRFunction & fn, LowIROptContext & context)
 
 }  // namespace
 
+namespace {
+
+// The single owner of "what references a LowIR symbol": direct
+// callees, global operands (including switch case values), eh_types,
+// and the tls_for metadata target. Counts are per occurrence so the
+// weak-discard worklist can decrement as bodies drop out.
+void CountFunctionSymbolRefs(const LowIRFunction & fn,
+                             map<string, long> & counts)
+{
+	string tls = fn.metadata.find("tls_for");
+	if(tls.size() > 1 && tls[0] == '@')
+		counts[tls.substr(1)]++;
+	for(size_t b = 0; b < fn.blocks.size(); b++)
+		for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
+		{
+			const LowIRInstruction & ins = fn.blocks[b].instructions[k];
+			if(ins.opcode == LOWIR_INS_CALL && !ins.callee_is_temp)
+				counts[ins.callee]++;
+			for(size_t o = 0; o < ins.operands.size(); o++)
+				if(ins.operands[o].kind == LOWIR_OPERAND_GLOBAL)
+					counts[ins.operands[o].name]++;
+			for(size_t o = 0; o < ins.switch_values.size(); o++)
+				if(ins.switch_values[o].kind == LOWIR_OPERAND_GLOBAL)
+					counts[ins.switch_values[o].name]++;
+			for(size_t t = 0; t < ins.eh_types.size(); t++)
+				counts[ins.eh_types[t]]++;
+		}
+}
+
+void CountGlobalSymbolRefs(const LowIRGlobal & global,
+                           map<string, long> & counts)
+{
+	if(global.init == LOWIR_GLOBAL_ADDR)
+		counts[global.addr_symbol]++;
+	for(size_t i = 0; i < global.items.size(); i++)
+		if(global.items[i].kind == LOWIR_DATA_ADDR)
+			counts[global.items[i].symbol]++;
+}
+
+void CountProgramSymbolRefs(const LowIRProgram & program,
+                            map<string, long> & counts)
+{
+	for(size_t f = 0; f < program.functions.size(); f++)
+		CountFunctionSymbolRefs(program.functions[f], counts);
+	for(size_t g = 0; g < program.globals.size(); g++)
+		CountGlobalSymbolRefs(program.globals[g], counts);
+}
+
+}  // namespace
+
 void PruneUnreferencedLowIRDeclares(LowIRProgram & program)
 {
+	map<string, long> counts;
+	CountProgramSymbolRefs(program, counts);
 	set<string> referenced;
-	for(size_t f = 0; f < program.functions.size(); f++)
-	{
-		const LowIRFunction & fn = program.functions[f];
-		string tls = fn.metadata.find("tls_for");
-		if(tls.size() > 1 && tls[0] == '@')
-			referenced.insert(tls.substr(1));
-		for(size_t b = 0; b < fn.blocks.size(); b++)
-			for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
-			{
-				const LowIRInstruction & ins =
-					fn.blocks[b].instructions[k];
-				if(ins.opcode == LOWIR_INS_CALL && !ins.callee_is_temp)
-					referenced.insert(ins.callee);
-				for(size_t o = 0; o < ins.operands.size(); o++)
-					if(ins.operands[o].kind == LOWIR_OPERAND_GLOBAL)
-						referenced.insert(ins.operands[o].name);
-				for(size_t o = 0; o < ins.switch_values.size(); o++)
-					if(ins.switch_values[o].kind == LOWIR_OPERAND_GLOBAL)
-						referenced.insert(ins.switch_values[o].name);
-				for(size_t t = 0; t < ins.eh_types.size(); t++)
-					referenced.insert(ins.eh_types[t]);
-			}
-	}
-	for(size_t g = 0; g < program.globals.size(); g++)
-	{
-		const LowIRGlobal & global = program.globals[g];
-		if(global.init == LOWIR_GLOBAL_ADDR)
-			referenced.insert(global.addr_symbol);
-		for(size_t i = 0; i < global.items.size(); i++)
-			if(global.items[i].kind == LOWIR_DATA_ADDR)
-				referenced.insert(global.items[i].symbol);
-	}
+	for(map<string, long>::const_iterator it = counts.begin();
+	    it != counts.end(); ++it)
+		referenced.insert(it->first);
 	for(size_t a = 0; a < program.aliases.size(); a++)
 		referenced.insert(program.aliases[a].target);
 
@@ -280,64 +353,83 @@ void PruneUnreferencedLowIRDeclares(LowIRProgram & program)
 
 void RemoveUnreferencedWeakFunctions(LowIRProgram & program, int level)
 {
-	for(;;)
-	{
-		set<string> referenced;
-		for(size_t f = 0; f < program.functions.size(); f++)
-		{
-			const LowIRFunction & fn = program.functions[f];
-			for(size_t b = 0; b < fn.blocks.size(); b++)
-				for(size_t k = 0;
-				    k < fn.blocks[b].instructions.size(); k++)
-				{
-					const LowIRInstruction & ins =
-						fn.blocks[b].instructions[k];
-					if(ins.opcode == LOWIR_INS_CALL &&
-					   !ins.callee_is_temp)
-						referenced.insert(ins.callee);
-					for(size_t o = 0; o < ins.operands.size(); o++)
-						if(ins.operands[o].kind == LOWIR_OPERAND_GLOBAL)
-							referenced.insert(ins.operands[o].name);
-					for(size_t t = 0; t < ins.eh_types.size(); t++)
-						referenced.insert(ins.eh_types[t]);
-				}
-		}
-		for(size_t g = 0; g < program.globals.size(); g++)
-		{
-			const LowIRGlobal & global = program.globals[g];
-			if(global.init == LOWIR_GLOBAL_ADDR)
-				referenced.insert(global.addr_symbol);
-			for(size_t i = 0; i < global.items.size(); i++)
-				if(global.items[i].kind == LOWIR_DATA_ADDR)
-					referenced.insert(global.items[i].symbol);
-		}
+	map<string, long> counts;
+	CountProgramSymbolRefs(program, counts);
 
-		set<string> removed;
-		vector<LowIRFunction> kept;
-		for(size_t f = 0; f < program.functions.size(); f++)
-		{
-			const LowIRFunction & fn = program.functions[f];
-			bool discardable = fn.is_definition &&
-				fn.metadata.find("binding") == "weak" &&
-				!fn.metadata.has("role") &&
-				!fn.metadata.has("tls_for") &&
-				fn.metadata.find("object_root") != "yes" &&
-				(level >= 1 ||
-				 fn.metadata.find("trivial_lifecycle") == "yes");
-			if(discardable && !referenced.count(fn.name))
-				removed.insert(fn.name);
-			else
-				kept.push_back(fn);
-		}
-		if(removed.empty())
-			return;
-		program.functions.swap(kept);
-		vector<LowIRAlias> kept_aliases;
-		for(size_t a = 0; a < program.aliases.size(); a++)
-			if(!removed.count(program.aliases[a].target))
-				kept_aliases.push_back(program.aliases[a]);
-		program.aliases.swap(kept_aliases);
+	// An alias is normally just an extra object spelling of its target
+	// and dies with it (host vague-linkage discard). But when the
+	// program also declares the alias's object symbol as a LowIR
+	// top-level, LowIR references can reach the definition through the
+	// alias, so the target stays pinned.
+	set<string> declared;
+	for(size_t f = 0; f < program.functions.size(); f++)
+		if(!program.functions[f].is_definition)
+			declared.insert(program.functions[f].name);
+	for(size_t g = 0; g < program.globals.size(); g++)
+		if(!program.globals[g].is_definition)
+			declared.insert(program.globals[g].name);
+	for(size_t a = 0; a < program.aliases.size(); a++)
+		if(declared.count(program.aliases[a].object_symbol))
+			counts[program.aliases[a].target]++;
+
+	map<string, size_t> discardable;   // name -> functions index
+	vector<string> worklist;
+	for(size_t f = 0; f < program.functions.size(); f++)
+	{
+		const LowIRFunction & fn = program.functions[f];
+		bool eligible = fn.is_definition &&
+			fn.metadata.find("binding") == "weak" &&
+			!fn.metadata.has("role") &&
+			!fn.metadata.has("tls_for") &&
+			fn.metadata.find("object_root") != "yes" &&
+			(level >= 1 ||
+			 fn.metadata.find("trivial_lifecycle") == "yes");
+		if(!eligible)
+			continue;
+		discardable[fn.name] = f;
+		if(counts[fn.name] == 0)
+			worklist.push_back(fn.name);
 	}
+	if(discardable.empty())
+		return;
+
+	// Removing a body releases its references; newly unreferenced
+	// discardable functions cascade through the worklist.
+	set<string> removed;
+	while(!worklist.empty())
+	{
+		string name = worklist.back();
+		worklist.pop_back();
+		if(!removed.insert(name).second)
+			continue;
+		map<string, long> released;
+		CountFunctionSymbolRefs(
+			program.functions[discardable[name]], released);
+		for(map<string, long>::const_iterator it = released.begin();
+		    it != released.end(); ++it)
+		{
+			map<string, long>::iterator count = counts.find(it->first);
+			if(count == counts.end())
+				continue;
+			count->second -= it->second;
+			if(count->second <= 0 && discardable.count(it->first) &&
+			   !removed.count(it->first))
+				worklist.push_back(it->first);
+		}
+	}
+	if(removed.empty())
+		return;
+
+	vector<LowIRFunction> kept;
+	for(size_t f = 0; f < program.functions.size(); f++)
+		if(!removed.count(program.functions[f].name))
+			kept.push_back(program.functions[f]);
+	program.functions.swap(kept);
+	vector<LowIRAlias> kept_aliases;
+	for(size_t a = 0; a < program.aliases.size(); a++)
+		if(!removed.count(program.aliases[a].target))
+			kept_aliases.push_back(program.aliases[a]);
+	program.aliases.swap(kept_aliases);
 }
 
 void OptimizeLowIRProgram(LowIRProgram & program, int level)

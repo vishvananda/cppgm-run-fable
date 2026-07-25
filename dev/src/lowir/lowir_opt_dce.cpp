@@ -47,23 +47,6 @@ void CollectSlotUses(const LowIRFunction & fn,
 		}
 }
 
-void CountTempUses(const LowIRFunction & fn, map<string, size_t> & uses)
-{
-	uses.clear();
-	for(size_t b = 0; b < fn.blocks.size(); b++)
-		for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
-		{
-			const LowIRInstruction & ins = fn.blocks[b].instructions[k];
-			for(size_t o = 0; o < ins.operands.size(); o++)
-				if(ins.operands[o].kind == LOWIR_OPERAND_TEMP)
-					uses[ins.operands[o].name]++;
-			for(size_t o = 0; o < ins.switch_values.size(); o++)
-				if(ins.switch_values[o].kind == LOWIR_OPERAND_TEMP)
-					uses[ins.switch_values[o].name]++;
-			if(ins.opcode == LOWIR_INS_CALL && ins.callee_is_temp)
-				uses[ins.callee]++;
-		}
-}
 
 bool PureRemovable(const LowIRInstruction & ins)
 {
@@ -343,66 +326,88 @@ bool DcePass::RemovePromotedDeadStores()
 		const string & slot = it->first;
 
 		// Block-level liveness of this slot over normal edges plus a
-		// conservative all-handlers exceptional edge.
+		// conservative all-handlers exceptional edge. Once any handler
+		// can observe the slot, may-throw points count as reads and the
+		// liveness reruns so upstream stores stay (the exceptional edge
+		// crosses block boundaries too).
 		size_t count = fn.blocks.size();
 		vector<int> first_access(count, 0);  // 0 none, 1 load, 2 store
-		for(size_t b = 0; b < count; b++)
-			for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
-			{
-				const LowIRInstruction & ins =
-					fn.blocks[b].instructions[k];
-				if(ins.opcode == LOWIR_INS_LOAD &&
-				   ins.operands[0].kind == LOWIR_OPERAND_SLOT &&
-				   ins.operands[0].name == slot)
-				{
-					first_access[b] = 1;
-					break;
-				}
-				if(ins.opcode == LOWIR_INS_STORE &&
-				   ins.operands[1].kind == LOWIR_OPERAND_SLOT &&
-				   ins.operands[1].name == slot)
-				{
-					first_access[b] = 2;
-					break;
-				}
-			}
 		vector<bool> live_in(count, false), live_out(count, false);
-		bool stable = false;
-		while(!stable)
+		bool handler_live = false;
+		for(int rerun = 0; rerun < 2; rerun++)
 		{
-			stable = true;
-			for(size_t b = count; b-- > 0;)
+			for(size_t b = 0; b < count; b++)
 			{
-				bool out = false;
-				if(!fn.blocks[b].instructions.empty())
+				first_access[b] = 0;
+				for(size_t k = 0;
+				    k < fn.blocks[b].instructions.size(); k++)
 				{
-					vector<string> targets;
-					TerminatorTargets(fn.blocks[b].instructions.back(),
-					                  targets);
-					for(size_t t = 0; t < targets.size(); t++)
+					const LowIRInstruction & ins =
+						fn.blocks[b].instructions[k];
+					if(ins.opcode == LOWIR_INS_LOAD &&
+					   ins.operands[0].kind == LOWIR_OPERAND_SLOT &&
+					   ins.operands[0].name == slot)
 					{
-						map<string, size_t>::const_iterator succ =
-							view.block_index.find(targets[t]);
-						if(succ != view.block_index.end())
-							out = out || live_in[succ->second];
+						first_access[b] = 1;
+						break;
+					}
+					if(ins.opcode == LOWIR_INS_STORE &&
+					   ins.operands[1].kind == LOWIR_OPERAND_SLOT &&
+					   ins.operands[1].name == slot)
+					{
+						first_access[b] = 2;
+						break;
+					}
+					if(handler_live && view.depth_in[b] >= 0 &&
+					   MayTransferToHandler(*view.context, ins))
+					{
+						first_access[b] = 1;
+						break;
 					}
 				}
-				bool in = first_access[b] == 1 ||
-					(first_access[b] == 0 && out);
-				if(out != live_out[b] || in != live_in[b])
+			}
+			live_in.assign(count, false);
+			live_out.assign(count, false);
+			bool stable = false;
+			while(!stable)
+			{
+				stable = true;
+				for(size_t b = count; b-- > 0;)
 				{
-					live_out[b] = out;
-					live_in[b] = in;
-					stable = false;
+					bool out = false;
+					if(!fn.blocks[b].instructions.empty())
+					{
+						vector<string> targets;
+						TerminatorTargets(
+							fn.blocks[b].instructions.back(), targets);
+						for(size_t t = 0; t < targets.size(); t++)
+						{
+							map<string, size_t>::const_iterator succ =
+								view.block_index.find(targets[t]);
+							if(succ != view.block_index.end())
+								out = out || live_in[succ->second];
+						}
+					}
+					bool in = first_access[b] == 1 ||
+						(first_access[b] == 0 && out);
+					if(out != live_out[b] || in != live_in[b])
+					{
+						live_out[b] = out;
+						live_in[b] = in;
+						stable = false;
+					}
 				}
 			}
-		}
 
-		// Exceptional observation: liveness into any handler target.
-		bool handler_live = false;
-		for(size_t b = 0; b < count; b++)
-			if(view.handler_target[b] && live_in[b])
-				handler_live = true;
+			// Exceptional observation: liveness into any handler target.
+			bool observed = false;
+			for(size_t b = 0; b < count; b++)
+				if(view.handler_target[b] && live_in[b])
+					observed = true;
+			if(observed == handler_live)
+				break;
+			handler_live = observed;
+		}
 
 		for(size_t b = 0; b < count; b++)
 		{
@@ -435,6 +440,45 @@ bool DcePass::RemovePromotedDeadStores()
 
 }  // namespace
 
+void CountTempUses(const LowIRFunction & fn, map<string, size_t> & uses)
+{
+	uses.clear();
+	for(size_t b = 0; b < fn.blocks.size(); b++)
+		for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
+		{
+			const LowIRInstruction & ins = fn.blocks[b].instructions[k];
+			for(size_t o = 0; o < ins.operands.size(); o++)
+				if(ins.operands[o].kind == LOWIR_OPERAND_TEMP)
+					uses[ins.operands[o].name]++;
+			for(size_t o = 0; o < ins.switch_values.size(); o++)
+				if(ins.switch_values[o].kind == LOWIR_OPERAND_TEMP)
+					uses[ins.switch_values[o].name]++;
+			if(ins.opcode == LOWIR_INS_CALL && ins.callee_is_temp)
+				uses[ins.callee]++;
+		}
+}
+
+bool LiteralBarredPosition(const LowIRInstruction & ins, size_t o)
+{
+	switch(ins.opcode)
+	{
+	case LOWIR_INS_LOAD:
+	case LOWIR_INS_ATOMIC_LOAD:
+	case LOWIR_INS_ATOMIC_EXCHANGE:
+	case LOWIR_INS_ATOMIC_ADD_FETCH:
+	case LOWIR_INS_ZEROINIT:
+		return o == 0;
+	case LOWIR_INS_STORE:
+	case LOWIR_INS_ATOMIC_STORE:
+		return o == 1;
+	case LOWIR_INS_ATOMIC_COMPARE_EXCHANGE:
+	case LOWIR_INS_COPYOBJ:
+		return o == 0 || o == 1;
+	default:
+		return false;
+	}
+}
+
 bool ApplySubstitution(LowIRFunction & fn, const OptSubstitution & subst)
 {
 	if(subst.empty())
@@ -457,10 +501,7 @@ bool ApplySubstitution(LowIRFunction & fn, const OptSubstitution & subst)
 				const LowIROperand & op = ins.operands[o];
 				if(op.kind != LOWIR_OPERAND_TEMP)
 					continue;
-				bool storage_position =
-					(ins.opcode == LOWIR_INS_LOAD && o == 0) ||
-					(ins.opcode == LOWIR_INS_STORE && o == 1);
-				if(!storage_position)
+				if(!LiteralBarredPosition(ins, o))
 					continue;
 				OptSubstitution::const_iterator found =
 					subst.find(op.name);

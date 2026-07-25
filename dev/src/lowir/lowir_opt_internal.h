@@ -106,6 +106,16 @@ LowIROperand MakeIntLiteral(const LowIRType & type,
 unsigned long long WrapIntToType(const LowIRType & type,
                                  unsigned long long bits);
 
+// Whether operand `o` of `ins` is a storage/address position where a
+// literal operand is malformed (load/store/atomic addresses, copyobj
+// endpoints, zeroinit destination). Shared by substitution legality
+// and the inliner's argument paste.
+bool LiteralBarredPosition(const LowIRInstruction & ins, size_t o);
+
+// Use counts of every temp operand (including switch case values and
+// indirect callees).
+void CountTempUses(const LowIRFunction & fn, map<string, size_t> & uses);
+
 // Substitution map: temp name -> replacement operand. Applies to every
 // value-operand position; returns false (no changes committed) when a
 // replacement literal would land in a storage/callee position.

@@ -61,6 +61,7 @@ struct FoldPass
 	vector<SlotState> state_in;      // per block
 	vector<SlotState> handler_in;    // merged at may-transfer points
 	vector<vector<string> > stack_in;  // active handler labels
+	vector<char> handler_stack_known;  // stack_in assigned at push site
 	bool eh_stack_sane = true;
 
 	explicit FoldPass(OptFunction & v)
@@ -86,16 +87,15 @@ struct FoldPass
 	void FindPromotableSlots();
 	void MergeSlotState(SlotState & into, const SlotState & from,
 	                    bool & changed) const;
-	void SeedHandlerState(const vector<string> & stack, size_t at,
+	void SeedHandlerState(const vector<string> & stack,
 	                      const SlotState & slots, bool & changed);
 	struct FixpointRound
 	{
 		bool changed = false;
-		set<size_t> exec;
+		set<size_t> exec;   // processed this round (= executable)
 		set<std::pair<size_t, size_t> > edges;
 		vector<char> pending;
 		vector<size_t> work;
-		set<size_t> visited;
 	};
 	void ProcessBlock(size_t b, FixpointRound & round);
 	bool RunFixpoint();
@@ -118,8 +118,20 @@ bool ParseIntSpelling(const string & spelling, bool negated,
 	unsigned long long value = strtoull(spelling.c_str(), &end, 0);
 	if(end == spelling.c_str() || *end != '\0')
 		return false;
-	bits = negated ? (unsigned long long)(-(long long)value) : value;
+	bits = negated ? (unsigned long long)0 - value : value;
 	return true;
+}
+
+// Signed-flavored operations read the operand's width pattern as
+// signed; on an unsigned-typed operand with the sign bit set that
+// diverges from the type-canonical value this pass carries, so folds
+// back off.
+bool UnsignedSignBitSet(const LowIRType & type, unsigned long long bits)
+{
+	if(type.kind != LOWIR_TYPE_U8 && type.kind != LOWIR_TYPE_U16 &&
+	   type.kind != LOWIR_TYPE_U32)
+		return false;
+	return (bits >> (type.integer_bits() - 1)) & 1;
 }
 
 }  // namespace
@@ -191,10 +203,7 @@ LowIROperand MakeIntLiteral(const LowIRType & type,
 		return op;
 	}
 	op.negated = true;
-	op.literal = std::to_string(-(unsigned long long)bits);
-	// -(unsigned)LLONG_MIN prints its own magnitude correctly above.
-	if((long long)bits == -(long long)bits)
-		op.literal = std::to_string((unsigned long long)bits);
+	op.literal = std::to_string((unsigned long long)0 - bits);
 	return op;
 }
 
@@ -283,8 +292,6 @@ Value FoldPass::EvaluateBinary(const LowIRInstruction & ins,
 	if(a_lit && b_lit)
 	{
 		long width = type.integer_bits();
-		bool is_unsigned = type.kind == LOWIR_TYPE_U8 ||
-			type.kind == LOWIR_TYPE_U16 || type.kind == LOWIR_TYPE_U32;
 		unsigned long long ua = width >= 64 ? av
 			: av & ((1ull << width) - 1);
 		unsigned long long ub = width >= 64 ? bv
@@ -303,6 +310,9 @@ Value FoldPass::EvaluateBinary(const LowIRInstruction & ins,
 			return MakeKnown(MakeIntLiteral(type, av ^ bv));
 		if(op == "div" || op == "mod")
 		{
+			if(UnsignedSignBitSet(type, av) ||
+			   UnsignedSignBitSet(type, bv))
+				return MakeVarying();
 			long long sa = (long long)av, sb = (long long)bv;
 			if(sb == 0 || (sb == -1 && sa == (-9223372036854775807ll - 1)))
 				return MakeVarying();
@@ -325,11 +335,11 @@ Value FoldPass::EvaluateBinary(const LowIRInstruction & ins,
 				return MakeKnown(MakeIntLiteral(type, av << bv));
 			if(op == "ushr")
 				return MakeKnown(MakeIntLiteral(type, ua >> bv));
+			if(UnsignedSignBitSet(type, av))
+				return MakeVarying();
 			return MakeKnown(MakeIntLiteral(
 				type, (unsigned long long)((long long)av >> bv)));
 		}
-		if(is_unsigned)
-			(void)0;
 		return MakeVarying();
 	}
 
@@ -384,6 +394,18 @@ Value FoldPass::EvaluateCmp(const LowIRInstruction & ins,
 		long double av = 0, bv = 0;
 		if(!OperandFloatValue(a, av) || !OperandFloatValue(b, bv))
 			return MakeVarying();
+		// The backends round each literal to the operand type before
+		// comparing; the fold must see the same values.
+		if(ins.type.kind == LOWIR_TYPE_F32)
+		{
+			av = (float)av;
+			bv = (float)bv;
+		}
+		else if(ins.type.kind == LOWIR_TYPE_F64)
+		{
+			av = (double)av;
+			bv = (double)bv;
+		}
 		bool truth;
 		if(op == "eq")
 			truth = av == bv;
@@ -410,6 +432,10 @@ Value FoldPass::EvaluateCmp(const LowIRInstruction & ins,
 	long width = ins.type.integer_bits();
 	unsigned long long ua = width >= 64 ? av : av & ((1ull << width) - 1);
 	unsigned long long ub = width >= 64 ? bv : bv & ((1ull << width) - 1);
+	if((op == "lt" || op == "le" || op == "gt" || op == "ge") &&
+	   (UnsignedSignBitSet(ins.type, av) ||
+	    UnsignedSignBitSet(ins.type, bv)))
+		return MakeVarying();
 	long long sa = (long long)av, sb = (long long)bv;
 	bool truth;
 	if(op == "eq")
@@ -453,6 +479,8 @@ Value FoldPass::EvaluateConvert(const LowIRInstruction & ins,
 		   !ins.type2.is_integer() || ins.type2.kind == LOWIR_TYPE_I128)
 			return MakeVarying();
 		bits = WrapIntToType(ins.type2, bits);
+		if(op == "sext" && UnsignedSignBitSet(ins.type2, bits))
+			return MakeVarying();
 		if(op == "zext")
 		{
 			long width = ins.type2.integer_bits();
@@ -468,11 +496,24 @@ Value FoldPass::EvaluateConvert(const LowIRInstruction & ins,
 		   ins.type2.kind == LOWIR_TYPE_I128 || !ins.type.is_float())
 			return MakeVarying();
 		bits = WrapIntToType(ins.type2, bits);
+		if(op == "sitofp" && UnsignedSignBitSet(ins.type2, bits))
+			return MakeVarying();
+		if(op == "uitofp")
+		{
+			// The unsigned read takes the width pattern zero-extended.
+			long width = ins.type2.integer_bits();
+			if(width < 64)
+				bits &= (1ull << width) - 1;
+		}
 		long double value = op == "sitofp"
 			? (long double)(long long)bits
 			: (long double)bits;
-		// Fold only exactly-representable integral values; spell them
-		// as `<int>.0` with the destination type's suffix.
+		// Fold only exactly-representable integral values within the
+		// signed 64-bit spelling range; spell them as `<int>.0` with
+		// the destination type's suffix.
+		if(value < -9223372036854775808.0L ||
+		   value >= 9223372036854775808.0L)
+			return MakeVarying();
 		if(value != (long double)(long long)value)
 			return MakeVarying();
 		long long ivalue = (long long)value;
@@ -565,7 +606,8 @@ void FoldPass::MergeSlotState(SlotState & into, const SlotState & from,
 			continue;
 		}
 		if(incoming.kind == Value::VARYING ||
-		   !SameOperand(current.op, incoming.op))
+		   !SameOperand(current.op, incoming.op) ||
+		   current.slot_type.kind != incoming.slot_type.kind)
 		{
 			current = MakeVarying();
 			changed = true;
@@ -573,10 +615,9 @@ void FoldPass::MergeSlotState(SlotState & into, const SlotState & from,
 	}
 }
 
-void FoldPass::SeedHandlerState(const vector<string> & stack, size_t at,
+void FoldPass::SeedHandlerState(const vector<string> & stack,
                                 const SlotState & slots, bool & changed)
 {
-	(void)at;
 	for(size_t h = 0; h < stack.size(); h++)
 	{
 		map<string, size_t>::const_iterator target =
@@ -752,6 +793,7 @@ bool FoldPass::RunFixpoint()
 	state_in.assign(fn.blocks.size(), SlotState());
 	handler_in.assign(fn.blocks.size(), SlotState());
 	stack_in.assign(fn.blocks.size(), vector<string>());
+	handler_stack_known.assign(fn.blocks.size(), 0);
 
 	for(int iter = 0; iter < 64; iter++)
 	{
@@ -801,12 +843,10 @@ bool FoldPass::RunFixpoint()
 void FoldPass::ProcessBlock(size_t b, FixpointRound & round)
 {
 	bool & changed = round.changed;
-	set<size_t> & visited = round.visited;
 	set<size_t> & new_exec = round.exec;
 	set<std::pair<size_t, size_t> > & new_edges = round.edges;
 	vector<char> & pending = round.pending;
 	vector<size_t> & work = round.work;
-	visited.insert(b);
 	new_exec.insert(b);
 	SlotState slots = state_in[b];
 	vector<string> stack = stack_in[b];
@@ -816,7 +856,25 @@ void FoldPass::ProcessBlock(size_t b, FixpointRound & round)
 		const LowIRInstruction & ins = block.instructions[k];
 		if(ins.opcode == LOWIR_INS_EH_TRY ||
 		   ins.opcode == LOWIR_INS_EH_CLEANUP)
+		{
+			// The transfer pops the pushed region, so the handler runs
+			// under the stack active at the push site; its own throw
+			// and resume points seed the enclosing handlers.
+			map<string, size_t>::const_iterator target =
+				view.block_index.find(ins.block_targets[0]);
+			if(target != view.block_index.end())
+			{
+				size_t h = target->second;
+				if(!handler_stack_known[h] && stack_in[h].empty())
+				{
+					handler_stack_known[h] = 1;
+					stack_in[h] = stack;
+				}
+				else if(stack_in[h] != stack)
+					eh_stack_sane = false;
+			}
 			stack.push_back(ins.block_targets[0]);
+		}
 		else if(ins.opcode == LOWIR_INS_EH_END)
 		{
 			if(!stack.empty())
@@ -825,7 +883,7 @@ void FoldPass::ProcessBlock(size_t b, FixpointRound & round)
 				eh_stack_sane = false;
 		}
 		if(MayTransferToHandler(*view.context, ins))
-			SeedHandlerState(stack, b, slots, changed);
+			SeedHandlerState(stack, slots, changed);
 		Value value = EvaluateInstruction(ins, slots);
 		if(!ins.result.empty())
 		{
@@ -847,9 +905,9 @@ void FoldPass::ProcessBlock(size_t b, FixpointRound & round)
 		bool merged = false;
 		MergeSlotState(state_in[succs[s]], slots, merged);
 		if(stack_in[succs[s]].empty() && !stack.empty() &&
-		   visited.count(succs[s]) == 0)
+		   new_exec.count(succs[s]) == 0)
 			stack_in[succs[s]] = stack;
-		if((merged || !visited.count(succs[s])) && !pending[succs[s]])
+		if((merged || !new_exec.count(succs[s])) && !pending[succs[s]])
 		{
 			pending[succs[s]] = 1;
 			work.push_back(succs[s]);
@@ -870,7 +928,7 @@ void FoldPass::ProcessBlock(size_t b, FixpointRound & round)
 		new_edges.insert(std::make_pair(b, h));
 		bool merged = false;
 		MergeSlotState(state_in[h], handler_in[h], merged);
-		if((merged || !visited.count(h)) && !pending[h])
+		if((merged || !new_exec.count(h)) && !pending[h])
 		{
 			pending[h] = 1;
 			work.push_back(h);
