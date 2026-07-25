@@ -134,3 +134,68 @@ After collapse:
   `MirInstruction::debug_location` by construction. The LowIR `!dbg` →
   MIR lowering plumbing and `!dbg` dump serialization remain untracked
   (same status PA37 left them); wiring them does not change pass logic.
+
+## Architecture Review
+
+- **One optimizer owner, two consumers.** `mir_optimize` is the only
+  level-gated MIR transform. `lowir2native` and the cppgm++
+  LowIR-to-object tail (`CompileLowIRProgramToModule`) call the same
+  `OptimizeMirProgram` between `LowerLowIRProgramToMir` and encoding,
+  so driver objects at `-O1/-O2` and the standalone tool share one
+  pipeline — the README's "not a display-only transform" rule. The
+  dump and the encoders consume the identical optimized
+  `MirProgram`; `ret <reg>` is a serializable MIR fact and the only
+  emission-time addition is the ABI staging `mov rax, <reg>`, which is
+  epilogue knowledge MIR deliberately does not model.
+- **Baseline ownership split.** Lowering keeps the `-O0` shape,
+  including its own `result_copy_hint` staging cleanup and the
+  mentions-based callee-saved selection in `FinishFrame`; those are
+  PA28 fixture-pinned baseline policy. `mir_optimize` owns everything
+  gated on level. No pass re-derives LowIR facts: it reads only typed
+  MIR (opcodes, operand kinds, `callee_saved_regs`, `stack_size`,
+  `scratch_bytes`).
+- **EH safety.** Every function with landing pads — host EH, private
+  walker EH, or a synthesized throw-payload window — sets
+  `host_eh_enabled`/`host_eh_regions` in lowering, and
+  `OptimizeFunction` skips exactly on that. This protects both the
+  implicit call→landing edges liveness cannot see and the
+  `snapshot_all` callee-saved contract landed frames rely on. Should
+  a landing marker ever appear in an optimized function anyway,
+  `MI_EH_LANDING` classifies as a full barrier and its `def` mask
+  keeps `ExplicitMentionMask` from pruning anything.
+- **Callee-saved prune / stack recompute soundness.** The preserve
+  list only ever holds {rbx, r12..r15} (never rbp/rsp); save-slot
+  addresses derive from `stack_size - scratch_bytes - 8*index` in
+  prologue, epilogue, and CFI alike, so pruning plus the 16-byte-step
+  recompute keeps slots below the fixed frame offsets and preserves
+  the rsp%16 call alignment invariant (`stack_size` stays a multiple
+  of 16).
+- **Classifier conservatism.** Unknown opcodes are full barriers;
+  calls read everything and clobber caller-saved; string/div/shift
+  implicit registers are modeled; `jmp *` makes every block a
+  successor. Flag producers are never deleted (DCE removes only
+  mov/lea/fmov register writes) and the cmp→test rewrite is
+  flag-equivalent for all sixteen condition codes (`cond ^ 1`
+  inversion is valid by the paired enum layout).
+
+## Final Architecture Review
+
+Post-audit state after the performance cleanup:
+
+- The propagation/DCE fixpoint (≤8 rounds) no longer copies
+  instructions: `PropagateBlock` rewrites in place and compacts with
+  moves only when a self-copy was dropped, and `EliminateDeadCopies`
+  marks deletions during the backward liveness walk and compacts with
+  moves only in blocks that lost instructions. `LayoutBlocks` moves
+  blocks through the permutation instead of deep-copying them.
+- CFG successors (string-label map resolution) are computed once per
+  function in `OptimizeFunction` and reused by every DCE round;
+  `ComputeLiveness` resets `gen/kill/live_out` per call. This is
+  sound because the fixpoint never edits labels, never deletes
+  branch instructions, and never reorders blocks — layout and
+  branch-tail collapse run after the loop on fresh adjacency.
+- No hidden representation, no test-shape gates, no interpreter or
+  payload substitutes: `-O1/-O2` output is real optimized MIR encoded
+  by the PA28 native backend, and the batch harness executes the full
+  parse→validate→lower→optimize→emit path per request through the
+  shared `test_runner` fork-per-request main.

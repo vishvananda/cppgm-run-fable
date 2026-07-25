@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 // PA38 machine-backend optimizer. Every pass operates on the typed
@@ -280,6 +281,7 @@ void ComputeLiveness(const MirFunction & function,
     const MirBlock & block = function.blocks[i];
     flows[i].gen = 0;
     flows[i].kill = 0;
+    flows[i].live_out = 0;
     for(size_t j = 0; j < block.instructions.size(); ++j) {
       InsEffect effect = classify(block.instructions[j]);
       flows[i].gen |= effect.use & ~flows[i].kill;
@@ -328,17 +330,19 @@ bool pure_register_write(const MirInstruction & ins)
   return false;
 }
 
-bool EliminateDeadCopies(MirFunction & function)
+// `flows` carries the function's CFG successors, computed once by the
+// caller: the fixpoint rounds never touch labels or block order, so
+// only gen/kill/liveness change between calls.
+bool EliminateDeadCopies(MirFunction & function,
+                         std::vector<BlockFlow> & flows)
 {
-  std::vector<BlockFlow> flows(function.blocks.size());
-  CollectSuccessors(function, flows);
   ComputeLiveness(function, flows);
   bool changed = false;
   for(size_t i = 0; i < function.blocks.size(); ++i) {
     MirBlock & block = function.blocks[i];
     RegMask live = flows[i].live_out;
-    std::vector<MirInstruction> kept;
-    kept.reserve(block.instructions.size());
+    std::vector<bool> drop(block.instructions.size(), false);
+    bool any = false;
     // Frame operands read rbp/rsp implicitly, so writes to either are
     // never removable (baseline lowering never emits one mid-body).
     const RegMask frame_regs = gpr_bit(XR_RBP) | gpr_bit(XR_RSP);
@@ -347,14 +351,24 @@ bool EliminateDeadCopies(MirFunction & function)
       InsEffect effect = classify(ins);
       if(pure_register_write(ins) && (effect.def & live) == 0 &&
          (effect.def & frame_regs) == 0) {
-        changed = true;
+        drop[j] = true;
+        any = true;
         continue;
       }
       live = (live & ~effect.def) | effect.use;
-      kept.push_back(ins);
     }
-    if(kept.size() != block.instructions.size())
-      block.instructions.assign(kept.rbegin(), kept.rend());
+    if(!any)
+      continue;
+    changed = true;
+    size_t out = 0;
+    for(size_t j = 0; j < block.instructions.size(); ++j) {
+      if(drop[j])
+        continue;
+      if(out != j)
+        block.instructions[out] = std::move(block.instructions[j]);
+      ++out;
+    }
+    block.instructions.resize(out);
   }
   return changed;
 }
@@ -621,8 +635,7 @@ bool PropagateBlock(MirBlock & block)
 {
   PropState state;
   bool changed = false;
-  std::vector<MirInstruction> kept;
-  kept.reserve(block.instructions.size());
+  size_t out = 0;
   for(size_t i = 0; i < block.instructions.size(); ++i) {
     MirInstruction & ins = block.instructions[i];
     changed |= RewriteInstruction(ins, state);
@@ -631,10 +644,12 @@ bool PropagateBlock(MirBlock & block)
       continue;
     }
     UpdateFacts(ins, state);
-    kept.push_back(ins);
+    if(out != i)
+      block.instructions[out] = std::move(ins);
+    ++out;
   }
-  if(kept.size() != block.instructions.size())
-    block.instructions.swap(kept);
+  if(out != block.instructions.size())
+    block.instructions.resize(out);
   return changed;
 }
 
@@ -776,7 +791,7 @@ bool LayoutBlocks(MirFunction & function)
   std::vector<MirBlock> blocks;
   blocks.reserve(order.size());
   for(size_t i = 0; i < order.size(); ++i)
-    blocks.push_back(function.blocks[order[i]]);
+    blocks.push_back(std::move(function.blocks[order[i]]));
   function.blocks.swap(blocks);
   return true;
 }
@@ -855,12 +870,14 @@ void OptimizeFunction(MirFunction & function, int level)
 {
   if(function.host_eh_enabled || !function.host_eh_regions.empty())
     return;
+  std::vector<BlockFlow> flows(function.blocks.size());
+  CollectSuccessors(function, flows);
   bool changed = true;
   for(int round = 0; changed && round < 8; ++round) {
     changed = false;
     for(size_t b = 0; b < function.blocks.size(); ++b)
       changed |= PropagateBlock(function.blocks[b]);
-    changed |= EliminateDeadCopies(function);
+    changed |= EliminateDeadCopies(function, flows);
   }
   RewriteZeroCompareBranches(function);
   if(level >= 2)
