@@ -1094,6 +1094,7 @@ bool SemBinder::FillDeducedDefaults(TemplateInfo& tmpl,
 			return false;
 		Scope* partial = MakeArgumentAliasScope(
 			tmpl, FlattenDeduced(tmpl.params, bound, pack_elements));
+		TransientScope partial_release(model_, &partial);
 		Scope* saved = current_;
 		current_ = partial;
 		try
@@ -1301,6 +1302,9 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->name = tmpl.name + TemplateArgumentSpelling(args);
 	spec->param_scope =
 		MakeArgumentAliasScope(tmpl, slots ? *slots : args);
+	// A substitution failure releases the probe's scopes with the
+	// half-built record (SFINAE probes dominate scope creation).
+	TransientScope param_scope_release(model_, &spec->param_scope);
 
 	// Compose the concrete signature in the template's context; the
 	// parameters bind into a scratch scope so a trailing-return
@@ -1309,6 +1313,7 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	const AstDeclarator* declarator = PatternDeclarator(inner);
 	Scope* capture = model_.CreateScope(SCOPE_FUNCTION, tmpl.name,
 	                                    spec->param_scope);
+	TransientScope capture_release(model_, &capture);
 	InstantiationContext context(*this, capture);
 	param_capture_scope_ = capture;
 	// PA21 member templates: a trailing-return decltype may name the
@@ -1378,6 +1383,8 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		defaults[i] = composed.parameters[i].default_arg;
 
+	param_scope_release.Dismiss();
+	capture_release.Dismiss();
 	tmpl.fn_specs[key] = std::move(fresh);
 	return spec;
 }

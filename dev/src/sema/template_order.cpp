@@ -479,6 +479,7 @@ void SemBinder::DeduceOneConversionTemplate(TemplateInfo& tmpl,
 		if (!param.default_type && !param.default_expr)
 			throw runtime_error("conversion deduction incomplete");
 		Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+		TransientScope partial_release(model_, &partial);
 		Scope* saved = current_;
 		current_ = partial;
 		try

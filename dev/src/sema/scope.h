@@ -298,6 +298,11 @@ struct Scope
 	vector<Scope*> using_directives;
 	// 7.3.1.1p1: the unique unnamed member namespace, if any.
 	Scope* unnamed_member;
+	// The owning model's storage slot (ReleaseScope bookkeeping).
+	size_t model_index = 0;
+	// A durable record captured this scope (a deferred noexcept
+	// spec's evaluation context): ReleaseScope refuses it.
+	bool pinned = false;
 };
 
 // The per-translation-unit arena: scope tree, named-type entity
@@ -315,6 +320,14 @@ public:
 
 	// Creates a scope and appends it to `parent`'s child (print) list.
 	Scope* CreateScope(EScopeKind kind, const string& name, Scope* parent);
+
+	// Releases a scope created for one transient resolution (alias
+	// substitution, argument-list binding, deduction probes, pack
+	// element contexts): detaches it from its parent's child list and
+	// frees its storage. Refused (a no-op, keeping today's retention)
+	// for the global scope, a member scope, or a scope that acquired
+	// children - releasing those would dangle live references.
+	void ReleaseScope(Scope* scope);
 
 	// `scope` and `name` record the entity's structural identity
 	// (declaring scope, bare declared name) alongside the display text.
@@ -337,6 +350,29 @@ private:
 	vector<unique_ptr<NamedTypeInfo>> infos_;
 	map<const NamedTypeInfo*, Scope*> member_scopes_;
 	Scope* global_;
+};
+
+// Releases a transient resolution scope (argument-alias binding,
+// deduction probe, pack-element context) when the owning resolution
+// exits, unless dismissed. Watches a slot so a lazily-created scope
+// (or one replaced mid-resolution) releases without extra wiring.
+class TransientScope
+{
+public:
+	TransientScope(TypesModel& model, Scope** slot)
+		: model_(&model), slot_(slot) {}
+	~TransientScope()
+	{
+		if (model_ && slot_ && *slot_)
+			model_->ReleaseScope(*slot_);
+	}
+	void Dismiss() { slot_ = 0; }
+
+private:
+	TypesModel* model_;
+	Scope** slot_;
+	TransientScope(const TransientScope&);
+	TransientScope& operator=(const TransientScope&);
 };
 
 // The binding of `name` declared in `scope` itself, or null.

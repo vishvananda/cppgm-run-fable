@@ -108,6 +108,9 @@ const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 		if (TemplateArgIsDependent(args[i]))
 			dependent_args = true;
 	Scope* alias_scope = MakeArgumentAliasScope(tmpl, args);
+	// The substitution context serves this one use; the cached
+	// binding keeps only the substituted type.
+	TransientScope alias_release(model_, &alias_scope);
 	Scope* saved = current_;
 	current_ = alias_scope;
 	TypePtr substituted;

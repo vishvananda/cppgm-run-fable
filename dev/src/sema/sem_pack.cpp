@@ -383,6 +383,7 @@ void SemBinder::ExpandTemplateArgumentPack(TemplateInfo& tmpl,
 	for (size_t k = 0; k < length; k++)
 	{
 		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		TransientScope element_release(model_, &element_scope);
 		Scope* saved = current_;
 		current_ = element_scope;
 		try
@@ -457,6 +458,7 @@ void SemBinder::ExpandPackBases(const AstBaseSpecifier& base,
 	for (size_t k = 0; k < length; k++)
 	{
 		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		TransientScope element_release(model_, &element_scope);
 		Scope* saved = current_;
 		current_ = element_scope;
 		try
@@ -601,6 +603,7 @@ bool SemBinder::ExpandPackExpression(const AstExpr& pattern,
 	for (size_t k = 0; k < length; k++)
 	{
 		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		TransientScope element_release(model_, &element_scope);
 		Scope* saved = current_;
 		current_ = element_scope;
 		try
@@ -634,6 +637,7 @@ bool SemBinder::ExpandPackTypeId(const AstTypeId& pattern,
 	for (size_t k = 0; k < length; k++)
 	{
 		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		TransientScope element_release(model_, &element_scope);
 		Scope* saved = current_;
 		current_ = element_scope;
 		try
@@ -675,6 +679,7 @@ bool SemBinder::ExpandPackParameter(const AstParameter& parameter,
 	for (size_t k = 0; k < length; k++)
 	{
 		Scope* element_scope = MakePackElementScope(mentions.packs, k);
+		TransientScope element_release(model_, &element_scope);
 		Scope* saved = current_;
 		current_ = element_scope;
 		try

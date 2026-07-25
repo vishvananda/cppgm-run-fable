@@ -822,7 +822,18 @@ void SemBinder::RequireCompleteType(const NamedTypeInfo* info)
 
 Scope* SemBinder::DeferNoexceptSpecScope()
 {
-	return class_replay_depth_ > 0 ? current_ : 0;
+	if (class_replay_depth_ <= 0)
+		return 0;
+	// The pending record holds the scope past this resolution: a
+	// transient owner (a pack-element or argument-binding context)
+	// must survive until the deferred evaluation reads it.
+	for (Scope* scope = current_; scope; scope = scope->parent)
+	{
+		if (scope->pinned)
+			break;
+		scope->pinned = true;
+	}
+	return current_;
 }
 
 bool SemBinder::EvaluatePendingNoexcept(const AstExpr& expr, Scope* scope)

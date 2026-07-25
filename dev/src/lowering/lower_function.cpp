@@ -66,6 +66,11 @@ string FunctionLowerer::Lower()
 		ParamInfo param;
 		param.low_name = child.name.empty()
 			? "__param" + to_string(i) : child.name;
+		// A source parameter spelling a reserved signature name (the
+		// `ret` indirect-result slot) keeps its storage spelling but
+		// takes a de-conflicted register name.
+		if (param_names_.count(param.low_name))
+			param.low_name += "__arg" + to_string(i);
 		LowerAbiParameter(child.type, param.type_text, param.pass,
 		                  program_.SeparateCompilation());
 		// The named slot keeps the object's storage spelling even when
@@ -274,13 +279,17 @@ void FunctionLowerer::EmitParameterStores()
 	{
 		const SemNode& child = *def_.children[i - lead];
 		const Scope* scope = child.entity_scope;
+		// The storage slot keeps the source spelling (body references
+		// resolve by it) even when the register name de-conflicted.
+		const string& slot_name = child.name.empty()
+			? params_[i].low_name : child.name;
 		TypePtr bare = RemoveTopCv(child.type);
 		if (bare->kind == TK_CLASS)
 		{
 			// The named slot keeps the object's storage spelling; a
 			// direct obj parameter copies into it, a by_address
 			// parameter addresses the caller's object through %name.
-			string slot = AddSlot(scope, params_[i].low_name,
+			string slot = AddSlot(scope, slot_name,
 			                      LowerSlotType(bare));
 			if (params_[i].pass == "by_address")
 				address_aliases_[std::make_pair(
@@ -298,7 +307,7 @@ void FunctionLowerer::EmitParameterStores()
 			RegisterParameterCleanup(child);
 			continue;
 		}
-		string slot = AddSlot(scope, params_[i].low_name,
+		string slot = AddSlot(scope, slot_name,
 		                      params_[i].type_text);
 		string spill = "store " + params_[i].type_text + " %" +
 			params_[i].low_name + ", $" + slot;

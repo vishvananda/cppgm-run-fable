@@ -1,11 +1,14 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA9 pass; failures 12-19 fixed. All previously
-failing pa10-rung host-compile TUs now compile (type_builder,
-ast_parse_class, template_info, template_args, sem_pack,
-sem_builtin_template, const_expr, sem_spec, sem_template,
-template_spelling). Next: rerun the pa10 ladder rung, then the
-pptoken/cppgm++ inception compares.
+Status: self-built PA1-PA9 pass; failures 12-21 fixed/in progress.
+The pa10 rung's remaining blockers are resource-shaped: the ladder
+runs inside a 64 GiB cgroup at -j32 while heavy sema TUs peaked at
+~3.4 GiB each (cgroup OOM kills, exit 137), and two TUs
+(toolchain/compile_unit.cpp 10.2 GiB, cppgm++.cpp 8.4 GiB) exceeded
+the harness's 8 GiB per-command RSS cap even alone (EXIT_OOM, 125).
+Failure 21 attacks the underlying compiler memory bug. Next: finish
+the memory reduction, rerun the pa10 rung, then the pptoken/cppgm++
+inception compares.
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -605,6 +608,69 @@ Reducer: `cppgm.tests/course/pa36/link/604-hosted-inlined-try-catch-
 selector-runtime-smoke` (small internal try/catch callee called at
 depth 0 by a caller with a different catch type; fails object
 emission before the fix, prints "10 94 9" after).
+
+### Failure 20 (fixed): source parameter named `ret` collides with
+### the indirect-result slot (pa10 rung: sem_lambda)
+
+Host-seeded `../dev/cppgm++` rejected `sema/sem_lambda.cpp`:
+"LowIR validation error: duplicate parameter %ret in
+@SemBinder__BindLambdaBody". `BindLambdaBody(..., const TypePtr& ret)`
+returns a nontrivial class, so the lowering synthesizes the
+`%ret : ptr [pass=indirect_result]` slot - and spelled the source
+parameter `%ret` too. Every validated pipeline (`-c` objects AND the
+whole-program executable path, both of which round-trip the LowIR
+text through ParseLowIRProgram/ValidateLowIRProgram) rejects the
+duplicate. Fix at the PA14-era lowering surface
+(lowering/lower_function.cpp): a source parameter whose name is
+already taken in the signature (the reserved `ret`) takes a
+de-conflicted register name (`ret__argN`, mirroring the NewTemp
+collision discipline), while its storage slot and the
+address-alias/slot-map keys keep the source spelling (body references
+resolve by source name).
+
+No course reducer can express this fix: the reference shares the bug
+in every validated mode (`cppgm++-ref -c` fails with "duplicate
+storage name %ret" on the reduced form), so ref-generated fixtures in
+the -c harnesses (pa31+) would pin the failure, and the pa15-pa27
+`--emit-lowir` text harnesses compare against reference dumps that
+spell the ambiguous `%ret, %ret` form (which their unvalidated dump
+path accepts silently) - matching those would require keeping the
+bug. Like failure 13, the refs are not perfect here; the pa10 ladder
+rung (sem_lambda.cpp) and the inception build gate the behavior.
+Reduced form kept for reference: a nontrivial class returned by value
+from a function whose parameter is named `ret`.
+
+### Failure 21 (in progress): frontend retains transient template
+### resolution scopes for the whole unit (pa10 rung OOM kills)
+
+The rung's Error-137/125 exits are memory, not logic: the Ralph check
+runs in a 64 GiB memory cgroup, the selfhost object build runs at
+-j32 (DEFAULT_BUILD_JOBS), heavy sema TUs peaked at ~3.4 GiB each,
+and toolchain/compile_unit.cpp (10.2 GiB) and cppgm++.cpp (8.4 GiB)
+individually exceeded the 8 GiB per-command RSS cap. g++ compiles the
+same TUs in ~250 MB, and RSS grows linearly across the whole compile
+- the retain-everything shape. Massif attribution of the 3.4 GiB peak
+(sem_member_template.cpp): ~1.8 GiB (>50%) is Scope + ScopeBinding
+records created per template-id *resolution* and retained forever by
+the TypesModel - argument alias scopes (ResolveAliasTemplateId's
+substitution context), per-resolution argument-binding scopes
+(EnsureArgBindingScope), deduction-probe scopes (FillDeducedDefaults,
+failed EnsureFunctionSpecialization SFINAE probes leaking param/
+capture scopes), and pack-element scopes. ~650 MB is SemNode bodies
+(needed by the lowering; not transient).
+
+Fix (PA18/PA21-era template machinery + the scope model):
+`TypesModel::ReleaseScope` frees one transiently-created scope
+(detach from parent's child list, swap-remove from storage);
+`TransientScope` RAII guards release at every probe/resolution exit.
+Safety-by-refusal: the release refuses the global scope, member
+scopes (entity set), pinned scopes (a deferred noexcept spec's
+recorded evaluation context pins its chain - the CWG 1330 records
+hold scopes durably), and any scope that acquired children. Scope
+dumps only print in the pa10/pa11-era --emit-types mode, which
+predates instantiation, so released instantiation scopes are
+dump-invisible. Result: sem_member_template.cpp frontend peak 3.43
+GiB -> 2.26 GiB (-34%) with byte-identical emitted LowIR.
 
 ## Validation plan
 

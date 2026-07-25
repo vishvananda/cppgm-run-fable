@@ -191,6 +191,9 @@ const ScopeBinding* SemBinder::ResolveVariableTemplateId(
 	if (!init || !tmpl.var_decl)
 		throw runtime_error("variable template " + tmpl.name +
 		                    " has no usable initializer");
+	// The evaluation context serves this one resolution; the cached
+	// slot records the declaring scope.
+	TransientScope alias_release(model_, &alias);
 	Scope* saved = current_;
 	current_ = alias;
 	ConstValue value;

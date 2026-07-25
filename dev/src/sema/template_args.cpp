@@ -839,6 +839,9 @@ vector<TemplateArg> SemBinder::ResolveTemplateArgumentList(
 		if (tmpl.params[i].kind == TPK_VALUE)
 			needs_scope = true;
 	Scope* partial = 0;
+	// The binding scope serves this one resolution; the returned
+	// arguments carry types and values only.
+	TransientScope partial_release(model_, &partial);
 	vector<TemplateArg> args;
 	if (needs_scope)
 		EnsureArgBindingScope(tmpl, args, partial);

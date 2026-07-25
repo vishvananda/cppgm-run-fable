@@ -18,9 +18,39 @@ Scope* TypesModel::CreateScope(EScopeKind kind, const string& name,
 	scope->kind = kind;
 	scope->name = name;
 	scope->parent = parent;
+	scope->model_index = scopes_.size() - 1;
 	if (parent)
 		parent->children.push_back(scope);
 	return scope;
+}
+
+void TypesModel::ReleaseScope(Scope* scope)
+{
+	if (!scope || scope == global_ || scope->entity || scope->pinned ||
+	    !scope->children.empty())
+		return;
+	size_t index = scope->model_index;
+	if (index >= scopes_.size() || scopes_[index].get() != scope)
+		return;
+	if (Scope* parent = scope->parent)
+	{
+		// Transient scopes release right after creation, so the
+		// child entry sits at (or near) the back.
+		vector<Scope*>& siblings = parent->children;
+		for (size_t i = siblings.size(); i-- > 0;)
+		{
+			if (siblings[i] != scope)
+				continue;
+			siblings.erase(siblings.begin() + i);
+			break;
+		}
+	}
+	if (index + 1 != scopes_.size())
+	{
+		scopes_[index] = std::move(scopes_.back());
+		scopes_[index]->model_index = index;
+	}
+	scopes_.pop_back();
 }
 
 NamedTypeInfo* TypesModel::CreateNamedTypeInfo(const string& display,
