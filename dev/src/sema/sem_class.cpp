@@ -327,39 +327,51 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	bool deleted = decl.special_init &&
 		decl.special_init->kind == INIT_DELETE;
 	bool defined = decl.kind == DK_SPECIAL_MEMBER_DEFINITION;
-	if (is_dtor)
+	if (!is_dtor)
 	{
-		if (!composed.type->parameters.empty() || composed.type->variadic)
-			throw runtime_error("destructor with parameters");
-		if (decl.has_ctor_initializer)
-			throw runtime_error("destructor with a ctor-initializer");
-		// A defaulted destructor behaves like the implicit one.
-		cls->has_user_dtor = !defaulted && !deleted;
-		cls->dtor_user_declared = true;
-		cls->dtor_access = current_access_;
-		cls->dtor_deleted = deleted;
-		cls->dtor_definition = defined ? &decl : 0;
-		cls->dtor_unwind_no = composed.noexcept_simple;
-		cls->dtor_noexcept_pending_expr = composed.noexcept_pending_expr;
-		cls->dtor_noexcept_pending_scope = composed.noexcept_pending_scope;
-		if (decl.declarator)
-			cls->dtor_abi_tags = decl.declarator->abi_tags;
-		RecordVirtualDtor(*cls, is_virtual, composed, defined, defaulted,
-		                  deleted);
-		if (defined)
-		{
-			DeferredBody body;
-			body.decl = &decl;
-			body.composed = composed;
-			body.name = "~" + cls->members->name;
-			body.fn_scope = MakeSpecialMemberScope(body.name, composed,
-			                                       *cls);
-			body.declaring = cls->members;
-			body.cls = cls;
-			deferred_bodies_.push_back(body);
-		}
+		BindConstructorMember(decl, *cls, composed, is_explicit,
+		                      defaulted, deleted, defined);
 		return;
 	}
+	if (!composed.type->parameters.empty() || composed.type->variadic)
+		throw runtime_error("destructor with parameters");
+	if (decl.has_ctor_initializer)
+		throw runtime_error("destructor with a ctor-initializer");
+	// A defaulted destructor behaves like the implicit one.
+	cls->has_user_dtor = !defaulted && !deleted;
+	cls->dtor_user_declared = true;
+	cls->dtor_access = current_access_;
+	cls->dtor_deleted = deleted;
+	cls->dtor_definition = defined ? &decl : 0;
+	cls->dtor_unwind_no = composed.noexcept_simple;
+	cls->dtor_noexcept_pending_expr = composed.noexcept_pending_expr;
+	cls->dtor_noexcept_pending_scope = composed.noexcept_pending_scope;
+	if (decl.declarator)
+		cls->dtor_abi_tags = decl.declarator->abi_tags;
+	RecordVirtualDtor(*cls, is_virtual, composed, defined, defaulted,
+	                  deleted);
+	if (defined)
+	{
+		DeferredBody body;
+		body.decl = &decl;
+		body.composed = composed;
+		body.name = "~" + cls->members->name;
+		body.fn_scope = MakeSpecialMemberScope(body.name, composed,
+		                                       *cls);
+		body.declaring = cls->members;
+		body.cls = cls;
+		deferred_bodies_.push_back(body);
+	}
+}
+
+// A constructor member declaration: the ClassCtor record (12.1),
+// aggregate disqualification (8.5.1p1/12.1p5), and the deferred
+// in-class body.
+void SemBinder::BindConstructorMember(const AstDecl& decl, ClassInfo& cls,
+                                      const DeclaratorInfo& composed,
+                                      bool is_explicit, bool defaulted,
+                                      bool deleted, bool defined)
+{
 	if (composed.has_override || composed.has_final)
 		throw runtime_error("virt-specifier on a constructor");
 	ClassCtor ctor;
@@ -379,29 +391,29 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	ctor.definition = defined ? &decl : 0;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		ctor.defaults.push_back(composed.parameters[i].default_arg);
-	ctor.kind = ClassifyCtorKind(cls->entity, ctor);
+	ctor.kind = ClassifyCtorKind(cls.entity, ctor);
 	if (ctor.kind == CK_COPY)
-		cls->has_user_copy_ctor = true;
+		cls.has_user_copy_ctor = true;
 	else if (ctor.kind == CK_MOVE)
-		cls->has_user_move_ctor = true;
-	cls->ctors.push_back(ctor);
+		cls.has_user_move_ctor = true;
+	cls.ctors.push_back(ctor);
 	// 8.5.1p1/12.1p5: user-provided or deleted constructors disqualify
 	// aggregates; `= default` on the default constructor keeps the
 	// class an aggregate (C++11 semantics pinned by the fixtures).
 	if (!defaulted && !deleted)
 	{
-		cls->is_aggregate = false;
-		cls->has_user_ctor = true;
+		cls.is_aggregate = false;
+		cls.has_user_ctor = true;
 	}
 	if (defined)
 	{
 		DeferredBody body;
 		body.decl = &decl;
 		body.composed = composed;
-		body.name = cls->members->name;
-		body.fn_scope = MakeSpecialMemberScope(body.name, composed, *cls);
-		body.declaring = cls->members;
-		body.cls = cls;
+		body.name = cls.members->name;
+		body.fn_scope = MakeSpecialMemberScope(body.name, composed, cls);
+		body.declaring = cls.members;
+		body.cls = &cls;
 		deferred_bodies_.push_back(body);
 	}
 }

@@ -235,6 +235,10 @@ private:
 	// PA16: a conversion-function member declaration (12.3.2).
 	void BindConversionFunction(const AstDecl& decl, ClassInfo& cls,
 	                            const AstNamePart& part);
+	void BindConstructorMember(const AstDecl& decl, ClassInfo& cls,
+	                           const DeclaratorInfo& composed,
+	                           bool is_explicit, bool defaulted,
+	                           bool deleted, bool defined);
 	void BindMemberFunctionBody(const AstDecl& decl,
 	                            const DeclaratorInfo& composed,
 	                            const string& name);
@@ -1056,26 +1060,8 @@ private:
 	// One pass over the poisoned member bodies awaiting re-bind
 	// (alternates with the drain until both queues empty).
 	bool RetryDeferredBodies();
-	// PA25 5.1.7: prior closure operator parameter lists per enclosing
-	// function body (the mangled local-name prefix context); the
-	// Itanium <lambda-sig> discriminator counts earlier same-signature
-	// lambdas there.
-	std::map<const Scope*, std::vector<std::vector<TypePtr>>>
-		closure_discriminators_;
-	vector<LambdaFrame> lambda_frames_;
-	std::map<std::pair<const void*, const void*>, LambdaInfo>
-		lambda_cache_;
-	// Captureless closures: the class entity's synthesized function
-	// identity (queried by conversions and deduction contexts).
-	std::map<const NamedTypeInfo*, ClosureFunction> closure_functions_;
-	// Captureless closures whose auto deduction keeps the closure
-	// object view (local-type-owning bodies; the reference shape).
-	std::set<const NamedTypeInfo*> closure_object_view_;
-	int lambda_counter_ = 0;
-	// PA34: the templated lambda whose invocation is being analyzed
-	// (its head's argument aliases are in scope); any other templated
-	// lambda reaching AnalyzeLambda is an uninvoked boundary.
-	const AstLambda* invoked_templated_lambda_ = 0;
+	// The lambda machinery state (sem_lambda_state.h).
+	SemLambdaState lambda_;
 	// PA34 __type_pack_element shadow record and the synthesized AST
 	// for its index parameter's declared type.
 	std::unique_ptr<TemplateInfo> type_pack_element_tmpl_;
@@ -1090,10 +1076,7 @@ private:
 	vector<RetryBody> retry_bodies_;
 	MethodContext method_;
 public:
-	string CurrentFunctionName() override
-	{
-		return method_.fn_name;
-	}
+	string CurrentFunctionName() override;
 private:
 	bool NothrowTraitShorthand(const AstName& name, ConstValue& out);
 	void ClassifyUserAssignOperators(ClassInfo& cls);

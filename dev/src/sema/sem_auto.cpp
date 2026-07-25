@@ -149,7 +149,7 @@ TypePtr SemBinder::DeduceAutoVariableType(const TypePtr& type,
 	    value.node && value.node->kind == SN_CLOSURE_INIT &&
 	    type->is_auto_placeholder && !type->is_const &&
 	    !type->is_volatile &&
-	    !closure_object_view_.count(RemoveTopCv(value.type)->named))
+	    !lambda_.closure_object_view.count(RemoveTopCv(value.type)->named))
 	{
 		const Scope* owner = 0;
 		string fn_name;

@@ -271,3 +271,78 @@ TypePtr SemBinder::MakeGnuComplexType(const TypePtr& element)
 	complex_types_[ft] = type;
 	return type;
 }
+
+// PA25 18.9: the std::initializer_list<element> specialization type;
+// throws when the program declares no such template.
+TypePtr SemBinder::StdInitializerListType(const TypePtr& element)
+{
+	Scope* global = model_.global();
+	ScopeBinding* std_binding =
+		global ? FindOwnBinding(*global, "std") : 0;
+	TemplateInfo* tmpl = 0;
+	if (std_binding && std_binding->kind == SB_NAMESPACE &&
+	    std_binding->target)
+		if (ScopeBinding* binding = FindOwnBinding(*std_binding->target,
+		                                           "initializer_list"))
+			tmpl = binding->templ;
+	if (!tmpl || tmpl->kind != TMPL_CLASS)
+		throw runtime_error(
+			"braced deduction requires std::initializer_list");
+	std::vector<TemplateArg> args;
+	args.push_back(TemplateArg(element));
+	ClassSpecialization* spec = EnsureClassSpecialization(*tmpl, args);
+	if (!spec || !spec->entity)
+		throw runtime_error(
+			"std::initializer_list specialization failed");
+	return MakeNamedType(TK_CLASS, spec->entity);
+}
+
+// PA25 18.9: the builtin std::initializer_list<T> record for a
+// program that only declares the template: {const T* __begin_,
+// long __size_}, 16 bytes.
+void SemBinder::BuildBuiltinInitializerList(NamedTypeInfo* info)
+{
+	if (info->complete)
+		return;
+	TypePtr element = RemoveTopCv(info->spec_args[0].type);
+	ClassInfo& cls = unit_.classes.Create(info);
+	Scope* members = model_.MemberScope(info);
+	if (!members)
+	{
+		members = model_.CreateScope(
+			SCOPE_CLASS, info->name,
+			const_cast<Scope*>(
+				info->spec_template->declaring
+					? info->spec_template->declaring
+					: model_.global()));
+		model_.SetMemberScope(info, members);
+	}
+	cls.members = members;
+	cls.is_aggregate = false;
+	model_.MutableInfo(info)->class_record = &cls;
+	BeginClassLayout(cls);
+	static const char* const names[2] = {"__begin_", "__size_"};
+	TypePtr types[2];
+	types[0] = MakePointerType(
+		MakeCvQualifiedType(element, true, false), false, false);
+	types[1] = MakeFundamentalType(FT_LONG_INT);
+	for (int i = 0; i < 2; i++)
+	{
+		ScopeBinding binding;
+		binding.kind = SB_VARIABLE;
+		binding.name = names[i];
+		binding.type = types[i];
+		binding.home = members;
+		AddBinding(*members, binding);
+		ClassField field;
+		field.name = names[i];
+		field.type = types[i];
+		field.access = MA_PUBLIC;
+		LayoutField(cls, field);
+	}
+	FinishClassLayout(cls, *model_.MutableInfo(info), 0);
+	model_.MutableInfo(info)->complete = true;
+	// The record copies and destroys like any trivial class (list
+	// values pass by value, 18.9p2).
+	DeclareImplicitSpecialMembers(cls);
+}

@@ -1,8 +1,12 @@
 #pragma once
 
+#include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "sema/sem_binder_state.h"
 #include "sema/type.h"
 
 // PA24 lambda-binding state (sem_lambda.cpp): the capture records,
@@ -13,6 +17,7 @@
 struct Scope;
 struct ScopeBinding;
 struct ClassInfo;
+struct AstLambda;
 
 // One capture of an open (or synthesized) lambda, in field order.
 struct SemLambdaCapture
@@ -55,4 +60,28 @@ struct SemLambdaInfo
 	TypePtr fn_type;
 	ClassInfo* cls = 0;   // capturing: the closure class
 	std::vector<SemLambdaCapture> captures;
+};
+
+// The binder's lambda machinery state, one instance per SemBinder.
+struct SemLambdaState
+{
+	// PA25 5.1.7: prior closure operator parameter lists per enclosing
+	// function body (the mangled local-name prefix context); the
+	// Itanium <lambda-sig> discriminator counts earlier same-signature
+	// lambdas there.
+	std::map<const Scope*, std::vector<std::vector<TypePtr>>>
+		closure_discriminators;
+	std::vector<SemLambdaFrame> frames;
+	std::map<std::pair<const void*, const void*>, SemLambdaInfo> cache;
+	// Captureless closures: the class entity's synthesized function
+	// identity (queried by conversions and deduction contexts).
+	std::map<const NamedTypeInfo*, SemClosureFunction> closure_functions;
+	// Captureless closures whose auto deduction keeps the closure
+	// object view (local-type-owning bodies; the reference shape).
+	std::set<const NamedTypeInfo*> closure_object_view;
+	int counter = 0;
+	// PA34: the templated lambda whose invocation is being analyzed
+	// (its head's argument aliases are in scope); any other templated
+	// lambda reaching AnalyzeLambda is an uninvoked boundary.
+	const AstLambda* invoked_templated = 0;
 };

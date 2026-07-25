@@ -202,10 +202,8 @@ struct ClassDirectBase
 // region in the same order).
 struct ClassVBase
 {
-	ClassVBase() : cls(0), offset(0) {}
-
-	const ClassInfo* cls;
-	unsigned long long offset;  // complete-object byte offset
+	const ClassInfo* cls = 0;
+	unsigned long long offset = 0;  // complete-object byte offset
 };
 
 // PA27: one polymorphic base subobject off the primary chain. Each
@@ -214,12 +212,10 @@ struct ClassVBase
 // chain share one vpointer).
 struct ClassView
 {
-	ClassView() : cls(0), offset(0), outermost(true), is_virtual(false) {}
-
-	const ClassInfo* cls;
-	unsigned long long offset;
-	bool outermost;
-	bool is_virtual;  // reached as a shared virtual-base subobject
+	const ClassInfo* cls = 0;
+	unsigned long long offset = 0;
+	bool outermost = true;
+	bool is_virtual = false;  // reached as a shared virtual-base subobject
 };
 
 struct ClassInfo

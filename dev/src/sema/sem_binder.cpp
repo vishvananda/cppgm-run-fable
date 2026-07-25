@@ -156,6 +156,11 @@ Scope* SemBinder::CurrentScope()
 	return current_;
 }
 
+string SemBinder::CurrentFunctionName()
+{
+	return method_.fn_name;
+}
+
 TypesModel& SemBinder::Model()
 {
 	return model_;

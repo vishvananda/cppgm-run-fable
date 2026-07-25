@@ -68,9 +68,9 @@ bool StmtDeclaresClass(const AstStmt* stmt)
 // method_.fn_scope and disables the enclosing frame until it returns.
 SemBinder::LambdaFrame* SemBinder::ActiveLambdaFrame()
 {
-	for (size_t i = lambda_frames_.size(); i > 0; i--)
-		if (lambda_frames_[i - 1].fn_scope == method_.fn_scope)
-			return &lambda_frames_[i - 1];
+	for (size_t i = lambda_.frames.size(); i > 0; i--)
+		if (lambda_.frames[i - 1].fn_scope == method_.fn_scope)
+			return &lambda_.frames[i - 1];
 	return 0;
 }
 
@@ -239,8 +239,8 @@ bool SemBinder::CapturelessClosureFunction(const NamedTypeInfo* cls,
                                            string& name, TypePtr& type)
 {
 	std::map<const NamedTypeInfo*, ClosureFunction>::const_iterator
-		found = closure_functions_.find(cls);
-	if (found == closure_functions_.end())
+		found = lambda_.closure_functions.find(cls);
+	if (found == lambda_.closure_functions.end())
 		return false;
 	owner = found->second.owner;
 	name = found->second.name;
@@ -313,15 +313,15 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	const AstLambda& lambda = *expr.lambda;
 	// PA34: a templated lambda binds only through its immediate
 	// invocation (the head's argument aliases are then in scope).
-	if (lambda.template_head && invoked_templated_lambda_ != &lambda)
+	if (lambda.template_head && lambda_.invoked_templated != &lambda)
 		throw OutsideBoundary("uninvoked templated lambda");
 	// One synthesis per (lambda, enclosing body): the deduction and
 	// initialization analyses of one declaration share it, while a
 	// re-instantiated template body synthesizes its own.
 	std::pair<const void*, const void*> key(&lambda, method_.fn_scope);
 	std::map<std::pair<const void*, const void*>,
-	         LambdaInfo>::iterator found = lambda_cache_.find(key);
-	if (found != lambda_cache_.end())
+	         LambdaInfo>::iterator found = lambda_.cache.find(key);
+	if (found != lambda_.cache.end())
 		return MakeLambdaValue(found->second);
 	for (size_t i = 0; i < lambda.captures.size(); i++)
 		if (lambda.captures[i].pack)
@@ -329,8 +329,8 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	bool captureless = !lambda.has_capture_default &&
 		lambda.captures.empty();
 
-	++lambda_counter_;
-	string name = "__lambda" + to_string(lambda_counter_);
+	++lambda_.counter;
+	string name = "__lambda" + to_string(lambda_.counter);
 	if (!method_.fn_name.empty())
 	{
 		// The closure-class name: the enclosing function's qualified
@@ -431,7 +431,7 @@ SemValue SemBinder::AnalyzeLambda(const AstExpr& expr)
 	else
 		BindClosureLambda(lambda, name, fn_scope, parameters,
 		                  param_types, ret, info);
-	LambdaInfo& cached = lambda_cache_[key];
+	LambdaInfo& cached = lambda_.cache[key];
 	cached = info;
 	return MakeLambdaValue(cached);
 }
@@ -525,9 +525,9 @@ SemValue SemBinder::AnalyzeTemplatedLambdaInvoke(const AstExpr& expr,
 			                    "failed");
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, bound);
 	Scope* saved = current_;
-	const AstLambda* saved_invoked = invoked_templated_lambda_;
+	const AstLambda* saved_invoked = lambda_.invoked_templated;
 	current_ = alias_scope;
-	invoked_templated_lambda_ = &lambda;
+	lambda_.invoked_templated = &lambda;
 	SemValue value;
 	try
 	{
@@ -536,11 +536,11 @@ SemValue SemBinder::AnalyzeTemplatedLambdaInvoke(const AstExpr& expr,
 	catch (...)
 	{
 		current_ = saved;
-		invoked_templated_lambda_ = saved_invoked;
+		lambda_.invoked_templated = saved_invoked;
 		throw;
 	}
 	current_ = saved;
-	invoked_templated_lambda_ = saved_invoked;
+	lambda_.invoked_templated = saved_invoked;
 	return value;
 }
 
@@ -635,7 +635,7 @@ void SemBinder::BindCapturelessLambda(const AstLambda& lambda,
 	context.lexical_cls = method_.cls ? method_.cls : method_.lexical_cls;
 	LambdaFrame frame;
 	frame.fn_scope = fn_scope;
-	lambda_frames_.push_back(frame);
+	lambda_.frames.push_back(frame);
 	TypePtr deduced;
 	try
 	{
@@ -643,10 +643,10 @@ void SemBinder::BindCapturelessLambda(const AstLambda& lambda,
 	}
 	catch (...)
 	{
-		lambda_frames_.pop_back();
+		lambda_.frames.pop_back();
 		throw;
 	}
-	lambda_frames_.pop_back();
+	lambda_.frames.pop_back();
 	if (TypeContainsAutoPlaceholder(ret))
 	{
 		fn_type = MakeFunctionType(deduced, param_types, false);
@@ -711,11 +711,11 @@ void SemBinder::BindCapturelessLambda(const AstLambda& lambda,
 		BindClosureLambda(lambda, name, op_scope, op_parameters,
 		                  op_param_types, ret, info);
 	}
-	closure_functions_[info.cls->entity].owner = model_.global();
-	closure_functions_[info.cls->entity].name = name;
-	closure_functions_[info.cls->entity].type = fn_type;
+	lambda_.closure_functions[info.cls->entity].owner = model_.global();
+	lambda_.closure_functions[info.cls->entity].name = name;
+	lambda_.closure_functions[info.cls->entity].type = fn_type;
 	if (StmtDeclaresClass(lambda.body.get()))
-		closure_object_view_.insert(info.cls->entity);
+		lambda_.closure_object_view.insert(info.cls->entity);
 }
 
 void SemBinder::BindClosureLambda(const AstLambda& lambda,
@@ -752,7 +752,7 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 				break;
 		}
 		std::vector<std::vector<TypePtr>>& seen =
-			closure_discriminators_[context];
+			lambda_.closure_discriminators[context];
 		int matching = 0;
 		for (size_t i = 0; i < seen.size(); i++)
 		{
@@ -842,11 +842,11 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 				lambda.captures[i].kind == LC_COPY);
 		}
 	}
-	lambda_frames_.push_back(frame);
+	lambda_.frames.push_back(frame);
 	// 5.1.2p14: spelled captures are members regardless of use.
 	for (size_t i = 0; i < lambda.captures.size(); i++)
 	{
-		LambdaFrame& open = lambda_frames_.back();
+		LambdaFrame& open = lambda_.frames.back();
 		if (lambda.captures[i].kind == LC_THIS)
 		{
 			if (open.enclosing_this)
@@ -867,11 +867,11 @@ void SemBinder::BindClosureLambda(const AstLambda& lambda,
 	}
 	catch (...)
 	{
-		lambda_frames_.pop_back();
+		lambda_.frames.pop_back();
 		throw;
 	}
-	LambdaFrame bound = lambda_frames_.back();
-	lambda_frames_.pop_back();
+	LambdaFrame bound = lambda_.frames.back();
+	lambda_.frames.pop_back();
 	FinishClassLayout(cls, *model_.MutableInfo(entity), 0);
 	model_.MutableInfo(entity)->complete = true;
 	DeclareClosureSpecialMembers(cls);
