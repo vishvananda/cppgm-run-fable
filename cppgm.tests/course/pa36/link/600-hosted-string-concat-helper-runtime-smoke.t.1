@@ -1,0 +1,6 @@
+#include "600-hosted-string-concat-helper-runtime-smoke.shared.h"
+
+std::string decorate(const std::string& name) {
+  std::string tail = name + "-tail";
+  return "head-" + tail;
+}

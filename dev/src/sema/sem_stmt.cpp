@@ -116,6 +116,8 @@ void SemBinder::BindDeclarationStatement(const AstStmt& stmt)
 	}
 	if (TryVexingCallRecovery(decl))
 		return;
+	if (TryVexingParamInitRecovery(decl))
+		return;
 	SemNode* item = AppendItem(SN_SIMPLE_DECLARATION);
 	parents_.push_back(item);
 	BindDeclaration(decl);

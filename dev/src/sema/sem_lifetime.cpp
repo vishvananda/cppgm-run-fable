@@ -1337,6 +1337,95 @@ bool SemBinder::TryVexingCallRecovery(const AstDecl& decl)
 	return true;
 }
 
+// 8.2p1 disambiguation for the parameter position: `_Str __str(
+// _Alloc_traits::_S_select_on_copy(__a));` is only a function
+// declaration when the parameter's leading name is a type; when it
+// names a function the parens re-read as the variable's parenthesized
+// initializer (each "parameter" one call argument). The parser commits
+// to the declaration form (inside templates the names are dependent),
+// so the binder re-reads the instantiated shape here.
+bool SemBinder::TryVexingParamInitRecovery(const AstDecl& decl)
+{
+	if (decl.kind != DK_SIMPLE || decl.declarators.size() != 1)
+		return false;
+	const AstInitDeclarator& declarator = decl.declarators[0];
+	if (declarator.init || !declarator.declarator ||
+	    declarator.declarator->items.size() != 2)
+		return false;
+	const AstDeclaratorItem& id = declarator.declarator->items[0];
+	const AstDeclaratorItem& parens = declarator.declarator->items[1];
+	if (id.kind != DI_ID || !id.name.IsPlainIdentifier() ||
+	    parens.kind != DI_PARAMS || !parens.params ||
+	    parens.params->variadic || parens.params->parameters.empty())
+		return false;
+	AstInitializerPtr init(new AstInitializer());
+	init->kind = INIT_PAREN;
+	for (size_t p = 0; p < parens.params->parameters.size(); p++)
+	{
+		const AstParameter& param = parens.params->parameters[p];
+		if (param.default_arg || param.specifiers.size() != 1 ||
+		    param.specifiers[0].kind != SPEC_TYPE_NAME)
+			return false;
+		const AstName& callee_name = param.specifiers[0].name;
+		if (TryResolveTypeFromName(callee_name))
+			return false;
+		const ScopeBinding* fn = 0;
+		try
+		{
+			const NamedTypeInfo* member_class = 0;
+			fn = ResolveValue(callee_name, member_class);
+		}
+		catch (const std::exception&)
+		{
+			return false;
+		}
+		if (!fn || fn->kind != SB_FUNCTION)
+			return false;
+		// The parameter declarator re-reads as the call's argument:
+		// `(name)` for a one-identifier argument.
+		const AstDeclarator* inner = 0;
+		if (param.declarator && param.declarator->items.size() == 1 &&
+		    param.declarator->items[0].kind == DI_NESTED)
+			inner = param.declarator->items[0].nested.get();
+		if (!inner || inner->items.size() != 1 ||
+		    inner->items[0].kind != DI_ID ||
+		    !inner->items[0].name.IsPlainIdentifier())
+			return false;
+		AstExprPtr callee(new AstExpr(EK_ID));
+		callee->name.global_scope = callee_name.global_scope;
+		for (size_t i = 0; i < callee_name.parts.size(); i++)
+		{
+			if (callee_name.parts[i].kind != NP_IDENTIFIER)
+				return false;
+			AstNamePart part;
+			part.kind = NP_IDENTIFIER;
+			part.identifier = callee_name.parts[i].identifier;
+			callee->name.parts.push_back(std::move(part));
+		}
+		AstExprPtr argument(new AstExpr(EK_ID));
+		AstNamePart arg_part;
+		arg_part.kind = NP_IDENTIFIER;
+		arg_part.identifier = inner->items[0].name.parts[0].identifier;
+		argument->name.parts.push_back(std::move(arg_part));
+		AstExprPtr call(new AstExpr(EK_CALL));
+		call->operands.push_back(std::move(callee));
+		call->arguments.push_back(std::move(argument));
+		init->args.push_back(std::move(call));
+	}
+	DeclSpecifierInfo specs =
+		builder_.ProcessSpecifiers(decl.specifiers, true);
+	if (!specs.type)
+		return false;
+	ScopeBinding binding;
+	binding.kind = SB_VARIABLE;
+	binding.name = id.name.parts[0].identifier;
+	binding.type = specs.type;
+	ScopeBinding& added = AddBinding(*current_, binding);
+	OnVariableBound(added, init.get(), specs);
+	recovered_inits_.push_back(std::move(init));
+	return true;
+}
+
 bool SemBinder::InClassContextOrFriend(const NamedTypeInfo* cls)
 {
 	const ClassInfo* naming = unit_.classes.Find(cls);

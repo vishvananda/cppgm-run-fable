@@ -1,0 +1,10 @@
+#include "600-hosted-string-concat-helper-runtime-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  if (decorate("core") != "head-core-tail")
+    return 1;
+  std::printf("string-concat ok\n");
+  return 0;
+}

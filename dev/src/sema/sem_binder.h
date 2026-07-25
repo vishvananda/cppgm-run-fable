@@ -961,9 +961,11 @@ private:
 	// constructor synthesis (first writes store plainly).
 	std::map<unsigned long long, bool> bf_units_written_;
 	bool TryVexingCallRecovery(const AstDecl& decl);
+	bool TryVexingParamInitRecovery(const AstDecl& decl);
 	// Call expressions synthesized by the statement disambiguation
 	// recovery (owned here; analyzed nodes reference them).
 	vector<AstExprPtr> recovered_exprs_;
+	vector<AstInitializerPtr> recovered_inits_;
 	// PA24 range-for desugaring: synthesized expression/initializer
 	// fragments (owned here) and the per-body hidden-name counter.
 	vector<AstExprPtr> synth_exprs_;
