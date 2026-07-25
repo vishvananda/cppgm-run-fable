@@ -162,8 +162,11 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 		item->name = QualifiedScopePath(body.declaring) + body.name;
 	item->entity_scope = body.declaring;
 	item->entity_name = body.name;
-	item->unwind_no = body.composed.noexcept_simple;
-	item->noexcept_decl = body.composed.noexcept_simple;
+	// PA39/CWG 1330: a spec deferred at replay time evaluates here
+	// (drained bodies bind outside the replay window).
+	bool noexcept_fact = ComposedNoexceptSimple(body.composed);
+	item->unwind_no = noexcept_fact;
+	item->noexcept_decl = noexcept_fact;
 	item->throw_spec = body.composed.throw_spec_types;
 	item->inline_def = !body.out_of_class;
 	item->is_method = is_method;

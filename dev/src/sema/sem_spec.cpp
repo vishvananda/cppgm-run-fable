@@ -1271,6 +1271,22 @@ void SemBinder::InstantiateClassFromPartial(
 	catch (...)
 	{
 		allow_qualified_class_name_ = saved_allow;
+		// A failed body must not leave a hollow "instantiated" record
+		// (mirrors InstantiateClassSpecialization): reset the entity
+		// so the next completeness demand re-instantiates - the
+		// end-of-unit body retries heal failures caused by a class
+		// still open in the demanding context. Repeat failures report
+		// softly (InstantiateSpecializationBody), so probes stay
+		// tolerant of candidates that legitimately never instantiate.
+		spec.instantiated = false;
+		NamedTypeInfo* stale = model_.MutableInfo(spec.entity);
+		stale->complete = false;
+		stale->is_defined = false;
+		if (ClassInfo* record = unit_.classes.Find(spec.entity))
+		{
+			*record = ClassInfo();
+			record->entity = spec.entity;
+		}
 		throw;
 	}
 	allow_qualified_class_name_ = saved_allow;

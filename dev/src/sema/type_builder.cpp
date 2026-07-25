@@ -563,6 +563,14 @@ void TypeBuilder::ApplyDeclaratorSuffix(const AstDeclaratorItem& item,
 		{
 			// PA36 15.4p1: noexcept(constant-expression) evaluated
 			// true is a non-throwing specification like the bare form.
+			// PA39/CWG 1330: inside a class-template body replay the
+			// expression records unevaluated for an on-demand read.
+			if (Scope* defer = host_.DeferNoexceptSpecScope())
+			{
+				out.noexcept_pending_expr = item.qual.expr.get();
+				out.noexcept_pending_scope = defer;
+				break;
+			}
 			bool spec_value = false;
 			if (host_.EvaluateNoexceptSpec(*item.qual.expr,
 			                               spec_value) &&

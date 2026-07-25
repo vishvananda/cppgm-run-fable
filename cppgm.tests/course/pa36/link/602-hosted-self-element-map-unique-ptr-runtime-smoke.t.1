@@ -1,0 +1,42 @@
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <string>
+
+template<typename T> struct Holder
+{
+	std::map<std::string, std::unique_ptr<T>> items;
+
+	T* find(const std::string& key)
+	{
+		typename std::map<std::string, std::unique_ptr<T>>::iterator
+			it = items.find(key);
+		return it == items.end() ? 0 : it->second.get();
+	}
+
+	void put(const std::string& key, T* value)
+	{
+		items[key] = std::unique_ptr<T>(value);
+	}
+};
+
+struct Rec
+{
+	Holder<Rec> nested;
+	int v;
+	Rec() : v(0) {}
+};
+
+int main()
+{
+	Rec root;
+	root.v = 3;
+	Rec* child = new Rec();
+	child->v = 11;
+	root.nested.put("a", child);
+	Rec* found = root.nested.find("a");
+	Rec* missing = root.nested.find("b");
+	std::printf("%d %d %d\n", root.v, found ? found->v : -1,
+	            missing ? 1 : 0);
+	return 0;
+}

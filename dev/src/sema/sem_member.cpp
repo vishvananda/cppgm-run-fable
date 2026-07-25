@@ -854,6 +854,7 @@ SemNodePtr SemExprAnalyzer::MakeMemberCalleeNode(
 		callee->entity_name = spec->name;
 		callee->fn_spec = spec;
 		host_.OnSpecializationOdrUsed(spec);
+		host_.ResolveNoexceptFacts(spec->self, 0);
 		if (spec->self.fn_unwind_no[0])
 			callee->unwind_no = true;
 		if (spec->self.fn_noexcept_decl[0])
@@ -866,6 +867,7 @@ SemNodePtr SemExprAnalyzer::MakeMemberCalleeNode(
 	callee->is_method = is_method;
 	callee->fn_spec = self_spec;
 	host_.OnSpecializationOdrUsed(self_spec);
+	host_.ResolveNoexceptFacts(binding, winner);
 	if (winner < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[winner])
 		callee->unwind_no = true;
@@ -1233,6 +1235,7 @@ SemValue SemExprAnalyzer::AnalyzeStringUdl(const AstExpr& expr)
 	callee->type = fn;
 	callee->entity_scope = binding->owner;
 	callee->entity_name = binding->name;
+	host_.ResolveNoexceptFacts(*binding, winner);
 	if (winner < binding->fn_unwind_no.size() &&
 	    binding->fn_unwind_no[winner])
 		callee->unwind_no = true;

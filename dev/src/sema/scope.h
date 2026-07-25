@@ -5,6 +5,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using std::deque;
@@ -196,6 +197,13 @@ struct ScopeBinding
 	// specification, which the noexcept operator reads (5.3.7).
 	vector<bool> fn_unwind_no;
 	vector<bool> fn_noexcept_decl;
+	// PA39/CWG 1330: per-overload noexcept(expr) specifications
+	// recorded unevaluated during a class-template body replay
+	// ({expression, evaluation scope}; null expression when none). The
+	// first unwind-fact read evaluates in the recorded scope and
+	// memoizes into the two vectors above (true only, matching the
+	// eager writers).
+	vector<std::pair<const AstExpr*, Scope*>> fn_noexcept_pending;
 	// PA16: explicitly-defaulted special member functions (8.4.2); the
 	// binder synthesizes their definitions like the implicit ones.
 	vector<bool> fn_defaulted;

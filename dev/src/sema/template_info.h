@@ -103,6 +103,12 @@ struct ClassSpecialization
 	// a recursive dependency (the class is incomplete there, so a
 	// SFINAE probe discards and a real use errors).
 	bool match_in_flight = false;
+	// PA39: a previous body bind failed and reset the record (so the
+	// end-of-unit body retries can heal window-order failures). The
+	// first failure reports hard (14.8.2p8); a re-demand of a spec
+	// that already failed reports softly, like the pre-reset hollow
+	// record did, so deduction probes keep tolerating it.
+	bool bind_failed = false;
 	// PA19 explicit/partial specialization: the body bound for this
 	// key came from an explicit specialization definition or a partial
 	// specialization pattern (the primary's registered member

@@ -455,15 +455,23 @@ void SemBinder::FinishTemplateChecks()
 // complete; a still-failing body keeps its poisoned definition.
 // Retried bodies only ever come from instantiation, so they keep
 // binding as instantiated bodies (14.7.1 demand semantics).
-void SemBinder::RetryDeferredBodies()
+// PA39: a failure re-queues instead of dropping - the entries retry
+// in poison order, not dependency order, and a body can depend on a
+// sibling's constexpr definition that heals later in the pass
+// (_Rb_tree::operator= reading _S_nothrow_move()). The caller loops
+// while any body healed; returns whether this pass healed one.
+bool SemBinder::RetryDeferredBodies()
 {
-	for (size_t i = 0; i < retry_bodies_.size(); i++)
+	bool healed = false;
+	// Take the queue for this pass; failures re-queue for the next
+	// round, and re-binds may poison further bodies, appending fresh
+	// entries (which also retry next round).
+	vector<RetryBody> pass;
+	pass.swap(retry_bodies_);
+	for (size_t i = 0; i < pass.size(); i++)
 	{
-		// The re-bind may poison further bodies, appending retry
-		// entries; copy the entry out so the vector may reallocate
-		// mid-bind (newly appended entries retry in this same loop).
-		DeferredBody body = retry_bodies_[i].body;
-		const size_t deferred_index = retry_bodies_[i].deferred_index;
+		DeferredBody body = pass[i].body;
+		const size_t deferred_index = pass[i].deferred_index;
 		bool saved_instantiating = instantiating_;
 		instantiating_ = true;
 		try
@@ -473,18 +481,27 @@ void SemBinder::RetryDeferredBodies()
 		catch (const std::exception&)
 		{
 			instantiating_ = saved_instantiating;
+			retry_bodies_.push_back(pass[i]);
 			continue;
 		}
 		instantiating_ = saved_instantiating;
+		healed = true;
 		const size_t last = unit_.deferred.size() - 1;
 		unit_.deferred[deferred_index].swap(unit_.deferred[last]);
 		unit_.deferred.pop_back();
+		// The replacement destroyed the poisoned node; the const-eval
+		// body index holds raw pointers into the deferred list and
+		// must re-scan (later retries re-evaluate constexpr members).
+		engine_.InvalidateBodies();
 		// A pending entry pointing at the moved back item follows it.
-		for (size_t j = i + 1; j < retry_bodies_.size(); j++)
+		for (size_t j = i + 1; j < pass.size(); j++)
+			if (pass[j].deferred_index == last)
+				pass[j].deferred_index = deferred_index;
+		for (size_t j = 0; j < retry_bodies_.size(); j++)
 			if (retry_bodies_[j].deferred_index == last)
 				retry_bodies_[j].deferred_index = deferred_index;
 	}
-	retry_bodies_.clear();
+	return healed;
 }
 
 void SemBinder::BindTranslationUnit(const AstDecl& unit)
@@ -502,8 +519,13 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 	DrainPendingInstantiations();
 	while (!retry_bodies_.empty())
 	{
-		RetryDeferredBodies();
+		// PA39: failed retries re-queue; a round that heals nothing
+		// ends the loop (the remaining bodies keep their poisoned
+		// definitions, as before).
+		const bool healed = RetryDeferredBodies();
 		DrainPendingInstantiations();
+		if (!healed)
+			break;
 	}
 	// PA22: the mangler spells specialization object names from the
 	// composed pattern pieces, and explicit-argument calls can create

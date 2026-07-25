@@ -1484,6 +1484,7 @@ SemNodePtr SemBinder::MakeDestructorCall(const ClassInfo& cls,
 	callee->entity_name = "~" + base_name;
 	callee->is_method = true;
 	callee->special = action->special;
+	ResolveDtorNoexceptFact(cls);
 	callee->unwind_no = cls.has_user_dtor ? cls.dtor_unwind_no
 	                                      : cls.implicit_dtor_unwind_no;
 	callee->noexcept_decl = callee->unwind_no;

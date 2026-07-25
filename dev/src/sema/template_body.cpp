@@ -198,8 +198,9 @@ SemNodePtr SemBinder::MakeInstantiatedBodyNode(
 	item->type = composed.type;
 	item->entity_scope = spec.param_scope;
 	item->entity_name = spec.name;
-	item->unwind_no = composed.noexcept_simple;
-	item->noexcept_decl = composed.noexcept_simple;
+	bool noexcept_fact = ComposedNoexceptSimple(composed);
+	item->unwind_no = noexcept_fact;
+	item->noexcept_decl = noexcept_fact;
 	item->throw_spec = composed.throw_spec_types;
 	item->inline_def = true;
 	item->demand_strong = spec.explicit_def && !spec.explicit_inline;
@@ -807,5 +808,107 @@ Scope* SemBinder::SwapLookupScope(Scope* scope)
 void SemBinder::RequireCompleteType(const NamedTypeInfo* info)
 {
 	EnsureTypeCompleteness(info);
+}
+
+// --- PA39/CWG 1330 deferred noexcept(expr) specifications ------------------
+// Evaluating a member's conditional specification while its class-
+// template body replays can instantiate traits over a class that is
+// still open in the demanding context (the trait's completeness
+// static_assert then poisons the memoized specialization). The
+// composition gate below records such specs unevaluated; the first
+// read of the affected unwind facts evaluates in the recorded scope
+// and memoizes. Evaluation only promotes to true, matching the eager
+// writers.
+
+Scope* SemBinder::DeferNoexceptSpecScope()
+{
+	return class_replay_depth_ > 0 ? current_ : 0;
+}
+
+bool SemBinder::EvaluatePendingNoexcept(const AstExpr& expr, Scope* scope)
+{
+	Scope* saved = current_;
+	if (scope)
+		current_ = scope;
+	bool value = false;
+	bool known;
+	try
+	{
+		known = EvaluateNoexceptSpec(expr, value);
+	}
+	catch (...)
+	{
+		current_ = saved;
+		throw;
+	}
+	current_ = saved;
+	return known && value;
+}
+
+void SemBinder::ResolveNoexceptFacts(const ScopeBinding& binding,
+                                     size_t index)
+{
+	if (index >= binding.fn_noexcept_pending.size())
+		return;
+	const AstExpr* expr = binding.fn_noexcept_pending[index].first;
+	Scope* scope = binding.fn_noexcept_pending[index].second;
+	// Inside a replay window the fact stays conservative and the
+	// record stays pending for a later read.
+	if (!expr || class_replay_depth_ > 0)
+		return;
+	// The bindings live in the persistent scope model; clearing the
+	// entry before evaluating breaks self-referential recursion (an
+	// in-progress spec reads as may-throw).
+	ScopeBinding& record = const_cast<ScopeBinding&>(binding);
+	record.fn_noexcept_pending[index] =
+		std::pair<const AstExpr*, Scope*>();
+	if (!EvaluatePendingNoexcept(*expr, scope))
+		return;
+	if (index < record.fn_unwind_no.size())
+		record.fn_unwind_no[index] = true;
+	if (index < record.fn_noexcept_decl.size())
+		record.fn_noexcept_decl[index] = true;
+}
+
+void SemBinder::ResolveCtorNoexceptFact(const ClassInfo& cls,
+                                        int ctor_index)
+{
+	if (ctor_index < 0 || (size_t)ctor_index >= cls.ctors.size())
+		return;
+	const ClassCtor& ctor = cls.ctors[(size_t)ctor_index];
+	if (!ctor.noexcept_pending_expr || class_replay_depth_ > 0)
+		return;
+	ClassCtor& record = const_cast<ClassCtor&>(ctor);
+	const AstExpr* expr = ctor.noexcept_pending_expr;
+	Scope* scope = ctor.noexcept_pending_scope;
+	record.noexcept_pending_expr = 0;
+	record.noexcept_pending_scope = 0;
+	if (!EvaluatePendingNoexcept(*expr, scope))
+		return;
+	record.unwind_no = true;
+	record.noexcept_decl = true;
+}
+
+void SemBinder::ResolveDtorNoexceptFact(const ClassInfo& cls)
+{
+	if (!cls.dtor_noexcept_pending_expr || class_replay_depth_ > 0)
+		return;
+	ClassInfo& record = const_cast<ClassInfo&>(cls);
+	const AstExpr* expr = cls.dtor_noexcept_pending_expr;
+	Scope* scope = cls.dtor_noexcept_pending_scope;
+	record.dtor_noexcept_pending_expr = 0;
+	record.dtor_noexcept_pending_scope = 0;
+	if (EvaluatePendingNoexcept(*expr, scope))
+		record.dtor_unwind_no = true;
+}
+
+bool SemBinder::ComposedNoexceptSimple(const DeclaratorInfo& composed)
+{
+	if (composed.noexcept_simple)
+		return true;
+	if (!composed.noexcept_pending_expr || class_replay_depth_ > 0)
+		return false;
+	return EvaluatePendingNoexcept(*composed.noexcept_pending_expr,
+	                               composed.noexcept_pending_scope);
 }
 

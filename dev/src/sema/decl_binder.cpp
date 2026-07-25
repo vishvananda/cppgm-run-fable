@@ -102,6 +102,7 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 	binding.fn_adl_only.resize(count, false);
 	binding.fn_unwind_no.resize(count, false);
 	binding.fn_noexcept_decl.resize(count, false);
+	binding.fn_noexcept_pending.resize(count);
 	binding.fn_owner.resize(count, 0);
 	if (binding.home)
 		binding.fn_owner[index] = binding.home;
@@ -162,6 +163,12 @@ void DeclBinder::RecordFunctionFacts(ScopeBinding& binding,
 		binding.fn_unwind_no[index] = true;
 		binding.fn_noexcept_decl[index] = true;
 	}
+	else if (composed.noexcept_pending_expr)
+		// PA39/CWG 1330: a spec deferred during a class-template body
+		// replay resolves at the first unwind-fact read.
+		binding.fn_noexcept_pending[index] = std::make_pair(
+			composed.noexcept_pending_expr,
+			composed.noexcept_pending_scope);
 	// 8.3.6p4: later declarations may add default arguments.
 	vector<const AstExpr*>& defaults = binding.fn_defaults[index];
 	defaults.resize(composed.parameters.size(), 0);

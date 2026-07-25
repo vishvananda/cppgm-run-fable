@@ -1,0 +1,37 @@
+#include <cstdio>
+#include <vector>
+
+struct A
+{
+	std::vector<A> elems;
+	int v;
+};
+
+static void grow(std::vector<A>& list, const A& item)
+{
+	list.push_back(item);
+}
+
+static void fill(std::vector<A>& list, const A& item)
+{
+	list.insert(list.begin(), 2, item);
+}
+
+int main()
+{
+	A leaf;
+	leaf.v = 7;
+	A node;
+	node.v = 1;
+	grow(node.elems, leaf);
+	grow(node.elems, leaf);
+	fill(node.elems, leaf);
+	std::printf("%d %d %d\n", (int)node.elems.size(), node.elems[0].v,
+	            node.v);
+	std::vector<A> forest;
+	grow(forest, node);
+	grow(forest, node);
+	std::printf("%d %d %d\n", (int)forest.size(),
+	            (int)forest[1].elems.size(), forest[0].elems[2].v);
+	return 0;
+}

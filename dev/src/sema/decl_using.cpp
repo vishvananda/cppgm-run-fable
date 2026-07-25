@@ -178,6 +178,7 @@ void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
 		own.fn_adl_only.resize(count, false);
 		own.fn_unwind_no.resize(count, false);
 		own.fn_noexcept_decl.resize(count, false);
+		own.fn_noexcept_pending.resize(count);
 		own.fn_owner.resize(count, 0);
 		own.fn_access[at] = current_access_;
 		own.fn_owner[at] =
@@ -195,5 +196,7 @@ void DeclBinder::MergeImportedOverloads(ScopeBinding& own,
 			own.fn_unwind_no[at] = imported.fn_unwind_no[i];
 		if (i < imported.fn_noexcept_decl.size())
 			own.fn_noexcept_decl[at] = imported.fn_noexcept_decl[i];
+		if (i < imported.fn_noexcept_pending.size())
+			own.fn_noexcept_pending[at] = imported.fn_noexcept_pending[i];
 	}
 }

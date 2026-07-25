@@ -96,6 +96,11 @@ struct ClassCtor
 	// only the declared specification (the noexcept operator, 5.3.7).
 	bool unwind_no;
 	bool noexcept_decl = false;
+	// PA39/CWG 1330: a noexcept(expr) recorded unevaluated during a
+	// class-template body replay; the first ctor-fact read evaluates
+	// in the recorded scope and memoizes into the two flags above.
+	const AstExpr* noexcept_pending_expr = 0;
+	Scope* noexcept_pending_scope = 0;
 	// The defining DK_SPECIAL_MEMBER_DEFINITION (mem-initializers and
 	// body), or null for declaration-only / defaulted constructors.
 	const AstDecl* definition;
@@ -257,6 +262,11 @@ struct ClassInfo
 	EMemberAccess dtor_access = MA_PUBLIC;
 	const AstDecl* dtor_definition = 0;  // user destructor body (null: implicit)
 	bool dtor_unwind_no = false;
+	// PA39/CWG 1330: a destructor noexcept(expr) recorded unevaluated
+	// during a class-template body replay; the first dtor-fact read
+	// evaluates in the recorded scope and memoizes into dtor_unwind_no.
+	const AstExpr* dtor_noexcept_pending_expr = 0;
+	Scope* dtor_noexcept_pending_scope = 0;
 	vector<string> dtor_abi_tags;  // PA33 abi_tag (B<len><tag>)
 	// 11.3 friends: friend-class entities and friend-function names.
 	vector<const NamedTypeInfo*> friend_classes;

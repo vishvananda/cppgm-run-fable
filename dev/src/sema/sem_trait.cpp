@@ -736,6 +736,7 @@ bool SemExprAnalyzer::ProbeTraitDestructible(const TypePtr& target,
 	if (!cls || cls->dtor_deleted)
 		return false;
 	trivial = ClassHasTrivialDtor(*cls);
+	host_.ResolveDtorNoexceptFact(*cls);
 	no_throw = trivial || cls->dtor_unwind_no ||
 		(!cls->dtor_definition && cls->implicit_dtor_unwind_no);
 	return true;

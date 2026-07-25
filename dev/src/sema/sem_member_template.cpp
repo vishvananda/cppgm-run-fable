@@ -871,6 +871,7 @@ void SemBinder::InstantiateCtorTemplateBody(ClassInfo& cls, int index)
 	body.cls = &cls;
 	body.member_template = true;
 	AnalyzeDeferredBody(body);
+	ResolveCtorNoexceptFact(*body.cls, (int)index);
 	if (body.cls->ctors[index].unwind_no)
 		mutable_spec.self.fn_unwind_no[0] = true;
 }

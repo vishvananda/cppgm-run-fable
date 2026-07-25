@@ -96,6 +96,12 @@ public:
 	// The definition for a resolved SN_CALLEE, or null.
 	const SemNode* Find(const SemNode& callee);
 
+	// PA39: the unit's deferred list is append-only except for the
+	// end-of-unit poisoned-body retries, which replace nodes in
+	// place; the incremental index must drop its pointers into the
+	// replaced (destroyed) nodes and rebuild.
+	void Invalidate();
+
 private:
 	void Refresh();
 	void Index(const SemNode& node);
@@ -135,6 +141,10 @@ public:
 	                                    const TypePtr& type,
 	                                    const Scope* scope,
 	                                    const string& name);
+
+	// PA39: a poisoned-body retry replaced deferred definition nodes
+	// in place; drop the body index so later lookups re-scan.
+	void InvalidateBodies();
 
 	// --- the constant-object store (evaluated named objects) ---
 	void StoreObject(const Scope* scope, const string& name,

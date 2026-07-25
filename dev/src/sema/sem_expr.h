@@ -124,6 +124,20 @@ struct ISemExprHost
 	// A temporary's destructor action (no address subtree); demanded
 	// for full-expression temporaries of destructible classes.
 	virtual SemNodePtr MakeTemporaryDtor(const ClassInfo& cls) = 0;
+	// PA39/CWG 1330: evaluate a deferred noexcept(expr) (recorded
+	// during a class-template body replay) before its per-overload /
+	// destructor unwind facts are read; no-op for hosts without
+	// deferral.
+	virtual void ResolveNoexceptFacts(const ScopeBinding& binding,
+	                                  size_t index)
+	{
+		(void)binding;
+		(void)index;
+	}
+	virtual void ResolveDtorNoexceptFact(const ClassInfo& cls)
+	{
+		(void)cls;
+	}
 	// --- PA16 value semantics ---
 	// Constructor overload resolution over the class's constructors
 	// (user-declared plus the implicitly declared copy/move members);

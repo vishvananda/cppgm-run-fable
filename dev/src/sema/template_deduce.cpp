@@ -1365,6 +1365,13 @@ FunctionSpecialization* SemBinder::EnsureFunctionSpecialization(
 	spec->self.fn_adl_only.resize(1, false);
 	spec->self.fn_unwind_no.resize(1, composed.noexcept_simple);
 	spec->self.fn_noexcept_decl.resize(1, composed.noexcept_simple);
+	spec->self.fn_noexcept_pending.resize(1);
+	if (!composed.noexcept_simple && composed.noexcept_pending_expr)
+		// PA39/CWG 1330: a spec deferred during a class-template body
+		// replay resolves at the first unwind-fact read.
+		spec->self.fn_noexcept_pending[0] = std::make_pair(
+			composed.noexcept_pending_expr,
+			composed.noexcept_pending_scope);
 	spec->self.fn_owner.resize(1, spec->param_scope);
 	vector<const AstExpr*>& defaults = spec->self.fn_defaults[0];
 	defaults.resize(composed.parameters.size(), 0);

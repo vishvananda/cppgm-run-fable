@@ -550,6 +550,7 @@ SemValue SemExprAnalyzer::AnalyzeAdlCall(
 	callee->entity_name = binding.name;
 	callee->fn_spec = chosen.spec;
 	host_.OnSpecializationOdrUsed(chosen.spec);
+	host_.ResolveNoexceptFacts(binding, chosen.index);
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;
@@ -727,6 +728,7 @@ bool SemExprAnalyzer::ResolveOperatorCall(const string& spelling,
 	callee->is_method = chosen.is_member && !chosen.spec;
 	callee->fn_spec = chosen.spec;
 	host_.OnSpecializationOdrUsed(chosen.spec);
+	host_.ResolveNoexceptFacts(binding, chosen.index);
 	if (chosen.index < binding.fn_unwind_no.size() &&
 	    binding.fn_unwind_no[chosen.index])
 		callee->unwind_no = true;

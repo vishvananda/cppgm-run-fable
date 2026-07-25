@@ -83,6 +83,7 @@ SemBinder::SemBinder(TypesModel& model, SemUnit& unit)
 	: DeclBinder(model), unit_(unit), analyzer_(*this), engine_(unit),
 	  local_types_(0), pending_local_type_(false), in_bit_field_(false),
 	  instantiating_(false), instantiation_depth_(0),
+	  class_replay_depth_(0),
 	  in_implicit_type_context_(false), in_unevaluated_operand_(false),
 	  param_capture_scope_(0)
 {

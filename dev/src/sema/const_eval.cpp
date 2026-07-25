@@ -102,6 +102,16 @@ void ConstBodyRegistry::Refresh()
 		Index(*unit_.synthesized[synthesized_seen_]);
 }
 
+void ConstBodyRegistry::Invalidate()
+{
+	items_seen_ = 0;
+	deferred_seen_ = 0;
+	synthesized_seen_ = 0;
+	by_spec_.clear();
+	by_entity_.clear();
+	by_name_.clear();
+}
+
 const SemNode* ConstBodyRegistry::Find(const SemNode& callee)
 {
 	Refresh();
@@ -144,6 +154,11 @@ const SemNode* ConstBodyRegistry::Find(const SemNode& callee)
 }
 
 // --- engine state -----------------------------------------------------------
+
+void ConstEvalEngine::InvalidateBodies()
+{
+	registry_.Invalidate();
+}
 
 ConstEvalEngine::ConstEvalEngine(SemUnit& unit)
 	: unit_(unit), registry_(unit), depth_(0), steps_(0)

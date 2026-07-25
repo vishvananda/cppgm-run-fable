@@ -240,6 +240,11 @@ private:
 	                            const string& name);
 	void FlushDeferredBodies();
 	void AnalyzeDeferredBody(const DeferredBody& body);
+	// The qualified (out-of-class) special-member body path: under
+	// instantiation a failure poisons this one body for the
+	// end-of-unit retry instead of failing the whole instantiation
+	// (14.7.1, like the deferred in-class path).
+	void AnalyzeQualifiedMemberBody(const DeferredBody& body);
 	void BindDeferredBodyStatement(const DeferredBody& body,
 	                               ESpecialFunction special,
 	                               SemNode& node);
@@ -723,6 +728,24 @@ private:
 	// PA21: an abstract-pattern array bound naming a value parameter
 	// (ITypeBuilderHost).
 	virtual bool AbstractArrayBound(const AstExpr& expr, int& param);
+	// PA39/CWG 1330 deferred noexcept(expr) specs (template_body.cpp).
+	// The composition-time gate (ITypeBuilderHost): the scope to
+	// record while a class-template body replays, null otherwise.
+	virtual Scope* DeferNoexceptSpecScope();
+	// On-demand resolution before unwind-fact reads (ISemExprHost for
+	// the per-overload and destructor forms; the constructor form is
+	// internal to the class machinery).
+	virtual void ResolveNoexceptFacts(const ScopeBinding& binding,
+	                                  size_t index);
+	virtual void ResolveDtorNoexceptFact(const ClassInfo& cls);
+	void ResolveCtorNoexceptFact(const ClassInfo& cls, int ctor_index);
+	// The effective noexcept fact of a composed declarator when its
+	// facts flow into a definition node (drained bodies bind outside
+	// the replay window; an in-window bind keeps may-throw).
+	bool ComposedNoexceptSimple(const DeclaratorInfo& composed);
+	// Evaluates one recorded spec in its recorded scope; true only
+	// when it evaluates to a nonzero constant.
+	bool EvaluatePendingNoexcept(const AstExpr& expr, Scope* scope);
 	// The most recent clause expansion (one pack parameter per clause
 	// in the slice): the declared pack name and its expanded slots,
 	// consumed right after signature composition to bind the function
@@ -1032,7 +1055,7 @@ private:
 	void DrainPendingInstantiations();
 	// One pass over the poisoned member bodies awaiting re-bind
 	// (alternates with the drain until both queues empty).
-	void RetryDeferredBodies();
+	bool RetryDeferredBodies();
 	// PA25 5.1.7: prior closure operator parameter lists per enclosing
 	// function body (the mangled local-name prefix context); the
 	// Itanium <lambda-sig> discriminator counts earlier same-signature
@@ -1088,6 +1111,12 @@ private:
 	// emit weak (demand-emitted) instead of strong.
 	bool instantiating_;
 	int instantiation_depth_;
+	// PA39/CWG 1330: nonzero while a class-template specialization
+	// body replays (InstantiateSpecializationBody). Conditional
+	// noexcept specs composed under it record unevaluated - evaluating
+	// them there can instantiate traits over a class still open in the
+	// demanding context - and resolve at the first unwind-fact read.
+	int class_replay_depth_;
 	// Shared positional deduction placeholders (`#0`, `#1`, ...).
 	vector<TypePtr> placeholders_;
 	// Synthesized unique argument types for partial ordering.

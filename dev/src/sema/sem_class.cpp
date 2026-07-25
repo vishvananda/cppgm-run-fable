@@ -340,6 +340,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 		cls->dtor_deleted = deleted;
 		cls->dtor_definition = defined ? &decl : 0;
 		cls->dtor_unwind_no = composed.noexcept_simple;
+		cls->dtor_noexcept_pending_expr = composed.noexcept_pending_expr;
+		cls->dtor_noexcept_pending_scope = composed.noexcept_pending_scope;
 		if (decl.declarator)
 			cls->dtor_abi_tags = decl.declarator->abi_tags;
 		RecordVirtualDtor(*cls, is_virtual, composed, defined, defaulted,
@@ -372,6 +374,8 @@ void SemBinder::BindSpecialMember(const AstDecl& decl)
 	ctor.defaulted = defaulted;
 	ctor.unwind_no = composed.noexcept_simple;
 	ctor.noexcept_decl = composed.noexcept_simple;
+	ctor.noexcept_pending_expr = composed.noexcept_pending_expr;
+	ctor.noexcept_pending_scope = composed.noexcept_pending_scope;
 	ctor.definition = defined ? &decl : 0;
 	for (size_t i = 0; i < composed.parameters.size(); i++)
 		ctor.defaults.push_back(composed.parameters[i].default_arg);
@@ -517,7 +521,31 @@ void SemBinder::BindQualifiedConversionFunction(const AstDecl& decl,
 	body.declaring = declaring;
 	body.cls = &cls;
 	body.out_of_class = true;
-	AnalyzeDeferredBody(body);
+	AnalyzeQualifiedMemberBody(body);
+}
+
+// 14.7.1: an instantiated out-of-class member definition can bind
+// while another class is still mid-bind in an outer context (a
+// completeness demand instantiating the specialization's registered
+// members); a failure then poisons this one body - the end-of-unit
+// re-bind retries it once every class is complete - instead of
+// failing the whole instantiation. Source-owned definitions keep
+// their hard diagnostics.
+void SemBinder::AnalyzeQualifiedMemberBody(const DeferredBody& body)
+{
+	if (!instantiating_)
+	{
+		AnalyzeDeferredBody(body);
+		return;
+	}
+	try
+	{
+		AnalyzeDeferredBody(body);
+	}
+	catch (const std::exception& error)
+	{
+		AppendPoisonedBody(body, error.what());
+	}
 }
 
 void SemBinder::BindQualifiedSpecialMember(const AstDecl& decl,
@@ -571,7 +599,7 @@ void SemBinder::BindQualifiedDestructor(const AstDecl& decl,
 	// vtables stay weak (14.7.1).
 	if (!instantiating_ && cls.is_polymorphic && cls.key_is_dtor)
 		cls.key_defined_in_tu = true;
-	AnalyzeDeferredBody(body);
+	AnalyzeQualifiedMemberBody(body);
 }
 
 void SemBinder::BindQualifiedSpecialMemberInner(const AstDecl& decl,
@@ -662,7 +690,7 @@ void SemBinder::BindQualifiedSpecialMemberInner(const AstDecl& decl,
 	// prints weak but still prints.
 	body.out_of_class = true;
 	body.spelled_inline = DeclSpellsInline(decl);
-	AnalyzeDeferredBody(body);
+	AnalyzeQualifiedMemberBody(body);
 }
 
 // --- friends ------------------------------------------------------------
@@ -1299,6 +1327,7 @@ SemNodePtr SemBinder::MakeConstructorCall(const ClassInfo& cls,
 	}
 	else
 	{
+		ResolveCtorNoexceptFact(cls, ctor_index);
 		const ClassCtor& selected = cls.ctors[ctor_index];
 		ctor_type = selected.type;
 		callee_unwind_no = selected.unwind_no;

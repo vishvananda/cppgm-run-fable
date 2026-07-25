@@ -395,6 +395,7 @@ void SemExprAnalyzer::ApplyConversion(SemValue& value,
 			for (size_t i = 0; i < binding->overloads.size(); i++)
 				if (TypeEquals(binding->overloads[i], fn.type))
 					index = i + 1;
+			host_.ResolveNoexceptFacts(*binding, index);
 			if (index < binding->fn_unwind_no.size() &&
 			    binding->fn_unwind_no[index])
 				callee->unwind_no = true;

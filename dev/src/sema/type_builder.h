@@ -18,6 +18,7 @@ using std::vector;
 // only the structural rules.
 
 struct ParameterInfo;
+struct Scope;
 
 struct ITypeBuilderHost
 {
@@ -97,6 +98,16 @@ struct ITypeBuilderHost
 		(void)result;
 		return false;
 	}
+	// PA39/CWG 1330: while a class-template specialization body is
+	// replaying, a member's noexcept(constant-expression) must not
+	// evaluate (it can instantiate traits over a class that is still
+	// open in the demanding context); the host returns the scope to
+	// record for an on-demand evaluation at the first unwind-fact
+	// read, or null to evaluate now.
+	virtual Scope* DeferNoexceptSpecScope()
+	{
+		return 0;
+	}
 	virtual ~ITypeBuilderHost() {}
 };
 
@@ -165,6 +176,12 @@ struct DeclaratorInfo
 	// PA14: bare `noexcept` or empty `throw()` on the declarator (the
 	// cheap non-unwinding markings; expressions are not evaluated).
 	bool noexcept_simple;
+	// PA39/CWG 1330: a conditional noexcept(expr) whose evaluation the
+	// host deferred (composed during a class-template body replay):
+	// the spec expression and the scope to evaluate it in on first
+	// demand.
+	const AstExpr* noexcept_pending_expr = 0;
+	Scope* noexcept_pending_scope = 0;
 	// PA36 15.4: the dynamic-exception-specification type list of a
 	// non-empty `throw(T...)`, resolved and 15.4p2-adjusted (array ->
 	// pointer to element, function -> pointer to function).

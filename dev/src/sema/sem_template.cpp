@@ -694,6 +694,18 @@ void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
 	// rethrows as the hard-error type SFINAE catch sites refuse to
 	// swallow. (The recursive-demand throw above stays soft: in that
 	// context the class is merely incomplete.)
+	// PA39: a failed bind resets the record (the bind paths' catch
+	// blocks) so the end-of-unit body retries can heal failures caused
+	// by a class still open in the demanding context. The reset makes
+	// re-demands re-instantiate, so only the FIRST failure reports
+	// hard; a repeat reports softly, like the pre-reset hollow record
+	// did, keeping deduction probes that composed an invalid candidate
+	// signature (tuple_element<0, tuple<>>) tolerant of it.
+	// PA39/CWG 1330: conditional noexcept specs composed under the
+	// replay record unevaluated (template_body.cpp) and resolve at the
+	// first unwind-fact read.
+	const bool repeat_failure = spec.bind_failed;
+	class_replay_depth_++;
 	try
 	{
 		if (partial >= 0)
@@ -710,16 +722,27 @@ void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
 	}
 	catch (const NotImplementedException&)
 	{
+		class_replay_depth_--;
 		throw;
 	}
-	catch (const InstantiationBodyFault&)
+	catch (const InstantiationBodyFault& e)
 	{
+		class_replay_depth_--;
+		spec.bind_failed = true;
+		if (repeat_failure)
+			throw runtime_error(e.what());
 		throw;
 	}
 	catch (const std::exception& e)
 	{
+		class_replay_depth_--;
+		spec.bind_failed = true;
+		if (repeat_failure)
+			throw runtime_error(e.what());
 		throw InstantiationBodyFault(e.what());
 	}
+	class_replay_depth_--;
+	spec.bind_failed = false;
 }
 
 void SemBinder::InstantiateClassSpecialization(TemplateInfo& tmpl,
@@ -1413,7 +1436,26 @@ void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 	InstantiationContext context(*this, pending.scope, true);
 	// The forward-declared entity completes in place (the pending
 	// scope is its declaring class scope).
-	BindClass(*pending.decl, true);
+	try
+	{
+		BindClass(*pending.decl, true);
+	}
+	catch (...)
+	{
+		// A failed completion must stay retryable (an end-of-unit
+		// poisoned-body retry re-demands it): restore the pending
+		// record and reset the partial bind's entity state.
+		NamedTypeInfo* stale = model_.MutableInfo(info);
+		stale->complete = false;
+		stale->is_defined = false;
+		if (ClassInfo* record = unit_.classes.Find(info))
+		{
+			*record = ClassInfo();
+			record->entity = info;
+		}
+		pending_classes_[info] = pending;
+		throw;
+	}
 }
 
 // --- explicit instantiation --------------------------------------------------

@@ -286,6 +286,7 @@ SemValue SemExprAnalyzer::AnalyzeNamedCall(const AstExpr& expr,
 	// identity.
 	callee->fn_spec = spec ? spec : chosen.fn_self_spec;
 	host_.OnSpecializationOdrUsed(spec ? spec : chosen.fn_self_spec);
+	host_.ResolveNoexceptFacts(chosen, slot);
 	if (slot < chosen.fn_unwind_no.size() && chosen.fn_unwind_no[slot])
 		callee->unwind_no = true;
 	if (slot < chosen.fn_noexcept_decl.size() &&

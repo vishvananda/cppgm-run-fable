@@ -65,6 +65,7 @@ SemValue SemExprAnalyzer::MakeAllocationCall(const char* name,
 	const TypePtr& fn = candidates[winner];
 	for (size_t i = 0; i < args.size(); i++)
 		ApplyConversion(args[i], conversions[i], fn->parameters[i]);
+	host_.ResolveNoexceptFacts(*binding, winner);
 	unwind_no = winner < binding->fn_unwind_no.size() &&
 		binding->fn_unwind_no[winner];
 	// 18.6.1.3: the reserved placement form returns its pointer
