@@ -1105,6 +1105,14 @@ void FunctionLowerer::LowerReturn(const SemNode& node)
 
 void FunctionLowerer::LowerIf(const SemNode& node)
 {
+	// 6.4p3: a condition declaration's scope (and its object's
+	// lifetime) extends to the end of the selection statement, so its
+	// cleanup must not leak into the enclosing scope - an exit there
+	// would destroy an object this statement never constructed.
+	bool condition_scope =
+		node.children[0]->children[0]->kind == SN_CONDITION_DECLARATION;
+	if (condition_scope)
+		PushCleanupScope();
 	string then_label = NewLabel("if_then");
 	string else_label = NewLabel("if_else");
 	string end_label = NewLabel("if_end");
@@ -1127,6 +1135,8 @@ void FunctionLowerer::LowerIf(const SemNode& node)
 		Terminate("jump ^" + end_label);
 	}
 	OpenBlock(end_label);
+	if (condition_scope)
+		PopCleanupScope(true);
 }
 
 void FunctionLowerer::LowerWhile(const SemNode& node)
@@ -1261,6 +1271,12 @@ void FunctionLowerer::ScanSwitchLabels(const SemNode& node,
 void FunctionLowerer::LowerSwitch(const SemNode& node)
 {
 	const SemNode& condition = *node.children[0];
+	// 6.4p3: a condition declaration's scope spans the whole switch
+	// statement (see LowerIf).
+	bool condition_scope =
+		condition.children[0]->kind == SN_CONDITION_DECLARATION;
+	if (condition_scope)
+		PushCleanupScope();
 	string selector;
 	if (condition.children[0]->kind == SN_CONDITION_DECLARATION)
 	{
@@ -1300,6 +1316,8 @@ void FunctionLowerer::LowerSwitch(const SemNode& node)
 	// switch shape keeps it for the implicit function epilogue).
 	ReferenceLabel(end_label);
 	CloseInto(end_label);
+	if (condition_scope)
+		PopCleanupScope(true);
 }
 
 string FunctionLowerer::GotoLabel(const string& name)

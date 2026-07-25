@@ -1,0 +1,56 @@
+#include <cstdio>
+#include <memory>
+
+struct Node
+{
+	int v;
+	~Node() {}
+};
+typedef std::unique_ptr<Node> NodePtr;
+
+struct P
+{
+	int kind;
+
+	NodePtr ParsePrefix()
+	{
+		if (kind != 1)
+			return NodePtr();
+		NodePtr n(new Node());
+		n->v = 10;
+		return n;
+	}
+
+	NodePtr Tail()
+	{
+		NodePtr n(new Node());
+		n->v = 20;
+		return n;
+	}
+
+	NodePtr ParseUnary()
+	{
+		if (kind == 1)
+			if (NodePtr contextual = ParsePrefix())
+				return contextual;
+		if (kind == 2)
+		{
+			NodePtr direct(new Node());
+			direct->v = 30;
+			return direct;
+		}
+		return Tail();
+	}
+};
+
+int main()
+{
+	for (int k = 0; k <= 2; k++)
+	{
+		P p;
+		p.kind = k;
+		NodePtr n = p.ParseUnary();
+		std::printf("%d\n", n->v);
+	}
+	return 0;
+}

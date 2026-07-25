@@ -734,6 +734,33 @@ emission, turning an ill-formed program into an undefined reference
 at link time; a diagnostic would be better once demanded-versus-
 speculative body demands are distinguished.
 
+### Failure 24 (fixed): if-condition declarations' cleanups leak into
+### the enclosing scope (pa10 tests: cppgm++-self segfault on any
+### non-identifier token)
+
+cppgm++-self linked, but --emit-ast on `int x = 1;` freed a garbage
+pointer inside `AstParser::ParseUnaryExpression`: the shared final-
+return tail destroyed the if-condition variable `contextual` on paths
+that never constructed it. `LowerIf` (and `LowerSwitch`) opened no
+cleanup scope for an SN_CONDITION_DECLARATION, so
+`RegisterCleanup` parked the variable's destructor in the ENCLOSING
+scope's list - every later exit of that scope ran it, including the
+outer if's false path in the braceless
+`if (k) if (Ptr p = make()) return p;` nesting (and paths where the
+variable's own if had already destroyed it). Fix at the PA14/15
+statement-lowering surface (lowering/lower_function.cpp): LowerIf and
+LowerSwitch bracket the whole selection statement with
+Push/PopCleanupScope when the condition is a declaration, mirroring
+LowerFor's init-statement scope; returns inside the branches keep
+destroying the variable through the ordinary active-scope walk
+(6.4p3). while/do condition declarations (per-iteration destruction)
+remain unhandled until a checkpoint source needs them - none does.
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-if-condition-decl-
+scope-runtime-smoke` (all three paths of the nesting print their
+selected values; free(): invalid pointer before the fix, 20/10/30
+after; ref-generated fixtures).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.
