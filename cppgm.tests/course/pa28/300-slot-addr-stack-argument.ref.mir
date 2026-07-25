@@ -1,0 +1,72 @@
+machine_ir x86_64 linux
+
+startup
+    call @main
+    mov rdi, rax
+    exit
+
+function @sink
+  abi
+    param %a -> rdi : i64
+    param %b -> rsi : i64
+    param %c -> rdx : i64
+    param %d -> rcx : i64
+    param %e -> r8 : i64
+    param %f -> r9 : i64
+    param %created -> [rbp+16] : ptr
+    return void -> void
+  frame
+    stack_size 64
+    scratch_bytes 0
+    param-slot %a -> [rbp-8] : i64
+    param-slot %b -> [rbp-16] : i64
+    param-slot %c -> [rbp-24] : i64
+    param-slot %d -> [rbp-32] : i64
+    param-slot %e -> [rbp-40] : i64
+    param-slot %f -> [rbp-48] : i64
+    param-slot %created -> [rbp-56] : ptr
+
+  block ^entry
+    store.i64 [rbp-8], rdi
+    store.i64 [rbp-16], rsi
+    store.i64 [rbp-24], rdx
+    store.i64 [rbp-32], rcx
+    store.i64 [rbp-40], r8
+    store.i64 [rbp-48], r9
+    load.ptr rax, [rbp+16]
+    store.ptr [rbp-56], rax
+    mov rax, 1
+    load.ptr rcx, [rbp-56]
+    store.u8 [rcx], rax
+    ret
+
+function @main
+  abi
+    return i32 -> rax
+  frame
+    stack_size 16
+    scratch_bytes 0
+    slot $created -> [rbp-1] : u8
+
+  block ^entry
+    mov rax, 0
+    store.u8 [rbp-1], rax
+    sub rsp, 16
+    mov rdi, 1
+    mov rsi, 2
+    mov rdx, 3
+    mov rcx, 4
+    mov r8, 5
+    mov r9, 6
+    lea r11, [rbp-1]
+    store.ptr [rsp], r11
+    call @sink
+    add rsp, 16
+    load.u8 r8, [rbp-1]
+    zext.i8 r8
+    mov rdx, 1
+    cmp.i64 r8, rdx
+    setne r8
+    movzx r8, r8
+    mov rax, r8
+    ret rax

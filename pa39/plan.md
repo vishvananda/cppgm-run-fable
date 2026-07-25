@@ -1,9 +1,9 @@
 # PA39 Inception Plan
 
 Status: self-built PA1-PA6 pass; failures 12 (member-template bodies
-bound inside an open class) and 13 (elaborated-type-specifier scope)
-fixed; every nsdecl checkpoint TU now host-compiles; the nsdecl rung
-(pa7) next runs from the top.
+bound inside an open class), 13 (elaborated-type-specifier scope), and
+14 (slot-address stack arguments) fixed; nsdecl-self builds and links;
+the pa7 test rung next runs from the top.
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -365,6 +365,37 @@ compiles `sema/type.h`'s exact member and parameter spellings) and
 the inception build gate the behavior. The host dialect here is a
 strict superset of the reference dialect: forms the ref accepts still
 bind identically (report re-run green).
+
+### Failure 14: addr-of-slot temps dropped from stack-passed call
+### arguments (pa7 self tests, nsdecl-self segfault)
+
+nsdecl-self built and linked, but segfaulted on the first variable
+declaration (`char c;`): `Program::LinkEntity` wrote `created = true`
+through a null reference. The caller (`DeclParser::LinkNewEntity`,
+7 GPR-class arguments, the 7th on the stack) staged the stack argument
+as `store.i64 [rsp], rax` with stale rax — the argument was
+`%t = addr $created`, a `VL_SLOT_ADDR` temp (rematerialized at each
+use), and the integer-class stack-argument path in
+`x86/lowir_to_mir_flow.cpp` had no `VL_SLOT_ADDR` case: the fallback
+read `location.reg` off a location that has none. The register-class
+argument path already handled it. Host-seeded `../dev/cppgm++`
+reproduces directly (7-arg method call with a `bool&` local as the
+7th argument segfaults at -O0); the reference backend stages
+`lea r11, [slot]; store.ptr [rsp], r11`. Fixes (PA28 surface):
+- `lowir_to_mir_flow.cpp`: the integer-class stack-argument path gains
+  the `VL_SLOT_ADDR` branch — lea through r11, `store.ptr` (the
+  reference shape).
+- `lowir_to_mir_program.cpp` (`PlanWideParam`): the stack-parameter
+  intake copy spells a full-eightbyte pointer parameter `ptr` instead
+  of `i64` (the reference load.ptr/store.ptr shape); container chunks
+  stay i64.
+
+Reducer: `cppgm.tests/course/pa28/300-slot-addr-stack-argument.t`
+(fails before the fix, passes after; `.ref.mir` checked in to pin the
+exact reference staging). The callee keeps its register parameters
+unused so the pinned parking discipline (which legitimately differs
+from the reference for late single-use register params) stays out of
+the fixture.
 
 ## Validation plan
 

@@ -603,6 +603,23 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			}
 			else {
 				const ValueLocation & location = resolve_location(arg.name);
+				if(location.kind == ValueLocation::VL_SLOT_ADDR) {
+					// an addr-of-slot temp rematerializes at each
+					// use: lea through r11 and store the pointer
+					// (the reference stack-argument shape)
+					mir_model::Instruction & lea =
+						emit(mir_model::Instruction::MI_LEA);
+					lea.operands.push_back(MakeReg(XR_R11));
+					lea.operands.push_back(frame_operand(
+						slots_[location.slot_name].frame_offset));
+					mir_model::Instruction & store =
+						emit(mir_model::Instruction::MI_STORE);
+					store.type = "ptr";
+					store.operands.push_back(
+						MakeDeref(XR_RSP, slot.stack_offset));
+					store.operands.push_back(MakeReg(XR_R11));
+					continue;
+				}
 				if(location.kind == ValueLocation::VL_FRAME) {
 					mir_model::Instruction & load =
 						emit(mir_model::Instruction::MI_LOAD);

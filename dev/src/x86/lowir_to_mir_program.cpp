@@ -108,19 +108,24 @@ bool FunctionLowering::PlanWideParam(const LowIRParam & param,
 	}
 	else {
 		// copy the full padded container (one chunk for scalars and small
-		// objects, several for by-value memory-class objects)
+		// objects, several for by-value memory-class objects); a full
+		// eightbyte scalar copies at its own spelling (the reference
+		// shape: load.ptr/store.ptr for a pointer), container chunks
+		// stay i64
 		invalidate_rax();
 		long long copy_bytes =
 			big_obj || is_wide ? FrameSizeOf(param.type) : 8;
+		const char * chunk_type =
+			param.type.kind == LOWIR_TYPE_PTR ? "ptr" : "i64";
 		for(long long off = 0; off < copy_bytes; off += 8) {
 			mir_model::Instruction & load =
 				emit(mir_model::Instruction::MI_LOAD);
-			load.type = "i64";
+			load.type = chunk_type;
 			load.operands.push_back(MakeReg(XR_RAX));
 			load.operands.push_back(frame_operand(stack_offset + off));
 			mir_model::Instruction & store =
 				emit(mir_model::Instruction::MI_STORE);
-			store.type = "i64";
+			store.type = chunk_type;
 			store.operands.push_back(frame_operand(home + off));
 			store.operands.push_back(MakeReg(XR_RAX));
 		}
