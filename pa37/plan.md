@@ -40,9 +40,10 @@ Three connected pieces, all built on the existing PA13 LowIR object model
   parsed program before MIR lowering.
 
 The optimizer works only on the parsed `LowIRProgram`; no frontend side data
-crosses the text boundary (PA37 contract). Facts the object layer needs after
-optimization (inferred no-unwind for defined functions) are re-derived from
-LowIR bodies by a small analysis shared with the optimizer.
+crosses the text boundary (PA37 contract). The object layer needs no
+re-derived unwind facts: the backend consumes only the eh_try/eh_end region
+structure present in the text, and `unwind=no` on definitions is the
+declared/implicit specification the lowering already spelled.
 
 ## Pipeline (reverse-engineered from the byte-exact refs)
 
@@ -143,3 +144,73 @@ keeps the first definition's name; folded literals substitute in place.
   required gate), watching pa13/pa14/pa28-36 for regressions.
 - `perl scripts/cppgm_file_audit.pl --stage pa37 --paths dev/src` before
   committing; keep new files under the 1500/120 line limits.
+
+## Architecture Review (loop 87 audit)
+
+Layer ownership of the PA37 surface, as actually implemented:
+
+- **LowIR model** (`lowir_program.h`) stays the single typed boundary; every
+  new PA37 fact travels as validated metadata text (`trivial_lifecycle`,
+  `unwind=no` from the declared spec, `object_root`) — no side channel
+  crosses `CompileLowIRProgramToModule`, and `LowerProgram` carries no
+  optimization level at all (the dead `optimize_level_` plumbing is gone).
+- **Dumper** (`lowir_dump.cpp`) is presentation-only: pa13 phase order,
+  operand spellings preserved verbatim; its one rewrite (`binding=strong`
+  inserted before a bare `prefer_local`) is documented reference parity.
+- **Optimizer** (`lowir_opt*.cpp`) works on the parsed program only. The
+  driver (`lowir_opt.cpp`) owns program rounds (bounded at 32), the
+  per-function fixpoint, Tarjan-SCC inline-cycle facts, and the single
+  reference-count walker (`CountProgramSymbolRefs`) that both
+  `PruneUnreferencedLowIRDeclares` and the worklist-based
+  `RemoveUnreferencedWeakFunctions` consume. Pass files own one family
+  each: fold (value lattice + level-2 slot tracking with handler-stack
+  seeding at push sites), CSE (available expressions keyed on semantic
+  fields, converging-or-bail), CFG (cleanup + EH shape facts), DCE
+  (dead temps/calls/slot traffic + exception-aware promoted-store
+  liveness), inline (`__o1inl<N>__` contract, literal-position and
+  spill-type guards sharing `LiteralBarredPosition`/`CountTempUses`
+  with DCE).
+- **Driver** (`cppgm++.cpp`): `-c` sniffs a bounded prefix for the four
+  LowIR top-level keywords and both `-c` entries funnel through
+  `CompileLowIRProgramToModule` (optimize -> weak discard -> validate ->
+  MIR -> object), which is what makes the object roundtrip byte-exact by
+  construction. `--emit-lowir -g<n>` lowers each unit separately and
+  merges through `MergeLowIRUnits` (`lowir_merge.cpp`): weak definitions
+  dedupe first-wins (host vague linkage), declares yield to definitions,
+  and colliding internal-binding definitions rename apart per unit —
+  unit-scoped names are a documented presentation tie-breaker. Output
+  writes are flushed and checked on both emit paths.
+- **Lowering/sema** own the pre-boundary facts: `unwind_declared` comes
+  only from declared/implicit exception specifications (15.4p14 now
+  wired for synthesized default ctors, dtors, and built copy/move ctors,
+  matching the assignment precedent); `trivial_lifecycle` compares
+  bodies against the spill lines `EmitParameterStores` actually emitted
+  (typed handshake, not re-derivation); namespace-scope `static`
+  functions carry `binding=internal` (3.5p3) so object symbols go local
+  like the host compiler's; the space-free low-name spelling
+  (`operator_`) gates on separate compilation so whole-program refs
+  keep their pinned spellings.
+- **Backend**: host-mode object lowering classifies direct 9..16-byte
+  object params/returns as GPR pairs itself; `LowerClassDirect` admits
+  only all-INTEGER shapes at that size, so the rule is complete from
+  LowIR types alone (SSE-classified shapes keep the by-address path, as
+  before PA37 they kept the memory path — no fixture exercises either).
+
+## Final Architecture Review
+
+The PA37 contract holds structurally: the serialized LowIR unit is
+level-independent (one lowering, one optimizer, one object tail), facts the
+object layer needs after optimization are spelled in the text or re-derived
+from it, and the `lowiropt` oracle exercises the same pipeline the driver
+uses. Known accepted divergences, none load-bearing: internal-linkage
+symbols keep course spellings (`_Z...` local) rather than g++'s `_ZL...`
+(local symbols never resolve across objects); the merged-driver dump orders
+functions by unit lowering order (top-level order is canonicalized by the
+graders); `lowiropt` rejects duplicate top-level symbols across its inputs,
+matching the reference tool. Signed-flavored folds back off on
+unsigned-typed operands with the width sign bit set because the CY86 and
+x86 lanes disagree there; folding only where both lanes agree keeps -O1
+behavior-preserving on each. The stringly `metadata.find(...)` reads
+throughout the optimizer are the LowIR contract itself (facts are defined
+as validated metadata text), with misspellings taking the conservative
+branch by construction.
