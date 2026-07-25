@@ -448,7 +448,8 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 				}
 			}
 			else if(arg.kind == LOWIR_OPERAND_GLOBAL) {
-				if(facts_.info->is_function(arg.name))
+				if(facts_.info->is_function(arg.name) &&
+				   !imported_function_global(arg.name))
 					emit_mov(MakeReg(target),
 					         MakeSymbol(arg.name, false));
 				else
@@ -1292,7 +1293,8 @@ void FunctionLowering::LowerReturn(const LowIRInstruction & ins)
 	}
 	else if(source.kind == LOWIR_OPERAND_GLOBAL) {
 		invalidate_rax();
-		if(facts_.info->is_function(source.name))
+		if(facts_.info->is_function(source.name) &&
+		   !imported_function_global(source.name))
 			emit_mov(MakeReg(XR_RAX), MakeSymbol(source.name, false));
 		else
 			emit_global_address(XR_RAX, source.name);

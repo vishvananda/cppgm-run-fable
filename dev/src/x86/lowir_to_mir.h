@@ -117,6 +117,9 @@ private:
 	// PA36 host data model: an imported (declared, not defined here)
 	// non-TLS data global; its address comes from the GOT.
 	bool imported_data_global(const std::string & name) const;
+	// An imported function whose address is taken; PIE host links
+	// need the GOT spelling rather than an absolute text relocation.
+	bool imported_function_global(const std::string & name) const;
 	// Materialize a data global's address into `reg` (a GOT load for
 	// imported globals, the plain symbol mov otherwise).
 	void emit_global_address(X64Register reg, const std::string & name);

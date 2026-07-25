@@ -1,0 +1,2 @@
+host_unwind_section 1
+absent_relocation_class_canonical 1 data_pcrel _gxx_personality_v0

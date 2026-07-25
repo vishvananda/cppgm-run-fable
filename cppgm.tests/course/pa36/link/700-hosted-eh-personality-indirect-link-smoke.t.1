@@ -1,0 +1,14 @@
+#include "700-hosted-eh-personality-indirect-link-smoke.shared.h"
+
+static void thrower() {
+  throw 5;
+}
+
+int catch_thrown() {
+  try {
+    thrower();
+  } catch (int value) {
+    return value;
+  }
+  return 0;
+}

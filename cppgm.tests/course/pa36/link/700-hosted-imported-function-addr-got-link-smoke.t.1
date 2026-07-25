@@ -1,0 +1,9 @@
+#include "700-hosted-imported-function-addr-got-link-smoke.shared.h"
+
+int callee() {
+  return 41;
+}
+
+int call_through(int (*fp)()) {
+  return fp() + 1;
+}

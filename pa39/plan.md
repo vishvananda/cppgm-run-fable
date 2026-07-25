@@ -55,6 +55,40 @@ the name by unqualified lookup and requires an enumeration; wire it from
 `cppgm.tests/course/pa11/` with fixtures regenerated via
 `make -C pa11 ref-test TEST=course/pa11/<test>.t`.
 
+### Failure 3: PIE host links reject our objects (pptoken-self link)
+
+With both compile failures fixed, the `pptoken-self` host link failed:
+`ld` rejects our objects under the default-PIE host `g++`
+(`R_X86_64_PC32 against __gxx_personality_v0 can not be used when making
+a PIE object`, plus DT_TEXTREL warnings from movabs address
+materialization). The reference compiler's objects link and run under
+default PIE, so this is a real hosted-emission gap that the earlier
+interop harness masked by always linking `-no-pie`
+(`run_cpphostinterop_tests_worker.pl`). Three PA36-surface fixes, all
+gated on host-object mode:
+
+- `x86/lowir_to_mir_*`: taking the address of a function the unit only
+  declares now loads from the GOT (`imported_function_global`),
+  matching the host GOTPCREL spelling; direct calls keep PLT.
+- `x86/mir_to_native.cpp`: OP_SYMBOL (defined-function) address movs
+  materialize rip-relative like OP_GLOBAL, not movabs.
+- `toolchain/elf_object.cpp`: the CIE personality is encoded
+  indirect-pcrel (0x9b) through a DW.ref-style 8-byte .data slot
+  holding the absolute `__gxx_personality_v0`, exactly the host
+  convention. `toolchain/elf_reader.cpp` recovers the indirect form
+  (verifying the slot really names `__gxx_personality_v0` so foreign
+  personalities stay skipped), and the private runtime library defines
+  `__gxx_personality_v0` so the slot resolves in private links.
+
+Reducers: `cppgm.tests/course/pa36/link/700-hosted-imported-function-
+addr-got-link-smoke` and `700-hosted-eh-personality-indirect-link-smoke`
+pin the GOT spelling and the absence of a direct personality relocation
+via `.inspect.expect`; the reference passes both.
+
+Note: root `make test-strict` fails pre-existing (`--witness` is
+rejected by the driver in emit modes for pa18-pa23); unrelated to and
+unchanged by this work, and not part of the PA39 required checks.
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

@@ -531,9 +531,12 @@ void FunctionEncoder::EmitMov(const Ins & ins)
 	else if (src.kind == Op::OP_IMM)
 		code_.MovRegImm(Reg(dst), X86Imm::Constant(
 			static_cast<unsigned long long>(src.imm)));
-	else if (src.kind == Op::OP_GLOBAL && env_.program().host_object)
-		// PA36 host data model: data addresses materialize
-		// rip-relative like the accesses (R_X86_64_PC32).
+	else if ((src.kind == Op::OP_GLOBAL || src.kind == Op::OP_SYMBOL) &&
+	         env_.program().host_object)
+		// PA36 host data model: data and defined-function addresses
+		// materialize rip-relative like the accesses (R_X86_64_PC32);
+		// a movabs would put an absolute relocation in .text, which a
+		// PIE host link rejects.
 		code_.Lea(Reg(dst), X86Mem::RipLabel(
 			X86Imm::Label(env_.SymbolLabel(src.text), 0)));
 	else if (src.kind == Op::OP_SYMBOL || src.kind == Op::OP_GLOBAL)

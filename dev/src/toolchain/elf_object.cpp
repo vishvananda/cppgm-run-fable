@@ -134,6 +134,7 @@ private:
 	void ConvertPatches();
 	ElfReloc ConvertOnePatch(const X86Patch & patch);
 	unsigned long long TypeSlotOffset(int type_symbol);
+	unsigned long long PersonalitySlotOffset();
 	void BuildEhSections();
 	void AppendCie(bool with_personality);
 	void AppendFde(size_t fn, bool with_lsda, unsigned long long lsda);
@@ -162,6 +163,7 @@ private:
 	map<string, int> defined_by_name_;
 	map<string, int> undefined_by_name_;
 	map<int, unsigned long long> type_slots_;
+	long long personality_slot_ = -1;
 	map<int, unsigned long long> function_size_;
 	vector<ElfSymbolEntry> locals_, globals_;
 	size_t global_base_ = 1;            // first global symtab index
@@ -572,6 +574,27 @@ unsigned long long ElfObjectWriter::TypeSlotOffset(int type_symbol)
 	return offset;
 }
 
+// DW.ref-style indirection for the personality routine: one 8-byte
+// .data slot holding the absolute __gxx_personality_v0 address. A PIE
+// host link forbids a text-side relocation against the preemptible
+// personality symbol, so the CIE encodes the pointer indirect-pcrel
+// through this slot, exactly like host compilers spell DW.ref.
+unsigned long long ElfObjectWriter::PersonalitySlotOffset()
+{
+	if (personality_slot_ >= 0)
+		return static_cast<unsigned long long>(personality_slot_);
+	AppendPadding(data_.bytes, 8);
+	unsigned long long offset = data_.bytes.size();
+	ElfReloc reloc;
+	reloc.offset = offset;
+	reloc.kind = kRelocAbs64;
+	reloc.symbol = UndefinedByName("__gxx_personality_v0");
+	AppendWord(data_.bytes, 0, 8);
+	data_.relocs.push_back(reloc);
+	personality_slot_ = static_cast<long long>(offset);
+	return offset;
+}
+
 void ElfObjectWriter::AppendCie(bool with_personality)
 {
 	vector<unsigned char> & out = eh_frame_.bytes;
@@ -589,11 +612,12 @@ void ElfObjectWriter::AppendCie(bool with_personality)
 	if (with_personality)
 	{
 		out.push_back(7);      // augmentation data length
-		out.push_back(0x1b);   // personality: pcrel sdata4, direct
-		ElfReloc reloc;
+		out.push_back(0x9b);   // personality: indirect pcrel sdata4
+		ElfReloc reloc;        // -> the .data indirection slot
 		reloc.offset = out.size();
 		reloc.kind = kRelocPc32;
-		reloc.symbol = UndefinedByName("__gxx_personality_v0");
+		reloc.symbol = data_.symbol;
+		reloc.addend = static_cast<long long>(PersonalitySlotOffset());
 		eh_frame_.relocs.push_back(reloc);
 		AppendWord(out, 0, 4);
 		out.push_back(0x1b);   // LSDA encoding: pcrel sdata4

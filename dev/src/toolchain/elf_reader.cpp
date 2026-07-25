@@ -243,12 +243,18 @@ void RecoverProgramRoles(ObjectModule & module, const ElfFile & elf,
 }
 
 // One parsed CIE: whether it carries our landing-pad profile (zPLR
-// with a direct pcrel-sdata4 personality; host compilers use the
-// indirect 0x9b form, which the private toolchain does not model).
+// with an indirect pcrel-sdata4 personality, the same 0x9b spelling
+// host compilers use; the personality slot is verified against
+// __gxx_personality_v0 before the FDEs count as ours). The legacy
+// direct 0x1b form from earlier private objects stays accepted.
 struct CieProfile
 {
 	bool has_lsda = false;
 	bool ours = false;
+	// Set for the indirect form: frame offset of the 4-byte
+	// personality field, whose relocation must resolve through an
+	// 8-byte slot to __gxx_personality_v0.
+	size_t personality_field = 0;
 };
 
 CieProfile ParseCieProfile(const vector<unsigned char> & frame,
@@ -280,9 +286,48 @@ CieProfile ParseCieProfile(const vector<unsigned char> & frame,
 	{
 		if (pos >= end)
 			return profile;
-		profile.ours = profile.has_lsda && frame[pos] == 0x1b;
+		if (frame[pos] == 0x9b)
+			profile.personality_field = pos + 1;
+		profile.ours = profile.has_lsda &&
+			(frame[pos] == 0x1b || frame[pos] == 0x9b);
 	}
 	return profile;
+}
+
+// The indirect personality field must relocate into an 8-byte slot
+// whose absolute patch names __gxx_personality_v0; anything else is a
+// foreign frame (a host C personality, say) the private toolchain
+// must keep skipping.
+bool PersonalitySlotIsOurs(const ObjectModule & module,
+                           const map<unsigned long long, RawReloc> & relocs,
+                           size_t field)
+{
+	map<unsigned long long, RawReloc>::const_iterator entry =
+		relocs.find(field);
+	if (entry == relocs.end() ||
+	    entry->second.symbol >= module.symbols.size())
+		return false;
+	const ObjectSymbol & slot_base =
+		module.symbols[entry->second.symbol];
+	if (slot_base.item < 0)
+		return false;
+	const ImageItem & slot_item =
+		module.items[static_cast<size_t>(slot_base.item)];
+	unsigned long long slot_offset = static_cast<unsigned long long>(
+		slot_base.offset + entry->second.addend);
+	for (size_t p = 0; p < slot_item.patches.size(); p++)
+	{
+		const X86Patch & patch = slot_item.patches[p];
+		if (patch.offset == slot_offset &&
+		    patch.kind == X86_PATCH_ABS && patch.size == 8 &&
+		    patch.imm.has_label &&
+		    static_cast<size_t>(patch.imm.label) <
+		        module.symbols.size())
+			return module.symbols[static_cast<size_t>(
+				patch.imm.label)].external_name ==
+				"__gxx_personality_v0";
+	}
+	return false;
 }
 
 // Parses .eh_frame + .gcc_except_table back into typed host-EH facts
@@ -332,7 +377,12 @@ void RecoverEhFacts(ObjectModule & module, const ElfFile & elf,
 				<< (8 * b);
 		if (id == 0)
 		{
-			cies[pos] = ParseCieProfile(frame, pos, end);
+			CieProfile profile = ParseCieProfile(frame, pos, end);
+			if (profile.ours && profile.personality_field != 0 &&
+			    !PersonalitySlotIsOurs(module, frame_relocs,
+			                           profile.personality_field))
+				profile.ours = false;
+			cies[pos] = profile;
 			pos = end;
 			continue;
 		}

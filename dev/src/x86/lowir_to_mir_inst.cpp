@@ -468,7 +468,8 @@ void FunctionLowering::LowerAddr(const LowIRInstruction & ins)
 		return;
 	}
 	X64Register reg = alloc_gpr(ins.result);
-	bool is_global = !facts_.info->is_function(target.name);
+	bool is_global = !facts_.info->is_function(target.name) ||
+		imported_function_global(target.name);
 	if(locations_[ins.result].kind == ValueLocation::VL_FRAME) {
 		invalidate_rax();
 		if(is_global)

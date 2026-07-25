@@ -485,7 +485,7 @@ mir_model::Operand FunctionLowering::gpr_read(const LowIROperand & operand)
 // its address from the GOT (host objects spell the access
 // R_X86_64_REX_GOTPCRELX; the private linker synthesizes the slot).
 // TLS globals keep their wrapper-call path, and functions their
-// direct symbol spelling.
+// direct symbol spelling in call position.
 bool FunctionLowering::imported_data_global(const std::string & name) const
 {
 	if(!facts_.host_object)
@@ -500,10 +500,26 @@ bool FunctionLowering::imported_data_global(const std::string & name) const
 	       !global->second->is_definition;
 }
 
+// Taking the address of a function the unit only declares also goes
+// through the GOT: a PIE host link rejects both the movabs spelling
+// (an absolute text relocation) and a PC32 against the preemptible
+// symbol, and host compilers spell &external_function as a GOTPCREL
+// load. Direct calls keep their PLT-relocated symbol spelling.
+bool FunctionLowering::imported_function_global(
+	const std::string & name) const
+{
+	if(!facts_.host_object)
+		return false;
+	std::map<std::string, const LowIRFunction *>::const_iterator fn =
+		facts_.info->functions.find(name);
+	return fn != facts_.info->functions.end() &&
+	       !fn->second->is_definition;
+}
+
 void FunctionLowering::emit_global_address(X64Register reg,
                                            const std::string & name)
 {
-	if(imported_data_global(name)) {
+	if(imported_data_global(name) || imported_function_global(name)) {
 		mir_model::Instruction & load =
 			emit(mir_model::Instruction::MI_LOAD);
 		load.type = "ptr";
