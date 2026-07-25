@@ -1,9 +1,8 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA6 pass; failures 12 (member-template bodies
-bound inside an open class), 13 (elaborated-type-specifier scope), and
-14 (slot-address stack arguments) fixed; nsdecl-self builds and links;
-the pa7 test rung next runs from the top.
+Status: self-built PA1-PA8 pass; failures 12-15 fixed; the cy86 rung
+(pa9) next runs from the top (its checkpoint TUs all host-compile
+after failure 15).
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -396,6 +395,32 @@ exact reference staging). The callee keeps its register parameters
 unused so the pinned parking discipline (which legitimately differs
 from the reference for late single-use register params) stays out of
 the fixture.
+
+### Failure 15: class names hidden by same-scope functions lost to
+### elaborated lookup (pa9 cy86 checkpoint, x86/elf_program.cpp)
+
+pa7 and pa8 pass self-built. The cy86 rung failed compiling
+`x86/elf_program.cpp` and `cy86.cpp`: "redeclaration of stat". glibc's
+`<sys/stat.h>` declares `struct stat` then the function `stat`;
+`SemBinder::BindFunctionName`'s 3.3.10p2 branch hides the class by
+*replacing* the SB_TYPE binding with the function binding, so a later
+`struct stat*` elaborated-type-specifier found no type (3.4.4p2 must
+ignore non-type names), took the first-declaration path, and
+`AddBinding` collided with the function binding. Fix (PA11/PA12
+binder surface): `ScopeBinding` gains `hidden_type`; the 3.3.10p2
+replacement records the hidden class there, and
+`DeclBinder::BindClassForward`'s elaborated path falls back to an
+unfiltered lookup and resolves through `hidden_type` (union-key
+checked) before first-declaring. Variable-hides-class and
+class-declared-after-function orderings remain unhandled until a
+checkpoint source needs them.
+
+Reducer: `cppgm.tests/course/pa12/elaborated-class-hidden-by-function`
+(--emit-semantics; fails before the fix, passes after). The reducer
+spells `(*buf).x` rather than `buf->x`: the reference presents `->`
+member access without the deref wrapper we synthesize (5.2.5), a
+presentation divergence no existing fixture covers and separate from
+this bug.
 
 ## Validation plan
 

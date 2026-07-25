@@ -1,0 +1,47 @@
+1 translation units
+start translation unit 1
+translation-unit
+  function-definition stat function of (pointer to const char, pointer to struct stat) returning int
+    parameter p pointer to const char
+    parameter buf pointer to struct stat
+    compound-statement
+      expression-statement
+        assignment-expression lvalue int OP_ASS:=
+          member-expression lvalue int OP_DOT:x
+            unary-expression lvalue struct stat OP_STAR:*
+              id-expression lvalue pointer to struct stat buf
+          literal prvalue int 7
+      return-statement
+        literal prvalue int 0
+  function-definition main function of () returning int
+    compound-statement
+      simple-declaration
+        variable s struct stat
+          constructor-action stat::stat
+            call-expression prvalue void
+              callee stat::stat function of (pointer to struct stat) returning void
+              unary-expression prvalue pointer to struct stat OP_AMP:&
+                id-expression lvalue struct stat s
+      expression-statement
+        assignment-expression lvalue int OP_ASS:=
+          member-expression lvalue int OP_DOT:x
+            id-expression lvalue struct stat s
+          literal prvalue int 0
+      simple-declaration
+        variable r int
+          call-expression prvalue int
+            callee stat function of (pointer to const char, pointer to struct stat) returning int
+            literal lvalue array of 2 const char "f"
+            unary-expression prvalue pointer to struct stat OP_AMP:&
+              id-expression lvalue struct stat s
+      return-statement
+        binary-expression prvalue int OP_MINUS:-
+          binary-expression prvalue int OP_PLUS:+
+            id-expression lvalue int r
+            member-expression lvalue int OP_DOT:x
+              id-expression lvalue struct stat s
+          literal prvalue int 7
+  function-definition stat::stat function of (pointer to struct stat) returning void
+    parameter this pointer to struct stat
+    compound-statement
+end translation unit

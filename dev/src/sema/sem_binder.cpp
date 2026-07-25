@@ -591,11 +591,13 @@ ScopeBinding& SemBinder::BindFunctionName(const string& name,
 		// 3.3.10p2: a function declared in the same scope hides the
 		// class/enumeration name. The entity record stays alive
 		// through the types already composed over it; only the plain
-		// name now resolves to the function.
+		// name now resolves to the function, and the hidden type stays
+		// reachable for elaborated-type-specifier lookup (3.4.4p2).
 		ScopeBinding fresh;
 		fresh.kind = SB_FUNCTION;
 		fresh.name = name;
 		fresh.type = type;
+		fresh.hidden_type = existing->type;
 		fresh.access = existing->access;
 		fresh.owner = existing->owner;
 		fresh.home = existing->home;

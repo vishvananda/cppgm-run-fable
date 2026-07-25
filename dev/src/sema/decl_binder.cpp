@@ -1316,6 +1316,23 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 			throw runtime_error(name + " does not name a matching class");
 		return found->type;
 	}
+	if (elaborated)
+	{
+		// 3.4.4p2 ignores non-type names: a class hidden by a function
+		// declared in the same scope (3.3.10p2) is still the
+		// elaborated specifier's referent.
+		vector<const ScopeBinding*> fn_set;
+		const ScopeBinding* any =
+			UnqualifiedLookup(current_, name, SLF_ANY, &fn_set);
+		if (any && any->hidden_type)
+		{
+			if (any->hidden_type->kind != TK_CLASS ||
+			    any->hidden_type->named->is_union != is_union)
+				throw runtime_error(name +
+				                    " does not name a matching class");
+			return any->hidden_type;
+		}
+	}
 	// 3.3.2p6: a class first declared by an elaborated-type-specifier
 	// inside a declaration (a member's decl-specifier-seq, a parameter
 	// clause) is declared in the smallest enclosing namespace or block

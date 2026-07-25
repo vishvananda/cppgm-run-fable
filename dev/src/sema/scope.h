@@ -101,6 +101,10 @@ struct ScopeBinding
 	EScopeBindingKind kind;
 	string name;
 	TypePtr type;    // entity / alias target type (null for namespaces)
+	// 3.3.10p2: the class/enumeration type this same-scope function
+	// declaration hid; elaborated-type-specifier lookup (3.4.4p2,
+	// which ignores non-type names) still resolves to it.
+	TypePtr hidden_type;
 	Scope* target;   // SB_NAMESPACE / SB_NAMESPACE_ALIAS
 	bool has_value;  // SB_ENUMERATOR and constant SB_VARIABLE
 	// PA35: an SB_TYPE_ALIAS spelled with __attribute__((vector_size))
