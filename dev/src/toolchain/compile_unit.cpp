@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include <malloc.h>
 #include <pthread.h>
 
 #include "ast/ast.h"
@@ -84,9 +85,16 @@ void * compile_unit_thread_main(void * opaque)
 		else
 			preprocessor.ProcessSourceFile(*task->presumed_name);
 
-		vector<ParseToken> tokens = BuildParseTokens(collector.tokens);
-		AstParser parser(tokens);
-		AstDeclPtr unit = parser.ParseTranslationUnit();
+		AstDeclPtr unit;
+		{
+			// The token streams feed the parse only; both release
+			// before the (much larger) semantic pass allocates.
+			vector<ParseToken> tokens =
+				BuildParseTokens(collector.tokens);
+			vector<PostToken>().swap(collector.tokens);
+			AstParser parser(tokens);
+			unit = parser.ParseTranslationUnit();
+		}
 
 		TypesModel model;
 		SemUnit semantics;
@@ -128,6 +136,11 @@ string LowerUnitToLowIR(const string & presumed_name, const string * text,
 	pthread_attr_destroy(&attributes);
 	if (task.failed)
 		throw runtime_error(task.message);
+	// The frontend structures died with the worker thread; return
+	// their freed arena pages to the OS so the object-encoding stage
+	// (and the sibling compiles of a parallel build) sees the live
+	// set, not the frontend peak.
+	malloc_trim(0);
 	return task.lowir_text;
 }
 

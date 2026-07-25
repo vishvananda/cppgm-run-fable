@@ -1,0 +1,135 @@
+function @n__swap__ov2(%x : obj<8x8>, %y : ptr [pass=reference]) -> void [binding=weak, object=_ZN1n4swapENS_2BRERb] {
+  slot $x : obj<8x8>
+  slot $y : ptr
+  slot $t : u8
+
+  block ^entry:
+    %t1 = addr $x
+    copyobj 8x8 %x, %t1
+    store ptr %y, $y
+    %t2 = addr $x
+    %t3 = index i8 [projection=field] %t2, 0
+    %t4 = load ptr %t3
+    %t5 = load u8 %t4
+    store u8 %t5, $t
+    %t6 = load ptr $y
+    %t7 = load u8 %t6
+    %t8 = addr $x
+    %t9 = index i8 [projection=field] %t8, 0
+    %t10 = load ptr %t9
+    store u8 %t7, %t10
+    %t11 = load u8 $t
+    %t12 = load ptr $y
+    store u8 %t11, %t12
+    return void
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $a : i32
+  slot $b : i32
+  slot $v : u8
+  slot $w : u8
+  slot $r : obj<8x8>
+  slot $argobj__1 : obj<8x8>
+  slot $cond__2 : i32
+  slot $land__3 : i64
+  slot $land__4 : i64
+  slot $land__5 : i64
+
+  block ^entry:
+    store i32 1, $a
+    store i32 2, $b
+    %t1 = addr $a
+    %t2 = addr $b
+    call void @n__swap__ov3(%t1, %t2)
+    store u8 0, $v
+    store u8 1, $w
+    %t3 = addr $r
+    %t4 = addr $v
+    %t5 = addr $r
+    %t6 = index i8 [projection=field] %t5, 0
+    store ptr %t4, %t6
+    %t7 = addr $argobj__1
+    %t8 = addr $r
+    copyobj 8x8 %t8, %t7
+    %t9 = addr $w
+    call void @n__swap__ov2($argobj__1, %t9)
+    %t10 = load i32 $a
+    %t11 = cmp eq i32 %t10, 2
+    branch %t11, ^land_rhs_10, ^land_short_11
+
+  block ^land_rhs_10:
+    %t12 = load i32 $b
+    %t13 = cmp eq i32 %t12, 1
+    %t14 = cmp ne i64 %t13, 0
+    store i64 %t14, $land__5
+    jump ^land_end_12
+
+  block ^land_short_11:
+    store i64 0, $land__5
+    jump ^land_end_12
+
+  block ^land_end_12:
+    %t15 = load i64 $land__5
+    branch %t15, ^land_rhs_7, ^land_short_8
+
+  block ^land_rhs_7:
+    %t16 = load u8 $v
+    %t17 = cmp ne i64 %t16, 0
+    store i64 %t17, $land__4
+    jump ^land_end_9
+
+  block ^land_short_8:
+    store i64 0, $land__4
+    jump ^land_end_9
+
+  block ^land_end_9:
+    %t18 = load i64 $land__4
+    branch %t18, ^land_rhs_4, ^land_short_5
+
+  block ^land_rhs_4:
+    %t19 = load u8 $w
+    %t20 = cmp eq i64 %t19, 0
+    %t21 = cmp ne i64 %t20, 0
+    store i64 %t21, $land__3
+    jump ^land_end_6
+
+  block ^land_short_5:
+    store i64 0, $land__3
+    jump ^land_end_6
+
+  block ^land_end_6:
+    %t22 = load i64 $land__3
+    branch %t22, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__2
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__2
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t23 = load i32 $cond__2
+    return i32 %t23
+}
+function @n__swap__ov3(%a : ptr [pass=reference], %b : ptr [pass=reference]) -> void [binding=weak, object=_ZN1n4swapIiEEvRT_S2_] {
+  slot $a : ptr
+  slot $b : ptr
+  slot $c : i32
+
+  block ^entry:
+    store ptr %a, $a
+    store ptr %b, $b
+    %t1 = load ptr $a
+    %t2 = load i32 %t1
+    store i32 %t2, $c
+    %t3 = load ptr $b
+    %t4 = load i32 %t3
+    %t5 = load ptr $a
+    store i32 %t4, %t5
+    %t6 = load i32 $c
+    %t7 = load ptr $b
+    store i32 %t6, %t7
+    return void
+}

@@ -672,6 +672,31 @@ predates instantiation, so released instantiation scopes are
 dump-invisible. Result: sem_member_template.cpp frontend peak 3.43
 GiB -> 2.26 GiB (-34%) with byte-identical emitted LowIR.
 
+### Failure 22 (fixed): hidden-friend overloads hide the ordinary
+### function template from qualified lookup (pa10 rung: lowir_opt_cse,
+### lowir_opt_fold, lowir_opt_cfg)
+
+With sem_lambda fixed the rung reached the lowir TUs and failed
+"no member named swap": any TU instantiating `std::vector` lost
+qualified `std::swap`. libstdc++'s `_Bit_reference` (stl_bvector.h)
+declares three concrete hidden-friend `swap` overloads; merging them
+into the namespace binding that until then carried only the ordinary
+`swap` function template filled every concrete `fn_adl_only` slot
+with true, and `HiddenFriendOnly` (scope_lookup.cpp) hid the whole
+binding - the ordinary template's visibility had no accounting once
+concrete slots existed. Fix at the PA18/PA22 friend-visibility
+surface: `ScopeBinding::fn_templates_adl_only` tracks the template
+set's visibility (set when the templates were declared only by friend
+declarations, cleared by any ordinary template declaration), and
+`HiddenFriendOnly` keeps the binding visible while an
+ordinarily-declared template lives under the name.
+
+Reducer: `cppgm.tests/course/pa18/hidden-friend-keeps-template-
+visible.t` (qualified call through the template beside two concrete
+hidden friends, plus an ADL call reaching the friend; fails
+"no member named swap" before the fix, passes with ref-generated
+fixtures after).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

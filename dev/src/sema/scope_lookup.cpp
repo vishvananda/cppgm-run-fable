@@ -21,6 +21,10 @@ bool HiddenFriendOnly(const ScopeBinding& binding)
 {
 	if (binding.kind != SB_FUNCTION || binding.fn_adl_only.empty())
 		return false;
+	// Ordinarily-declared function templates keep the name visible
+	// no matter how many hidden-friend overloads joined it.
+	if (!binding.fn_templates.empty() && !binding.fn_templates_adl_only)
+		return false;
 	size_t count = binding.overloads.size() + 1;
 	for (size_t i = 0; i < count; i++)
 		if (i >= binding.fn_adl_only.size() || !binding.fn_adl_only[i])

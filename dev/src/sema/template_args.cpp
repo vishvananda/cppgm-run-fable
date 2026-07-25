@@ -1101,6 +1101,7 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 			// through the shared per-element machinery.
 			vector<TemplateArg> expanded;
 			Scope* partial = 0;
+			TransientScope partial_release(model_, &partial);
 			try
 			{
 				ExpandTemplateArgumentPack(
@@ -1171,6 +1172,7 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 			else
 			{
 				Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+				TransientScope partial_release(model_, &partial);
 				resolved = ResolveValueArgument(
 					argument, ValueParamType(param, partial));
 			}

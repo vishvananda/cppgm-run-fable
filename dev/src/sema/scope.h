@@ -221,6 +221,11 @@ struct ScopeBinding
 	// imports copy the binding and carry them along).
 	TemplateInfo* templ;
 	vector<TemplateInfo*> fn_templates;
+	// 7.3.1.2p3 for the template set: every template under this name
+	// was declared only by friend declarations (`fn_adl_only` slots
+	// track the concrete overloads; this bit keeps the templates'
+	// visibility once concrete hidden friends occupy those slots).
+	bool fn_templates_adl_only = false;
 	// PA18: set on a FunctionSpecialization's own `self` binding so an
 	// explicit template-id id-expression carries its identity.
 	const FunctionSpecialization* fn_self_spec;

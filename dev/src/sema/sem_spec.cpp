@@ -438,10 +438,17 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 		// 7.3.1.2p3: a template declared only by friend declarations
 		// stays invisible to ordinary lookup (ADL still finds it).
 		if (as_friend)
+		{
 			binding->fn_adl_only.assign(1, true);
+			binding->fn_templates_adl_only = true;
+		}
 	}
 	else if (!as_friend && !binding->fn_adl_only.empty() && !binding->type)
 		binding->fn_adl_only.assign(binding->fn_adl_only.size(), false);
+	if (!as_friend)
+		binding->fn_templates_adl_only = false;
+	else if (binding->fn_templates.empty())
+		binding->fn_templates_adl_only = true;
 	binding->fn_templates.push_back(tmpl);
 	return tmpl;
 }
@@ -596,6 +603,8 @@ bool SemBinder::CheckDependentPatternSlots(
 	shadow.declaring = tmpl.declaring;
 	shadow.capture_seq = tmpl.capture_seq;
 	Scope* alias_scope = MakeArgumentAliasScope(shadow, bound);
+	// The re-substitution context serves this one match probe.
+	TransientScope alias_release(model_, &alias_scope);
 	size_t ai = 0;
 	for (size_t i = 0; i < partial.pattern.size(); i++)
 	{
