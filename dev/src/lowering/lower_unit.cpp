@@ -426,11 +426,17 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 		return functions_.back();
 	}
 	size_t overload = LowerOverloadIndex(scope, name, type);
-	string base = LowerScopePath(scope) + LowerSanitizeFunctionName(name);
+	// The space-free spelling (`operator =` -> `operator_`) is the
+	// separate-compilation presentation; whole-program low names keep
+	// their pinned reference spellings.
+	string base = LowerScopePath(scope) +
+		(separate_compilation_ ? LowerSanitizeFunctionName(name)
+		                       : LowerSanitizeName(name));
 	if (overload)
 		base += "__ov" + to_string(overload + 1);
 	info.low_name = info.is_main ? "main" : UniqueSymbol(base);
-	info.internal = LowerInUnnamedNamespace(scope);
+	info.internal = LowerInUnnamedNamespace(scope) ||
+		LowerOverloadInternalStatic(scope, name, type);
 	info.deleted = LowerOverloadDeleted(scope, name, type);
 	if (spec)
 		info.object_name = MangleFunctionTemplateObjectName(*spec);
@@ -536,7 +542,9 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	info.type = type;
 	info.is_method = true;
 	info.special_code = special_code;
-	string base = LowerScopePath(scope) + LowerSanitizeFunctionName(name);
+	string base = LowerScopePath(scope) +
+		(separate_compilation_ ? LowerSanitizeFunctionName(name)
+		                       : LowerSanitizeName(name));
 	size_t overload = special_code.empty()
 		? LowerMemberOverloadIndex(scope, name, type) : 0;
 	if (overload)

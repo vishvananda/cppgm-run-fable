@@ -430,11 +430,6 @@ private:
 	// lowers as a raw object copy (`copyobj`) instead of a synthesized
 	// helper call. The destination is `this_text` when non-empty, else
 	// the action's own address child.
-	// PA33 -O1 (lower_transfer.cpp): call-site expansion of a simple
-	// inline constructor (literal member stores only).
-	bool LowerSimpleInlineConstruction(const SemNode& action,
-	                                   const SemNode& callee,
-	                                   const string& this_text);
 	void LowerTrivialCopyAction(const SemNode& action,
 	                            const string& this_text);
 	// A class temporary: a fresh object slot plus its constructor run;
@@ -599,6 +594,10 @@ private:
 	set<string> referenced_;
 	vector<ParamInfo> params_;
 	set<string> param_names_;
+	// The scalar spill lines EmitParameterStores actually emitted;
+	// trivial_lifecycle checks bodies against these spellings instead
+	// of re-deriving them.
+	set<string> param_spill_lines_;
 	// PA27: the signature's hidden trailing pointers and the per-
 	// parameter carried-entry maps ("this" holds the __vbptr row).
 	vector<HiddenParam> hidden_params_;

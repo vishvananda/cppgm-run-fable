@@ -869,6 +869,9 @@ void SemBinder::EnsureSpecialCtor(const ClassInfo& cls_in, int index,
 		if (NodeMayThrow(*node->children[i]))
 			may_throw = true;
 	node->unwind_no = !may_throw;
+	// 15.4p14: the computed fact is the implicit exception
+	// specification, so it counts as declared.
+	node->noexcept_decl = !may_throw;
 	ctor.built_unwind_no = !may_throw;
 	unit_.deferred.push_back(std::move(item));
 }

@@ -1203,6 +1203,9 @@ void SemBinder::EnsureImplicitDefaultCtor(const ClassInfo& cls_in,
 			spec_may_throw = true;
 	}
 	node->unwind_no = !may_throw;
+	// 15.4p14: the computed specification is the implicit exception
+	// specification, so it counts as declared.
+	node->noexcept_decl = !spec_may_throw;
 	cls.implicit_ctor_unwind_no = !may_throw;
 	cls.implicit_ctor_noexcept = !spec_may_throw;
 	unit_.deferred.push_back(std::move(item));
@@ -1260,6 +1263,9 @@ void SemBinder::EnsureImplicitDtor(const ClassInfo& cls_in,
 		if (NodeMayThrow(*node->children[i]))
 			may_throw = true;
 	node->unwind_no = !may_throw;
+	// 15.4p14: the computed fact is the implicit exception
+	// specification, so it counts as declared.
+	node->noexcept_decl = !may_throw;
 	cls.implicit_dtor_unwind_no = !may_throw;
 	unit_.deferred.push_back(std::move(item));
 }

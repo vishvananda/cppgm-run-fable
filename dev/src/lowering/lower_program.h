@@ -65,8 +65,9 @@ struct LowFunctionInfo
 	bool unwind_no;
 	// PA37: only the declared/implicit exception specification, not
 	// the derived body fact. Separate-compilation (driver) LowIR
-	// prints unwind=no on definitions from this; the object layer
-	// re-derives the body fact from LowIR (lowir_unwind.h).
+	// prints unwind=no on definitions from this; the backend consumes
+	// only the eh_try/eh_end region structure, so no re-derivation is
+	// needed behind the boundary.
 	bool unwind_declared = false;
 	bool internal;
 	// PA15: in-class definitions emit weak and only on demand; methods
@@ -221,8 +222,6 @@ public:
 	// not visible at compile time.
 	void SetSeparateCompilation() { separate_compilation_ = true; }
 	bool SeparateCompilation() const { return separate_compilation_; }
-	void SetOptimizeLevel(int level) { optimize_level_ = level; }
-	int OptimizeLevel() const { return optimize_level_; }
 
 	// Registers one bound translation unit's namespace-scope items.
 	void AddUnit(const SemUnit& unit);
@@ -528,7 +527,6 @@ private:
 	set<string> symbols_;                 // taken top-level names
 	bool has_main_;
 	bool separate_compilation_ = false;
-	int optimize_level_ = 0;
 	// The added units, for whole-program scans (branch-fold analysis).
 	vector<const SemUnit*> units_;
 	// PA25 5.2.8: each unit's sema-recognized std::type_info entity.

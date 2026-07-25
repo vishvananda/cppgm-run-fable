@@ -44,6 +44,11 @@ size_t LowerOverloadIndex(const Scope* scope, const string& name,
 bool LowerOverloadDeleted(const Scope* scope, const string& name,
                           const TypePtr& type);
 
+// True when that overload is a namespace-scope function declared
+// `static` (3.5p3 internal linkage; class-scope statics stay external).
+bool LowerOverloadInternalStatic(const Scope* scope, const string& name,
+                                 const TypePtr& type);
+
 // True when `scope` is inside an unnamed namespace (internal linkage).
 bool LowerInUnnamedNamespace(const Scope* scope);
 

@@ -239,18 +239,13 @@ string FunctionLowerer::Header() const
 	    !info_.special_code.empty() && info_.special_code != "D0" &&
 	    blocks_.size() == 1)
 	{
+		// The spill spellings come from EmitParameterStores itself, so
+		// slot-name uniquification cannot desynchronize the check.
 		bool trivial = true;
 		for (size_t i = 0; i < blocks_[0].lines.size(); i++)
 		{
 			const string& line = blocks_[0].lines[i];
-			if (line == "return void")
-				continue;
-			bool spill = false;
-			for (size_t p = 0; p < params_.size() && !spill; p++)
-				if (line == "store " + params_[p].type_text + " %" +
-				    params_[p].low_name + ", $" + params_[p].low_name)
-					spill = true;
-			if (!spill)
+			if (line != "return void" && !param_spill_lines_.count(line))
 				trivial = false;
 		}
 		if (trivial)
@@ -305,8 +300,10 @@ void FunctionLowerer::EmitParameterStores()
 		}
 		string slot = AddSlot(scope, params_[i].low_name,
 		                      params_[i].type_text);
-		Emit("store " + params_[i].type_text + " %" +
-		     params_[i].low_name + ", $" + slot);
+		string spill = "store " + params_[i].type_text + " %" +
+			params_[i].low_name + ", $" + slot;
+		Emit(spill);
+		param_spill_lines_.insert(spill);
 		// PA27: a parameter of a virtual-base class binds its carried
 		// subobject pointers (slots for references, raw registers
 		// otherwise) right after its own store.

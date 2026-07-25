@@ -13,6 +13,7 @@
 #include "ast/ast_printer.h"
 #include "lowering/lower_program.h"
 #include "lowir/lowir_dump.h"
+#include "lowir/lowir_merge.h"
 #include "lowir/lowir_opt.h"
 #include "lowir/lowir_parser.h"
 #include "lowir/lowir_validate.h"
@@ -598,17 +599,24 @@ int run_preprocess_mode(const DriverInvocation & invocation)
 
 // PA37: `-c` accepts serialized LowIR text beside C++ sources; the
 // LowIR route skips the frontend and runs the same optimize-then-object
-// pipeline.
+// pipeline. The sniff reads only a leading chunk; the full text is
+// slurped only once the input routes to the LowIR parser.
 bool read_lowir_input_file(const string & path, string & text)
 {
   ifstream in(path.c_str(), ios::binary);
   if(!in) {
     return false;
   }
+  char prefix[4096];
+  in.read(prefix, sizeof(prefix));
+  string head(prefix, static_cast<size_t>(in.gcount()));
+  if(!toolchain::LooksLikeLowIRText(head)) {
+    return false;
+  }
   ostringstream data;
   data << in.rdbuf();
-  text = data.str();
-  return toolchain::LooksLikeLowIRText(text);
+  text = head + data.str();
+  return true;
 }
 
 int run_compile_mode(const DriverInvocation & invocation)
@@ -871,8 +879,9 @@ void collect_stdinc_path_env(vector<string> & dirs);
 
 // PA37 driver-surface emit: `--emit-lowir` with a debug-level flag runs
 // the hosted separate-compilation lowering the object path compiles,
-// then the LowIR optimizer at the requested level, then the canonical
-// dump. The classic whole-program emit (no -g flag) is untouched.
+// merges the units with linker-style symbol resolution, then the LowIR
+// optimizer at the requested level, then the canonical dump. The
+// classic whole-program emit (no -g flag) is untouched.
 int run_emit_lowir_driver_mode(const vector<string> & args)
 {
   DriverInvocation invocation = parse_driver_invocation(args);
@@ -882,14 +891,18 @@ int run_emit_lowir_driver_mode(const vector<string> & args)
   collect_stdinc_path_env(invocation.preprocess.stdinc_dirs);
   const toolchain::CompileOptions options = make_compile_options(invocation);
 
-  string text;
+  vector<LowIRProgram> units;
   for(size_t i = 0; i < invocation.inputs.size(); ++i) {
-    text += toolchain::LowerSourceFileToLowIRText(invocation.inputs[i],
-                                                  options);
+    string text = toolchain::LowerSourceFileToLowIRText(invocation.inputs[i],
+                                                        options);
+    units.push_back(ParseLowIRProgram(text));
+    ValidateLowIRProgram(units.back(), false);
   }
 
-  LowIRProgram program = ParseLowIRProgram(text);
-  ValidateLowIRProgram(program, false);
+  LowIRProgram program = MergeLowIRUnits(units);
+  if(units.size() > 1) {
+    ValidateLowIRProgram(program, false);
+  }
   PruneUnreferencedLowIRDeclares(program);
   OptimizeLowIRProgram(program, invocation.optimize);
 
@@ -898,6 +911,10 @@ int run_emit_lowir_driver_mode(const vector<string> & args)
     throw runtime_error("cannot create output file: " + invocation.outfile);
   }
   DumpLowIRProgram(program, out);
+  out.flush();
+  if(!out) {
+    throw runtime_error("cannot write output file: " + invocation.outfile);
+  }
   return EXIT_SUCCESS;
 }
 
@@ -942,6 +959,10 @@ int run_emit_lowir_mode(const vector<string> & args)
     throw runtime_error("cannot create output file: " + invocation.outfile);
   }
   program.Write(out);
+  out.flush();
+  if(!out) {
+    throw runtime_error("cannot write output file: " + invocation.outfile);
+  }
   return EXIT_SUCCESS;
 }
 

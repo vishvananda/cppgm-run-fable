@@ -95,7 +95,6 @@ void * compile_unit_thread_main(void * opaque)
 
 		LowerProgram lowering;
 		lowering.SetSeparateCompilation();
-		lowering.SetOptimizeLevel(task->options->optimize);
 		lowering.AddUnit(semantics);
 		std::ostringstream lowir;
 		lowering.Write(lowir);
@@ -523,26 +522,15 @@ ObjectModule CompileLowIRTextToModule(const string & text,
 bool LooksLikeLowIRText(const string & text)
 {
 	size_t at = 0;
-	while(at < text.size())
-	{
-		// Skip blank space and LowIR comment lines.
-		if(text[at] == ' ' || text[at] == '\t' || text[at] == '\n' ||
-		   text[at] == '\r')
-		{
-			at++;
-			continue;
-		}
-		if(text[at] == ';')
-		{
-			while(at < text.size() && text[at] != '\n')
-				at++;
-			continue;
-		}
-		break;
-	}
+	while(at < text.size() &&
+	      (text[at] == ' ' || text[at] == '\t' || text[at] == '\n' ||
+	       text[at] == '\r'))
+		at++;
 	size_t end = at;
 	while(end < text.size() &&
-	      ((text[end] >= 'a' && text[end] <= 'z') || text[end] == '_'))
+	      ((text[end] >= 'a' && text[end] <= 'z') ||
+	       (text[end] >= 'A' && text[end] <= 'Z') ||
+	       (text[end] >= '0' && text[end] <= '9') || text[end] == '_'))
 		end++;
 	string word = text.substr(at, end - at);
 	return word == "declare" || word == "global" ||

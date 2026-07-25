@@ -197,8 +197,10 @@ void ConstEvalEngine::EvalConstructorAction(const SemNode& node,
 	{
 		target = *dest;
 		// An aggregate-array element action carries its element byte
-		// offset in `value` (the zero-fill form uses ctor_addressed).
-		if (node.has_value && !node.value_zero_fill)
+		// offset in `value` (the zero-fill forms reuse `value` for the
+		// fill size instead).
+		if (node.has_value && !node.value_zero_fill &&
+		    !node.value_zero_fill_wide)
 			target.offset += node.value.bits;
 	}
 	else

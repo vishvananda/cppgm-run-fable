@@ -1178,6 +1178,19 @@ bool LowerOverloadDeleted(const Scope* scope, const string& name,
 		binding->fn_deleted[index];
 }
 
+bool LowerOverloadInternalStatic(const Scope* scope, const string& name,
+                                 const TypePtr& type)
+{
+	if (!scope || scope->kind != SCOPE_NAMESPACE)
+		return false;
+	const ScopeBinding* binding = FindOwnBinding(*scope, name);
+	if (!binding || binding->kind != SB_FUNCTION)
+		return false;
+	size_t index = LowerOverloadIndex(scope, name, type);
+	return index < binding->fn_static.size() &&
+		binding->fn_static[index];
+}
+
 bool LowerInUnnamedNamespace(const Scope* scope)
 {
 	for (; scope && scope->parent; scope = scope->parent)

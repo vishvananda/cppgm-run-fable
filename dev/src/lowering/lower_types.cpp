@@ -189,28 +189,6 @@ unsigned long long LowerValueWidth(const TypePtr& type)
 
 // --- PA16 object ABI ---------------------------------------------------
 
-bool LowerClassDirect(const TypePtr& bare, bool host_abi)
-{
-	if (!bare->named || !bare->named->class_record)
-		return false;
-	return host_abi ? ClassParamDirectHost(*bare->named->class_record)
-	                : ClassParamDirect(*bare->named->class_record);
-}
-
-bool LowerClassReturnDirect(const TypePtr& bare, bool host_abi)
-{
-	if (!bare->named || !bare->named->class_record)
-		return false;
-	return host_abi
-		? ClassReturnDirectHost(*bare->named->class_record)
-		: ClassReturnDirect(*bare->named->class_record);
-}
-
-string LowerObjSpan(const TypePtr& bare)
-{
-	return to_string(TypeSize(bare)) + "x" + to_string(TypeAlignment(bare));
-}
-
 namespace {
 
 bool ClassFieldsAllInteger(const ClassInfo& record);
@@ -242,7 +220,42 @@ bool ClassFieldsAllInteger(const ClassInfo& record)
 	return true;
 }
 
+// Host mode restricts direct 9..16-byte objects to all-INTEGER
+// eightbytes: LowIR's obj<NxA> carries no eightbyte classes, so the
+// object layer's GPR-pair rule is complete only because every direct
+// object this size is INTEGER by construction. SSE-classified shapes
+// keep the by-address path (no fixture exercises host by-value float
+// pairs - see pa33/plan.md).
+bool HostDirectClass(const ClassInfo& record)
+{
+	return record.size <= 8 || ClassFieldsAllInteger(record);
+}
+
 }  // namespace
+
+bool LowerClassDirect(const TypePtr& bare, bool host_abi)
+{
+	if (!bare->named || !bare->named->class_record)
+		return false;
+	return host_abi ? ClassParamDirectHost(*bare->named->class_record) &&
+			HostDirectClass(*bare->named->class_record)
+	                : ClassParamDirect(*bare->named->class_record);
+}
+
+bool LowerClassReturnDirect(const TypePtr& bare, bool host_abi)
+{
+	if (!bare->named || !bare->named->class_record)
+		return false;
+	return host_abi
+		? ClassReturnDirectHost(*bare->named->class_record) &&
+			HostDirectClass(*bare->named->class_record)
+		: ClassReturnDirect(*bare->named->class_record);
+}
+
+string LowerObjSpan(const TypePtr& bare)
+{
+	return to_string(TypeSize(bare)) + "x" + to_string(TypeAlignment(bare));
+}
 
 void LowerAbiParameter(const TypePtr& param, string& type_text,
                        string& pass, bool host_abi)
@@ -259,16 +272,11 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 	{
 		if (LowerClassDirect(bare, host_abi))
 		{
-			type_text = LowerSlotType(bare);
-			// PA33 host ABI: a 9..16-byte all-INTEGER object passes in
-			// two GPRs (SysV two-eightbyte classification). Mode-gated
-			// so whole-program LowIR shapes stay pinned; SSE-classified
-			// eightbytes stay on the current memory path (no fixture
-			// exercises them yet - see pa33/plan.md).
 			// PA37: the serialized LowIR no longer spells gpr_pair; the
 			// object layer classifies direct 9..16-byte host objects
-			// itself (lowir_to_mir_flow.cpp).
-			(void)host_abi;
+			// itself (lowir_to_mir_flow.cpp), which LowerClassDirect
+			// keeps sound by admitting only all-INTEGER shapes.
+			type_text = LowerSlotType(bare);
 		}
 		else
 		{
