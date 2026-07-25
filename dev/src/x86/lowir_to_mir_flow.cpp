@@ -745,13 +745,23 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		copy.result_copy_hint = true;
 		copy.operands.push_back(MakeReg(result_reg));
 		copy.operands.push_back(MakeReg(XR_RAX));
+		// A parked sub-64 result normalizes to the canonical 64-bit
+		// register form: host callees leave the upper bits undefined,
+		// and 64-bit readers (switch staging, index arithmetic) assume
+		// register homes are normalized.
+		emit_narrow_normalize(return_type, result_reg);
 		locations_[ins.result].also_in_rax = true;
 		rax_alias_ = ins.result;
 	}
 	else if(result_plan == RP_FRAME) {
+		// Frame homes hold the normalized 64-bit form (readers load
+		// i64, see gpr_read); a typed sub-64 store would leave stale
+		// upper bytes in the home.
+		emit_narrow_normalize(return_type, XR_RAX);
 		mir_model::Instruction & store =
 			emit(mir_model::Instruction::MI_STORE);
-		store.type = SpellType(return_type);
+		store.type = return_type.is_integer() ? "i64"
+		                                      : SpellType(return_type);
 		store.operands.push_back(frame_operand(result_offset));
 		store.operands.push_back(MakeReg(XR_RAX));
 		ValueLocation location;
@@ -1174,6 +1184,12 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 			emit_mov(MakeReg(XR_RAX), MakeReg(location.reg));
 		}
 	}
+	// The 64-bit case compares below require the canonical normalized
+	// form; a sub-64 selector staged from an unnormalized source (a
+	// host call result, or a frame home written before the normalized
+	// contract) re-normalizes here.
+	if(selector.kind == LOWIR_OPERAND_TEMP)
+		emit_narrow_normalize(values_[selector.name].type, XR_RAX);
 	for(size_t c = 0; c < ins.switch_values.size(); c++) {
 		const LowIROperand & value = ins.switch_values[c];
 		if(value.kind == LOWIR_OPERAND_LITERAL) {
@@ -1192,6 +1208,9 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 			else {
 				emit_mov(MakeReg(XR_RCX), MakeReg(location.reg));
 			}
+			if(value.kind == LOWIR_OPERAND_TEMP)
+				emit_narrow_normalize(values_[value.name].type,
+				                      XR_RCX);
 		}
 		mir_model::Instruction & flags =
 			emit(mir_model::Instruction::MI_CMP);

@@ -135,6 +135,26 @@ Reducer: `cppgm.tests/course/pa28/300-loop-live-value-across-call.t`
 (behavior kind: raw LowIR loop with the call in the loop body and the
 linearly-last use before it).
 
+### Failure 6: parked call results left unnormalized (pa1 self tests,
+### `*=` scanned as two non-whitespace characters)
+
+`pptoken-self` next failed recognizing every punctuator: the inlined
+`IsOpStartChar` switch compared 64-bit against a frame home that the
+call-result commit had written with a 32-bit store (`SpellType(i32)`),
+leaving stale upper bytes — exposed when -O2 slot promotion replaced
+`load i32 $c` with the raw call temp. The backend's contract is that
+integer register/frame homes hold the canonical normalized 64-bit form
+(readers `load.i64`, the reference emits `sext.i32` when parking a call
+result, and host callees leave upper bits undefined). Fixes in
+`x86/lowir_to_mir_flow.cpp`: pool-parked and frame-parked sub-64
+integer call results normalize via `emit_narrow_normalize` (frame
+stores now i64), and `LowerSwitch` re-normalizes sub-64 selector and
+case temps after staging. Pinned MIR fixtures unchanged (no pinned
+sub-64 selector shapes); report re-run green.
+
+Reducer: `cppgm.tests/course/pa28/300-call-result-switch-selector.t`
+(negative i32 call result crossing a second call, then switched on).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.
