@@ -113,6 +113,28 @@ Reducer: `cppgm.tests/course/pa36/link/600-hosted-unordered-set-init-
 list-link-smoke` (the ordering needs hosted libstdc++, so the hosted
 link suite is the earliest harness that can express it).
 
+### Failure 5: loop-live values kept in caller-saved registers (pa1
+### self tests, pptoken-self miscompiled)
+
+`pptoken-self` built but failed every PA1 test, segfaulting or dropping
+tokens after the first new-line. Reduced (freestanding `tok1.cpp`, then
+raw LowIR): `MarkCallCrossings` in `x86/lowir_to_mir_analyze.cpp` used
+the *linear* (def, last-use) window to decide `crosses_call`, so a
+value defined before a loop and read at the loop head — with the loop's
+call linearly *after* the last use — was housed in a caller-saved pool
+register (r8) and clobbered every iteration. Latent since PA28, exposed
+by PA37's -O2 LowIR CSE hoisting `index`-derived addresses out of
+loops; mode-independent (whole-program and hosted alike). The reference
+backend houses such values callee-saved. Fix: extend each value's
+effective range through every loop region (backedge target start →
+backedge block end, to fixpoint) it is live into; the old behavior is
+unchanged for values that cross no backedge, so the pinned PA28/PA38
+MIR fixtures stay byte-identical (report re-run green).
+
+Reducer: `cppgm.tests/course/pa28/300-loop-live-value-across-call.t`
+(behavior kind: raw LowIR loop with the call in the loop body and the
+linearly-last use before it).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

@@ -441,17 +441,57 @@ void FunctionLowering::MarkCallCrossings()
 	for(size_t c = 0; c < call_positions_.size(); c++)
 		embedded[c] = InstructionEmbedsCall(*linear_[call_positions_[c]],
 		                                    facts_);
+	// Loop regions from backedges: a value defined before a loop and
+	// still live at the loop head is live through the whole loop body,
+	// not just to its linearly-last use - the backedge re-enters the
+	// earlier blocks. The linear (def, last) window alone would let
+	// such a value sit in a caller-saved register across the loop's
+	// calls (a use before the call in block order still reads the
+	// register after the call on the next iteration).
+	std::map<std::string, int> block_start;
+	for(size_t b = 0; b < function_.blocks.size(); b++)
+		block_start[function_.blocks[b].label] =
+			block_first_position_[b];
+	std::vector<std::pair<int, int> > loop_regions;
+	for(size_t p = 0; p < linear_.size(); p++) {
+		const LowIRInstruction & ins = *linear_[p];
+		for(size_t t = 0; t < ins.block_targets.size(); t++) {
+			std::map<std::string, int>::const_iterator target =
+				block_start.find(ins.block_targets[t]);
+			if(target == block_start.end())
+				continue;
+			if(target->second <= enclosing_block_begin((int)p))
+				loop_regions.push_back(std::make_pair(
+					target->second,
+					enclosing_block_end((int)p)));
+		}
+	}
 	for(std::map<std::string, ValueInfo>::iterator it = values_.begin();
 	    it != values_.end(); ++it) {
 		ValueInfo & info = it->second;
 		int last = info.last_use();
+		// extend through every loop the value is live into (exclusive
+		// block-end bound); nested loops chain through the fixpoint
+		int extended = last;
+		bool grew = true;
+		while(grew) {
+			grew = false;
+			for(size_t r = 0; r < loop_regions.size(); r++) {
+				if(info.def_position < loop_regions[r].first &&
+				   extended >= loop_regions[r].first &&
+				   extended < loop_regions[r].second) {
+					extended = loop_regions[r].second;
+					grew = true;
+				}
+			}
+		}
 		// a call strictly inside (def, last) crosses; a call *at* the last
 		// use crosses only when it is embedded in that instruction
 		std::vector<int>::const_iterator call = std::upper_bound(
 			call_positions_.begin(), call_positions_.end(),
 			info.def_position);
 		if(call != call_positions_.end() &&
-		   (*call < last ||
+		   (*call < extended ||
 		    (*call == last && embedded[call - call_positions_.begin()])))
 			info.crosses_call = true;
 		int def_begin = -1, def_end = -1;
