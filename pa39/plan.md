@@ -210,6 +210,26 @@ classes keep the pinned raw-copy arm shape. Reducer:
 `cppgm.tests/course/pa36/link/600-hosted-string-conditional-copy-
 runtime-smoke`.
 
+### Failure 10 (frontier): aggregate elements with array members
+### (pa6 recog checkpoint, parse_expr.cpp)
+
+Self-built PA1-PA5 all pass. The recog checkpoint fails compiling
+`dev/src/parse/parse_expr.cpp`: `kBinaryLevels` is an aggregate array
+whose elements carry an ARRAY member (`ETokenType ops[4]`) initialized
+from a braced sub-list. The synthesized aggregate-constructor
+machinery's member initializer does
+`CopyInitialize(value, field.type, "member initializer")`
+(sema/sem_class.cpp:~1180) which has no braced-list-into-array-member
+handling — "no conversion for member initializer". Pre-existing for
+locals too (not introduced by the namespace-array routing fix).
+Reducers ready in /tmp/pa39probe/agg3.cpp (namespace) and agg4.cpp
+(local): a `struct { const char* name; T ops[4]; int num; }` array
+with `{ "or", { T_A }, 1 }` elements. Fix direction: the aggregate
+constructor body's array-member initialization must lower the braced
+sub-list element-wise (see `AppendAggregateInit`'s member-wise
+handling), or the array member's parameter/argument contract must
+materialize the sub-list into an array temp before the call.
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.
