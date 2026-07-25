@@ -6,9 +6,12 @@
 
 // In-band markers stored in TranslatedChar::cp alongside real code points.
 //
-// kEndOfInputChar is produced by the universal-character-name \UFFFFFFFF
-// (whose hex quad wraps to -1); the reference pipeline treats it as end of
-// input, so tokenization stops there and the rest of the file is ignored.
+// kEndOfInputChar is produced by the universal-character-name whose eight
+// hex digits are all F (the value wraps to -1); the reference pipeline
+// treats it as end of input, so tokenization stops there and the rest of
+// the file is ignored. (The marker is deliberately not spelled literally
+// here: phases 1-2 decode UCNs before comments are stripped, so a raw
+// spelling would truncate this very file.)
 //
 // kInvalidChar marks a malformed source byte. Translation cannot reject it
 // outright: a bad byte is an error only if tokenization actually reads it

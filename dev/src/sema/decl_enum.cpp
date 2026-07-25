@@ -178,7 +178,7 @@ void DeclBinder::BindEnumerators(const AstDecl& decl,
 	current_ = saved;
 }
 
-TypePtr DeclBinder::BindEnum(const AstDecl& decl)
+TypePtr DeclBinder::BindEnum(const AstDecl& decl, bool elaborated)
 {
 	bool scoped = decl.has_enum_key;
 	string name = decl.name;
@@ -187,6 +187,24 @@ TypePtr DeclBinder::BindEnum(const AstDecl& decl)
 		if (scoped || !decl.enum_body)
 			throw runtime_error("anonymous enumeration form");
 		name = "__anonymous_enum" + to_string(++anonymous_enums_);
+	}
+	if (elaborated && !decl.enum_body)
+	{
+		// 7.1.6.3: the elaborated-enum-specifier grammar has no
+		// enum-base and no class-key.
+		if (scoped || decl.has_enum_base)
+			throw runtime_error("enum-base or enum-key in elaborated "
+			                    "enum specifier");
+		// 3.4.4p2 / 7.1.6.3p3: the elaborated form `enum E` used as a
+		// type specifier only refers to an already-declared
+		// enumeration; it declares nothing.
+		const ScopeBinding* found =
+			UnqualifiedLookup(current_, name, SLF_SCOPE_NAMES);
+		if (!found || found->kind != SB_TYPE ||
+		    found->type->kind != TK_ENUM)
+			throw runtime_error(name +
+			                    " does not name an enumeration");
+		return found->type;
 	}
 	TypePtr underlying;
 	if (decl.has_enum_base)

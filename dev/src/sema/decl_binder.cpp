@@ -314,7 +314,7 @@ TypePtr DeclBinder::BindNestedTypeSpecifier(const AstDecl& decl)
 	case DK_CLASS_FORWARD:
 		return BindClassForward(decl, true);
 	case DK_ENUM:
-		return BindEnum(decl);
+		return BindEnum(decl, true);
 	default:
 		throw OutsideBoundary("declaration used as a type specifier");
 	}
@@ -545,7 +545,7 @@ void DeclBinder::BindDeclaration(const AstDecl& decl)
 		BindClassForward(decl, false);
 		return;
 	case DK_ENUM:
-		BindEnum(decl);
+		BindEnum(decl, false);
 		return;
 	case DK_STATIC_ASSERT:
 		BindStaticAssert(decl);

@@ -219,7 +219,7 @@ protected:
 	virtual void BindAnonymousUnionMembers(const AstDecl& decl,
 	                                       const TypePtr& type,
 	                                       const Scope& union_scope);
-	TypePtr BindEnum(const AstDecl& decl);
+	TypePtr BindEnum(const AstDecl& decl, bool elaborated);
 	TypePtr DeclareEnumEntity(const AstDecl& decl, const string& name,
 	                          bool scoped, const TypePtr& underlying);
 	void BindEnumerators(const AstDecl& decl, const TypePtr& enum_type);

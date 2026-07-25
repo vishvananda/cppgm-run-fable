@@ -182,9 +182,9 @@ private:
 		}
 		if (k == digits)
 		{
-			// Stored as a plain int: \UFFFFFFFF becomes
-			// kEndOfInputChar, and other out-of-range values are
-			// rejected only if they reach token data.
+			// Stored as a plain int: the all-F hex quads wrap
+			// to kEndOfInputChar, and other out-of-range values
+			// are rejected only if they reach token data.
 			Emit(static_cast<int>(value), begin, j + 1 + digits);
 			return j + 1 + digits;
 		}

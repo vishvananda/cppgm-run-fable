@@ -1,0 +1,16 @@
+1 translation units
+start translation unit 1
+translation-unit
+  scope namespace <global>
+    type E enum E
+    enumerator A enum E 0
+    enumerator B enum E 1
+    type S struct S
+    variable x enum E
+    function main function of () returning int
+    scope class S
+      variable e enum E
+    scope function main
+      scope block
+        variable s struct S
+end translation unit

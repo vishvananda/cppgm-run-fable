@@ -874,9 +874,10 @@ void CtrlExprStream::emit_non_whitespace_char(const string& data)
 
 void CtrlExprStream::emit_eof()
 {
-	// Only the \UFFFFFFFF end-of-input marker can cut a line short of
-	// its new-line (phase 1-2 appends a missing final line feed); the
-	// reference discards such a partial line rather than evaluating it.
+	// Only the all-F universal-character-name end-of-input marker can
+	// cut a line short of its new-line (phase 1-2 appends a missing
+	// final line feed); the reference discards such a partial line
+	// rather than evaluating it.
 	calc_.Reset();
 	out_ << "eof\n";
 }
