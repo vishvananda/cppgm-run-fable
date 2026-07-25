@@ -218,12 +218,18 @@ SemValue SemExprAnalyzer::AnalyzeMemberAccess(SemValue object,
 	else
 		value.type = MakeCvQualifiedType(field->type, object_const,
 		                                 object_volatile);
-	value.category = VC_LVALUE;
+	// 5.2.5p4: a non-reference member of a non-lvalue object keeps the
+	// object's expiring-ness (E1.E2 is an xvalue when E1 is an xvalue
+	// or prvalue); a reference member is an lvalue regardless.
+	value.category = !IsReferenceType(field->type) &&
+	                 object.category != VC_LVALUE
+	                     ? VC_XVALUE
+	                     : VC_LVALUE;
 	value.node = MakeSemNode(SN_MEMBER_EXPRESSION);
 	value.node->name = name;
 	value.node->type = value.type;
 	value.node->member_ref = IsReferenceType(field->type);
-	value.node->category = VC_LVALUE;
+	value.node->category = value.category;
 	if (!implicit_this)
 	{
 		value.node->has_op = true;

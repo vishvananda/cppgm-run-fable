@@ -1,0 +1,18 @@
+1 translation units
+start translation unit 1
+translation-unit
+  function-definition use_xvalue function of (lvalue-reference to struct V) returning int
+    parameter obj lvalue-reference to struct V
+    compound-statement
+      return-statement
+        member-expression xvalue int OP_DOT:v
+          member-expression xvalue struct N OP_DOT:n
+            id-expression xvalue rvalue-reference to struct V obj
+  function-definition use_lvalue function of (lvalue-reference to struct V) returning int
+    parameter obj lvalue-reference to struct V
+    compound-statement
+      return-statement
+        member-expression lvalue int OP_DOT:v
+          member-expression lvalue struct N OP_DOT:n
+            id-expression lvalue struct V obj
+end translation unit

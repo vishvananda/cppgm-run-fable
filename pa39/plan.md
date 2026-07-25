@@ -697,6 +697,43 @@ hidden friends, plus an ADL call reaching the friend; fails
 "no member named swap" before the fix, passes with ref-generated
 fixtures after).
 
+### Failure 23 (fixed): members of non-lvalue objects classified as
+### lvalues (cppgm++-self host link: copying unique_ptr push_back)
+
+With every TU compiling, the cppgm++-self host link failed:
+sem_binder.o carried an undefined reference to
+`__new_allocator<unique_ptr<SemNode>>::construct<unique_ptr,
+const unique_ptr&>` inside an emitted
+`vector<unique_ptr<SemNode>>::push_back(const&)` body - the COPYING
+overload of a move-only element, which g++ never instantiates for
+this source. `AnalyzeExpandedParenInit` passes
+`ZeroValue(...).node` (a member of a prvalue) to push_back; 5.2.5p4
+makes E1.E2 an xvalue when E1 is not an lvalue, so overload
+resolution must select `push_back(&&)`. `AnalyzeMemberAccess`
+classified every data-member access VC_LVALUE regardless of the
+object's category, the const& overload won, and its
+deleted-copy-instantiating body poisoned into a declare-only
+reference (the failure-tolerant end-of-unit drain) instead of a
+diagnostic. Fix at the PA12 member-access surface (sem_member.cpp):
+a non-reference member of a non-lvalue object is VC_XVALUE
+(mirroring the existing member-pointer-access and member-call object
+adjustments); reference members stay lvalues.
+
+Reducer: `cppgm.tests/course/pa12/member-of-prvalue-xvalue.t`
+(--emit-semantics pins `member-expression xvalue` through a
+static_cast<V&&> object beside the lvalue contrast; ref-generated
+fixtures). Noted while reducing: the reference presents
+reference-member access with the reference type spelled in the member
+expression and prints synthesized destructors for temporary-bearing
+translation units at pa12 - presentation divergences no fixture pins,
+kept out of the reducer.
+
+Latent issue documented (not fixed here): a hard failure inside a
+demanded body can survive the end-of-unit retry as a declare-only
+emission, turning an ill-formed program into an undefined reference
+at link time; a diagnostic would be better once demanded-versus-
+speculative body demands are distinguished.
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.
@@ -706,6 +743,18 @@ fixtures after).
    method: reduce, find owning surface, fix there, add reducer.
 4. `make -C pa39 compare-pptoken-inception ...` as the first reproducibility
    compare, then the full `compare-cppgm++-inception` target.
+
+Status (this pass): report green 3451/3451 after failures 20-22;
+same-binary object determinism spot-checked across runs (type.cpp,
+sem_spec.cpp byte-identical under ASLR). Memory after the failure-21
+work: heavy sema TU 3.43->2.26 GiB frontend peak, compile_unit.cpp
+10.2->4.6 GiB, cppgm++.cpp 8.4->3.9 GiB (both giants now under the
+8 GiB per-command cap), plus token-stream release before sema and a
+post-frontend malloc_trim. The canonical -j32 rung's aggregate peak
+inside the 64 GiB envelope is being measured; if it still overflows,
+the next levers are the SemNode record (592 B x ~1.1M) and the
+ScopeBinding record (896 B, mostly empty per-overload vectors on
+non-function bindings).
 
 ## Ladder expectations
 
