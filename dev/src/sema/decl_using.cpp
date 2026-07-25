@@ -101,6 +101,12 @@ void DeclBinder::BindUsingDeclaration(const AstDecl& decl)
 		    existing->type && imported.type &&
 		    TypeEquals(existing->type, imported.type))
 			return;
+		// 7.3.3p10 likewise for templates: repeated imports of the
+		// same template entity are harmless redeclarations (two
+		// headers each spelling `using std::vector;`).
+		if (existing->kind == imported.kind && existing->templ &&
+		    existing->templ == imported.templ)
+			return;
 		if ((current_->kind != SCOPE_CLASS &&
 		     current_->kind != SCOPE_NAMESPACE) ||
 		    existing->kind != SB_FUNCTION ||

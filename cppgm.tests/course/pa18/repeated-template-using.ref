@@ -1,0 +1,18 @@
+declare function @touch(%arg0 : i32) -> i32 [binding=strong, object=_Z5touchi]
+
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $s : obj<1x1>
+  slot $v : obj<4x4>
+
+  block ^entry:
+    %t1 = addr $s
+    %t2 = addr $v
+    %t3 = addr $v
+    %t4 = index i8 [projection=field] %t3, 0
+    store i32 3, %t4
+    %t5 = addr $v
+    %t6 = index i8 [projection=field] %t5, 0
+    %t7 = load i32 %t6
+    %t8 = call i32 @touch(%t7)
+    return i32 %t8
+}
