@@ -654,7 +654,8 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 		string then_label = NewLabel("condobj_then");
 		string else_label = NewLabel("condobj_else");
 		string end_label = NewLabel("condobj_end");
-		BranchOnValue(*node.children[0], then_label, else_label);
+		BranchOnValue(*node.children[0], then_label, else_label,
+		              false);
 		OpenBlock(then_label);
 		cond_arm_depth_++;
 		OpenSegmentRegion(*node.children[1]);

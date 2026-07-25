@@ -297,7 +297,8 @@ void FunctionLowerer::EmitZeroValueReturn()
 
 void FunctionLowerer::BranchOnValue(const SemNode& node,
                                     const string& true_label,
-                                    const string& false_label)
+                                    const string& false_label,
+                                    bool edge_cleanups)
 {
 	// Reference parity: a branch on a namespace-scope
 	// pointer-to-function object spells the object's address - but
@@ -323,11 +324,15 @@ void FunctionLowerer::BranchOnValue(const SemNode& node,
 	LowerValue truth = MaterializeTruth(LowerValueExpr(node));
 	// The dispatch region closes once the branch value is secured;
 	// pending condition temporaries destroy on per-edge cleanup
-	// trampolines before the real targets.
+	// trampolines before the real targets - but only when this branch
+	// ends the condition's own full expression (a statement
+	// condition). An expression-level branch keeps the enclosing full
+	// expression's temporaries alive (12.2: they die at its end).
 	if (eh_open_)
 		CloseEhRegion();
 	size_t mark = fe_marks_.empty() ? 0 : fe_marks_.back();
-	if (temp_cleanups_.size() > mark && !in_cleanup_emission_)
+	if (edge_cleanups && temp_cleanups_.size() > mark &&
+	    !in_cleanup_emission_)
 	{
 		string true_cleanup = NewLabel("cond_true_cleanup");
 		string false_cleanup = NewLabel("cond_false_cleanup");
@@ -359,7 +364,8 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 	string end_label = NewLabel("cond_end");
 	if (IsVoidType(node.type))
 	{
-		BranchOnValue(*node.children[0], then_label, else_label);
+		BranchOnValue(*node.children[0], then_label, else_label,
+	              false);
 		OpenBlock(then_label);
 		cond_arm_depth_++;
 		OpenSegmentRegion(*node.children[1]);
@@ -383,7 +389,8 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 	}
 	TypePtr type = NodeType(node);
 	string slot = AddMatSlot("cond", LowerValueType(type));
-	BranchOnValue(*node.children[0], then_label, else_label);
+	BranchOnValue(*node.children[0], then_label, else_label,
+	              false);
 	OpenBlock(then_label);
 	cond_arm_depth_++;
 	OpenSegmentRegion(*node.children[1]);
@@ -417,7 +424,8 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 	string else_label = NewLabel("condaddr_else");
 	string end_label = NewLabel("condaddr_end");
 	TypePtr result_type = NodeType(node);
-	BranchOnValue(*node.children[0], then_label, else_label);
+	BranchOnValue(*node.children[0], then_label, else_label,
+	              false);
 	for (int arm = 1; arm <= 2; arm++)
 	{
 		OpenBlock(arm == 1 ? then_label : else_label);

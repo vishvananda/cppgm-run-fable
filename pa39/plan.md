@@ -761,6 +761,35 @@ scope-runtime-smoke` (all three paths of the nesting print their
 selected values; free(): invalid pointer before the fix, 20/10/30
 after; ref-generated fixtures).
 
+### Failure 25 (fixed): expression-level branches destroy the
+### enclosing full expression's temporaries (pa10 tests:
+### cppgm++-self double free printing special members)
+
+With parsing fixed the rung reached 15/134 pa10 tests, then
+cppgm++-self died "double free detected in tcache 2" inside
+`operator+(string&&, string&&)` from `PrintSpecialMember`: the
+LowIR showed `branch %cond, ^cond_true_cleanup, ^cond_false_cleanup`
+edges destroying the operator+'s LEFT operand (a heap string
+temporary created earlier in the same full expression) before the
+conditional's arms even ran - append then reallocated an
+already-freed buffer. `BranchOnValue`'s per-edge cleanup trampolines
+(the statement-condition contract: an if/while condition IS a full
+expression, so its temporaries die on the branch edges) fired for
+EXPRESSION-level branches too (?:, &&, ||), where the enclosing full
+expression continues past the join and 12.2 keeps its temporaries
+alive to its end (the reference branches these directly, no edge
+blocks). Fix at the PA16/PA25-era lowering surface: BranchOnValue
+takes `edge_cleanups`; the statement path (LowerCondition's tail)
+keeps the trampolines, the conditional-value/void/class-init/
+conditional-address and short-circuit sites pass false. The
+short-circuit RHS-arm temp handling (dies inside its arm, the pinned
+12.2 conditional-operand shape) is untouched.
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-conditional-
+operand-temp-lifetime-runtime-smoke` (long heap strings so SSO
+cannot mask the free; double free before, correct concatenations
+after; ref-generated fixtures).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

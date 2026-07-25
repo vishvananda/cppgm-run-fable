@@ -240,8 +240,12 @@ private:
 	string LowerPointerCmpOperand(const SemNode& node);
 	void LowerCondition(const SemNode& node, const string& true_label,
 	                    const string& false_label);
+	// `edge_cleanups`: the branch ends the condition's full expression
+	// (a statement condition), so pending temporaries destroy on
+	// per-edge trampolines. An expression-level branch (?:, &&, ||)
+	// keeps them alive - the enclosing full expression continues.
 	void BranchOnValue(const SemNode& node, const string& true_label,
-	                   const string& false_label);
+	                   const string& false_label, bool edge_cleanups);
 	void LowerEffect(const SemNode& node);
 	// PA29 GNU statement expressions (lower_expand.cpp): the trailing
 	// expression statement's node ("" value when absent) and the

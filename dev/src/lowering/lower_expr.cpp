@@ -159,7 +159,7 @@ void FunctionLowerer::LowerCondition(const SemNode& node,
 		LowerCondition(*node.children[1], true_label, false_label);
 		return;
 	}
-	BranchOnValue(node, true_label, false_label);
+	BranchOnValue(node, true_label, false_label, true);
 }
 
 // --- values ---------------------------------------------------------------
@@ -713,9 +713,11 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	string short_label = NewLabel(string(family) + "_short");
 	string end_label = NewLabel(string(family) + "_end");
 	if (is_and)
-		BranchOnValue(*node.children[0], rhs_label, short_label);
+		BranchOnValue(*node.children[0], rhs_label, short_label,
+		              false);
 	else
-		BranchOnValue(*node.children[0], short_label, rhs_label);
+		BranchOnValue(*node.children[0], short_label, rhs_label,
+		              false);
 	OpenBlock(rhs_label);
 	OpenSegmentRegion(*node.children[1]);
 	size_t rhs_mark = temp_cleanups_.size();
