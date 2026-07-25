@@ -978,6 +978,7 @@ mir_model::MirProgram LowerLowIRProgramToMir(const LowIRProgram & program,
 {
 	mir_model::MirProgram result;
 	result.target = target;
+	result.host_object = host_object;
 	ProgramFacts facts;
 	facts.info = &info;
 	facts.host_object = host_object;

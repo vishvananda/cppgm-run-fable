@@ -390,16 +390,22 @@ bool DecodeEhTable(const vector<unsigned char> & bytes,
 				action.filter = filter;
 				size_t spec_pos =
 					ttype_base + static_cast<size_t>(-filter - 1);
+				bool terminated = false;
 				for (int entries = 0; entries < 1024; entries++)
 				{
 					unsigned long long index = 0;
 					if (!ReadUleb(bytes, spec_pos, index))
 						return false;
 					if (index == 0)
+					{
+						terminated = true;
 						break;
+					}
 					action.spec_filters.push_back(
 						static_cast<long long>(index));
 				}
+				if (!terminated)
+					return false;   // no terminator: corrupt table
 			}
 			chain.push_back(action);
 			if (next == 0)

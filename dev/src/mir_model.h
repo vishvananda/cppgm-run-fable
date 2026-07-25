@@ -323,10 +323,12 @@ struct Program
   // PA32: wrapper symbol -> its ABI object spelling (_ZTW...), for
   // host-object wrapper synthesis.
   std::map<std::string, std::string> tls_wrapper_objects;
-  // PA32 host object emission: thread_local storage is real ELF TLS
-  // (tls_addr always calls the per-TU synthesized wrapper). The
-  // private executable path keeps the single-threaded direct model.
-  bool host_tls = false;
+  // Host relocatable-object conventions (`-c`): thread_local storage
+  // is real ELF TLS (tls_addr always calls the per-TU synthesized
+  // wrapper, PA32) and data addressing is rip-relative/GOT-mediated
+  // (PA36). The private executable path keeps the single-threaded
+  // direct model and its pinned absolute encodings.
+  bool host_object = false;
 };
 
 using MirGlobalDefinition = GlobalDefinition;

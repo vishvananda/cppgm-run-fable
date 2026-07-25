@@ -482,7 +482,7 @@ X86Mem FunctionEncoder::MemOperand(const Op & op, long long extra)
 		// PA36 host data model: -c objects address data rip-relative
 		// (R_X86_64_PC32); the private executable keeps the absolute
 		// [disp32] form its pinned encodings expect.
-		if (env_.program().host_tls)
+		if (env_.program().host_object)
 			return X86Mem::RipLabel(X86Imm::Label(
 				env_.SymbolLabel(op.text),
 				static_cast<unsigned long long>(extra)));
@@ -531,7 +531,7 @@ void FunctionEncoder::EmitMov(const Ins & ins)
 	else if (src.kind == Op::OP_IMM)
 		code_.MovRegImm(Reg(dst), X86Imm::Constant(
 			static_cast<unsigned long long>(src.imm)));
-	else if (src.kind == Op::OP_GLOBAL && env_.program().host_tls)
+	else if (src.kind == Op::OP_GLOBAL && env_.program().host_object)
 		// PA36 host data model: data addresses materialize
 		// rip-relative like the accesses (R_X86_64_PC32).
 		code_.Lea(Reg(dst), X86Mem::RipLabel(
@@ -694,7 +694,7 @@ void FunctionEncoder::EmitTlsAddr(const Ins & ins)
 	// PA32 host TLS: every access goes through the per-TU wrapper
 	// (synthesized below); the private executable model keeps the
 	// single-threaded direct-global fallback.
-	if (env_.HasFunction(wrapper) || env_.program().host_tls)
+	if (env_.HasFunction(wrapper) || env_.program().host_object)
 	{
 		code_.CallRel32(X86Imm::Label(env_.SymbolLabel(wrapper), 0));
 		if (dst != X86_RAX)
@@ -1425,7 +1425,7 @@ NativeModule EncodeMirProgramModule(const mir_model::MirProgram & program)
 	// PA32 host TLS: define the wrapper for every thread_local this
 	// module defines or accesses (the access sites call it).
 	std::vector<std::pair<int, int> > wrapper_items;
-	if (program.host_tls && !program.tls_wrappers.empty())
+	if (program.host_object && !program.tls_wrappers.empty())
 	{
 		std::set<std::string> global_names;
 		for (std::size_t i = 0; i < program.globals.size(); i++)

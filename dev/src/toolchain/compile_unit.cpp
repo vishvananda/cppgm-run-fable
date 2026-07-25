@@ -479,9 +479,6 @@ ObjectModule CompileToModule(const string & presumed_name,
 	string target = options.target.empty() ? "linux" : options.target;
 	mir_model::MirProgram machine_ir =
 		LowerLowIRProgramToMir(program, info, target, true);
-	// PA32: `-c` objects carry real host TLS (STT_TLS storage and the
-	// per-TU _ZTW wrapper).
-	machine_ir.host_tls = true;
 	NativeModule native = EncodeMirProgramModule(machine_ir);
 	return BuildObjectModule(program, info, native, target);
 }

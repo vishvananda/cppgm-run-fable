@@ -148,6 +148,70 @@ against the cached spec, and propagates/terminates per 15.5.2.
   linker synthesizes GOT slots. lowir2native keeps absolute
   addressing and its pinned encodings.
 
+## Architecture Review (loop 84 audit)
+
+Layer ownership of the PA36 surface, as actually implemented:
+
+- **Parse** owns the source forms: GNU asm labels are typed declarator
+  state (`AstDeclarator::asm_label`), dynamic exception specifications
+  parse into `throw_types`, and the GCC 15 transform-template spellings
+  (`__remove_reference_t<T>`) reuse the transform-specifier path.
+- **Sema** owns the semantic facts as typed state: `throw_spec`
+  (15.4p2-adjusted `TypePtr` list) and `asm_label` ride `SemNode`;
+  extern-declared class specializations hand their member `Scope*`s to
+  the unit (`extern_class_scopes`); 7.1.3p9 typedef-for-linkage is
+  `NamedTypeInfo::{unnamed, linkage_name}`; the host call-ABI
+  classification is `ClassParamDirectHost/ClassReturnDirectHost` beside
+  the course predicates in class_info.
+- **Lowering** owns symbol spelling and emission policy. The Itanium
+  5.1.4.2 abbreviation catalog lives in `lower_name_std.cpp` with
+  structural `::std` checks; extern-template member suppression keys on
+  scope identity (`extern_member_scopes_`) and is reversible
+  (`extern_suppressed` lifted by explicit-instantiation definitions);
+  host-mode forks are explicit parameters (`host_abi`,
+  `separate_compilation`) through single funnels (`LowerClassDirect`,
+  `LowerAbiReturn`, `HiddenSignatureParams`), never duplicated bodies.
+  15.4 spec regions reuse the terminate-region shape and the single
+  `EmitUnwindLeave` frame-escape funnel; destructible local statics
+  register through `__cxa_atexit`/`__cxa_thread_atexit` inside the
+  first-use guard (`lower_static.cpp`).
+- **MIR/encoding** owns the host data-addressing model behind one
+  predicate (`imported_data_global`) and one materialization funnel
+  (`emit_global_address`/`global_mem_operand`); `OP_GOT` operands and
+  `X86Mem::{AM_RIP, AM_GOT}` are typed forms; `MirProgram.host_object`
+  (set once, inside `LowerLowIRProgramToMir`) selects the model, while
+  `host_object=false` keeps every pinned whole-program encoding.
+- **Toolchain** owns the object contract: `EH_SPEC` actions encode to
+  real LSDA negative filters with spec areas after ttbase and decode
+  symmetrically; the private linker synthesizes GOT slots in one
+  deduped pass and treats spec records as inert (the documented
+  whole-program semantics).
+
+Boundaries respected: no hosted-only semantic switches in sema beyond
+the facts above; `-c` objects come from the same LowIR the
+`--emit-lowir` surface exposes; hosted symbol facts flow as LowIR
+metadata/declares (e.g. `object=` attributes, `DsoHandleRef`), not as
+side channels.
+
+## Final Architecture Review
+
+The loop-84 audit read every hunk in `d5dd329c2..HEAD` against the
+current tree. Verdict: no fallback success paths, no fixture-keyed
+gates, no stringly semantic facts introduced, no whole-program
+regressions (pinned shapes verified by the 36-stage suite), no
+quadratic scans on hot paths. Two cleanups landed from the audit:
+`MirProgram.host_object` replaced the aliased `host_tls`/`host_object`
+flag pair (one owner for the host-object fact), and `DecodeEhTable`
+now rejects an unterminated exception-spec list instead of silently
+truncating it. Scoped decisions that stand with rationale: host
+virtual-base parity targets polymorphic classes (non-polymorphic
+vbase classes keep the course carrier model consistently in both
+signatures and bodies); base-DAG deduction keeps the historical
+first-match semantics (ambiguity diagnosis is not demanded by any
+oracle); the unscoped-variable `_Z` spelling is pinned by the
+unmodified handout inspect fixtures. Details and dispositions:
+`pa36/audit.md`.
+
 ## Validation
 
 - Fast loop: `make check TEST=tests/link/<case>.t` inside pa36, and
