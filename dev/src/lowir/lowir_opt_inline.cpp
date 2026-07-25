@@ -159,12 +159,18 @@ bool Inliner::CalleeEligible(const LowIRInstruction & call, size_t b,
 	int depth = DepthAt(view, b, k);
 	if(depth < 0)
 		return false;
+	// PA39: a callee with its own EH structure never pastes. Its
+	// eh_catch selectors are function-local ids also baked into the
+	// pad's dispatch compares as plain literals, so they cannot be
+	// renumbered at paste time - and the caller's LSDA requires
+	// per-function-unique filter/type pairs (two try/catch bodies
+	// merged into one function collide on selector 1).
+	if(HasEhInstruction(*callee))
+		return false;
 	if(depth > 0)
 	{
 		// Inside a protected region: the pasted body must not be able
 		// to transfer to the region's handler.
-		if(HasEhInstruction(*callee))
-			return false;
 		if(callee->metadata.find("unwind") != "no" &&
 		   BodyMayTransfer(context, *callee))
 			return false;

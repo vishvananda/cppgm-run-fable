@@ -1,0 +1,23 @@
+#include "604-hosted-inlined-try-catch-selector-runtime-smoke.shared.h"
+
+int poke(int x)
+{
+	if (x < 0)
+	{
+		Bang b;
+		b.code = x;
+		throw b;
+	}
+	return x;
+}
+
+int trip(int x)
+{
+	if (x == 0)
+	{
+		Snap s;
+		s.code = 9;
+		throw s;
+	}
+	return x;
+}

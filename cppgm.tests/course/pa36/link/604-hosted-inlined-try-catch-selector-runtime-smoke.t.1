@@ -1,0 +1,34 @@
+#include <cstdio>
+
+#include "604-hosted-inlined-try-catch-selector-runtime-smoke.shared.h"
+
+int guarded(int x)
+{
+	try
+	{
+		return poke(x);
+	}
+	catch (const Bang& b)
+	{
+		return 100 + b.code;
+	}
+}
+
+int run(int x)
+{
+	int base = guarded(x);
+	try
+	{
+		return base + trip(x);
+	}
+	catch (const Snap& s)
+	{
+		return base * 1000 + s.code;
+	}
+}
+
+int main()
+{
+	std::printf("%d %d %d\n", run(5), run(-3), run(0));
+	return 0;
+}

@@ -1,9 +1,11 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA9 pass; failures 12-15 fixed. The pa10 rung
-(cppgm++-self) is the frontier: four host-compile failure classes
-remain across ten TUs (failures 16-19 below, analyzed with repro
-commands; 16 has a worked design).
+Status: self-built PA1-PA9 pass; failures 12-19 fixed. All previously
+failing pa10-rung host-compile TUs now compile (type_builder,
+ast_parse_class, template_info, template_args, sem_pack,
+sem_builtin_template, const_expr, sem_spec, sem_template,
+template_spelling). Next: rerun the pa10 ladder rung, then the
+pptoken/cppgm++ inception compares.
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -423,9 +425,9 @@ member access without the deref wrapper we synthesize (5.2.5), a
 presentation divergence no existing fixture covers and separate from
 this bug.
 
-### Failure 16 (frontier, design ready): eager noexcept-spec
-### evaluation instantiates traits inside open classes (pa10 rung,
-### 6 TUs: type_builder, ast_parse_class, template_info, template_args,
+### Failure 16 (fixed): eager noexcept-spec evaluation
+### instantiates traits inside open classes (pa10 rung, 6 TUs:
+### type_builder, ast_parse_class, template_info, template_args,
 ### sem_pack, sem_builtin_template)
 
 Repro: `struct A { std::vector<A> elems; int v; };` plus a function
@@ -480,17 +482,72 @@ Design (validated against fixture constraints, not yet implemented):
   so evaluating there (replay depth 0) is correct and keeps the
   pinned unwind flags on instantiated bodies.
 
-### Failure 17: undeclared name __bool_constant (pa10 rung: sem_spec,
-### sem_template)
+Implemented as designed (`class_replay_depth_` gate in
+`InstantiateSpecializationBody`; `DeferNoexceptSpecScope()`
+composition hook; per-overload/ctor/dtor pending records resolved
+on-demand at every unwind-fact read site). Fixing the deferral
+unmasked four more real bugs in the same demand chain, each fixed at
+its owning surface:
 
-`../dev/cppgm++ -std=gnu++11 -Wall -O3 -I../dev/src
--I../obj/pa39/generated -c ../dev/src/sema/sem_spec.cpp` (with the
-pa39 defines) → "ERROR: undeclared name __bool_constant".
-`__bool_constant` is an unconditional alias template in GCC 15's
-<type_traits> (used by true_type, resolved fine in passing TUs), so
-some instantiation context in these TUs looks it up with a broken
-scope chain. Header probes (sem_instantiation.h, <set>) pass — the
-trigger is in the TU bodies. Not yet reduced.
+- `InstantiateClassFromPartial` (PA19/PA21, sem_spec.cpp) had no
+  reset-on-failure, unlike the primary path: a partial-matched trait
+  whose base clause faulted mid-window (`__is_move_insertable
+  <allocator<A>>` reaching `is_move_constructible<A>` with `A` open)
+  stayed a hollow "instantiated" record forever. It now mirrors the
+  primary reset - and to keep deduction probes tolerant, a spec whose
+  bind already failed reports softly on re-demand
+  (`ClassSpecialization::bind_failed` in
+  `InstantiateSpecializationBody`): the first failure keeps the hard
+  14.8.2p8 fault, repeats read like the old hollow record (probes
+  legitimately compose candidates whose alias targets never
+  instantiate, e.g. `tuple_element<0, tuple<>>`).
+- `ConstBodyRegistry` (PA20, const_eval.cpp) indexed `unit_.deferred`
+  by append-only watermark; the end-of-unit poisoned-body retry
+  replaces nodes in place, leaving the index dangling on the
+  destroyed poison and blind to the healed body
+  (`_S_use_relocate()`'s template-argument evaluation then failed as
+  "undefined function"). `RetryDeferredBodies` now invalidates the
+  index after each replacement.
+- The pending member-class completion (PA21, sem_template.cpp) erased
+  its record before the bind: a mid-window failure
+  (`vector<A>::_Temporary_value`) was unretryable. The record now
+  restores on failure with the entity reset.
+- `RetryDeferredBodies` dropped failed retries: entries retry in
+  poison order, not dependency order, so a body reading a sibling's
+  constexpr definition that heals later stayed poisoned. Failures now
+  re-queue while any body heals (fixpoint; a no-progress round ends
+  the loop as before).
+
+Reducers: `cppgm.tests/course/pa36/link/601-hosted-self-element-
+vector-runtime-smoke` (vector<A> member of open A, push_back +
+insert) and `602-hosted-self-element-map-unique-ptr-runtime-smoke`
+(map<string, unique_ptr<T>> member bodies in a class template held by
+its own element class).
+
+### Failure 17 (fixed): undeclared name __bool_constant (pa10 rung:
+### sem_spec, sem_template)
+
+The misleading message came from `stl_tree.h`'s
+`_M_move_assign(__x, __bool_constant<_Node_alloc_traits::
+_S_nothrow_move()>())`: the alias template-id's value argument spells
+a zero-argument constexpr static member call behind a
+typedef-spelled qualifier, which parses as a *function type-id*
+(`Q::f ()` vexing parse - the parser's type oracle sees the typedef
+qualifier as a type prefix, unlike a direct class-name spelling that
+resolves the terminal to a function). The value re-read
+(`EvaluateZeroArgConstantCall`, PA20 template_arg_const.cpp) only
+handled deduced member-template specializations; an ordinary
+(non-template) member fell through to false, the callee type never
+resolved, and the call misrouted to ADL - "undeclared name". Fix at
+the PA20 surface: the re-read now evaluates the unique
+zero-parameter overload through the full constant engine over its
+analyzed definition (a synthesized SN_CALL over the resolved
+binding). The retry fixpoint above is load-bearing here: in-window
+demands poison and heal at the end-of-unit rounds.
+
+Reducer: `cppgm.tests/course/pa36/link/603-hosted-typedef-qualified-
+constexpr-call-arg-runtime-smoke` (bool_c<node_traits::
+nothrow_move()>() selecting sizeof-dependent overloads; prints "1 2").
 
 ### Failure 18 (fixed): i128 bitnot and variable shift counts
 ### (pa10 rung: const_expr)
@@ -521,13 +578,33 @@ consistent across our own objects, and no checkpoint source passes
 i128 across the host boundary, but a g++-compiled caller cannot call
 an i128-by-value function we compiled.
 
-### Failure 19: eh filter maps to conflicting catch types (pa10 rung:
-### template_spelling)
+### Failure 19 (fixed): eh filter maps to conflicting catch types
+### (pa10 rung: template_spelling, sem_spec)
 
-Same compile shape on `../dev/src/sema/template_spelling.cpp`. A
-catch shape in that TU produces conflicting filter-region catch types
-in the PA36 EH lowering. Reduce the try/catch pattern and fix the
-filter mapping.
+The PA37 inliner (`lowir_opt_inline.cpp`) only refused EH-bearing
+callees *inside* a protected region; at depth 0 it pasted a small
+callee with its own try/catch (template_spelling.cpp's SpellBail
+helpers) into a caller with different EH. eh_catch selectors are
+function-local ids also baked into the pad's dispatch compares as
+plain literals, so they cannot be renumbered at paste time - and the
+LSDA requires per-function-unique filter/type pairs, so the merged
+function collided on selector 1 at object emission. Fix at the PA37
+surface: a callee with any EH instruction never pastes.
+
+Also fixed on the same chain: the qualified (out-of-class) special
+-member definition path (`BindQualifiedDestructor` etc.,
+sem_class.cpp) analyzed instantiated bodies without the
+poison-and-retry wrapper the in-class path has, so `~_Hashtable`'s
+completeness static_assert - reading a deferred noexcept fact
+conservatively while still in-window - failed the whole instantiation
+instead of poisoning one body (the unordered_set hosted smokes caught
+this). The three sites now route through
+`AnalyzeQualifiedMemberBody`.
+
+Reducer: `cppgm.tests/course/pa36/link/604-hosted-inlined-try-catch-
+selector-runtime-smoke` (small internal try/catch callee called at
+depth 0 by a caller with a different catch type; fails object
+emission before the fix, prints "10 94 9" after).
 
 ## Validation plan
 
