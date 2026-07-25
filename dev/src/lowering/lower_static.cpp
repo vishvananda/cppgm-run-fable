@@ -209,6 +209,19 @@ void FunctionLowerer::LowerLocalStaticInit(const SemNode& node,
 		}
 		if (child.kind == SN_DESTRUCTOR_ACTION)
 			continue;
+		// A class object copy-initialized from a prvalue producer
+		// (a factory call) constructs into the static object itself
+		// (copy elision), like the namespace-scope dynamic init.
+		if (bare->kind == TK_CLASS &&
+		    (child.kind == SN_CALL_EXPRESSION ||
+		     child.kind == SN_CONDITIONAL_EXPRESSION))
+		{
+			bool saved = in_lifetime_action_;
+			in_lifetime_action_ = true;
+			LowerClassInit(child, base);
+			in_lifetime_action_ = saved;
+			continue;
+		}
 		// The scalar initializer value.
 		TypePtr value_type = RemoveTopCv(declared);
 		string value = LowerValueAs(child, value_type, LCC_INIT);

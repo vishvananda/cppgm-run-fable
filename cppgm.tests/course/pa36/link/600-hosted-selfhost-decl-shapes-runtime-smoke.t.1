@@ -1,0 +1,66 @@
+#include "600-hosted-selfhost-decl-shapes-runtime-smoke.shared.h"
+
+namespace {
+
+struct Family {
+  const char* name;
+  const char* pattern;
+};
+
+const Family kFamilies[] = {
+  {"acos", "rr"}, {"atan2", "rrr"}, {"cbrt", "rr"},
+};
+
+class Resolver {
+ public:
+  int go(int x) {
+    Result r = resolve(x);
+    return r.found ? r.value : -1;
+  }
+
+ private:
+  struct Result {
+    Result() : found(false), value(0) {}
+    bool found;
+    int value;
+  };
+  Result resolve(int x);
+};
+
+Resolver::Result Resolver::resolve(int x) {
+  Result r;
+  r.found = x > 0;
+  r.value = x * 2;
+  return r;
+}
+
+struct Wide {
+  long a, b, c;
+};
+
+Wide MakeWide(long s) {
+  Wide w;
+  w.a = s;
+  w.b = s + 1;
+  w.c = s + 2;
+  return w;
+}
+
+}  // namespace
+
+int check_family_table() {
+  int total = 0;
+  for (const Family* at = kFamilies; at != kFamilies + 3; at++)
+    total += (int)(at->pattern[0] == 'r');
+  return total;
+}
+
+int check_private_result(int x) {
+  Resolver r;
+  return r.go(x);
+}
+
+long check_static_factory(long s) {
+  static Wide cached = MakeWide(s);
+  return cached.a + cached.c;
+}

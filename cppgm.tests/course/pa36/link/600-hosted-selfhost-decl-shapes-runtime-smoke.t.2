@@ -1,0 +1,16 @@
+#include "600-hosted-selfhost-decl-shapes-runtime-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  if (check_family_table() != 3)
+    return 1;
+  if (check_private_result(21) != 42)
+    return 2;
+  if (check_static_factory(7) != 16)
+    return 3;
+  if (check_static_factory(9) != 16)
+    return 4;
+  std::printf("decl-shapes ok\n");
+  return 0;
+}

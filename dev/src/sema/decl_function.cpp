@@ -32,13 +32,12 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 	// nested inside its body.
 	in_linkage_single_ = false;
 	size_t collapse_before = collapsed_alias_uses_;
-	DeclSpecifierInfo specs =
-		builder_.ProcessSpecifiers(decl.specifiers, true);
-	if (specs.is_typedef)
-		throw runtime_error("typedef on a function definition");
 	// 3.4.3p3/8.3.5: names in the declarator after a qualified
 	// declarator-id (parameters, trailing return type) resolve in the
-	// named class's scope.
+	// named class's scope. 11.2: the whole definition - the leading
+	// return type included, which still looks up lexically - checks
+	// access as a member of that class, so the member context opens
+	// before the specifiers process.
 	Scope* compose_scope = current_;
 	const AstName* declared_id =
 		decl.declarator ? decl.declarator->IdName() : 0;
@@ -50,13 +49,17 @@ void DeclBinder::BindFunctionDefinition(const AstDecl& decl)
 			compose_scope = prefix;
 	}
 	Scope* saved_compose = current_;
-	current_ = compose_scope;
 	bool member_signature = compose_scope->kind == SCOPE_CLASS;
 	if (member_signature)
 		OnMemberSignatureBegin(compose_scope);
+	DeclSpecifierInfo specs;
 	DeclaratorInfo composed;
 	try
 	{
+		specs = builder_.ProcessSpecifiers(decl.specifiers, true);
+		if (specs.is_typedef)
+			throw runtime_error("typedef on a function definition");
+		current_ = compose_scope;
 		composed = builder_.ComposeDeclarator(decl.declarator.get(),
 		                                      specs.type);
 	}

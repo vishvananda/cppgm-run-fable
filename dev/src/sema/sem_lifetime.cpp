@@ -538,8 +538,7 @@ void SemBinder::AppendClassArrayInit(SemNode& item, ScopeBinding& binding,
 			braced = init->expr.get();
 		if (!braced)
 			throw OutsideBoundary("class array initializer form");
-		if (!cls.has_user_ctor && cls.is_aggregate &&
-		    binding.home && binding.home->kind != SCOPE_NAMESPACE)
+		if (!cls.has_user_ctor && cls.is_aggregate)
 		{
 			AppendAggregateArrayInit(item, binding, cls, *braced);
 			return;
@@ -656,6 +655,18 @@ void SemBinder::AppendAggregateArrayInit(SemNode& item,
 				IsReferenceType(param) ? param->target
 				                       : RemoveTopCv(param));
 			call->children.push_back(std::move(zero.node));
+		}
+		// The shared-base offset form serves member/local contexts;
+		// a namespace-scope array's init-helper actions carry their
+		// subscripted element address explicitly.
+		if (binding.home && binding.home->kind == SCOPE_NAMESPACE)
+		{
+			call->children.insert(
+				call->children.begin() + 1,
+				AddressOfNode(SubscriptNode(
+					VariableObjectExpr(binding), i)));
+			action->ctor_addressed = true;
+			action->has_value = false;
 		}
 		action->children.push_back(std::move(call));
 		item.children.push_back(std::move(action));
