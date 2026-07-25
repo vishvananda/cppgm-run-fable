@@ -636,7 +636,13 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		// per-constructor entry identities above keep the declared
 		// ABI spelling right when a constructor-template
 		// specialization shares a plain constructor's signature.
+		// Synthesized (implicit/defaulted) special members stay local:
+		// the host toolchain lowers their uses inline and never
+		// materializes them in the owning TU (libstdc++ exports no
+		// allocator<char>::operator=, say), so a suppressed reference
+		// could never resolve.
 		if (separate_compilation_ && def->second->inline_def &&
+		    !def->second->synthesized &&
 		    extern_member_scopes_.count(scope))
 			info.extern_suppressed = true;
 	}

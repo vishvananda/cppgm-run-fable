@@ -1,0 +1,13 @@
+#include "600-hosted-string-move-assign-link-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  std::string a("first");
+  std::string b("second-long-enough-to-heap-allocate");
+  move_into(a, b);
+  if (a != "second-long-enough-to-heap-allocate")
+    return 1;
+  std::printf("string-move-smoke ok\n");
+  return 0;
+}

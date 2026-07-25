@@ -155,6 +155,24 @@ sub-64 selector shapes); report re-run green.
 Reducer: `cppgm.tests/course/pa28/300-call-result-switch-selector.t`
 (negative i32 call result crossing a second call, then switched on).
 
+### Failure 7: synthesized members of extern-instantiated classes
+### suppressed (posttoken-self link)
+
+PA1 now passes self-built. `posttoken-self` linking failed on the
+defaulted `allocator<char>::operator=` odr-used by `__alloc_on_move`
+(string move-assignment): `bits/allocator.h` declares
+`extern template class allocator<char>`, and the PA36 host-mode
+suppression turned all inline members of extern-declared
+specializations into external references. The host toolchain lowers
+synthesized special members inline and never materializes them
+(libstdc++ exports no `allocator<char>::operator=`), so such a
+reference can never resolve. Fix in `lowering/lower_unit.cpp`:
+synthesized (implicit/defaulted) special members stay locally emitted
+under the suppression.
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-string-move-assign-
+link-smoke`.
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

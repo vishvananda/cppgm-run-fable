@@ -1,0 +1,5 @@
+#include "600-hosted-string-move-assign-link-smoke.shared.h"
+
+void move_into(std::string& dst, std::string& src) {
+  dst = static_cast<std::string&&>(src);
+}
