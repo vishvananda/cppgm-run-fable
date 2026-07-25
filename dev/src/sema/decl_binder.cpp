@@ -1316,17 +1316,26 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 			throw runtime_error(name + " does not name a matching class");
 		return found->type;
 	}
+	// 3.3.2p6: a class first declared by an elaborated-type-specifier
+	// inside a declaration (a member's decl-specifier-seq, a parameter
+	// clause) is declared in the smallest enclosing namespace or block
+	// scope, past any class, prototype, or template-parameter scope. A
+	// standalone forward declaration stays in the current scope.
+	Scope* home = current_;
+	if (elaborated)
+		while (home->kind != SCOPE_NAMESPACE && home->kind != SCOPE_BLOCK)
+			home = home->parent;
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-		TypeDisplayName(decl.class_key_spelling, name), current_, name);
+		TypeDisplayName(decl.class_key_spelling, name), home, name);
 	info->is_union = is_union;
 	info->class_key = decl.class_key_spelling;
 	TypePtr type = MakeNamedType(TK_CLASS, info);
 	ScopeBinding binding;
 	binding.kind = SB_TYPE;
-	binding.access = current_access_;
+	binding.access = home == current_ ? current_access_ : MA_PUBLIC;
 	binding.name = name;
 	binding.type = type;
-	AddBinding(*current_, binding);
+	AddBinding(*home, binding);
 	return type;
 }
 

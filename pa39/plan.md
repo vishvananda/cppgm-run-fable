@@ -1,8 +1,9 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA6 pass; failure 12 (member-template bodies
-bound inside an open class) fixed; the nsdecl rung (pa7) next runs
-from the top.
+Status: self-built PA1-PA6 pass; failures 12 (member-template bodies
+bound inside an open class) and 13 (elaborated-type-specifier scope)
+fixed; every nsdecl checkpoint TU now host-compiles; the nsdecl rung
+(pa7) next runs from the top.
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -330,6 +331,40 @@ the behavior, like failures 8 and 9. The ctor-template merge path
 (`sem_member_template.cpp`, failure 4) still binds at the merge; if a
 ladder failure reduces to a ctor-template body bound inside an open
 class, give it the same deferral through its `DeferredBody` route.
+
+### Failure 13: elaborated-type-specifier first-declarations land in
+### the current scope (pa7 nsdecl checkpoint, sema/type.cpp)
+
+With failure 12 fixed, `sema/type.cpp` failed "no matching function
+for call to IsStdInitializerListTemplate": `sema/type.h` first
+declares `TemplateInfo` through the member
+`const struct TemplateInfo* template_entity` (TemplateArg, line ~96),
+and `BindClassForward`'s elaborated create path declared the entity in
+`current_` — the class scope — making a `TemplateArg::TemplateInfo`
+distinct from the `sema/template_info.h` definition, so every later
+use failed to unify (reduced: `struct Holder { const struct Late* p; };
+struct Late { int v; };` — assigning `&x` to `h.p` reports "no
+conversion"). 3.3.2p6: a class first declared by an
+elaborated-type-specifier inside a declaration is declared in the
+smallest enclosing namespace or block scope, past class, prototype,
+and template-parameter scopes. Fix in `sema/decl_binder.cpp`
+(`BindClassForward`, PA11 surface): the elaborated create path walks
+`current_` up to the nearest SCOPE_NAMESPACE/SCOPE_BLOCK and declares
+there (MA_PUBLIC when rehomed); standalone forward declarations keep
+the current scope.
+
+No course reducer can express this fix: every reference generation
+mishandles the construct — `cppgm++-ref` (final) rejects the
+function-parameter spelling outright ("unsupported namespace-scope
+declarator") and binds the member spelling to a class-scope entity
+(`pointer to const struct Holder::Late`), and the pa12-era ref does
+the same — so ref-generated fixtures in any harness would pin the
+wrong behavior. Per the testing rules the refs are not perfect and
+the standard governs non-test inputs; the nsdecl ladder rung (which
+compiles `sema/type.h`'s exact member and parameter spellings) and
+the inception build gate the behavior. The host dialect here is a
+strict superset of the reference dialect: forms the ref accepts still
+bind identically (report re-run green).
 
 ## Validation plan
 
