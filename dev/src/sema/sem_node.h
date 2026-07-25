@@ -367,6 +367,11 @@ struct SemNode
 	// SN_FUNCTION_DEFINITION: a compiler-synthesized special-member
 	// body (implicit/defaulted); emitted only when directly called.
 	bool synthesized;
+	// 12.2p5: a class prvalue bound directly to a local reference
+	// declaration; the temporary still materializes (needs_dtor), but
+	// its cleanup belongs to the declaration's scope, not the full
+	// expression.
+	bool lifetime_extended = false;
 	// PA20 SN_FUNCTION_DEFINITION: declared constexpr (7.1.5); the
 	// constant engine only runs constexpr or synthesized bodies.
 	bool is_constexpr_fn = false;

@@ -69,6 +69,42 @@ SemNodePtr SemBinder::VariableObjectExpr(const ScopeBinding& binding)
 	return object;
 }
 
+// 12.2p5: a class temporary bound directly to a local reference
+// declaration persists for the reference's lifetime. The bound
+// prvalue drops its full-expression cleanup (the elision pattern of
+// AppendElidedObjectInit) and the declaration destroys the referee at
+// scope exit through the stored reference instead.
+void SemBinder::ExtendBoundTemporaryLifetime(SemNode& item,
+                                             const ScopeBinding& binding)
+{
+	if (!IsReferenceType(binding.type) || item.children.empty())
+		return;
+	// Namespace-scope extension (destruction at shutdown) stays out of
+	// scope: the reference emission has no static cleanup for it.
+	if (!binding.home || (binding.home->kind != SCOPE_BLOCK &&
+	                      binding.home->kind != SCOPE_FUNCTION))
+		return;
+	SemNode* bound = item.children.back().get();
+	if (!bound || !bound->needs_dtor || bound->category != VC_PRVALUE)
+		return;
+	TypePtr bare = bound->type ? RemoveTopCv(bound->type) : TypePtr();
+	if (!bare || bare->kind != TK_CLASS)
+		return;
+	const ClassInfo* cls = unit_.classes.Find(bare->named);
+	if (!cls || !unit_.classes.NeedsDestruction(*cls))
+		return;
+	// The bound node keeps needs_dtor (it drives the result
+	// materialization); the flag reroutes its cleanup registration.
+	bound->lifetime_extended = true;
+	item.needs_dtor = true;
+	SemNodePtr object = VariableObjectExpr(binding);
+	// The reference collapses on use: the destructor receives the
+	// referee's address (a pointer to a reference is ill-formed).
+	object->type = binding.type->target;
+	item.children.push_back(MakeDestructorCall(
+		*cls, false, AddressOfNode(std::move(object))));
+}
+
 void SemBinder::AppendAggregateInit(const ClassInfo& cls,
                                     const SemNode& target_proto,
                                     const AstExpr& braced,
@@ -640,7 +676,10 @@ void SemBinder::AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
 	if (!class_object)
 	{
 		if (init)
+		{
 			AnalyzeVariableInit(item, binding, init);
+			ExtendBoundTemporaryLifetime(item, binding);
+		}
 		return;
 	}
 	if (specs.is_extern && !init)

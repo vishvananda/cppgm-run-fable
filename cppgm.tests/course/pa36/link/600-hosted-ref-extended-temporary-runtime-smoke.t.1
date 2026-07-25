@@ -1,0 +1,12 @@
+#include "600-hosted-ref-extended-temporary-runtime-smoke.shared.h"
+
+std::vector<std::string> MakeWords() {
+  std::vector<std::string> words;
+  words.push_back("alpha");
+  words.push_back("beta-long-enough-to-heap-allocate-here");
+  return words;
+}
+
+std::string Tag(int n) {
+  return std::string("tag-") + (n == 0 ? "zero" : "many");
+}

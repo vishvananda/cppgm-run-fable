@@ -719,7 +719,9 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 		bool reopen = eh_open_;
 		if (eh_open_)
 			CloseEhRegion();
-		if (!cond_arm_depth_)
+		// 12.2p5: an extended temporary's cleanup belongs to the
+		// binding declaration's scope, not this full expression.
+		if (!cond_arm_depth_ && !call.lifetime_extended)
 		{
 			TempCleanup cleanup;
 			cleanup.address = address;
@@ -746,7 +748,8 @@ string FunctionLowerer::MaterializeTemporary(const SemNode& action,
 		LowerTrivialCopyAction(action, address);
 	else
 		LowerConstructorCall(action, address);
-	if (action.needs_dtor && register_cleanup)
+	if (action.needs_dtor && register_cleanup &&
+	    !action.lifetime_extended)
 	{
 		const SemNode* dtor = 0;
 		for (size_t i = 0; i < action.children.size(); i++)

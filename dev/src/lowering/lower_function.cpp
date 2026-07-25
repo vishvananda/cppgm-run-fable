@@ -791,6 +791,18 @@ void FunctionLowerer::LowerLocalVariable(const SemNode& node)
 			                       referee->named);
 		Emit("store ptr " + address + ", $" + slot);
 		EndFullExpression();
+		// 12.2p5: a temporary this reference extended destroys at
+		// scope exit (the sema attached its destructor action); the
+		// cleanup arms only once the binding completed.
+		if (node.needs_dtor)
+		{
+			vector<const SemNode*> actions;
+			for (size_t i = 1; i < node.children.size(); i++)
+				if (node.children[i]->kind == SN_DESTRUCTOR_ACTION)
+					actions.push_back(node.children[i].get());
+			if (!actions.empty())
+				RegisterCleanup(actions);
+		}
 		return;
 	}
 	if (declared->kind == TK_ARRAY)

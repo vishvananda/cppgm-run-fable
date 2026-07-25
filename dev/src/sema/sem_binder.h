@@ -390,6 +390,8 @@ private:
 	virtual void BindInheritingConstructors(Scope* base_scope);
 	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
 	                              SemNodePtr address);
+	void ExtendBoundTemporaryLifetime(SemNode& item,
+	                                  const ScopeBinding& binding);
 
 	// --- PA18 templates (sem_template.cpp) ---
 	// Capture seams: template declarations are recorded, not analyzed;

@@ -173,6 +173,30 @@ under the suppression.
 Reducer: `cppgm.tests/course/pa36/link/600-hosted-string-move-assign-
 link-smoke`.
 
+### Failure 8: reference-bound temporaries destroyed at statement end
+### (pa2 self tests: map::at, double frees)
+
+`posttoken-self` linked but every literal path corrupted memory: a
+class prvalue bound to a reference declaration (including range-for's
+hidden `__range`) was destroyed with the full expression, so
+`for (const IntegerType& c : IntegerTypeCandidates(...))` iterated
+freed memory. The reference compiler extends but never destroys (a
+leak the fixtures cannot see); ours destroyed early — 12.2p5 requires
+scope-lifetime destruction. Fix: `ExtendBoundTemporaryLifetime`
+(sema/sem_lifetime.cpp) marks the directly-bound class prvalue
+`lifetime_extended` (materialization keeps `needs_dtor`; the two
+statement-cleanup registrations in lowering/lower_member.cpp skip
+extended nodes) and attaches a scope-exit destructor to the
+declaration through the stored reference; the reference-declaration
+lowering registers it as an ordinary scope cleanup. Wired for plain
+reference declarations and the range-for `__range` binding;
+namespace-scope extension (shutdown-time destruction) remains out of
+scope, matching the reference emission.
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-ref-extended-
+temporary-runtime-smoke` (value-correctness only, so the reference —
+which leaks but reads correctly — generates passing fixtures).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

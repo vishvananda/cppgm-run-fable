@@ -1,0 +1,19 @@
+#include "600-hosted-ref-extended-temporary-runtime-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  const std::string& tag = Tag(0);
+  std::size_t total = 0;
+  for (const std::string& word : MakeWords()) {
+    if (word.empty())
+      return 1;
+    total += word.size();
+  }
+  if (total != 5 + 38)
+    return 2;
+  if (tag != "tag-zero")
+    return 3;
+  std::printf("ref-extended-temporary ok\n");
+  return 0;
+}
