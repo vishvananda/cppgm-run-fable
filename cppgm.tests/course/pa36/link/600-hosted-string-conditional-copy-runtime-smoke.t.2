@@ -1,0 +1,15 @@
+#include "600-hosted-string-conditional-copy-runtime-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  std::string word("suffix-carrying-literal-long-enough-to-allocate-f");
+  std::string cut = trim_last(word, true);
+  std::string kept = trim_last(word, false);
+  if (cut.size() != word.size() - 1)
+    return 1;
+  if (kept != word)
+    return 2;
+  std::printf("conditional-copy ok\n");
+  return 0;
+}

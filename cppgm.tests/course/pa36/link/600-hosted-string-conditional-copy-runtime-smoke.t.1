@@ -1,0 +1,7 @@
+#include "600-hosted-string-conditional-copy-runtime-smoke.shared.h"
+
+std::string trim_last(const std::string& source, bool cut) {
+  std::string spelling =
+      cut ? source.substr(0, source.size() - 1) : source;
+  return spelling;
+}

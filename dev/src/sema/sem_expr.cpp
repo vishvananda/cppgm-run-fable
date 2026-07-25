@@ -1341,6 +1341,25 @@ SemValue SemExprAnalyzer::AnalyzeConditional(const AstExpr& expr)
 	}
 	EValueCategory category = VC_PRVALUE;
 	TypePtr type = ConditionalResultType(a, b, category);
+	// 5.16p6: a class-typed prvalue result converts glvalue arms to
+	// prvalues (the lvalue-to-rvalue conversion copy-initializes). The
+	// arms lower in place into the materialized result, so a glvalue
+	// arm of a nontrivially-copyable class must wrap in its copy
+	// construction rather than lower as a raw object copy (which would
+	// alias the source's resources). Trivially copyable classes keep
+	// the pinned raw-copy arm shape.
+	if (category == VC_PRVALUE && RemoveTopCv(type)->kind == TK_CLASS)
+	{
+		const ClassInfo* cls =
+			host_.Classes().Find(RemoveTopCv(type)->named);
+		if (cls && !ClassHasTrivialCopyCtor(*cls))
+		{
+			if (a.category != VC_PRVALUE)
+				WrapClassValueInit(a, RemoveTopCv(type));
+			if (b.category != VC_PRVALUE)
+				WrapClassValueInit(b, RemoveTopCv(type));
+		}
+	}
 	SemValue value;
 	value.type = type;
 	value.category = category;
