@@ -10,6 +10,7 @@
 #include "mir_model.h"
 #include "tool_help_text.h"
 #include "x86/lowir_to_mir.h"
+#include "x86/mir_optimize.h"
 #include "x86/mir_to_native.h"
 
 #include <fstream>
@@ -192,6 +193,7 @@ int run_lowir2native_mode(const vector<string> & args)
   LowIRProgramInfo info = ValidateLowIRProgram(program, false);
   mir_model::MirProgram machine_ir =
       LowerLowIRProgramToMir(program, info, target, false);
+  mir_optimize::OptimizeMirProgram(machine_ir, invocation.optimization_level);
 
   if(!invocation.machine_ir_file.empty()) {
     mir_model::write_mir_program_file(invocation.machine_ir_file,

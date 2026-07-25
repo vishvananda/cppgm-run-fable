@@ -820,6 +820,12 @@ void FunctionEncoder::EmitInstruction(const Ins & ins)
 	case Ins::MI_JMP_INDIRECT: code_.JmpReg(Reg(ins.operands[0])); return;
 	case Ins::MI_EH_LANDING: EmitEhLanding(); return;
 	case Ins::MI_RET:
+		// PA38 return coalescing can name the value's own register
+		// (`ret rbx`); stage it into rax before the epilogue restores
+		// the callee-saved set.
+		if (!ins.operands.empty() && ins.operands[0].kind == Op::OP_REG &&
+		    ins.operands[0].reg != XR_RAX)
+			code_.MovRegReg(64, X86_RAX, Reg(ins.operands[0]));
 		EmitEpilogue();
 		code_.Ret();
 		return;

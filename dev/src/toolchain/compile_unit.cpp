@@ -26,6 +26,7 @@
 #include "toolchain/runtime_library.h"
 #include "x86/frame_cfi.h"
 #include "x86/lowir_to_mir.h"
+#include "x86/mir_optimize.h"
 #include "x86/mir_to_native.h"
 
 using std::runtime_error;
@@ -483,6 +484,7 @@ ObjectModule CompileLowIRProgramToModule(LowIRProgram & program,
 	string target = options.target.empty() ? "linux" : options.target;
 	mir_model::MirProgram machine_ir =
 		LowerLowIRProgramToMir(program, info, target, true);
+	mir_optimize::OptimizeMirProgram(machine_ir, options.optimize);
 	NativeModule native = EncodeMirProgramModule(machine_ir);
 	return BuildObjectModule(program, info, native, target);
 }
