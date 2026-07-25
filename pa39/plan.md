@@ -197,6 +197,19 @@ Reducer: `cppgm.tests/course/pa36/link/600-hosted-ref-extended-
 temporary-runtime-smoke` (value-correctness only, so the reference —
 which leaks but reads correctly — generates passing fixtures).
 
+### Failure 9: glvalue conditional arms raw-copied (pa2 self tests,
+### floating literals double-freeing)
+
+`cut ? source.substr(...) : source` lowered the lvalue arm in place as
+a raw object copy of the nontrivial string, aliasing the source's heap
+buffer. 5.16p6 converts glvalue arms of a class-typed prvalue
+conditional to prvalues (copy-initialization); nontrivially-copyable
+glvalue arms now wrap in their copy construction in
+`AnalyzeConditional` (sema/sem_expr.cpp), while trivially copyable
+classes keep the pinned raw-copy arm shape. Reducer:
+`cppgm.tests/course/pa36/link/600-hosted-string-conditional-copy-
+runtime-smoke`.
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.
