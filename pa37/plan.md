@@ -102,22 +102,38 @@ Per function, iterated to a local fixpoint:
 Names are preserved: surviving instructions keep their input temp names; CSE
 keeps the first definition's name; folded literals substitute in place.
 
-## Driver deltas (phase 2/3)
+## Driver deltas (phase 2/3, as landed)
 
 - `--emit-lowir` with a `-g` flag = driver surface: hosted preprocessing,
-  `SetSeparateCompilation()`, benign driver flags accepted. The pa14-pa27
-  whole-program `--emit-lowir -O0` fixtures (no `-g`) keep the existing path.
-- The separate-compilation lowering stops printing *inferred* `unwind=no`
-  (declared/deduced noexcept only). The MIR layer re-derives inferred
-  no-unwind from LowIR bodies (fixpoint over the unit's call graph) so EH
-  shapes and object bytes are unchanged for pa29-36.
-- `trivial_lifecycle=yes` on implicit lifecycle helpers whose lowered
-  complete-object bodies do no work (sema-owned fact).
-- Implicit assignment operators lower memberwise in separate-compilation
-  mode with the reference low-name spelling (`Class__operator___ovN`).
+  `SetSeparateCompilation()`, full driver flags accepted, then
+  `parse -> validate -> prune unreferenced declares -> optimize(level) ->
+  canonical dump`. The pa14-pa27 whole-program `--emit-lowir -O0` fixtures
+  (no `-g`) keep the existing path.
+- The separate-compilation lowering prints `unwind=no` on definitions only
+  from the declared/implicit exception specification
+  (`SemNode::noexcept_decl` -> `LowFunctionInfo::unwind_declared`). No MIR
+  re-derivation is needed: the backend consumes only the eh_try/eh_end
+  region structure, which still comes from the merged sema facts.
+- The serialized unit is optimization-level-independent: the PA33 `-O1`
+  simple-inline-constructor call-site expansion moved behind the boundary
+  (the optimizer inlines the call; object preparation discards unreferenced
+  weak functions at `-O1+`, and unreferenced `trivial_lifecycle=yes`
+  wrappers at every level - `RemoveUnreferencedWeakFunctions`).
+- `pass=gpr_pair` is no longer spelled in LowIR; host-mode object lowering
+  classifies direct 9..16-byte object params itself.
+- `trivial_lifecycle=yes` marks synthesized ctor/dtor definitions whose
+  lowered bodies do nothing beyond parameter spills.
+- Separate-compilation implicit assignment bodies transfer class-type
+  members through their operators (the raw-storage prefix stops at the
+  first class member); function low names spell with spaces removed
+  (`operator =` -> `operator_`), matching the reference presentation.
+- Wide (non-scalar-width) value-initialized temporaries zero-fill in
+  separate mode: unrolled i64 stores up to 32 bytes, zeroinit beyond.
 - `cppgm++ -c` sniffs LowIR input (leading `declare`/`global`/`function`/
-  `alias` line) and skips the frontend; both compile paths run
-  `parse -> validate -> optimize(level) -> MIR -> object`.
+  `alias` token) and skips the frontend; both compile paths share
+  `CompileLowIRProgramToModule` = `optimize(level) -> weak discard ->
+  validate -> MIR -> object`, which is what makes the object roundtrip
+  byte-exact by construction.
 
 ## Validation
 

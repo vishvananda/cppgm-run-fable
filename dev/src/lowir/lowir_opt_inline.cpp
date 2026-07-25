@@ -358,7 +358,15 @@ bool Inliner::Expand(const InlinePlan & plan)
 	const LowIRFunction & callee = *plan.callee;
 	LowIRBlock & call_block = fn.blocks[plan.site.block];
 	LowIRInstruction call = call_block.instructions[plan.site.index];
-	bool multi_block = callee.blocks.size() > 1;
+	// A single-block callee pastes inline only when it is call-free;
+	// pasted calls keep the split continuation so later inline rounds
+	// land their joins on this site's cont label (reference parity).
+	bool has_calls = false;
+	for(size_t b = 0; b < callee.blocks.size(); b++)
+		for(size_t k = 0; k < callee.blocks[b].instructions.size(); k++)
+			if(callee.blocks[b].instructions[k].opcode == LOWIR_INS_CALL)
+				has_calls = true;
+	bool multi_block = callee.blocks.size() > 1 || has_calls;
 	bool multi_return = plan.returns.size() > 1;
 	const string cont_label = plan.prefix + "cont";
 

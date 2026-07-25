@@ -95,7 +95,8 @@ bool check_symbol_metadata_item(const string & key, const string & value,
 			fail("unknown binding value: " + value);
 		return true;
 	}
-	if(key == "keep_alias" || key == "prefer_local" || key == "object_root")
+	if(key == "keep_alias" || key == "prefer_local" ||
+	   key == "object_root" || key == "trivial_lifecycle")
 	{
 		if(!value_in(value, kYesNo))
 			fail("bad " + key + " value: " + value);

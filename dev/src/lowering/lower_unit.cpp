@@ -275,6 +275,7 @@ void LowerProgram::ApplyDeferredDefinition(const SemNode& item,
 		info.demand_strong = item.demand_strong;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
+		info.unwind_declared = item.noexcept_decl;
 		// An instantiated friend body binds only when odr-used
 		// (14.7.1), so it never counts as definition-time demand.
 		info.friend_def = item.entity_scope &&
@@ -418,13 +419,14 @@ LowFunctionInfo& LowerProgram::FunctionEntry(const Scope* scope,
 					? string("operator_delete")
 				 : string("operator_delete_array"));
 		info.unwind_no = builtin.compare(0, 15, "operator_delete") == 0;
+		info.unwind_declared = info.unwind_no;
 		info.index = functions_.size();
 		function_index_[key] = functions_.size();
 		functions_.push_back(info);
 		return functions_.back();
 	}
 	size_t overload = LowerOverloadIndex(scope, name, type);
-	string base = LowerScopePath(scope) + LowerSanitizeName(name);
+	string base = LowerScopePath(scope) + LowerSanitizeFunctionName(name);
 	if (overload)
 		base += "__ov" + to_string(overload + 1);
 	info.low_name = info.is_main ? "main" : UniqueSymbol(base);
@@ -534,7 +536,7 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	info.type = type;
 	info.is_method = true;
 	info.special_code = special_code;
-	string base = LowerScopePath(scope) + LowerSanitizeName(name);
+	string base = LowerScopePath(scope) + LowerSanitizeFunctionName(name);
 	size_t overload = special_code.empty()
 		? LowerMemberOverloadIndex(scope, name, type) : 0;
 	if (overload)
@@ -618,6 +620,7 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 		info.weak = def->second->inline_def;
 		info.definition = def->second;
 		info.unwind_no = def->second->unwind_no;
+		info.unwind_declared = def->second->noexcept_decl;
 		// PA36 14.7.2p10 host mode: in-class members of an
 		// extern-declared specialization reference the owning TU's
 		// copy like the host compiler does (an explicit-instantiation
@@ -649,6 +652,7 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 			member.weak = false;
 			member.definition = &item;
 			member.unwind_no = item.unwind_no;
+			member.unwind_declared = item.noexcept_decl;
 		}
 		return;
 	}
@@ -691,6 +695,7 @@ void LowerProgram::RegisterFunction(const SemNode& item, bool defined)
 		info.defined = true;
 		info.definition = &item;
 		info.unwind_no = item.unwind_no;
+		info.unwind_declared = item.noexcept_decl;
 		// 7.1.2p4: inline definitions emit weak, on demand. Inline
 		// (non-constexpr) bodies keep the conservative demand sweep;
 		// constexpr bodies used only in constant expressions must not

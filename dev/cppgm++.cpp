@@ -12,6 +12,10 @@
 #include "ast/ast_parser.h"
 #include "ast/ast_printer.h"
 #include "lowering/lower_program.h"
+#include "lowir/lowir_dump.h"
+#include "lowir/lowir_opt.h"
+#include "lowir/lowir_parser.h"
+#include "lowir/lowir_validate.h"
 #include "parse/parse_token.h"
 #include "post_token.h"
 #include "post_tokenizer.h"
@@ -31,6 +35,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -591,14 +596,33 @@ int run_preprocess_mode(const DriverInvocation & invocation)
   return EXIT_SUCCESS;
 }
 
+// PA37: `-c` accepts serialized LowIR text beside C++ sources; the
+// LowIR route skips the frontend and runs the same optimize-then-object
+// pipeline.
+bool read_lowir_input_file(const string & path, string & text)
+{
+  ifstream in(path.c_str(), ios::binary);
+  if(!in) {
+    return false;
+  }
+  ostringstream data;
+  data << in.rdbuf();
+  text = data.str();
+  return toolchain::LooksLikeLowIRText(text);
+}
+
 int run_compile_mode(const DriverInvocation & invocation)
 {
   if(invocation.inputs.size() != 1) {
     throw logic_error("compile mode takes exactly one source file");
   }
   const toolchain::CompileOptions options = make_compile_options(invocation);
+  string lowir_text;
   toolchain::ObjectModule module =
-      toolchain::CompileSourceFileToModule(invocation.inputs[0], options);
+      read_lowir_input_file(invocation.inputs[0], lowir_text)
+          ? toolchain::CompileLowIRTextToModule(lowir_text, options)
+          : toolchain::CompileSourceFileToModule(invocation.inputs[0],
+                                                 options);
   const string outfile = invocation.explicit_outfile
       ? invocation.outfile
       : default_object_outfile(invocation.inputs[0]);
@@ -843,8 +867,52 @@ int run_emit_semantics_mode(const vector<string> & args)
   return EXIT_SUCCESS;
 }
 
+void collect_stdinc_path_env(vector<string> & dirs);
+
+// PA37 driver-surface emit: `--emit-lowir` with a debug-level flag runs
+// the hosted separate-compilation lowering the object path compiles,
+// then the LowIR optimizer at the requested level, then the canonical
+// dump. The classic whole-program emit (no -g flag) is untouched.
+int run_emit_lowir_driver_mode(const vector<string> & args)
+{
+  DriverInvocation invocation = parse_driver_invocation(args);
+  if(!invocation.explicit_outfile) {
+    throw logic_error("invalid usage");
+  }
+  collect_stdinc_path_env(invocation.preprocess.stdinc_dirs);
+  const toolchain::CompileOptions options = make_compile_options(invocation);
+
+  string text;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    text += toolchain::LowerSourceFileToLowIRText(invocation.inputs[i],
+                                                  options);
+  }
+
+  LowIRProgram program = ParseLowIRProgram(text);
+  ValidateLowIRProgram(program, false);
+  PruneUnreferencedLowIRDeclares(program);
+  OptimizeLowIRProgram(program, invocation.optimize);
+
+  ofstream out(invocation.outfile.c_str());
+  if(!out) {
+    throw runtime_error("cannot create output file: " + invocation.outfile);
+  }
+  DumpLowIRProgram(program, out);
+  return EXIT_SUCCESS;
+}
+
 int run_emit_lowir_mode(const vector<string> & args)
 {
+  bool driver_surface = false;
+  for(size_t i = 0; i < args.size(); ++i) {
+    if(is_debug_info_flag(args[i])) {
+      driver_surface = true;
+    }
+  }
+  if(driver_surface) {
+    return run_emit_lowir_driver_mode(args);
+  }
+
   SourceOutputInvocation invocation =
       parse_source_output_invocation(args, true);
 

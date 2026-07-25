@@ -395,6 +395,27 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 				Emit("store " + width + " 0, " + this_text);
 		}
 	}
+	else if (action.value_zero_fill_wide && !action.ctor_addressed &&
+	         !this_text.empty() && program_.SeparateCompilation())
+	{
+		// PA37 host-parity fill of a wide value-initialized temporary:
+		// small 8-byte-granular objects unroll into i64 stores; anything
+		// else keeps one zeroinit.
+		unsigned long long size = action.value.bits;
+		if (size % 8 == 0 && size <= 32)
+		{
+			Emit("store i64 0, " + this_text);
+			for (unsigned long long at = 8; at < size; at += 8)
+			{
+				string part = NewTemp();
+				Emit(part + " = index i8 " + this_text + ", " +
+				     to_string(at));
+				Emit("store i64 0, " + part);
+			}
+		}
+		else
+			Emit("zeroinit " + to_string(size) + "x1 " + this_text);
+	}
 	// A declared object's action holds [callee, &object, args...]; a
 	// temporary's holds [callee, args...].
 	const SemNode& call = *action.children[0];
@@ -407,12 +428,11 @@ void FunctionLowerer::LowerConstructorCall(const SemNode& action,
 	if (program_.SeparateCompilation() &&
 	    program_.TrivialDefaultConstruction(callee))
 		return;
-	// PA33 -O1: a simple inline constructor (only literal member
-	// stores) expands at the call site, so its linkonce body is never
-	// demanded and the optimized host object carries no C1/C2 symbol.
-	if (program_.SeparateCompilation() && program_.OptimizeLevel() >= 1 &&
-	    LowerSimpleInlineConstruction(action, callee, this_text))
-		return;
+	// PA37: the -O1 call-site expansion of simple inline constructors
+	// moved behind the LowIR boundary (the optimizer inlines the call
+	// and object lowering drops unreferenced trivial_lifecycle
+	// wrappers), so the serialized unit no longer changes with the
+	// optimization level.
 	size_t first_arg = action.ctor_addressed ? 2 : 1;
 	ctor_depth_++;
 	bool saved = in_lifetime_action_;

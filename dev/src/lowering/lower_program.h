@@ -63,6 +63,11 @@ struct LowFunctionInfo
 	bool deleted;
 	bool c_linkage;
 	bool unwind_no;
+	// PA37: only the declared/implicit exception specification, not
+	// the derived body fact. Separate-compilation (driver) LowIR
+	// prints unwind=no on definitions from this; the object layer
+	// re-derives the body fact from LowIR (lowir_unwind.h).
+	bool unwind_declared = false;
 	bool internal;
 	// PA15: in-class definitions emit weak and only on demand; methods
 	// carry the hidden `this` first parameter. `demand_strong` keeps

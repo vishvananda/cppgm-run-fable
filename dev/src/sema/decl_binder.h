@@ -25,6 +25,10 @@ public:
 	explicit DeclBinder(TypesModel& model);
 	virtual ~DeclBinder() {}
 
+	// PA37 separate-compilation (host-parity) binding mode: synthesized
+	// assignments transfer class-type members through their operators.
+	void SetSeparateCompilation() { separate_compilation_ = true; }
+
 	virtual void BindTranslationUnit(const AstDecl& unit);
 
 	// ITypeBuilderHost
@@ -40,6 +44,7 @@ public:
 	virtual void RequireCompleteForLayout(const TypePtr& type);
 
 protected:
+	bool separate_compilation_ = false;
 	// The builtin typedef names of the 128-bit extended integer types
 	// resolve when no declaration shadows them; null otherwise. One
 	// owner for the PA11 and PA12+ type-name resolvers.

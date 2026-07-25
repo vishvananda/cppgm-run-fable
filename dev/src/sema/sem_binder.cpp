@@ -1142,6 +1142,7 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	item->entity_scope = declaring;
 	item->entity_name = name;
 	item->unwind_no = composed.noexcept_simple;
+	item->noexcept_decl = composed.noexcept_simple;
 	item->throw_spec = composed.throw_spec_types;
 	item->alias_collapsed = composed_alias_collapsed_;
 	// 7.1.2p4: an inline function emits weak and only where used;

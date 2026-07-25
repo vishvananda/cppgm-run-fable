@@ -20,6 +20,7 @@ struct Value
 	enum EKind { TOP, KNOWN, VARYING };
 	EKind kind = TOP;
 	LowIROperand op;
+	LowIRType slot_type;   // slot states: the storing instruction's type
 
 	bool is_literal() const
 	{
@@ -87,12 +88,23 @@ struct FoldPass
 	                    bool & changed) const;
 	void SeedHandlerState(const vector<string> & stack, size_t at,
 	                      const SlotState & slots, bool & changed);
+	struct FixpointRound
+	{
+		bool changed = false;
+		set<size_t> exec;
+		set<std::pair<size_t, size_t> > edges;
+		vector<char> pending;
+		vector<size_t> work;
+		set<size_t> visited;
+	};
+	void ProcessBlock(size_t b, FixpointRound & round);
 	bool RunFixpoint();
 	void SelectorTargets(const LowIRInstruction & ins,
 	                     vector<size_t> & out) const;
 	bool LexicallyBefore(const string & temp, size_t block,
 	                     size_t index) const;
 	bool SubstituteUses();
+	bool MaterializePromotedPtrLoads();
 	bool Reassociate();
 	bool FoldTerminators();
 };
@@ -642,7 +654,8 @@ Value FoldPass::EvaluateInstruction(const LowIRInstruction & ins,
 		{
 			SlotState::const_iterator found = slots.find(storage.name);
 			if(found != slots.end() &&
-			   found->second.kind == Value::KNOWN)
+			   found->second.kind == Value::KNOWN &&
+			   found->second.slot_type.kind == ins.type.kind)
 				return found->second;
 			return MakeVarying();
 		}
@@ -657,6 +670,7 @@ Value FoldPass::EvaluateInstruction(const LowIRInstruction & ins,
 			Value value = ResolveOperand(ins.operands[0]);
 			if(value.kind != Value::KNOWN)
 				value = MakeVarying();
+			value.slot_type = ins.type;
 			slots[storage.name] = value;
 		}
 		return MakeVarying();
@@ -741,16 +755,12 @@ bool FoldPass::RunFixpoint()
 
 	for(int iter = 0; iter < 64; iter++)
 	{
-		bool changed = false;
 		map<string, Value> prior_temps;
 		prior_temps.swap(temps);
-		set<size_t> new_exec;
-		set<std::pair<size_t, size_t> > new_edges;
-		vector<char> pending(fn.blocks.size(), 0);
-		vector<size_t> work;
-		work.push_back(0);
-		pending[0] = 1;
-		set<size_t> visited;
+		FixpointRound round;
+		round.pending.assign(fn.blocks.size(), 0);
+		round.work.push_back(0);
+		round.pending[0] = 1;
 
 		// Entry slot state: unknown storage reads stay loads.
 		SlotState entry_state;
@@ -760,84 +770,12 @@ bool FoldPass::RunFixpoint()
 		bool merge_ignored = false;
 		MergeSlotState(state_in[0], entry_state, merge_ignored);
 
-		while(!work.empty())
+		while(!round.work.empty())
 		{
-			size_t b = work.back();
-			work.pop_back();
-			pending[b] = 0;
-			visited.insert(b);
-			new_exec.insert(b);
-			SlotState slots = state_in[b];
-			vector<string> stack = stack_in[b];
-			const LowIRBlock & block = fn.blocks[b];
-			for(size_t k = 0; k < block.instructions.size(); k++)
-			{
-				const LowIRInstruction & ins = block.instructions[k];
-				if(ins.opcode == LOWIR_INS_EH_TRY ||
-				   ins.opcode == LOWIR_INS_EH_CLEANUP)
-					stack.push_back(ins.block_targets[0]);
-				else if(ins.opcode == LOWIR_INS_EH_END)
-				{
-					if(!stack.empty())
-						stack.pop_back();
-					else
-						eh_stack_sane = false;
-				}
-				if(MayTransferToHandler(*view.context, ins))
-					SeedHandlerState(stack, b, slots, changed);
-				Value value = EvaluateInstruction(ins, slots);
-				if(!ins.result.empty())
-				{
-					map<string, Value>::iterator known =
-						temps.find(ins.result);
-					if(known == temps.end())
-						temps[ins.result] = value;
-					else if(known->second.kind == Value::KNOWN &&
-					        !SameValue(known->second, value))
-						known->second = MakeVarying();
-				}
-			}
-			if(block.instructions.empty())
-				continue;
-			const LowIRInstruction & term = block.instructions.back();
-			vector<size_t> succs;
-			SelectorTargets(term, succs);
-			for(size_t s = 0; s < succs.size(); s++)
-			{
-				new_edges.insert(std::make_pair(b, succs[s]));
-				bool merged = false;
-				MergeSlotState(state_in[succs[s]], slots, merged);
-				if(stack_in[succs[s]].empty() && !stack.empty() &&
-				   visited.count(succs[s]) == 0)
-					stack_in[succs[s]] = stack;
-				if((merged || !visited.count(succs[s])) &&
-				   !pending[succs[s]])
-				{
-					pending[succs[s]] = 1;
-					work.push_back(succs[s]);
-				}
-			}
-			// Handler targets of executable eh pushes stay reachable.
-			for(size_t k = 0; k < block.instructions.size(); k++)
-			{
-				const LowIRInstruction & ins = block.instructions[k];
-				if(ins.opcode != LOWIR_INS_EH_TRY &&
-				   ins.opcode != LOWIR_INS_EH_CLEANUP)
-					continue;
-				map<string, size_t>::const_iterator target =
-					view.block_index.find(ins.block_targets[0]);
-				if(target == view.block_index.end())
-					continue;
-				size_t h = target->second;
-				new_edges.insert(std::make_pair(b, h));
-				bool merged = false;
-				MergeSlotState(state_in[h], handler_in[h], merged);
-				if((merged || !visited.count(h)) && !pending[h])
-				{
-					pending[h] = 1;
-					work.push_back(h);
-				}
-			}
+			size_t b = round.work.back();
+			round.work.pop_back();
+			round.pending[b] = 0;
+			ProcessBlock(b, round);
 		}
 
 		bool temps_stable = temps.size() == prior_temps.size();
@@ -850,14 +788,94 @@ bool FoldPass::RunFixpoint()
 				temps_stable = prior != prior_temps.end() &&
 					SameValue(prior->second, it->second);
 			}
-		bool stable = new_exec == exec_blocks && new_edges == exec_edges &&
-			temps_stable && !changed;
-		exec_blocks.swap(new_exec);
-		exec_edges.swap(new_edges);
+		bool stable = round.exec == exec_blocks &&
+			round.edges == exec_edges && temps_stable && !round.changed;
+		exec_blocks.swap(round.exec);
+		exec_edges.swap(round.edges);
 		if(stable)
 			return true;
 	}
 	return false;
+}
+
+void FoldPass::ProcessBlock(size_t b, FixpointRound & round)
+{
+	bool & changed = round.changed;
+	set<size_t> & visited = round.visited;
+	set<size_t> & new_exec = round.exec;
+	set<std::pair<size_t, size_t> > & new_edges = round.edges;
+	vector<char> & pending = round.pending;
+	vector<size_t> & work = round.work;
+	visited.insert(b);
+	new_exec.insert(b);
+	SlotState slots = state_in[b];
+	vector<string> stack = stack_in[b];
+	const LowIRBlock & block = fn.blocks[b];
+	for(size_t k = 0; k < block.instructions.size(); k++)
+	{
+		const LowIRInstruction & ins = block.instructions[k];
+		if(ins.opcode == LOWIR_INS_EH_TRY ||
+		   ins.opcode == LOWIR_INS_EH_CLEANUP)
+			stack.push_back(ins.block_targets[0]);
+		else if(ins.opcode == LOWIR_INS_EH_END)
+		{
+			if(!stack.empty())
+				stack.pop_back();
+			else
+				eh_stack_sane = false;
+		}
+		if(MayTransferToHandler(*view.context, ins))
+			SeedHandlerState(stack, b, slots, changed);
+		Value value = EvaluateInstruction(ins, slots);
+		if(!ins.result.empty())
+		{
+			map<string, Value>::iterator known = temps.find(ins.result);
+			if(known == temps.end())
+				temps[ins.result] = value;
+			else if(known->second.kind == Value::KNOWN &&
+			        !SameValue(known->second, value))
+				known->second = MakeVarying();
+		}
+	}
+	if(block.instructions.empty())
+		return;
+	vector<size_t> succs;
+	SelectorTargets(block.instructions.back(), succs);
+	for(size_t s = 0; s < succs.size(); s++)
+	{
+		new_edges.insert(std::make_pair(b, succs[s]));
+		bool merged = false;
+		MergeSlotState(state_in[succs[s]], slots, merged);
+		if(stack_in[succs[s]].empty() && !stack.empty() &&
+		   visited.count(succs[s]) == 0)
+			stack_in[succs[s]] = stack;
+		if((merged || !visited.count(succs[s])) && !pending[succs[s]])
+		{
+			pending[succs[s]] = 1;
+			work.push_back(succs[s]);
+		}
+	}
+	// Handler targets of executable eh pushes stay reachable.
+	for(size_t k = 0; k < block.instructions.size(); k++)
+	{
+		const LowIRInstruction & ins = block.instructions[k];
+		if(ins.opcode != LOWIR_INS_EH_TRY &&
+		   ins.opcode != LOWIR_INS_EH_CLEANUP)
+			continue;
+		map<string, size_t>::const_iterator target =
+			view.block_index.find(ins.block_targets[0]);
+		if(target == view.block_index.end())
+			continue;
+		size_t h = target->second;
+		new_edges.insert(std::make_pair(b, h));
+		bool merged = false;
+		MergeSlotState(state_in[h], handler_in[h], merged);
+		if((merged || !visited.count(h)) && !pending[h])
+		{
+			pending[h] = 1;
+			work.push_back(h);
+		}
+	}
 }
 
 bool FoldPass::LexicallyBefore(const string & temp, size_t block,
@@ -923,6 +941,54 @@ bool FoldPass::SubstituteUses()
 					changed = true;
 				}
 			}
+		}
+	}
+	return changed;
+}
+
+// A promotable pointer slot holding a literal cannot substitute into
+// storage positions, so its loads rematerialize as `const ptr`
+// instructions in place (keeping their result names); the slot's
+// stores then die.
+bool FoldPass::MaterializePromotedPtrLoads()
+{
+	if(promotable.empty())
+		return false;
+	bool changed = false;
+	for(set<size_t>::const_iterator b = exec_blocks.begin();
+	    b != exec_blocks.end(); ++b)
+	{
+		SlotState slots = state_in[*b];
+		LowIRBlock & block = fn.blocks[*b];
+		for(size_t k = 0; k < block.instructions.size(); k++)
+		{
+			LowIRInstruction & ins = block.instructions[k];
+			bool qualifies = ins.opcode == LOWIR_INS_LOAD &&
+				ins.type.kind == LOWIR_TYPE_PTR &&
+				ins.operands[0].kind == LOWIR_OPERAND_SLOT &&
+				promotable.count(ins.operands[0].name);
+			Value state;
+			if(qualifies)
+			{
+				SlotState::const_iterator found =
+					slots.find(ins.operands[0].name);
+				if(found != slots.end())
+					state = found->second;
+			}
+			Value ignored = EvaluateInstruction(ins, slots);
+			(void)ignored;
+			if(!qualifies || state.kind != Value::KNOWN ||
+			   state.op.kind != LOWIR_OPERAND_LITERAL ||
+			   state.slot_type.kind != LOWIR_TYPE_PTR ||
+			   state.op.literal.empty())
+				continue;
+			LowIRInstruction rewritten;
+			rewritten.opcode = LOWIR_INS_CONST;
+			rewritten.result = ins.result;
+			rewritten.type = ins.type;
+			rewritten.operands.push_back(state.op);
+			ins = rewritten;
+			changed = true;
 		}
 	}
 	return changed;
@@ -1061,6 +1127,7 @@ bool FoldAndPropagate(OptFunction & view)
 	}
 	bool changed = false;
 	changed |= pass.SubstituteUses();
+	changed |= pass.MaterializePromotedPtrLoads();
 	changed |= pass.Reassociate();
 	changed |= pass.FoldTerminators();
 	return changed;

@@ -14,7 +14,8 @@ namespace lowir_to_mir {
 // CallArgTargetsHome consumes the same slots when it decides forwarding.
 std::vector<ArgSlot> ClassifyCallArgs(
 	const std::vector<LowIRParam> & params, const LowIRInstruction & ins,
-	const std::map<std::string, ValueInfo> & values)
+	const std::map<std::string, ValueInfo> & values,
+	bool host_pair_default)
 {
 	std::vector<ArgSlot> slots;
 	int gpr = 0, xmm = 0;
@@ -63,8 +64,14 @@ std::vector<ArgSlot> ClassifyCallArgs(
 			stack += slot.stack_bytes;
 		}
 		else if(type.kind == LOWIR_TYPE_OBJ && type.obj_bytes > 8) {
+			// PA37: host-mode direct 9..16-byte objects default to the
+			// SysV two-eightbyte form; the serialized LowIR no longer
+			// carries a pass=gpr_pair annotation for it.
 			bool pair = a < params.size() &&
-				params[a].metadata.find("pass") == "gpr_pair";
+				(params[a].metadata.find("pass") == "gpr_pair" ||
+				 (host_pair_default &&
+				  params[a].metadata.find("pass").empty() &&
+				  params[a].type.obj_bytes <= 16));
 			if(pair && gpr <= 4) {
 				slot.kind = ArgSlot::AS_GPR_PAIR;
 				slot.ordinal = gpr;
@@ -154,7 +161,8 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 	else {
 		throw std::runtime_error("call to unknown callee @" + ins.callee);
 	}
-	std::vector<ArgSlot> slots = ClassifyCallArgs(*params, ins, values_);
+	std::vector<ArgSlot> slots = ClassifyCallArgs(*params, ins, values_,
+	                                              facts_.host_object);
 	long long stack_adjust = stack_bytes_of(slots);
 	int gpr_count = 0;
 	for(size_t i = 0; i < slots.size(); i++)

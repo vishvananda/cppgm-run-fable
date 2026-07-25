@@ -489,7 +489,13 @@ unsigned long long SemBinder::TrivialStoragePrefix(
 		if (field.name.empty() && field.bit_width == 0)
 			continue;  // zero-width alignment row
 		const ClassInfo* member = SubobjectClass(field.type);
-		if (member && !TransferTrivial(*member, is_move, assign_form))
+		// PA37 host-parity mode: assignment forms transfer class-type
+		// members through their own assignment operators, so the raw
+		// storage prefix ends at the first class member even when its
+		// operator is trivial. Whole-program mode keeps the pinned
+		// full-storage shape.
+		if (member && ((assign_form && separate_compilation_) ||
+		               !TransferTrivial(*member, is_move, assign_form)))
 		{
 			first_suffix = i;
 			return field.offset;
@@ -953,6 +959,9 @@ void SemBinder::BuildAssignSpecial(ClassInfo& cls, size_t overload_index,
 		if (NodeMayThrow(*node->children[i]))
 			may_throw = true;
 	node->unwind_no = !may_throw;
+	// 15.4p14: the computed fact is the implicit exception
+	// specification, so it counts as declared.
+	node->noexcept_decl = !may_throw;
 	if (is_move)
 		cls.move_assign_unwind_no = !may_throw;
 	else

@@ -218,15 +218,44 @@ string FunctionLowerer::Header() const
 		meta.push_back("role=" + info_.role);
 	if (def_.type->variadic)
 		meta.push_back("arity=variadic");
-	if (info_.unwind_no)
+	// PA37 separate compilation: only the declared specification is a
+	// LowIR header fact; the body-derived fact is re-derived from the
+	// serialized LowIR by the object layer.
+	if (program_.SeparateCompilation() ? info_.unwind_declared
+	                                   : info_.unwind_no)
 		meta.push_back("unwind=no");
 	if (info_.c_linkage)
 		meta.push_back("linkage=c");
 	meta.push_back(info_.internal ? "binding=internal"
 	               : info_.weak && !info_.demand_strong ? "binding=weak"
 	                                                    : "binding=strong");
-	if (!info_.object_name.empty())
+	if (!info_.object_name.empty() && info_.object_name != info_.low_name)
 		meta.push_back("object=" + info_.object_name);
+	// PA37: a synthesized constructor/destructor whose lowered body
+	// does nothing beyond its parameter spills is a trivial lifecycle
+	// wrapper; the serialized LowIR carries that fact for object
+	// lowering.
+	if (program_.SeparateCompilation() && def_.synthesized &&
+	    !info_.special_code.empty() && info_.special_code != "D0" &&
+	    blocks_.size() == 1)
+	{
+		bool trivial = true;
+		for (size_t i = 0; i < blocks_[0].lines.size(); i++)
+		{
+			const string& line = blocks_[0].lines[i];
+			if (line == "return void")
+				continue;
+			bool spill = false;
+			for (size_t p = 0; p < params_.size() && !spill; p++)
+				if (line == "store " + params_[p].type_text + " %" +
+				    params_[p].low_name + ", $" + params_[p].low_name)
+					spill = true;
+			if (!spill)
+				trivial = false;
+		}
+		if (trivial)
+			meta.push_back("trivial_lifecycle=yes");
+	}
 	if (info_.object_root)
 		meta.push_back("object_root=yes");
 	if (info_.is_main)
@@ -1376,7 +1405,9 @@ string LowerProgram::RenderFunctionDeclare(const LowFunctionInfo& info)
 	meta.push_back(info.internal ? "binding=internal"
 	               : info.fn_spec ? "binding=weak"
 	                              : "binding=strong");
-	if (!info.object_name.empty())
+	// A self-spelled object name adds nothing: resolution falls back
+	// to the low name.
+	if (!info.object_name.empty() && info.object_name != info.low_name)
 		meta.push_back("object=" + info.object_name);
 	string metadata;
 	for (size_t i = 0; i < meta.size(); i++)

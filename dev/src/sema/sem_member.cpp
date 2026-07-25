@@ -539,6 +539,14 @@ SemValue SemExprAnalyzer::MakeTemporaryObject(
 		action->value_zero_fill = true;
 		action->value = ConstValue(FT_UNSIGNED_LONG_INT, cls->size);
 	}
+	else if (value_init && !user_provided && !cls->is_empty)
+	{
+		// PA37: wider objects still zero-fill on the host-parity
+		// (separate-compilation) surface; the whole-program
+		// presentation keeps the pinned no-fill shape.
+		action->value_zero_fill_wide = true;
+		action->value = ConstValue(FT_UNSIGNED_LONG_INT, cls->size);
+	}
 	action->type = RemoveTopCv(class_type);
 	action->category = VC_PRVALUE;
 	if (host_.Classes().NeedsDestruction(*cls))

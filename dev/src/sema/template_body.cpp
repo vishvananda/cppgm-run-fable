@@ -199,6 +199,7 @@ SemNodePtr SemBinder::MakeInstantiatedBodyNode(
 	item->entity_scope = spec.param_scope;
 	item->entity_name = spec.name;
 	item->unwind_no = composed.noexcept_simple;
+	item->noexcept_decl = composed.noexcept_simple;
 	item->throw_spec = composed.throw_spec_types;
 	item->inline_def = true;
 	item->demand_strong = spec.explicit_def && !spec.explicit_inline;

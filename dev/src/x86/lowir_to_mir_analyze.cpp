@@ -482,7 +482,8 @@ bool FunctionLowering::CallArgTargetsHome(int position, int arg_index,
 	const std::vector<LowIRParam> * params = FindCalleeParams(call, facts_);
 	if(!params)
 		return false;
-	std::vector<ArgSlot> slots = ClassifyCallArgs(*params, call, values_);
+	std::vector<ArgSlot> slots = ClassifyCallArgs(*params, call, values_,
+	                                              facts_.host_object);
 	if(arg_index < 0 || arg_index >= (int)slots.size())
 		return false;
 	return slots[arg_index].kind == ArgSlot::AS_GPR &&

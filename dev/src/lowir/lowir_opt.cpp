@@ -217,6 +217,129 @@ bool OptimizeFunction(LowIRFunction & fn, LowIROptContext & context)
 
 }  // namespace
 
+void PruneUnreferencedLowIRDeclares(LowIRProgram & program)
+{
+	set<string> referenced;
+	for(size_t f = 0; f < program.functions.size(); f++)
+	{
+		const LowIRFunction & fn = program.functions[f];
+		string tls = fn.metadata.find("tls_for");
+		if(tls.size() > 1 && tls[0] == '@')
+			referenced.insert(tls.substr(1));
+		for(size_t b = 0; b < fn.blocks.size(); b++)
+			for(size_t k = 0; k < fn.blocks[b].instructions.size(); k++)
+			{
+				const LowIRInstruction & ins =
+					fn.blocks[b].instructions[k];
+				if(ins.opcode == LOWIR_INS_CALL && !ins.callee_is_temp)
+					referenced.insert(ins.callee);
+				for(size_t o = 0; o < ins.operands.size(); o++)
+					if(ins.operands[o].kind == LOWIR_OPERAND_GLOBAL)
+						referenced.insert(ins.operands[o].name);
+				for(size_t o = 0; o < ins.switch_values.size(); o++)
+					if(ins.switch_values[o].kind == LOWIR_OPERAND_GLOBAL)
+						referenced.insert(ins.switch_values[o].name);
+				for(size_t t = 0; t < ins.eh_types.size(); t++)
+					referenced.insert(ins.eh_types[t]);
+			}
+	}
+	for(size_t g = 0; g < program.globals.size(); g++)
+	{
+		const LowIRGlobal & global = program.globals[g];
+		if(global.init == LOWIR_GLOBAL_ADDR)
+			referenced.insert(global.addr_symbol);
+		for(size_t i = 0; i < global.items.size(); i++)
+			if(global.items[i].kind == LOWIR_DATA_ADDR)
+				referenced.insert(global.items[i].symbol);
+	}
+	for(size_t a = 0; a < program.aliases.size(); a++)
+		referenced.insert(program.aliases[a].target);
+
+	vector<LowIRFunction> kept_functions;
+	for(size_t f = 0; f < program.functions.size(); f++)
+	{
+		const LowIRFunction & fn = program.functions[f];
+		bool keep = fn.is_definition || referenced.count(fn.name) ||
+			fn.metadata.has("role") || fn.metadata.has("tls_for");
+		if(keep)
+			kept_functions.push_back(fn);
+	}
+	program.functions.swap(kept_functions);
+
+	vector<LowIRGlobal> kept_globals;
+	for(size_t g = 0; g < program.globals.size(); g++)
+	{
+		const LowIRGlobal & global = program.globals[g];
+		bool keep = global.is_definition ||
+			referenced.count(global.name) || global.metadata.has("role");
+		if(keep)
+			kept_globals.push_back(global);
+	}
+	program.globals.swap(kept_globals);
+}
+
+void RemoveUnreferencedWeakFunctions(LowIRProgram & program, int level)
+{
+	for(;;)
+	{
+		set<string> referenced;
+		for(size_t f = 0; f < program.functions.size(); f++)
+		{
+			const LowIRFunction & fn = program.functions[f];
+			for(size_t b = 0; b < fn.blocks.size(); b++)
+				for(size_t k = 0;
+				    k < fn.blocks[b].instructions.size(); k++)
+				{
+					const LowIRInstruction & ins =
+						fn.blocks[b].instructions[k];
+					if(ins.opcode == LOWIR_INS_CALL &&
+					   !ins.callee_is_temp)
+						referenced.insert(ins.callee);
+					for(size_t o = 0; o < ins.operands.size(); o++)
+						if(ins.operands[o].kind == LOWIR_OPERAND_GLOBAL)
+							referenced.insert(ins.operands[o].name);
+					for(size_t t = 0; t < ins.eh_types.size(); t++)
+						referenced.insert(ins.eh_types[t]);
+				}
+		}
+		for(size_t g = 0; g < program.globals.size(); g++)
+		{
+			const LowIRGlobal & global = program.globals[g];
+			if(global.init == LOWIR_GLOBAL_ADDR)
+				referenced.insert(global.addr_symbol);
+			for(size_t i = 0; i < global.items.size(); i++)
+				if(global.items[i].kind == LOWIR_DATA_ADDR)
+					referenced.insert(global.items[i].symbol);
+		}
+
+		set<string> removed;
+		vector<LowIRFunction> kept;
+		for(size_t f = 0; f < program.functions.size(); f++)
+		{
+			const LowIRFunction & fn = program.functions[f];
+			bool discardable = fn.is_definition &&
+				fn.metadata.find("binding") == "weak" &&
+				!fn.metadata.has("role") &&
+				!fn.metadata.has("tls_for") &&
+				fn.metadata.find("object_root") != "yes" &&
+				(level >= 1 ||
+				 fn.metadata.find("trivial_lifecycle") == "yes");
+			if(discardable && !referenced.count(fn.name))
+				removed.insert(fn.name);
+			else
+				kept.push_back(fn);
+		}
+		if(removed.empty())
+			return;
+		program.functions.swap(kept);
+		vector<LowIRAlias> kept_aliases;
+		for(size_t a = 0; a < program.aliases.size(); a++)
+			if(!removed.count(program.aliases[a].target))
+				kept_aliases.push_back(program.aliases[a]);
+		program.aliases.swap(kept_aliases);
+	}
+}
+
 void OptimizeLowIRProgram(LowIRProgram & program, int level)
 {
 	if(level <= 0)

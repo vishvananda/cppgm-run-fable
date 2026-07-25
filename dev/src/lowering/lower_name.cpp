@@ -1106,6 +1106,15 @@ string LowerSanitizeName(const string& name)
 	return out;
 }
 
+string LowerSanitizeFunctionName(const string& name)
+{
+	string compact;
+	for (size_t i = 0; i < name.size(); i++)
+		if (name[i] != ' ')
+			compact += name[i];
+	return LowerSanitizeName(compact);
+}
+
 size_t LowerMemberOverloadIndex(const Scope* scope, const string& name,
                                 const TypePtr& adjusted)
 {

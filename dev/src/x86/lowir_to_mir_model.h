@@ -138,7 +138,8 @@ struct ArgSlot
 
 std::vector<ArgSlot> ClassifyCallArgs(
 	const std::vector<LowIRParam> & params, const LowIRInstruction & ins,
-	const std::map<std::string, ValueInfo> & values);
+	const std::map<std::string, ValueInfo> & values,
+	bool host_pair_default = false);
 
 // Register-discipline constants (defined in lowir_to_mir_value.cpp): the
 // SysV integer argument registers in ABI order, and the GPR allocation

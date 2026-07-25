@@ -265,11 +265,10 @@ void LowerAbiParameter(const TypePtr& param, string& type_text,
 			// so whole-program LowIR shapes stay pinned; SSE-classified
 			// eightbytes stay on the current memory path (no fixture
 			// exercises them yet - see pa33/plan.md).
-			unsigned long long size = TypeSize(bare);
-			if (host_abi && size > 8 && size <= 16 &&
-			    bare->named && bare->named->class_record &&
-			    ClassFieldsAllInteger(*bare->named->class_record))
-				pass = "gpr_pair";
+			// PA37: the serialized LowIR no longer spells gpr_pair; the
+			// object layer classifies direct 9..16-byte host objects
+			// itself (lowir_to_mir_flow.cpp).
+			(void)host_abi;
 		}
 		else
 		{

@@ -148,7 +148,10 @@ void FunctionLowering::PlanParams()
 		// SysV two-eightbyte object parameter (pass=gpr_pair): both
 		// argument registers spill into the object's frame home.
 		if(param.type.kind == LOWIR_TYPE_OBJ && param.type.obj_bytes > 8 &&
-		   param.metadata.find("pass") == "gpr_pair" && gpr <= 4) {
+		   (param.metadata.find("pass") == "gpr_pair" ||
+		    (facts_.host_object && param.metadata.find("pass").empty() &&
+		     param.type.obj_bytes <= 16)) &&
+		   gpr <= 4) {
 			binding.location = mir_model::ParamBinding::PL_REG;
 			binding.reg = kArgRegs[gpr];
 			out_.params.push_back(binding);

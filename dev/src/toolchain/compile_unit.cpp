@@ -12,6 +12,7 @@
 #include "ast/ast.h"
 #include "ast/ast_parser.h"
 #include "lowering/lower_program.h"
+#include "lowir/lowir_opt.h"
 #include "lowir/lowir_parser.h"
 #include "lowir/lowir_validate.h"
 #include "parse/parse_token.h"
@@ -89,6 +90,7 @@ void * compile_unit_thread_main(void * opaque)
 		TypesModel model;
 		SemUnit semantics;
 		SemBinder binder(model, semantics);
+		binder.SetSeparateCompilation();
 		binder.BindTranslationUnit(*unit);
 
 		LowerProgram lowering;
@@ -469,12 +471,15 @@ ObjectModule BuildObjectModule(const LowIRProgram & program,
 	return module;
 }
 
-ObjectModule CompileToModule(const string & presumed_name,
-                             const string * text,
-                             const CompileOptions & options)
+// The shared LowIR-to-object tail: optimize at the requested level,
+// re-resolve the program facts, and encode. Both the source pipeline
+// and the serialized-LowIR input mode end here, so the two entries
+// cannot diverge (the PA37 object-roundtrip contract).
+ObjectModule CompileLowIRProgramToModule(LowIRProgram & program,
+                                         const CompileOptions & options)
 {
-	string lowir_text = LowerUnitToLowIR(presumed_name, text, options);
-	LowIRProgram program = ParseLowIRProgram(lowir_text);
+	OptimizeLowIRProgram(program, options.optimize);
+	RemoveUnreferencedWeakFunctions(program, options.optimize);
 	LowIRProgramInfo info = ValidateLowIRProgram(program, false);
 	string target = options.target.empty() ? "linux" : options.target;
 	mir_model::MirProgram machine_ir =
@@ -483,12 +488,65 @@ ObjectModule CompileToModule(const string & presumed_name,
 	return BuildObjectModule(program, info, native, target);
 }
 
+ObjectModule CompileToModule(const string & presumed_name,
+                             const string * text,
+                             const CompileOptions & options)
+{
+	string lowir_text = LowerUnitToLowIR(presumed_name, text, options);
+	LowIRProgram program = ParseLowIRProgram(lowir_text);
+	ValidateLowIRProgram(program, false);
+	return CompileLowIRProgramToModule(program, options);
+}
+
 }  // namespace
 
 ObjectModule CompileSourceFileToModule(const string & path,
                                        const CompileOptions & options)
 {
 	return CompileToModule(path, 0, options);
+}
+
+string LowerSourceFileToLowIRText(const string & path,
+                                  const CompileOptions & options)
+{
+	return LowerUnitToLowIR(path, 0, options);
+}
+
+ObjectModule CompileLowIRTextToModule(const string & text,
+                                      const CompileOptions & options)
+{
+	LowIRProgram program = ParseLowIRProgram(text);
+	ValidateLowIRProgram(program, false);
+	return CompileLowIRProgramToModule(program, options);
+}
+
+bool LooksLikeLowIRText(const string & text)
+{
+	size_t at = 0;
+	while(at < text.size())
+	{
+		// Skip blank space and LowIR comment lines.
+		if(text[at] == ' ' || text[at] == '\t' || text[at] == '\n' ||
+		   text[at] == '\r')
+		{
+			at++;
+			continue;
+		}
+		if(text[at] == ';')
+		{
+			while(at < text.size() && text[at] != '\n')
+				at++;
+			continue;
+		}
+		break;
+	}
+	size_t end = at;
+	while(end < text.size() &&
+	      ((text[end] >= 'a' && text[end] <= 'z') || text[end] == '_'))
+		end++;
+	string word = text.substr(at, end - at);
+	return word == "declare" || word == "global" ||
+		word == "function" || word == "alias";
 }
 
 ObjectModule CompileSourceTextToModule(const string & presumed_name,

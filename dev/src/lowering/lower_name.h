@@ -29,6 +29,11 @@ string LowerScopeKey(const Scope* scope);
 // ("operator delete" -> "operatordelete").
 string LowerSanitizeName(const string& name);
 
+// Function-name variant: spaces are removed before sanitizing, so
+// "operator =" spells "operator_" and "operator bool"
+// "operatorbool" (the reference presentation for function symbols).
+string LowerSanitizeFunctionName(const string& name);
+
 // The position of the overload with type `type` in the declaration
 // -ordered overload set of (scope, name); 0 for the first overload and
 // for non-overloaded names.

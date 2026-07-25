@@ -308,6 +308,9 @@ struct SemNode
 	// value-initialization zero-fills `value.bits` bytes of the target
 	// before the (non-user-provided) default constructor runs.
 	bool value_zero_fill = false;
+	// PA37: the same fact for objects one scalar store cannot cover;
+	// only the separate-compilation (driver) lowering emits this fill.
+	bool value_zero_fill_wide = false;
 	// PA19 SN_LITERAL: lowers as a materialized `const` instruction
 	// instead of an immediate (the sizeof... reference shape).
 	bool materialize_const = false;
