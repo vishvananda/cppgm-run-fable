@@ -701,6 +701,10 @@ private:
 	                                 const PartialSpecialization& b);
 	// DeduceFunctionTemplate stages (template_deduce.cpp): explicit
 	// argument binding, one fixed parameter, one pack element.
+	TemplateArg ResolveExplicitValueArgument(
+		TemplateInfo& tmpl, const TemplateParam& param,
+		const AstTemplateArgument& argument,
+		const vector<TemplateArg>& bound);
 	bool BindExplicitDeductionArgs(TemplateInfo& tmpl,
 	                               const AstNamePart& part,
 	                               vector<TemplateArg>& bound,

@@ -1060,6 +1060,17 @@ const AstName* ExpansionPackName(const AstTemplateArgument& argument)
 
 }  // namespace
 
+// One explicit value argument of a deduction probe, resolved against
+// the parameter's declared type under a transient binding scope.
+TemplateArg SemBinder::ResolveExplicitValueArgument(
+	TemplateInfo& tmpl, const TemplateParam& param,
+	const AstTemplateArgument& argument, const vector<TemplateArg>& bound)
+{
+	Scope* partial = MakeArgumentAliasScope(tmpl, bound);
+	TransientScope partial_release(model_, &partial);
+	return ResolveValueArgument(argument, ValueParamType(param, partial));
+}
+
 // 14.8.1: explicit template arguments bind the leading parameters;
 // the pack absorbs the remaining explicit arguments. False on any
 // unresolvable or dependent argument (the template contributes no
@@ -1170,12 +1181,8 @@ bool SemBinder::BindExplicitDeductionArgs(TemplateInfo& tmpl,
 					return false;
 			}
 			else
-			{
-				Scope* partial = MakeArgumentAliasScope(tmpl, bound);
-				TransientScope partial_release(model_, &partial);
-				resolved = ResolveValueArgument(
-					argument, ValueParamType(param, partial));
-			}
+				resolved = ResolveExplicitValueArgument(tmpl, param,
+				                                        argument, bound);
 		}
 		catch (const InstantiationBodyFault&)
 		{
