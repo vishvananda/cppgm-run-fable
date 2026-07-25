@@ -595,9 +595,14 @@ $(call inception_binary_path,$(1)): FORCE | $(INCEPTION_BIN_ROOT)
 	else \
 		env MAKEFLAGS= $$(MAKE) -j$(INCEPTION_OBJECT_BUILD_JOBS) $(call inception_link_inputs,$(1)); \
 	fi
-	@rm -f "$(call inception_link_output_path,$(1))"
-	$(CPPGM_HOST_CXX) $(INCEPTION_LINK_FLAGS) -I../dev/src -o "$(call inception_link_output_path,$(1))" $(call inception_link_inputs,$(1))
-	@mv -f "$(call inception_link_output_path,$(1))" $$@
+	@rm -f "$(call inception_link_output_path,$(1)).tmp"
+	$(CPPGM_HOST_CXX) $(INCEPTION_LINK_FLAGS) -I../dev/src -o "$(call inception_link_output_path,$(1)).tmp" $(call inception_link_inputs,$(1))
+	@if ! cmp -s "$(call inception_link_output_path,$(1)).tmp" "$$@" 2>/dev/null; then \
+		mv -f "$(call inception_link_output_path,$(1)).tmp" "$$@"; \
+	else \
+		rm -f "$(call inception_link_output_path,$(1)).tmp"; \
+	fi
+	@touch "$$@.link-stamp"
 
 $(1)-self: $(call inception_binary_path,$(1))
 	@ln -sf $(call inception_binary_path,$(1)) $$@
