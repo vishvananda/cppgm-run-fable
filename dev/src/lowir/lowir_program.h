@@ -160,6 +160,21 @@ struct LowIRCallSignature
 	LowIRMetadata metadata;
 };
 
+// Optional `!dbg(file, line, column)` source location suffix. Carried
+// through backend lowering so machine-IR instructions keep their
+// source positions (the PA38 debug-metadata contract).
+struct LowIRDebugLocation
+{
+	string file;
+	long line = 0;
+	long column = 0;
+
+	bool present() const
+	{
+		return !file.empty() && line > 0 && column > 0;
+	}
+};
+
 struct LowIRInstruction
 {
 	ELowIROpcode opcode = LOWIR_INS_RETURN;
@@ -181,6 +196,7 @@ struct LowIRInstruction
 	long atomic_failure_order = 5;
 	vector<string> eh_types;  // eh_catch/eh_filter type symbols
 	long eh_selector = 0;     // eh_catch/eh_catch_all handler selector
+	LowIRDebugLocation debug_location;
 
 	bool is_terminator() const
 	{

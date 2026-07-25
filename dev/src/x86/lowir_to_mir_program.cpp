@@ -648,6 +648,7 @@ void FunctionLowering::FinishFrame()
 void FunctionLowering::LowerBlock(size_t block_index)
 {
 	current_block_ = block_index;
+	current_source_ = 0;
 	mir_block_ = &out_.blocks[block_index];
 	// EH functions treat every block entry as a potential unwind
 	// landing: nothing cached in rax (or lingering call staging) may
@@ -671,6 +672,7 @@ void FunctionLowering::LowerInstruction(const LowIRInstruction & ins,
                                         int position)
 {
 	current_position_ = position;
+	current_source_ = &ins;
 
 	// PA29: 128-bit forms lower through the frame-resident pair path.
 	// They stage pairs through rax:rdx with rcx/rsi/r10/r11 scratch, so

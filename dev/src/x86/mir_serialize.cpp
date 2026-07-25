@@ -118,6 +118,19 @@ std::string operand_text(const Operand & operand)
   throw std::logic_error("unknown operand in mir serialization");
 }
 
+// ` !dbg(file, line, column)` when the instruction carries a source
+// location (PA38 debug-metadata lanes); empty otherwise.
+std::string dbg_suffix(const Instruction & instruction)
+{
+  if(!instruction.debug_location.present())
+    return "";
+  std::ostringstream out;
+  out << " !dbg(" << instruction.debug_location.file << ", "
+      << instruction.debug_location.line << ", "
+      << instruction.debug_location.column << ")";
+  return out.str();
+}
+
 // `mnemonic op, op, ...` with the operand list joined by ", ".
 void write_operands(std::ostream & out,
                     const Instruction & instruction,
@@ -126,7 +139,7 @@ void write_operands(std::ostream & out,
   out << mnemonic;
   for(size_t i = 0; i < instruction.operands.size(); ++i)
     out << (i == 0 ? " " : ", ") << operand_text(instruction.operands[i]);
-  out << "\n";
+  out << dbg_suffix(instruction) << "\n";
 }
 
 std::string span_text(const Instruction & instruction)
@@ -178,28 +191,32 @@ void write_instruction(std::ostream & out, const Instruction & ins)
     case Instruction::MI_IDIV: return write_operands(out, ins, "idiv");
     case Instruction::MI_DIV: return write_operands(out, ins, "div");
     case Instruction::MI_SHL_CL:
-      out << "shl " << operand_text(ins.operands[0]) << ", cl\n";
+      out << "shl " << operand_text(ins.operands[0]) << ", cl"
+          << dbg_suffix(ins) << "\n";
       return;
     case Instruction::MI_SHR_CL:
-      out << "shr " << operand_text(ins.operands[0]) << ", cl\n";
+      out << "shr " << operand_text(ins.operands[0]) << ", cl"
+          << dbg_suffix(ins) << "\n";
       return;
     case Instruction::MI_SAR_CL:
-      out << "sar " << operand_text(ins.operands[0]) << ", cl\n";
+      out << "sar " << operand_text(ins.operands[0]) << ", cl"
+          << dbg_suffix(ins) << "\n";
       return;
     case Instruction::MI_TLS_ADDR:
       return write_operands(out, ins, "tls_addr");
     case Instruction::MI_CALL: return write_operands(out, ins, "call");
     case Instruction::MI_CALL_INDIRECT:
-      out << "call *" << operand_text(ins.operands[0]) << "\n";
+      out << "call *" << operand_text(ins.operands[0])
+          << dbg_suffix(ins) << "\n";
       return;
     case Instruction::MI_COPY_BYTES:
       out << "copy_bytes " << span_text(ins) << ", "
           << operand_text(ins.operands[0]) << ", "
-          << operand_text(ins.operands[1]) << "\n";
+          << operand_text(ins.operands[1]) << dbg_suffix(ins) << "\n";
       return;
     case Instruction::MI_ZERO_BYTES:
       out << "zero_bytes " << span_text(ins) << ", "
-          << operand_text(ins.operands[0]) << "\n";
+          << operand_text(ins.operands[0]) << dbg_suffix(ins) << "\n";
       return;
     case Instruction::MI_FMOV: return write_operands(out, ins, "fmov." + ty);
     case Instruction::MI_FNEG: return write_operands(out, ins, "fneg." + ty);

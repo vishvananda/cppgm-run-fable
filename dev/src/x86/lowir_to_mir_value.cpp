@@ -274,6 +274,14 @@ mir_model::Instruction & FunctionLowering::emit(
 {
 	mir_model::Instruction instruction;
 	instruction.opcode = opcode;
+	if(current_source_ && current_source_->debug_location.present()) {
+		instruction.debug_location.file =
+			current_source_->debug_location.file;
+		instruction.debug_location.line =
+			(size_t)current_source_->debug_location.line;
+		instruction.debug_location.column =
+			(size_t)current_source_->debug_location.column;
+	}
 	mir_block_->instructions.push_back(instruction);
 	return mir_block_->instructions.back();
 }

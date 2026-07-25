@@ -272,6 +272,17 @@ struct Parser
 			++pos;
 	}
 
+	void attach_optional_debug_location(LowIRInstruction & ins)
+	{
+		if(!at(LOWIR_TOK_DEBUG_LOC))
+			return;
+		const LowIRToken & token = peek();
+		ins.debug_location.file = token.dbg_file;
+		ins.debug_location.line = token.dbg_line;
+		ins.debug_location.column = token.dbg_column;
+		++pos;
+	}
+
 	vector<LowIRParam> parse_parameter_list()
 	{
 		vector<LowIRParam> params;
@@ -653,7 +664,7 @@ LowIRInstruction Parser::parse_statement_instruction()
 	}
 	else
 		fail("unknown instruction");
-	skip_optional_debug_location();
+	attach_optional_debug_location(ins);
 	return ins;
 }
 

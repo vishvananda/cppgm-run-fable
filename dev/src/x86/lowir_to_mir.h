@@ -281,6 +281,10 @@ private:
 	long long frame_cursor_ = 0;
 	long long residual_bytes_ = 0;
 	int current_position_ = 0;
+	// LowIR instruction currently lowering: emit() stamps its !dbg
+	// location onto every machine instruction it produces (null for
+	// prologue/scaffold emission, which carries no source position).
+	const LowIRInstruction * current_source_ = 0;
 	std::map<std::string, const LowIRInstruction *> pending_loads_;
 	// Stable homes for rewritten atomic-load instructions: a deferred
 	// single-use load records its instruction by pointer, so the
