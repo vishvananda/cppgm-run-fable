@@ -85,7 +85,45 @@ bool SemBinder::EvaluateZeroArgConstantCall(const AstTypeId& type_id,
 			continue;
 		return EvaluateConstexprSpecReturn(*spec, out);
 	}
-	return false;
+	// PA39: an ordinary (non-template) static constexpr member behind
+	// a typedef-spelled qualifier parses as a function type-id too
+	// (`_Node_alloc_traits::_S_nothrow_move()`): evaluate the unique
+	// zero-parameter overload through the full engine over its
+	// analyzed definition.
+	TypePtr zero_arg;
+	if (binding->type && binding->type->kind == TK_FUNCTION &&
+	    binding->type->parameters.empty() && !binding->type->variadic)
+		zero_arg = binding->type;
+	for (size_t i = 0; i < binding->overloads.size(); i++)
+		if (binding->overloads[i]->kind == TK_FUNCTION &&
+		    binding->overloads[i]->parameters.empty() &&
+		    !binding->overloads[i]->variadic)
+		{
+			if (zero_arg)
+				return false;
+			zero_arg = binding->overloads[i];
+		}
+	if (!zero_arg || !binding->owner)
+		return false;
+	SemNodePtr callee_node = MakeSemNode(SN_CALLEE);
+	callee_node->name = CanonicalQualifiedName(binding->owner,
+	                                           binding->name);
+	callee_node->type = zero_arg;
+	callee_node->entity_scope = binding->owner;
+	callee_node->entity_name = binding->name;
+	SemNodePtr call = MakeSemNode(SN_CALL_EXPRESSION);
+	call->type = zero_arg->target;
+	call->category = VC_PRVALUE;
+	call->children.push_back(std::move(callee_node));
+	try
+	{
+		out = engine_.EvaluateIntegral(*call);
+		return true;
+	}
+	catch (const std::exception&)
+	{
+		return false;
+	}
 }
 
 // The constant value of a constexpr specialization's lone return

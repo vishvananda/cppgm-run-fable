@@ -1,0 +1,39 @@
+#include <cstdio>
+
+template<typename T, T V> struct int_const
+{
+	static constexpr T value = V;
+};
+template<bool B> using bool_c = int_const<bool, B>;
+
+template<typename A> struct traits
+{
+	static constexpr bool nothrow_move() { return sizeof(A) > 1; }
+};
+
+template<typename T> struct tree
+{
+	typedef traits<T> node_traits;
+	int mode;
+	tree() : mode(0) {}
+	tree& operator=(tree&& other)
+	{
+		assign(other, bool_c<node_traits::nothrow_move()>());
+		return *this;
+	}
+	template<typename B> void assign(tree& other, B)
+	{
+		mode = B::value ? 1 : 2;
+		(void)other;
+	}
+};
+
+int main()
+{
+	tree<int> a, b;
+	a = static_cast<tree<int>&&>(b);
+	tree<char> c, d;
+	c = static_cast<tree<char>&&>(d);
+	std::printf("%d %d\n", a.mode, c.mode);
+	return 0;
+}
