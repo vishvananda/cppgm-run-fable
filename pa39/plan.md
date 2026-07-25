@@ -1,5 +1,9 @@
 # PA39 Inception Plan
 
+Status: self-built PA1-PA5 pass; failure 10 (aggregate array members)
+and failure 11 (narrow parameter homes) fixed; recog-self next runs
+the pa6 ladder rung from the top.
+
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
 (`*-self`), keep the PA1-PA38 preservation ladder green under the self-built
@@ -7,11 +11,11 @@ checkpoints, then prove reproducibility (`*-self` rebuilds itself into a
 byte-identical `*-inception`). Every ladder failure is treated as an earlier
 compiler bug or a reproducibility bug until proven otherwise.
 
-## Current checkpoint: pptoken-self (PA1 rung)
+## Failure log (each fixed at its owning surface, oldest first)
 
-`make -C pa39 test-through-pa10 CXX=../dev/cppgm++ CPPGM_HOST_CXX=g++` fails
-in the very first rung: host-seeded `../dev/cppgm++` cannot compile four of
-the pptoken checkpoint sources.
+The ladder initially failed in the very first rung: host-seeded
+`../dev/cppgm++` could not compile four of the pptoken checkpoint
+sources.
 
 ### Failure 1: "unterminated comment" (source_translation, pp_tokenizer, pptoken)
 
@@ -257,6 +261,31 @@ Fix (earliest owning surface, the PA24-era aggregate ctor machinery):
   parameters into an `argarr` slot via `LowerLocalArrayInit` (the
   existing reference-to-array shape, minus the reference binding).
 - `MakeAggregateTemporary` gets the same omitted-tail handling.
+
+### Failure 11: narrow parameter frame homes read at 64 bits
+### (pa6 recog checkpoint, ParseBinaryExpression segfault)
+
+With the aggregate fix in, recog-self built and linked but segfaulted
+running pa6 tests/130-postfix.t (`2+int('a')` — any matched binary
+operator). `kBinaryLevels[level]` computed a corrupted element address:
+the high 32 bits of `level` were stale pointer bytes. Root cause in the
+PA28 MIR staging (`dev/src/x86/lowir_to_mir_*`): `SpillParamHome` parks
+a narrow (i32) parameter into its 8-byte frame home with a narrow
+store (high half = stack garbage), while `gpr_read` and
+`emit_dest_copy`'s VL_FRAME branch read parameter homes at 64 bits —
+here for the frontend's pinned subscript shape `binary mul i64
+%level, 32`, whose sext the shape leaves implicit. The reference's
+contract (probed via `lowir2native-ref --dump-machine-ir`, and pinned
+by pa28 structural fixtures for named slots): narrow parks stay
+narrow, and consumers re-load at the value's own width and
+re-normalize (`load.i32; sext.i32`). Fix: reader-side — `gpr_read`
+and `emit_dest_copy` re-load an is_param VL_FRAME value at its own
+width and `emit_narrow_normalize` when the home is narrower than the
+consumer; temp homes keep the widened normalized-64 contract
+(pinned). The lazy `resolve_location` park keeps the narrow spelling.
+Reducer: `cppgm.tests/course/pa28/300-narrow-param-home-across-call.t`
+(dirties the stack, then six crossing i32 params exhaust the
+callee-saved pool; verified failing before the fix, passing after).
 
 ## Validation plan
 

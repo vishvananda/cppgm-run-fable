@@ -401,7 +401,9 @@ ValueLocation & FunctionLowering::resolve_location(const std::string & name)
 		if(pool_holder_[i].empty() && !pool_clobbered_[i])
 			index = i;
 	if(index < 0) {
-		// out of registers: fall back to a named frame home
+		// out of registers: fall back to a named frame home. The park
+		// keeps the parameter's own width (the reference shape), so
+		// readers re-load narrow homes at that width and re-normalize.
 		long long offset = alloc_frame_home(
 			name, values_[name].type,
 			mir_model::FrameBinding::FB_PARAM_SLOT);
@@ -468,12 +470,22 @@ mir_model::Operand FunctionLowering::gpr_read(const LowIROperand & operand)
 					slots_[location.slot_name].frame_offset));
 				return MakeReg(staging);
 			}
+			// A temp home holds the canonical normalized 64-bit form;
+			// a parameter home keeps the parameter's own width (the
+			// SpillParamHome park), so a narrow one re-loads at that
+			// width and re-normalizes (the reference load+sext shape).
+			const ValueInfo & info = values_[operand.name];
+			bool narrow_param = info.is_param &&
+				FrameSizeOf(info.type) < 8 &&
+				info.type.kind != LOWIR_TYPE_OBJ;
 			mir_model::Instruction & load =
 				emit(mir_model::Instruction::MI_LOAD);
-			load.type = "i64";
+			load.type = narrow_param ? SpellType(info.type) : "i64";
 			load.operands.push_back(MakeReg(staging));
 			load.operands.push_back(
 				frame_operand(location.frame_offset));
+			if(narrow_param)
+				emit_narrow_normalize(info.type, staging);
 			return MakeReg(staging);
 		}
 	}
@@ -716,11 +728,23 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 	else if(lhs.kind == LOWIR_OPERAND_TEMP) {
 		const ValueLocation & location = resolve_location(lhs.name);
 		if(location.kind == ValueLocation::VL_FRAME) {
+			// A parameter home keeps the parameter's own width (the
+			// SpillParamHome park): a narrow one read into a wider
+			// operation re-loads at that width and re-normalizes (the
+			// reference load+sext shape). Temp homes hold the
+			// canonical normalized 64-bit form.
+			const ValueInfo & info = values_[lhs.name];
+			bool narrow_param = info.is_param &&
+				FrameSizeOf(info.type) < FrameSizeOf(type) &&
+				info.type.kind != LOWIR_TYPE_OBJ;
 			mir_model::Instruction & load =
 				emit(mir_model::Instruction::MI_LOAD);
-			load.type = SpellType(type);
+			load.type = narrow_param ? SpellType(info.type)
+			                         : SpellType(type);
 			load.operands.push_back(MakeReg(out_reg));
 			load.operands.push_back(frame_operand(location.frame_offset));
+			if(narrow_param)
+				emit_narrow_normalize(info.type, out_reg);
 		}
 		else if(location.kind == ValueLocation::VL_SLOT_ADDR) {
 			mir_model::Instruction & lea =
