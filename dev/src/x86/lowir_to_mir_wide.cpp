@@ -7,8 +7,8 @@
 // through rax:rdx (with rcx/r10/r11 as scratch), computes, and stores
 // the destination pair back to its home. Values never own registers,
 // so the PA28 register discipline is untouched for everything else.
-// Shift counts must be literals; the frontend's division expansion
-// (lower_expr.cpp LowerWideDivMod) only shifts by constants.
+// Literal shift counts compose from 64-bit half shifts; runtime
+// counts lower branchless through select masks.
 
 namespace lowir_to_mir {
 
@@ -135,7 +135,8 @@ void FunctionLowering::LowerWideBinary(const LowIRInstruction & ins)
 	WideStorePair(WideHome(ins.result), XR_RAX, XR_RDX);
 }
 
-// Shifts by a literal count compose from 64-bit shifts of the halves.
+// Shifts by a literal count compose from 64-bit shifts of the halves;
+// a runtime count lowers branchless through and/neg/sbb select masks.
 void FunctionLowering::LowerWideShift(const LowIRInstruction & ins)
 {
 	long long count = 0;
@@ -148,7 +149,10 @@ void FunctionLowering::LowerWideShift(const LowIRInstruction & ins)
 	else if (known != wide_consts_.end())
 		count = known->second;
 	else
-		throw std::runtime_error("i128 shift count must be constant");
+	{
+		LowerWideVariableShift(ins);
+		return;
+	}
 	count &= 127;
 	bool left = ins.operation == "shl";
 	bool arith = ins.operation == "shr";
@@ -236,6 +240,130 @@ void FunctionLowering::LowerWideShift(const LowIRInstruction & ins)
 		merge.operands.push_back(MakeReg(XR_R10));
 		mir_model::Instruction & high = emit(narrow_shift);
 		high.operands.push_back(MakeReg(XR_RDX));
+	}
+	WideStorePair(WideHome(ins.result), XR_RAX, XR_RDX);
+}
+
+// A runtime shift count lowers branchless: the 64-bit shifts use the
+// count modulo 64 (the hardware cl masking), the cross half gates out
+// when count%64 == 0 (its shift would be by 64), and and/neg/sbb
+// select masks pick the count>=64 arrangement. Counts of 128 or more
+// are undefined, matching the literal path's masking.
+void FunctionLowering::LowerWideVariableShift(const LowIRInstruction & ins)
+{
+	bool left = ins.operation == "shl";
+	bool arith = ins.operation == "shr";
+	WideReadPair(ins.operands[0], XR_RAX, XR_RDX);
+	// only the low half of the count matters
+	WideReadPair(ins.operands[1], XR_RCX, XR_R11);
+	// the half that shifts straight through by count%64 (lo for left
+	// shifts, hi for right shifts) and the half receiving cross bits
+	X64Register straight = left ? XR_RAX : XR_RDX;
+	X64Register crossed = left ? XR_RDX : XR_RAX;
+	mir_model::Instruction::Opcode own_shift =
+		left ? mir_model::Instruction::MI_SHL_CL
+		     : mir_model::Instruction::MI_SHR_CL;
+	mir_model::Instruction::Opcode cross_shift =
+		left ? mir_model::Instruction::MI_SHR_CL
+		     : mir_model::Instruction::MI_SHL_CL;
+	mir_model::Instruction::Opcode straight_shift =
+		left ? mir_model::Instruction::MI_SHL_CL
+		     : arith ? mir_model::Instruction::MI_SAR_CL
+		             : mir_model::Instruction::MI_SHR_CL;
+	// r10 = the straight half's original value, r11 = the count
+	emit_mov(MakeReg(XR_R10), MakeReg(straight));
+	emit_mov(MakeReg(XR_R11), MakeReg(XR_RCX));
+	// crossed half's own (always logical) shift by count%64
+	mir_model::Instruction & own = emit(own_shift);
+	own.operands.push_back(MakeReg(crossed));
+	// cross bits: straight half shifted the opposite way by
+	// (64-count)%64, gated to zero when count%64 == 0
+	mir_model::Instruction & flip_count =
+		emit(mir_model::Instruction::MI_NEG);
+	flip_count.operands.push_back(MakeReg(XR_RCX));
+	emit_mov(MakeReg(straight), MakeReg(XR_R10));
+	mir_model::Instruction & cross = emit(cross_shift);
+	cross.operands.push_back(MakeReg(straight));
+	emit_mov(MakeReg(XR_RCX), MakeReg(XR_R11));
+	mir_model::Instruction & low_bits =
+		emit(mir_model::Instruction::MI_AND);
+	low_bits.operands.push_back(MakeReg(XR_RCX));
+	low_bits.operands.push_back(MakeImm(63));
+	mir_model::Instruction & low_nz =
+		emit(mir_model::Instruction::MI_NEG);
+	low_nz.operands.push_back(MakeReg(XR_RCX));
+	mir_model::Instruction & low_mask =
+		emit(mir_model::Instruction::MI_SBB);
+	low_mask.operands.push_back(MakeReg(XR_RCX));
+	low_mask.operands.push_back(MakeReg(XR_RCX));
+	mir_model::Instruction & gate = emit(mir_model::Instruction::MI_AND);
+	gate.operands.push_back(MakeReg(straight));
+	gate.operands.push_back(MakeReg(XR_RCX));
+	mir_model::Instruction & merge = emit(mir_model::Instruction::MI_OR);
+	merge.operands.push_back(MakeReg(crossed));
+	merge.operands.push_back(MakeReg(straight));
+	// the straight half shifted by count%64 (also the crossed half's
+	// value when count >= 64)
+	emit_mov(MakeReg(XR_RCX), MakeReg(XR_R11));
+	emit_mov(MakeReg(straight), MakeReg(XR_R10));
+	mir_model::Instruction & main = emit(straight_shift);
+	main.operands.push_back(MakeReg(straight));
+	// count>=64 selection mask
+	emit_mov(MakeReg(XR_RCX), MakeReg(XR_R11));
+	mir_model::Instruction & big_bit =
+		emit(mir_model::Instruction::MI_AND);
+	big_bit.operands.push_back(MakeReg(XR_RCX));
+	big_bit.operands.push_back(MakeImm(64));
+	mir_model::Instruction & big_nz =
+		emit(mir_model::Instruction::MI_NEG);
+	big_nz.operands.push_back(MakeReg(XR_RCX));
+	mir_model::Instruction & big_mask =
+		emit(mir_model::Instruction::MI_SBB);
+	big_mask.operands.push_back(MakeReg(XR_RCX));
+	big_mask.operands.push_back(MakeReg(XR_RCX));
+	// crossed half for big counts is the straight-shifted value
+	emit_mov(MakeReg(XR_R11), MakeReg(straight));
+	mir_model::Instruction & big_pick =
+		emit(mir_model::Instruction::MI_AND);
+	big_pick.operands.push_back(MakeReg(XR_R11));
+	big_pick.operands.push_back(MakeReg(XR_RCX));
+	if (arith)
+	{
+		// the straight half for big counts is the sign fill of the
+		// original high half (r10), gated by the same mask
+		mir_model::Instruction & fill =
+			emit(mir_model::Instruction::MI_SAR_CL);
+		fill.operands.push_back(MakeReg(XR_R10));
+		// cl holds the mask (low bits all ones = 63), so the fill
+		// shift count is 63 exactly when the mask selects it; for a
+		// zero mask the fill is gated out below, so the count value
+		// does not matter
+		mir_model::Instruction & fill_gate =
+			emit(mir_model::Instruction::MI_AND);
+		fill_gate.operands.push_back(MakeReg(XR_R10));
+		fill_gate.operands.push_back(MakeReg(XR_RCX));
+	}
+	// keep the small-count halves where the mask is clear
+	mir_model::Instruction & flip = emit(mir_model::Instruction::MI_NOT);
+	flip.operands.push_back(MakeReg(XR_RCX));
+	mir_model::Instruction & keep_crossed =
+		emit(mir_model::Instruction::MI_AND);
+	keep_crossed.operands.push_back(MakeReg(crossed));
+	keep_crossed.operands.push_back(MakeReg(XR_RCX));
+	mir_model::Instruction & pick_crossed =
+		emit(mir_model::Instruction::MI_OR);
+	pick_crossed.operands.push_back(MakeReg(crossed));
+	pick_crossed.operands.push_back(MakeReg(XR_R11));
+	mir_model::Instruction & keep_straight =
+		emit(mir_model::Instruction::MI_AND);
+	keep_straight.operands.push_back(MakeReg(straight));
+	keep_straight.operands.push_back(MakeReg(XR_RCX));
+	if (arith)
+	{
+		mir_model::Instruction & pick_straight =
+			emit(mir_model::Instruction::MI_OR);
+		pick_straight.operands.push_back(MakeReg(straight));
+		pick_straight.operands.push_back(MakeReg(XR_R10));
 	}
 	WideStorePair(WideHome(ins.result), XR_RAX, XR_RDX);
 }
@@ -499,7 +627,9 @@ bool FunctionLowering::LowerWideInstruction(const LowIRInstruction & ins)
 		return true;
 	case LOWIR_INS_UNARY:
 	{
-		if (ins.operation != "neg" && ins.operation != "not")
+		// "bitnot" is the complement spelling ("not" is the logical
+		// form, which the frontend lowers through cmp instead).
+		if (ins.operation != "neg" && ins.operation != "bitnot")
 			throw std::runtime_error("unsupported i128 unary form");
 		WideReadPair(ins.operands[0], XR_RCX, XR_R10);
 		if (ins.operation == "neg")

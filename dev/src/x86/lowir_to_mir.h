@@ -207,6 +207,7 @@ private:
 	void WideStorePair(long long home, X64Register lo, X64Register hi);
 	void LowerWideBinary(const LowIRInstruction & ins);
 	void LowerWideShift(const LowIRInstruction & ins);
+	void LowerWideVariableShift(const LowIRInstruction & ins);
 	void LowerWideMul(const LowIRInstruction & ins);
 	void LowerWideCmp(const LowIRInstruction & ins);
 	void LowerWideConvert(const LowIRInstruction & ins);

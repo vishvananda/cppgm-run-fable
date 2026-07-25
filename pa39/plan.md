@@ -492,13 +492,34 @@ some instantiation context in these TUs looks it up with a broken
 scope chain. Header probes (sem_instantiation.h, <set>) pass — the
 trigger is in the TU bodies. Not yet reduced.
 
-### Failure 18: unsupported i128 unary form (pa10 rung: const_expr)
+### Failure 18 (fixed): i128 bitnot and variable shift counts
+### (pa10 rung: const_expr)
 
-Same compile shape on `../dev/src/sema/const_expr.cpp`. Our own
-source uses an __int128 unary operation the lowering lacks; find the
-form (likely negate on the 128-bit multiply-overflow helpers) and add
-it to the i128 surface (PA35-era x86/lowir_to_mir_wide.cpp) with a
-pa35-or-earliest reducer.
+`sema/const_expr.cpp` (the PA20 const-eval engine's SWide/UWide
+helpers) needs two i128 forms the PA29 wide lowering lacked:
+- `~wide`: the frontend spells complement `bitnot` (the narrow path's
+  spelling; `not` is the logical form), but the wide unary case only
+  accepted `neg`/`not` — and implemented "not" AS the complement. The
+  branch now accepts `neg`/`bitnot`.
+- `wide >> count` with a runtime count ("i128 shift count must be
+  constant"): `LowerWideVariableShift` lowers branchless — the 64-bit
+  half shifts use count%64 (the hardware cl masking), the cross half
+  gates out via an and/neg/sbb mask when count%64 == 0, and a second
+  mask selects the count>=64 arrangement (with sign fill for
+  arithmetic shifts). Validated byte-identical against g++ output for
+  all 128 counts of shl/lshr/ashr on positive and negative patterns
+  at -O0 and -O3.
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-wide-variable-
+shift-runtime-smoke` (prints all 513 results; fails before the fix,
+passes after). The pa28 whole-program harness cannot express it for
+the reference, which lowers these shifts to libgcc's `__ashlti3`
+family — unresolvable in a whole-program link — so the hosted suite
+is the earliest harness. Noted for later: our hosted i128 by-value
+parameter ABI (stack) differs from SysV's rdi:rsi pair — self-
+consistent across our own objects, and no checkpoint source passes
+i128 across the host boundary, but a g++-compiled caller cannot call
+an i128-by-value function we compiled.
 
 ### Failure 19: eh filter maps to conflicting catch types (pa10 rung:
 ### template_spelling)

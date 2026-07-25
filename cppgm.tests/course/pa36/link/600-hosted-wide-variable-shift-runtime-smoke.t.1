@@ -1,0 +1,31 @@
+#include <cstdio>
+
+typedef __int128 SWide;
+typedef unsigned __int128 UWide;
+
+__attribute__((noinline)) UWide Shl(UWide a, int n) { return a << n; }
+__attribute__((noinline)) UWide Lshr(UWide a, int n) { return a >> n; }
+__attribute__((noinline)) SWide Ashr(SWide a, int n) { return a >> n; }
+
+static void dump(const char* tag, int n, UWide v)
+{
+	std::printf("%s %d %016llx%016llx\n", tag, n,
+	            (unsigned long long)(v >> 64), (unsigned long long)v);
+}
+
+int main()
+{
+	UWide pat = ((UWide)0x8123456789abcdefULL << 64) | 0xfedcba9876543210ULL;
+	SWide spos = (SWide)(pat >> 3);
+	// also pin the complement spelling the same sources use
+	UWide flipped = ~pat;
+	dump("bitnot", 0, flipped);
+	for (int n = 0; n < 128; n++)
+	{
+		dump("shl", n, Shl(pat, n));
+		dump("lshr", n, Lshr(pat, n));
+		dump("ashr", n, (UWide)Ashr((SWide)pat, n));
+		dump("ashp", n, (UWide)Ashr(spos, n));
+	}
+	return 0;
+}
