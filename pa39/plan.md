@@ -1,8 +1,9 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA8 pass; failures 12-15 fixed; the cy86 rung
-(pa9) next runs from the top (its checkpoint TUs all host-compile
-after failure 15).
+Status: self-built PA1-PA9 pass; failures 12-15 fixed. The pa10 rung
+(cppgm++-self) is the frontier: four host-compile failure classes
+remain across ten TUs (failures 16-19 below, analyzed with repro
+commands; 16 has a worked design).
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -421,6 +422,91 @@ spells `(*buf).x` rather than `buf->x`: the reference presents `->`
 member access without the deref wrapper we synthesize (5.2.5), a
 presentation divergence no existing fixture covers and separate from
 this bug.
+
+### Failure 16 (frontier, design ready): eager noexcept-spec
+### evaluation instantiates traits inside open classes (pa10 rung,
+### 6 TUs: type_builder, ast_parse_class, template_info, template_args,
+### sem_pack, sem_builtin_template)
+
+Repro: `struct A { std::vector<A> elems; int v; };` plus a function
+calling `list.push_back(item)` — "static_assert failed \"template
+argument must be a complete class or an unbounded array\"".
+
+Chain (gdb trap on the assert, full backtrace verified): completing
+`A` completes `vector<A>` (`RecordMemberField` →
+`EnsureTypeCompleteness`); the member replay composes declarators and
+`TypeBuilder::ApplyDeclaratorSuffix` (type_builder.cpp:~567)
+eagerly evaluates each member's `noexcept(expr)` specifier via
+`EvaluateNoexceptSpec`. The spec expressions contain `noexcept(call)`
+operators whose candidate deduction (`AppendTemplateCandidates` →
+`EnsureFunctionSpecialization`) composes further declarators with
+their own specs, recursively, until a template-id value argument reads
+`is_constructible<A, A>::value` — `LookupConstant` →
+`EnsureTypeCompleteness` instantiates the trait's class body and its
+`__is_complete_or_unbounded` static_assert evaluates with `A` still
+open. The failure is swallowed (`EvaluateNoexceptSpec` returns
+false), but the trait specializations stay memoized with poisoned
+members; the first legitimate post-completion use (push_back's
+drained body via `move_if_noexcept`) hits the poison and the lowering
+reports the stored instantiation error. g++/the reference never
+evaluate these specs at replay time (CWG 1330: exception specs of
+members of class-template specializations instantiate only when
+needed), so their traits instantiate post-completion and pass.
+
+Design (validated against fixture constraints, not yet implemented):
+- Gate: a class-replay depth counter set around
+  `InstantiateSpecializationBody`'s class bind. When composing a
+  member declarator under replay, do NOT evaluate a FQ_NOEXCEPT
+  has_expr spec; record the unevaluated `{expr, current_ scope}` (the
+  alias scope keeps template-parameter bindings alive) in the
+  composed `DeclaratorInfo` (new pending fields).
+- Consumers that persist `composed.noexcept_simple` into durable
+  records store the pending entry instead: `ScopeBinding` per-overload
+  (decl_binder.cpp:~160), `ClassCtor.unwind_no`/`dtor_unwind_no`
+  (sem_class.cpp:342/373), `spec->self.fn_unwind_no`
+  (template_deduce.cpp:1366).
+- Resolution must be ON-DEMAND at the read sites (sem_call.cpp:289,
+  sem_apply.cpp:399, sem_operator.cpp:554/731, sem_member.cpp,
+  sem_new.cpp:69, sem_special.cpp:973): evaluate in the recorded
+  scope, memoize into the record. An end-of-unit patch pass is NOT
+  enough: forward-pass call analysis of green tests reads
+  `fn_unwind_no` immediately after completion, and a
+  deferred-until-patch value would flip pinned `[unwind=no]` LowIR
+  EH shapes. On-demand reads post-completion give today's values for
+  every green case; reads inside the bad window only occur from
+  replay-bound bodies, which already poison-and-retry.
+- Body-node flags (`MakeInstantiatedBodyNode`, sem_member_body:165)
+  re-compose at body-bind time; drained bodies bind post-completion,
+  so evaluating there (replay depth 0) is correct and keeps the
+  pinned unwind flags on instantiated bodies.
+
+### Failure 17: undeclared name __bool_constant (pa10 rung: sem_spec,
+### sem_template)
+
+`../dev/cppgm++ -std=gnu++11 -Wall -O3 -I../dev/src
+-I../obj/pa39/generated -c ../dev/src/sema/sem_spec.cpp` (with the
+pa39 defines) → "ERROR: undeclared name __bool_constant".
+`__bool_constant` is an unconditional alias template in GCC 15's
+<type_traits> (used by true_type, resolved fine in passing TUs), so
+some instantiation context in these TUs looks it up with a broken
+scope chain. Header probes (sem_instantiation.h, <set>) pass — the
+trigger is in the TU bodies. Not yet reduced.
+
+### Failure 18: unsupported i128 unary form (pa10 rung: const_expr)
+
+Same compile shape on `../dev/src/sema/const_expr.cpp`. Our own
+source uses an __int128 unary operation the lowering lacks; find the
+form (likely negate on the 128-bit multiply-overflow helpers) and add
+it to the i128 surface (PA35-era x86/lowir_to_mir_wide.cpp) with a
+pa35-or-earliest reducer.
+
+### Failure 19: eh filter maps to conflicting catch types (pa10 rung:
+### template_spelling)
+
+Same compile shape on `../dev/src/sema/template_spelling.cpp`. A
+catch shape in that TU produces conflicting filter-region catch types
+in the PA36 EH lowering. Reduce the try/catch pattern and fix the
+filter mapping.
 
 ## Validation plan
 
