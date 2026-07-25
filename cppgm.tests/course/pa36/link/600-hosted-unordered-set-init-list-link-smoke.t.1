@@ -1,0 +1,20 @@
+#include "600-hosted-unordered-set-init-list-link-smoke.shared.h"
+
+#include <unordered_set>
+
+bool has_keyword(const std::string& word) {
+  static const std::unordered_set<std::string> kKeywords = {
+    "if", "else", "while",
+  };
+  return kKeywords.count(word) != 0;
+}
+
+int range_sum() {
+  const int values[4] = {3, 5, 5, 8};
+  std::unordered_set<int> unique(values, values + 4);
+  int total = 0;
+  for (std::unordered_set<int>::const_iterator it = unique.begin();
+       it != unique.end(); ++it)
+    total += *it;
+  return total;
+}

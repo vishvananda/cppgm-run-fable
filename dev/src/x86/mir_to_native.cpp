@@ -310,6 +310,7 @@ private:
 	void EmitFptoui(const Ins & ins);
 	void EmitFpConvert(const Ins & ins);
 	X86Mem FloatRm(int bits, const Op & op);
+	X86Mem PoolMem(int label);
 	X86Mem PoolFloatMem(int bits, long double value);
 	X86Mem ScratchSlot(int slot, long long extra);
 	void CopyToXmm15(int bits, const Op & op);
@@ -868,10 +869,21 @@ void FunctionEncoder::EmitInstruction(const Ins & ins)
 
 // Floating-point instructions and conversions.
 
+// PA36 host data model: -c objects address constant-pool entries
+// rip-relative like other data (an absolute [disp32] would be a text
+// relocation a PIE host link rejects); the private executable keeps
+// the absolute form its pinned encodings expect.
+X86Mem FunctionEncoder::PoolMem(int label)
+{
+	X86Imm imm = X86Imm::Label(label, 0);
+	if (env_.program().host_object)
+		return X86Mem::RipLabel(imm);
+	return X86Mem::Absolute(imm);
+}
+
 X86Mem FunctionEncoder::PoolFloatMem(int bits, long double value)
 {
-	return X86Mem::Absolute(
-		X86Imm::Label(env_.FloatConstantLabel(bits, value), 0));
+	return PoolMem(env_.FloatConstantLabel(bits, value));
 }
 
 X86Mem FunctionEncoder::FloatRm(int bits, const Op & op)
@@ -995,8 +1007,7 @@ void FunctionEncoder::EmitFneg(const Ins & ins)
 		mask[i] = 0x80;
 	int label = env_.ByteConstantLabel(
 		bits == 32 ? "negmask32" : "negmask64", mask, 16, 16);
-	code_.SseRegMem(X86_XORPS, 15,
-	                X86Mem::Absolute(X86Imm::Label(label, 0)));
+	code_.SseRegMem(X86_XORPS, 15, PoolMem(label));
 	StoreXmmTo(bits, dst, 15);
 }
 

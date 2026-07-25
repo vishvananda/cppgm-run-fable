@@ -656,6 +656,19 @@ void SemBinder::CaptureQualifiedMemberTemplate(const AstDecl& decl,
 			merged->decl = &decl;
 			merged->pattern_decl = &inner;
 			merged->has_definition = inner.body != 0;
+			// A specialization selected before this definition was
+			// captured recorded the demand (odr_used); bind its body
+			// now, mirroring InstantiatePendingFunctions for
+			// namespace-scope templates.
+			if (merged->has_definition)
+				for (size_t c = 0; c < cls->ctors.size(); c++)
+				{
+					const FunctionSpecialization* used =
+						cls->ctors[c].tmpl_spec;
+					if (used && used->owner == merged &&
+					    used->odr_used && !used->body_emitted)
+						InstantiateCtorTemplateBody(*cls, (int)c);
+				}
 			break;
 		}
 		default:
@@ -800,9 +813,10 @@ int SemBinder::EnsureCtorTemplateEntry(ClassInfo& cls,
 	int index = (int)(cls.ctors.size() - 1);
 	// 14.7.1p2: the body instantiates only when overload resolution
 	// selects this candidate (ResolveClassConstructor), not when it
-	// merely joins the candidate set.
-	if (!tmpl.has_definition)
-		const_cast<FunctionSpecialization*>(spec)->body_emitted = true;
+	// merely joins the candidate set. A definition-less template stays
+	// un-poisoned: its out-of-class definition may still be captured
+	// after this candidate was synthesized, and the selection path
+	// records the demand for that later capture to satisfy.
 	return index;
 }
 
@@ -823,10 +837,16 @@ void SemBinder::InstantiateCtorTemplateBody(ClassInfo& cls, int index)
 		*const_cast<FunctionSpecialization*>(spec);
 	if (mutable_spec.body_emitted)
 		return;
-	mutable_spec.body_emitted = true;
 	const AstDecl& inner = *spec->owner->pattern_decl;
 	if (!inner.body)
+	{
+		// 14.7.1p2 selection before the out-of-class definition was
+		// captured: record the demand (like OnSpecializationOdrUsed)
+		// so the definition capture binds the body.
+		mutable_spec.odr_used = true;
 		return;
+	}
+	mutable_spec.body_emitted = true;
 	// Re-compose the declarator under a fresh function scope so the
 	// parameters bind with their declared names.
 	Scope* fn_scope = model_.CreateScope(SCOPE_FUNCTION, cls.entity->name,

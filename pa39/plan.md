@@ -89,6 +89,30 @@ Note: root `make test-strict` fails pre-existing (`--witness` is
 rejected by the driver in emit modes for pa18-pa23); unrelated to and
 unchanged by this work, and not part of the PA39 required checks.
 
+### Failure 4: ctor-template specialization poisoned before its
+### out-of-class definition (pptoken-self link, `_Hashtable` ctor)
+
+With PIE fixed, `pptoken-self` linking failed on an undefined
+`_Hashtable::_Hashtable<_InputIterator>(..., true_type)` — libstdc++'s
+tagged range constructor, defined out of class. Two poisons in the
+PA21 member-template surface (`sema/sem_member_template.cpp`):
+candidate synthesis marked specs of definition-less ctor templates
+`body_emitted` permanently, and `InstantiateCtorTemplateBody` marked
+`body_emitted` before checking whether the pattern had a body. When a
+class instantiation's out-of-class member definitions replay *after* a
+member body already delegated into the tagged constructor (exactly
+libstdc++'s ordering), the spec stayed body-less forever and the call
+resolved to a never-defined weak symbol. Fixed by recording the demand
+(`odr_used`, mirroring `OnSpecializationOdrUsed`'s use-before-
+definition path) and binding demanded bodies when the definition
+pairing completes. Also: the float/negmask constant pool addressed
+memory with absolute `[disp32]` (`R_X86_64_32S`), rejected by PIE;
+host objects now use rip-relative pool addressing (`PoolMem`).
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-unordered-set-init-
+list-link-smoke` (the ordering needs hosted libstdc++, so the hosted
+link suite is the earliest harness that can express it).
+
 ## Validation plan
 
 1. `make -C pa39 probe-self-object SOURCE=...` on each previously failing TU.

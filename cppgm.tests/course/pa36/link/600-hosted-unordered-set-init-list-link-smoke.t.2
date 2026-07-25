@@ -1,0 +1,12 @@
+#include "600-hosted-unordered-set-init-list-link-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  if (!has_keyword("while") || has_keyword("banana"))
+    return 1;
+  if (range_sum() != 16)
+    return 2;
+  std::printf("unordered-set-smoke ok\n");
+  return 0;
+}
