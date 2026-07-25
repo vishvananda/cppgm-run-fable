@@ -346,8 +346,10 @@ struct Validator
 		{
 			if(!dst.is_integer() || !src.is_integer())
 				fail("integer conversion requires integer types");
-			if(op == "trunc" ? dst.integer_bits() >= src.integer_bits()
-			                 : dst.integer_bits() <= src.integer_bits())
+			// Identity widths are accepted as no-op conversions (the
+			// PA37 optimizer's cleanup input can spell them).
+			if(op == "trunc" ? dst.integer_bits() > src.integer_bits()
+			                 : dst.integer_bits() < src.integer_bits())
 				fail("invalid integer conversion widths: " + op);
 		}
 		else if(op == "sitofp" || op == "uitofp")

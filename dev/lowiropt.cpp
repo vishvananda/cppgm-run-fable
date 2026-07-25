@@ -1,9 +1,18 @@
-// Student-facing scaffold for the PA37 `lowiropt` binary.
+// The PA37 `lowiropt` binary: parse LowIR text, run the deterministic
+// optimization pipeline at the requested level, and write the
+// canonical LowIR dump.
 
 #include "exceptions.h"
 #include "tool_help_text.h"
 
+#include "lowir/lowir_dump.h"
+#include "lowir/lowir_opt.h"
+#include "lowir/lowir_parser.h"
+#include "lowir/lowir_validate.h"
+
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -120,6 +129,17 @@ LowIROptInvocation parse_lowiropt_invocation(const vector<string> & args)
   return invocation;
 }
 
+string read_input_file(const string & path)
+{
+  ifstream in(path.c_str(), ios::binary);
+  if(!in) {
+    throw runtime_error("cannot read input file: " + path);
+  }
+  ostringstream data;
+  data << in.rdbuf();
+  return data.str();
+}
+
 int run_lowiropt_mode(const vector<string> & args)
 {
   if(has_batch_stdin_arg(args)) {
@@ -132,8 +152,28 @@ int run_lowiropt_mode(const vector<string> & args)
   }
 
   const LowIROptInvocation invocation = parse_lowiropt_invocation(args);
-  (void)invocation;
-  throw NotImplementedException();
+
+  string text;
+  for(size_t i = 0; i < invocation.inputs.size(); ++i) {
+    text += read_input_file(invocation.inputs[i]);
+  }
+
+  LowIRProgram program = ParseLowIRProgram(text);
+  ValidateLowIRProgram(program, false);
+  OptimizeLowIRProgram(program, invocation.optimization_level);
+
+  ofstream out(invocation.outfile.c_str(), ios::binary);
+  if(!out) {
+    throw runtime_error("cannot create output file: " +
+                        invocation.outfile);
+  }
+  DumpLowIRProgram(program, out);
+  out.flush();
+  if(!out) {
+    throw runtime_error("cannot write output file: " +
+                        invocation.outfile);
+  }
+  return EXIT_SUCCESS;
 }
 
 }  // namespace
