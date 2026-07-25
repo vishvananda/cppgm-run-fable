@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "sema/type.h"
 #include "sema/type_builder.h"
@@ -51,4 +52,40 @@ struct SemMethodContext
 	// body ("read" while binding read<int>); friend grants recorded
 	// under the template name match through it.
 	std::string fn_template_name;
+};
+
+// One clause expansion of a pack parameter: the declared pack name
+// and its expanded slots.
+struct SemPackParamRecord
+{
+	std::string name;
+	std::vector<std::string> names;
+	std::vector<TypePtr> types;
+};
+
+// A captureless closure's synthesized function identity.
+struct SemClosureFunction
+{
+	const Scope* owner = 0;
+	std::string name;
+	TypePtr type;
+};
+
+// A poisoned instantiated body queued for an end-of-unit retry.
+struct SemRetryBody
+{
+	SemRetryBody() : deferred_index(0) {}
+
+	SemDeferredBody body;
+	size_t deferred_index;
+};
+
+// A deferred member-class definition of an instantiated class
+// (14.7.1p1), completed on demand.
+struct SemPendingClassDefinition
+{
+	SemPendingClassDefinition() : decl(0), scope(0) {}
+
+	const AstDecl* decl;
+	Scope* scope;  // the class scope the definition binds in
 };

@@ -19,6 +19,10 @@ class SemBinder : public DeclBinder, public ISemExprHost
 {
 	typedef SemDeferredBody DeferredBody;
 	typedef SemMethodContext MethodContext;
+	typedef SemPackParamRecord PackParamRecord;
+	typedef SemClosureFunction ClosureFunction;
+	typedef SemRetryBody RetryBody;
+	typedef SemPendingClassDefinition PendingClassDefinition;
 
 public:
 	SemBinder(TypesModel& model, SemUnit& unit);
@@ -723,12 +727,6 @@ private:
 	// in the slice): the declared pack name and its expanded slots,
 	// consumed right after signature composition to bind the function
 	// -scope pack binding.
-	struct PackParamRecord
-	{
-		string name;
-		vector<string> names;
-		vector<TypePtr> types;
-	};
 	PackParamRecord last_pack_param_;
 	// Binds (or completes) the pack-parameter binding in `scope` from
 	// last_pack_param_.
@@ -1046,12 +1044,6 @@ private:
 		lambda_cache_;
 	// Captureless closures: the class entity's synthesized function
 	// identity (queried by conversions and deduction contexts).
-	struct ClosureFunction
-	{
-		const Scope* owner = 0;
-		string name;
-		TypePtr type;
-	};
 	std::map<const NamedTypeInfo*, ClosureFunction> closure_functions_;
 	// Captureless closures whose auto deduction keeps the closure
 	// object view (local-type-owning bodies; the reference shape).
@@ -1072,13 +1064,6 @@ private:
 	vector<DeferredBody> deferred_bodies_;
 	// PA21: poisoned instantiated bodies retried at the end of the
 	// unit (the poisoned deferred item is replaced on success).
-	struct RetryBody
-	{
-		RetryBody() : deferred_index(0) {}
-
-		DeferredBody body;
-		size_t deferred_index;
-	};
 	vector<RetryBody> retry_bodies_;
 	MethodContext method_;
 public:
@@ -1119,13 +1104,6 @@ private:
 	Scope* param_capture_scope_;
 	// Deferred member-class definitions of instantiated classes
 	// (14.7.1p1), completed on demand by EnsureTypeCompleteness.
-	struct PendingClassDefinition
-	{
-		PendingClassDefinition() : decl(0), scope(0) {}
-
-		const AstDecl* decl;
-		Scope* scope;  // the class scope the definition binds in
-	};
 	std::map<const NamedTypeInfo*, PendingClassDefinition> pending_classes_;
 
 public:

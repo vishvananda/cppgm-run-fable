@@ -2,9 +2,11 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <stdexcept>
 
 using std::logic_error;
+using std::runtime_error;
 
 namespace mir_native {
 
@@ -261,6 +263,87 @@ ImageItem EncodeTlsWrapperItem(int init_label, int probe_label,
 	};
 	b.insert(b.end(), epilogue, epilogue + 5);
 	return item;
+}
+
+ProgramEnv::ProgramEnv(const mir_model::MirProgram & program,
+                       bool allow_external)
+	: program_(program), allow_external_(allow_external), next_label_(0)
+{
+	for (std::size_t i = 0; i < program.functions.size(); i++)
+	{
+		symbol_labels_[program.functions[i].name] = next_label_++;
+		label_names_.push_back(program.functions[i].name);
+		function_names_.insert(program.functions[i].name);
+	}
+	for (std::size_t i = 0; i < program.globals.size(); i++)
+	{
+		symbol_labels_[program.globals[i].name] = next_label_++;
+		label_names_.push_back(program.globals[i].name);
+	}
+}
+
+int ProgramEnv::SymbolLabel(const std::string & name)
+{
+	std::map<std::string, int>::const_iterator it =
+		symbol_labels_.find(name);
+	if (it != symbol_labels_.end())
+		return it->second;
+	if (!allow_external_)
+		throw runtime_error("machine IR references unknown symbol: " +
+		                    name);
+	// Relocatable-module encoding: an unknown name is an external
+	// reference the linker resolves; it claims a label with no item.
+	int label = next_label_++;
+	symbol_labels_[name] = label;
+	label_names_.push_back(name);
+	return label;
+}
+
+bool ProgramEnv::HasFunction(const std::string & name) const
+{
+	return function_names_.count(name) != 0;
+}
+
+const std::string & ProgramEnv::TlsBackingGlobal(
+	const std::string & wrapper) const
+{
+	std::map<std::string, std::string>::const_iterator it =
+		program_.tls_wrappers.find(wrapper);
+	if (it == program_.tls_wrappers.end())
+		throw runtime_error("machine IR references unknown TLS wrapper: " +
+		                    wrapper);
+	return it->second;
+}
+
+int ProgramEnv::FloatConstantLabel(int bits, long double value)
+{
+	std::vector<unsigned char> bytes;
+	AppendFloatBits(bytes,
+	                bits == 32 ? "f32" : bits == 64 ? "f64" : "f80",
+	                value);
+	std::ostringstream key;
+	key << "f" << bits << ":";
+	for (std::size_t i = 0; i < bytes.size(); i++)
+		key << std::hex << static_cast<int>(bytes[i]) << ",";
+	return ByteConstantLabel(key.str(), bytes.data(), bytes.size(),
+	                         bits == 32 ? 4 : bits == 64 ? 8 : 16);
+}
+
+int ProgramEnv::ByteConstantLabel(const std::string & key,
+                                  const unsigned char * data,
+                                  std::size_t size, std::size_t align)
+{
+	std::map<std::string, int>::const_iterator it = pool_labels_.find(key);
+	if (it != pool_labels_.end())
+		return it->second;
+	PoolEntry entry;
+	entry.bytes.assign(data, data + size);
+	entry.align = align;
+	entry.label = next_label_++;
+	label_names_.push_back("");
+	pool_.push_back(entry);
+	pool_labels_[key] = entry.label;
+	return entry.label;
 }
 
 }  // namespace mir_native

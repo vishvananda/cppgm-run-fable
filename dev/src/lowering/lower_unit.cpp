@@ -527,6 +527,34 @@ static const FunctionSpecialization* CtorTemplateSpecFor(
 	return 0;
 }
 
+// PA33 abi_tag: the declared tags append B<len><tag> (sorted) after
+// the special-member code in the host ABI spelling.
+static string MemberSpecialAbiTagSuffix(const ClassInfo* cls,
+                                        const TypePtr& type,
+                                        const string& special_code)
+{
+	string suffix;
+	if (special_code.empty() || !cls)
+		return suffix;
+	vector<string> tags;
+	if (special_code[0] == 'C')
+	{
+		for (size_t i = 0; i < cls->ctors.size(); i++)
+			if (!cls->ctors[i].abi_tags.empty() &&
+			    CtorEntryMatches(cls->ctors[i].type, type))
+				tags = cls->ctors[i].abi_tags;
+	}
+	else if (special_code[0] == 'D')
+		tags = cls->dtor_abi_tags;
+	// sorted and unique: a tag repeated across positions still spells
+	// one B<len><tag>
+	std::sort(tags.begin(), tags.end());
+	tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
+	for (size_t i = 0; i < tags.size(); i++)
+		suffix += "B" + to_string(tags[i].size()) + tags[i];
+	return suffix;
+}
+
 LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	const Scope* scope, const string& name, const TypePtr& type,
 	const string& special_code)
@@ -570,31 +598,8 @@ LowFunctionInfo& LowerProgram::MemberFunctionEntry(
 	}
 	else
 	{
-		// PA33 abi_tag: the declared tags append B<len><tag> (sorted)
-		// after the special-member code in the host ABI spelling.
-		string tag_suffix;
-		if (!special_code.empty())
-			if (const ClassInfo* cls = MethodClass(type))
-			{
-				vector<string> tags;
-				if (special_code[0] == 'C')
-				{
-					for (size_t i = 0; i < cls->ctors.size(); i++)
-						if (!cls->ctors[i].abi_tags.empty() &&
-						    CtorEntryMatches(cls->ctors[i].type, type))
-							tags = cls->ctors[i].abi_tags;
-				}
-				else if (special_code[0] == 'D')
-					tags = cls->dtor_abi_tags;
-				// sorted and unique: a tag repeated across positions
-				// still spells one B<len><tag>
-				std::sort(tags.begin(), tags.end());
-				tags.erase(std::unique(tags.begin(), tags.end()),
-				           tags.end());
-				for (size_t i = 0; i < tags.size(); i++)
-					tag_suffix += "B" + to_string(tags[i].size()) +
-						tags[i];
-			}
+		string tag_suffix = MemberSpecialAbiTagSuffix(
+			MethodClass(type), type, special_code);
 		info.object_name = MangleMemberFunctionObjectName(
 			scope, name, type, special_code + tag_suffix);
 		// Complete and base entries are identical without virtual
