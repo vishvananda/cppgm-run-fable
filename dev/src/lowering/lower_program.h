@@ -474,6 +474,7 @@ private:
 	// Merges the polymorphic declares/globals into the output phases.
 	void AppendPolymorphicSections(vector<string>* sections);
 	string RenderVTableDefinition(LowVTableInfo& entry);
+	string RenderVTableGroupTail(LowVTableInfo& entry);
 	// The "@name" of a class's RTTI record, rendering it (and its
 	// typeinfo-name data and base chain) on first use.
 	string RttiRef(const ClassInfo* cls);

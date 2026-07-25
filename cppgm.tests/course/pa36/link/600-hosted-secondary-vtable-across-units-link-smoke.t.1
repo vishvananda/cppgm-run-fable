@@ -1,0 +1,11 @@
+#include "600-hosted-secondary-vtable-across-units-link-smoke.shared.h"
+
+void Collector::put(int value) {
+  total_ += value;
+}
+
+long drive(ISink& sink, ILine& lines) {
+  sink.put(7);
+  lines.line(3);
+  return 0;
+}

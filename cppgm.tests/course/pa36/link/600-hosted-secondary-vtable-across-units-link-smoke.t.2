@@ -1,0 +1,12 @@
+#include "600-hosted-secondary-vtable-across-units-link-smoke.shared.h"
+
+#include <cstdio>
+
+int main() {
+  Collector collector;
+  drive(collector, collector);
+  if (collector.total() != 307)
+    return 1;
+  std::printf("secondary-vtable ok\n");
+  return 0;
+}

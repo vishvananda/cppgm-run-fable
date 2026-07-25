@@ -949,8 +949,20 @@ string LowerProgram::RenderVTableDefinition(LowVTableInfo& entry)
 		entry.object_name + "] = {\n" + body + "}";
 	if (!entry.group_used)
 		return text;
-	// PA27: the group - every secondary view, then (for polymorphic
-	// virtual-base classes) the construction vtables and the VTT.
+	text += RenderVTableGroupTail(entry);
+	return text;
+}
+
+// PA27: the group - every secondary view, then (for polymorphic
+// virtual-base classes) the construction vtables and the VTT. The
+// group members are weak in every emitting unit, so a unit that only
+// declares the key-owned primary still renders the group entries it
+// uses (an inline constructor of a multi-base class stores the view
+// vpointers).
+string LowerProgram::RenderVTableGroupTail(LowVTableInfo& entry)
+{
+	const ClassInfo& cls = *entry.cls;
+	string text;
 	for (size_t v = 0; v < cls.views.size(); v++)
 	{
 		const ClassView& view = cls.views[v];
@@ -1155,10 +1167,20 @@ bool LowerProgram::RenderPendingVTables()
 		any = true;
 		// A class whose key function is defined in another translation
 		// unit gets its vtable there; this program only declares it.
+		// The weak group entries (views, construction tables) still
+		// render here: every emitting unit carries its own copy.
 		if (!entry.cls->key_name.empty() && !entry.strong)
+		{
 			poly_declare_globals_.push_back(
 				"declare global @" + entry.low_name +
 				" [binding=strong, object=" + entry.object_name + "]");
+			if (entry.group_used)
+			{
+				string tail = RenderVTableGroupTail(entry);
+				if (!tail.empty())
+					entry.text = tail.substr(1);
+			}
+		}
 		else
 			entry.text = RenderVTableDefinition(entry);
 	}
