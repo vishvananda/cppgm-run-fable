@@ -1,8 +1,8 @@
 # PA39 Inception Plan
 
-Status: self-built PA1-PA5 pass; failure 10 (aggregate array members)
-and failure 11 (narrow parameter homes) fixed; recog-self next runs
-the pa6 ladder rung from the top.
+Status: self-built PA1-PA6 pass; failure 12 (member-template bodies
+bound inside an open class) fixed; the nsdecl rung (pa7) next runs
+from the top.
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -286,6 +286,50 @@ consumer; temp homes keep the widened normalized-64 contract
 Reducer: `cppgm.tests/course/pa28/300-narrow-param-home-across-call.t`
 (dirties the stack, then six crossing i32 params exhaust the
 callee-saved pool; verified failing before the fix, passing after).
+
+### Failure 12: member-template bodies bound while the enclosing
+### class is still open (pa7 nsdecl checkpoint, all sema TUs)
+
+Recog-self passes pa6. The nsdecl rung failed earlier: host-seeded
+`../dev/cppgm++` rejected all seven `sema/*.cpp` checkpoint TUs with
+"class assignment is outside the PA12 assignment boundary". Reduced
+(header bisection to `sema/type.h`, then freestanding) to
+`struct A { std::vector<A> elems; };` — a member field whose class
+template is specialized over the still-open class. Completing `A`
+completes `vector<A>` (`RecordMemberField` →
+`EnsureTypeCompleteness`), whose specialization replay eagerly binds
+member bodies; those odr-use member-template specs (`_M_insert_aux<A>`
+et al.) before the out-of-class `vector.tcc` definitions replay, and
+the definition merge (`InstantiatePendingFunctions`, sem_spec.cpp)
+bound the demanded bodies immediately — analyzing
+`*__position = std::move(__x_copy)` (a class assignment on `A`)
+while `A` had no implicit `operator=` yet. The reference defers such
+bodies past the forward pass (14.6.4.1p3), and the architecture
+already has the queue: `OnSpecializationOdrUsed` pushes to
+`pending_instantiations_` when `instantiating_` is set, drained at
+end of unit when every class is complete.
+
+Fix (earliest owning surface, the PA21 member-template machinery,
+`sema/template_body.cpp`): `InstantiatePendingFunctions` mirrors
+`OnSpecializationOdrUsed` — while `instantiating_`, a demanded
+non-constexpr body queues to `pending_instantiations_` instead of
+binding at the merge; constexpr patterns still bind immediately
+(constant evaluation may need them before the drain). The end-of-unit
+drain is failure-tolerant, binding order unchanged for every existing
+fixture (report re-run green).
+
+Reducer: `cppgm.tests/course/pa36/link/600-hosted-member-template-
+open-class-body-runtime-smoke` (verified failing before the fix,
+passing after). A pa21 exact-LowIR fixture cannot express it: the
+whole-program emission order and low display names for this shape
+legitimately diverge from the reference (poison/retry sequencing,
+`helper_Node_` vs `helper` display spelling, synthesized-`operator=`
+copyobj vs memberwise form), while the `object=` manglings match — so
+the value-correctness link smoke is the earliest harness that can pin
+the behavior, like failures 8 and 9. The ctor-template merge path
+(`sem_member_template.cpp`, failure 4) still binds at the merge; if a
+ladder failure reduces to a ctor-template body bound inside an open
+class, give it the same deferral through its `DeferredBody` route.
 
 ## Validation plan
 

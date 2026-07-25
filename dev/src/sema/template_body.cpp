@@ -404,8 +404,28 @@ void SemBinder::InstantiatePendingFunctions(TemplateInfo& tmpl)
 	for (map<string, unique_ptr<FunctionSpecialization>>::iterator it =
 	         tmpl.fn_specs.begin();
 	     it != tmpl.fn_specs.end(); ++it)
-		if (it->second->odr_used && !it->second->body_emitted)
-			InstantiateFunctionBody(tmpl, *it->second);
+	{
+		FunctionSpecialization& spec = *it->second;
+		if (!spec.odr_used || spec.body_emitted)
+			continue;
+		// 14.6.4.1p3, mirroring OnSpecializationOdrUsed: a definition
+		// arriving inside another instantiation (a member template
+		// replayed during a class-specialization body) binds the
+		// demanded body after the enclosing instantiation - the
+		// end-of-unit drain - because an enclosing class may still be
+		// open here (a specialization completed for a member field of
+		// the class it is specialized over). Constexpr patterns still
+		// bind immediately: constant evaluation may need the body
+		// before the drain.
+		const AstDecl* pattern = spec.explicit_def ? spec.explicit_def
+		                                           : tmpl.pattern_decl;
+		if (instantiating_ && (!pattern || !DeclHasConstexpr(*pattern)))
+		{
+			pending_instantiations_.push_back(&spec);
+			continue;
+		}
+		InstantiateFunctionBody(tmpl, spec);
+	}
 }
 
 // --- explicit forms ------------------------------------------------------------

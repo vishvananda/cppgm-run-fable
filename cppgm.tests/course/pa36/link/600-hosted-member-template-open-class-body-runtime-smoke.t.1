@@ -1,0 +1,38 @@
+#include <cstdio>
+
+template<typename T>
+struct Box
+{
+	template<typename U> void helper(U& a, U& b);
+	void demand(T& a, T& b) { helper(a, b); }
+};
+
+// The out-of-class definition replays while Box<Node> instantiates
+// inside Node's still-open definition; demand()'s in-class body has
+// already odr-used helper<Node> by then. Binding this body at the
+// replay would assign Node objects before Node's implicit copy
+// assignment can exist.
+template<typename T> template<typename U>
+void Box<T>::helper(U& a, U& b)
+{
+	a = b;
+}
+
+struct Node
+{
+	Box<Node> box;
+	int value;
+};
+
+int main()
+{
+	Node a;
+	Node b;
+	a.value = 40;
+	b.value = 2;
+	a.box.demand(a, b);
+	if (a.value != 2)
+		return 1;
+	std::printf("member-template-open-class ok\n");
+	return 0;
+}
