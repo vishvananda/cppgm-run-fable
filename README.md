@@ -1,5 +1,13 @@
 # cppgm
 
+## Fable Ralph Run
+
+This repository records the `fable` Ralph compiler run. View the
+[exported run](https://storage.googleapis.com/ralph-run-viewer-zippy-960/index.html?run=fable-claude-fable-5-xhigh%2Frun&view=run),
+the maintained [cppgm-extended](https://github.com/vishvananda/cppgm-extended)
+project, and the exported
+[cppgm-assignments](https://github.com/vishvananda/cppgm-assignments).
+
 `cppgm` is a staged course project for building a C++11 compiler. The
 assignments start with preprocessing tokens and grow into a practical
 self-hosting compiler toolchain.
