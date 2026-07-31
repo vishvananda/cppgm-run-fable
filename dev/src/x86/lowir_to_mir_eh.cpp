@@ -163,6 +163,16 @@ void FunctionLowering::SimulateEhBlock(size_t block_index,
 				break;
 			}
 			case LOWIR_INS_EH_END:
+				// eh_end closes the innermost marker-armed region. A
+				// synthetic throw-payload window pushed by an
+				// allocate-exception call inside that region ends with
+				// it (the class-type throw lowering closes the
+				// allocation's region before the constructor runs);
+				// leaving it armed would corrupt the marker LIFO and
+				// cover later pads' resumes with a stale region.
+				while(!stack.empty() &&
+				      eh_regions_[stack.back()].synthetic)
+					stack.pop_back();
 				if(!stack.empty())
 					stack.pop_back();
 				break;

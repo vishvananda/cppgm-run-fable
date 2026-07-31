@@ -1,0 +1,43 @@
+#include <cstdio>
+#include <string>
+#include <stdexcept>
+
+int double_dtor = 0;
+
+struct Tracked
+{
+	bool live;
+	Tracked() : live(true) {}
+	~Tracked() { if (!live) double_dtor++; live = false; }
+};
+
+struct ProbeError : std::runtime_error
+{
+	ProbeError(const std::string& m) : std::runtime_error(m) {}
+};
+
+void probe(const std::string& name)
+{
+	Tracked guard;
+	std::string outer("prefix ");
+	throw ProbeError("no matching function for " + name + outer);
+}
+
+int main()
+{
+	try
+	{
+		probe("f");
+	}
+	catch (const ProbeError& e)
+	{
+		std::printf("caught %s\n", e.what());
+	}
+	if (double_dtor)
+	{
+		std::printf("FAIL %d\n", double_dtor);
+		return 1;
+	}
+	std::printf("OK\n");
+	return 0;
+}
