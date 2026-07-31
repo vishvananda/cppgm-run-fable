@@ -1,15 +1,26 @@
 # PA39 Inception Plan
 
-Status: failures 20-26 root-caused and fixed. Failure 26 (self-built
-sema corrupting SemNode trees) was a backend parameter-homing bug:
-a scratch parameter copy hoisted into the prologue could target r8/r9
-after a call-staging evacuation released the hold, clobbering the
-still-live incoming 5th/6th argument (pool_clobbered_ now set at every
-parameter pool grant and at the hoist itself; reducer
-`pa28/tests/behavior/210-sret-six-gpr-param-forwarding.t`).
-Next: re-run the full ladder (test-report-through-pa38,
-test-through-pa10, compare-pptoken-inception,
-compare-cppgm++-inception) on the fixed compiler.
+Status: **PA39 COMPLETE.** `make -C pa39 compare-cppgm++-inception`
+passes: the self-built compiler recompiles every checkpoint tool and
+the compiler itself, all 136 objects byte-match the host-seeded
+build, and cppgm++-inception is byte-identical to cppgm++-self
+(`MATCH cppgm++`). compare-pptoken-inception matches, test-through-
+pa10 is green (pa10 134/134 self-built), `make
+test-report-through-pa38` is green at 3456/3456, and the file audit
+passes. Twenty-seven failures were root-caused and fixed along the
+way; the last two were backend codegen bugs the sema TUs exposed:
+
+- Failure 26: a scratch parameter copy hoisted into the prologue
+  could target r8/r9 after a call-staging evacuation released the
+  hold, clobbering the still-live incoming 5th/6th argument
+  (pool_clobbered_ now set at every parameter pool grant and at the
+  hoist itself; reducer
+  `cppgm.tests/course/pa28/210-sret-six-gpr-param-forwarding.t`).
+- Failure 27: eh_end popped the synthetic throw-payload window
+  instead of the region it closes, leaking the class-throw
+  allocation's region onto the marker stack and double-running
+  cleanup pads on unwind (reducer `cppgm.tests/course/pa36/link/
+  600-hosted-class-throw-payload-region-runtime-smoke.{t,t.1}`).
 
 PA39 adds no new compiler surface. The work is: make the existing
 `../dev/cppgm++` rebuild every checkpoint tool from `frontend_source_sets.mk`
@@ -876,6 +887,46 @@ more integer-register parameters AND a caller whose argument sources
 sit in pending-copy homes - the sema interface (ISemHost at base
 offset 128 in SemBinder) is the first place the ladder ever executed
 that combination.
+
+### Failure 27 (FIXED): eh_end popped the synthetic throw-payload
+### window instead of the region it closes
+
+After failure 26, the pa15 DMI reducer passed but
+`#include <bits/exception_ptr.h>` still segfaulted the self compiler:
+`vector<ConversionSource>::~vector()` ran TWICE on the same
+`sources` local in AnalyzeStaticMethodCall (gdb: two ~vector calls
+from two different return addresses, both landing pads; between the
+two destructions the only EH event was one `_Unwind_Resume` - no
+throw, no catch - so the resume re-entered a second cleanup pad of
+the same frame). Diagnosis without any self-build iteration: run the
+TU's own `--emit-lowir -O3` text through `dev/lowir2native` with
+temporary env-guarded traces in LowerResume/EhRegionForArming; two
+resumes carried live regions (`dispatch_57` covered by `dispatch_55`,
+`dispatch_69` by `dispatch_67`), and the arming trace showed the
+region armed around `__cxa_allocate_exception` still on the abstract
+stack at the throw's own arming.
+
+Root cause in `lowir_to_mir_eh.cpp` (SimulateEhBlock): a
+`role=eh_allocate_exception` call pushes a synthetic throw-payload
+window, popped again at the `role=eh_throw` call. But the CLASS-type
+throw lowering closes the allocation's region before the payload
+constructor runs (`eh_try ^A; alloc; eh_end ... eh_try ^B; ctor;
+throw; eh_end`), so that `eh_end` popped the synthetic window instead
+of region A - region A leaked onto the marker stack for the rest of
+the function, later flat pads' resumes were covered by it, and the
+unwinder re-entered its pad and destroyed the enclosing locals a
+second time. Fix: `eh_end` retires any synthetic windows above the
+region it closes (the throw-site pop still serves the unsplit scalar
+shape). After the fix every resume in the function maps to -1
+(terminal flat pads) or to the intended catch-cleanup chain pad.
+Reducer: a class-type `throw E("..." + name)` from a function with
+destructible locals, caller catching - double destruction before,
+exactly-once after, at -O0 and -O3 (`cppgm.tests/course/pa36/link/
+600-hosted-class-throw-payload-region-runtime-smoke.{t,t.1}`,
+ref-generated fixtures). Note the trigger needs the throw OUTSIDE any
+try/catch in the throwing function (in-frame handler routing masks
+the leak), destructible locals so the allocation call gets its own
+region, and a class exception with a nontrivially-built payload.
 
 ## Validation plan
 
