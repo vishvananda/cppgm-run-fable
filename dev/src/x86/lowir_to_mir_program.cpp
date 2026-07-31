@@ -212,6 +212,9 @@ void FunctionLowering::PlanParams()
 			continue;
 		}
 		pool_holder_[index] = param.name;
+		// Live from function entry: never a hoisted-copy target (see
+		// the PlanGprParam pool grant).
+		pool_clobbered_[index] = true;
 		ValueLocation location;
 		location.kind = ValueLocation::VL_GPR;
 		location.reg = kPool[index];
@@ -527,6 +530,10 @@ void FunctionLowering::PlanGprParam(
 		return;
 	}
 	pool_holder_[index] = param.name;
+	// The parameter's value occupies this register from function entry,
+	// so a scratch copy hoisted into the prologue can never target it,
+	// even after a call-staging evacuation releases the hold.
+	pool_clobbered_[index] = true;
 	ValueLocation location;
 	location.kind = ValueLocation::VL_GPR;
 	location.reg = kPool[index];

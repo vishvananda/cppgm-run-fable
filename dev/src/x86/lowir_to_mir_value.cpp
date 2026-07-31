@@ -421,6 +421,9 @@ ValueLocation & FunctionLowering::resolve_location(const std::string & name)
 	}
 	X64Register reg = kPool[index];
 	pool_holder_[index] = name;
+	// The hoisted copy writes this register in the prologue, before
+	// every later read; a second hoist may never reuse it.
+	pool_clobbered_[index] = true;
 	mir_model::Instruction copy;
 	copy.opcode = mir_model::Instruction::MI_MOV;
 	copy.operands.push_back(MakeReg(reg));
