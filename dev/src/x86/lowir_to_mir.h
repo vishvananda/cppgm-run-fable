@@ -3,6 +3,7 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -112,6 +113,8 @@ private:
 	void invalidate_rax();
 	bool operand_in_rax(const LowIROperand & operand) const;
 	mir_model::Operand gpr_read(const LowIROperand & operand);
+	void emit_frame_home_load(const std::string & name,
+	                          long long frame_offset, X64Register reg);
 	mir_model::Operand address_operand(const LowIROperand & operand,
 	                                   X64Register staging);
 	// PA36 host data model: an imported (declared, not defined here)
@@ -254,6 +257,19 @@ private:
 	std::vector<const LowIRInstruction *> linear_;
 	std::vector<int> block_first_position_;
 	std::map<std::string, ValueInfo> values_;
+	// The checked read of one value's analyzed record: where a
+	// missing record would silently disable a width-normalization
+	// decision (values_[name] inserts a zeroed default), read through
+	// this instead so the desync fails loudly.
+	const ValueInfo & value_info(const std::string & name) const
+	{
+		std::map<std::string, ValueInfo>::const_iterator found =
+			values_.find(name);
+		if (found == values_.end())
+			throw std::logic_error("read of unanalyzed value " + name +
+			                       " in @" + function_.name);
+		return found->second;
+	}
 	std::map<std::string, SlotInfo> slots_;
 	std::map<std::string, LowIROperand> promoted_slot_value_;
 	std::set<int> skip_positions_;        // promoted slot stores

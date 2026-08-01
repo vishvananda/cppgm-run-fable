@@ -473,27 +473,37 @@ mir_model::Operand FunctionLowering::gpr_read(const LowIROperand & operand)
 					slots_[location.slot_name].frame_offset));
 				return MakeReg(staging);
 			}
-			// A temp home holds the canonical normalized 64-bit form;
-			// a parameter home keeps the parameter's own width (the
-			// SpillParamHome park), so a narrow one re-loads at that
-			// width and re-normalizes (the reference load+sext shape).
-			const ValueInfo & info = values_[operand.name];
-			bool narrow_param = info.is_param &&
-				FrameSizeOf(info.type) < 8 &&
-				info.type.kind != LOWIR_TYPE_OBJ;
-			mir_model::Instruction & load =
-				emit(mir_model::Instruction::MI_LOAD);
-			load.type = narrow_param ? SpellType(info.type) : "i64";
-			load.operands.push_back(MakeReg(staging));
-			load.operands.push_back(
-				frame_operand(location.frame_offset));
-			if(narrow_param)
-				emit_narrow_normalize(info.type, staging);
+			emit_frame_home_load(operand.name,
+			                     location.frame_offset, staging);
 			return MakeReg(staging);
 		}
 	}
 	throw std::logic_error("gpr_read on unhoused operand: " +
 	                       operand.name + " in @" + function_.name);
+}
+
+// The one GPR frame-home width rule (gpr_read and emit_dest_copy): a
+// temp home holds the canonical normalized 64-bit form and loads i64;
+// a parameter home keeps the parameter's own width (the SpillParamHome
+// park), so a narrow one re-loads at that width and re-normalizes
+// unconditionally (the reference load+sext shape). Loading at the
+// consumer's width instead lets an i32 home feed 64-bit sar/idiv
+// staging through a zero-extending load, folding negative values wrong.
+void FunctionLowering::emit_frame_home_load(const std::string & name,
+                                            long long frame_offset,
+                                            X64Register reg)
+{
+	const ValueInfo & info = value_info(name);
+	bool narrow_param = info.is_param &&
+		FrameSizeOf(info.type) < 8 &&
+		info.type.kind != LOWIR_TYPE_OBJ;
+	mir_model::Instruction & load =
+		emit(mir_model::Instruction::MI_LOAD);
+	load.type = narrow_param ? SpellType(info.type) : "i64";
+	load.operands.push_back(MakeReg(reg));
+	load.operands.push_back(frame_operand(frame_offset));
+	if(narrow_param)
+		emit_narrow_normalize(info.type, reg);
 }
 
 // PA36 host data model: a data global the unit only declares takes
@@ -731,23 +741,8 @@ void FunctionLowering::emit_dest_copy(const std::string & dest,
 	else if(lhs.kind == LOWIR_OPERAND_TEMP) {
 		const ValueLocation & location = resolve_location(lhs.name);
 		if(location.kind == ValueLocation::VL_FRAME) {
-			// A parameter home keeps the parameter's own width (the
-			// SpillParamHome park): a narrow one read into a wider
-			// operation re-loads at that width and re-normalizes (the
-			// reference load+sext shape). Temp homes hold the
-			// canonical normalized 64-bit form.
-			const ValueInfo & info = values_[lhs.name];
-			bool narrow_param = info.is_param &&
-				FrameSizeOf(info.type) < FrameSizeOf(type) &&
-				info.type.kind != LOWIR_TYPE_OBJ;
-			mir_model::Instruction & load =
-				emit(mir_model::Instruction::MI_LOAD);
-			load.type = narrow_param ? SpellType(info.type)
-			                         : SpellType(type);
-			load.operands.push_back(MakeReg(out_reg));
-			load.operands.push_back(frame_operand(location.frame_offset));
-			if(narrow_param)
-				emit_narrow_normalize(info.type, out_reg);
+			emit_frame_home_load(lhs.name, location.frame_offset,
+			                     out_reg);
 		}
 		else if(location.kind == ValueLocation::VL_SLOT_ADDR) {
 			mir_model::Instruction & lea =

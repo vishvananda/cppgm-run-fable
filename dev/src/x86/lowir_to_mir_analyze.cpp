@@ -448,6 +448,14 @@ void FunctionLowering::MarkCallCrossings()
 	// such a value sit in a caller-saved register across the loop's
 	// calls (a use before the call in block order still reads the
 	// register after the call on the next iteration).
+	// Precondition: a temp's def precedes its uses in linear order
+	// (the frontend emits defs first; the validator does not check
+	// it) - a use-before-def would collapse the window to a point and
+	// mark no calls. Cost note: the per-value fixpoint rescans the
+	// undeduplicated region list on every growth, O(regions^2) per
+	// value worst case; regions-per-function counts are small (one
+	// per backedge), so the quadratic term stays immaterial - revisit
+	// with sorted, merged intervals if that ever changes.
 	std::map<std::string, int> block_start;
 	for(size_t b = 0; b < function_.blocks.size(); b++)
 		block_start[function_.blocks[b].label] =

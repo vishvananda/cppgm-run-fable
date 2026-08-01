@@ -47,7 +47,19 @@ void FunctionLowering::WideReadPair(const LowIROperand & op,
 	if (op.kind == LOWIR_OPERAND_SLOT)
 		home = slots_[op.name].frame_offset;
 	else if (op.kind == LOWIR_OPERAND_TEMP)
-		home = WideHome(op.name);
+	{
+		// A read: the operand's 16-byte home must already exist (its
+		// defining instruction allocated it). WideHome's
+		// alloc-on-first-sight serves results only - fabricating a
+		// home here would read uninitialized stack.
+		std::map<std::string, ValueLocation>::const_iterator found =
+			locations_.find(op.name);
+		if (found == locations_.end() ||
+		    found->second.kind != ValueLocation::VL_FRAME)
+			throw std::runtime_error("i128 read of unhoused value " +
+			                         op.name);
+		home = found->second.frame_offset;
+	}
 	else
 		throw std::runtime_error("unsupported i128 operand form");
 	mir_model::Instruction & load_lo = emit(mir_model::Instruction::MI_LOAD);

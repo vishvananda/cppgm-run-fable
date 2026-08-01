@@ -588,7 +588,13 @@ unsigned long long ElfObjectWriter::PersonalitySlotOffset()
 	ElfReloc reloc;
 	reloc.offset = offset;
 	reloc.kind = kRelocAbs64;
-	reloc.symbol = UndefinedByName("__gxx_personality_v0");
+	// A module that defines the personality itself must not gain a
+	// second (undefined) GLOBAL entry under the same name.
+	map<string, int>::const_iterator defined =
+		defined_by_name_.find("__gxx_personality_v0");
+	reloc.symbol = defined != defined_by_name_.end()
+		? defined->second
+		: UndefinedByName("__gxx_personality_v0");
 	AppendWord(data_.bytes, 0, 8);
 	data_.relocs.push_back(reloc);
 	personality_slot_ = static_cast<long long>(offset);

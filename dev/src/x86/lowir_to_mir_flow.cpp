@@ -411,6 +411,12 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 			continue;
 		}
 		if(slot.kind == ArgSlot::AS_GPR) {
+			// Argument staging writes r8/r9 without pool_clobbered_
+			// bookkeeping: hoist safety for those registers rests on
+			// MarkCallCrossings routing every parameter with a call
+			// before its use away from VL_PENDING_COPY. An
+			// under-approximation there resurrects the failure-26
+			// prologue-hoist clobber rather than merely pessimizing.
 			X64Register target = kArgRegs[slot.ordinal];
 			if(arg.kind == LOWIR_OPERAND_LITERAL) {
 				emit_mov(MakeReg(target), MakeImm(ParseIntLiteral(arg)));
@@ -767,6 +773,13 @@ void FunctionLowering::LowerCall(const LowIRInstruction & ins)
 		// and 64-bit readers (switch staging, index arithmetic) assume
 		// register homes are normalized.
 		emit_narrow_normalize(return_type, result_reg);
+		// The alias is raw: RAX still holds the un-normalized callee
+		// return, so every alias consumer must read it at the value's
+		// own width (LowerBranch and LowerCmp do; LowerSwitch
+		// re-normalizes its selector). A consumer that assumes the
+		// normalized 64-bit form must read the pool copy instead -
+		// compare the direct-destination discipline at
+		// lowir_to_mir_inst.cpp (also_in_rax = !normalize).
 		locations_[ins.result].also_in_rax = true;
 		rax_alias_ = ins.result;
 	}
@@ -1007,7 +1020,13 @@ void FunctionLowering::emit_fused_compare(const LowIRInstruction & cmp,
 			// spilled value's own storage must fill them: a narrow
 			// value under a widened compare (`!bool_temp` spells
 			// cmp eq i64) reloads with its own width instead - the
-			// slot bytes past it are junk.
+			// slot bytes past it are junk. The own-width load
+			// zero-extends, which is only canonical for unsigned
+			// narrows - and those are the only narrows that reach a
+			// widened compare directly: signed narrows widen through
+			// an explicit convert whose result is a normalized temp.
+			// A future spelling that compares a signed narrow home
+			// wide must re-normalize like gpr_read.
 			if(rhs_literal && wide &&
 			   FrameSizeOf(values_[lhs.name].type) == cmp_width) {
 				left = frame_operand(location.frame_offset);
@@ -1206,7 +1225,7 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 	// host call result, or a frame home written before the normalized
 	// contract) re-normalizes here.
 	if(selector.kind == LOWIR_OPERAND_TEMP)
-		emit_narrow_normalize(values_[selector.name].type, XR_RAX);
+		emit_narrow_normalize(value_info(selector.name).type, XR_RAX);
 	for(size_t c = 0; c < ins.switch_values.size(); c++) {
 		const LowIROperand & value = ins.switch_values[c];
 		if(value.kind == LOWIR_OPERAND_LITERAL) {
@@ -1226,7 +1245,7 @@ void FunctionLowering::LowerSwitch(const LowIRInstruction & ins)
 				emit_mov(MakeReg(XR_RCX), MakeReg(location.reg));
 			}
 			if(value.kind == LOWIR_OPERAND_TEMP)
-				emit_narrow_normalize(values_[value.name].type,
+				emit_narrow_normalize(value_info(value.name).type,
 				                      XR_RCX);
 		}
 		mir_model::Instruction & flags =

@@ -251,10 +251,12 @@ struct CieProfile
 {
 	bool has_lsda = false;
 	bool ours = false;
-	// Set for the indirect form: frame offset of the 4-byte
-	// personality field, whose relocation must resolve through an
-	// 8-byte slot to __gxx_personality_v0.
+	// Frame offset of the personality field. Indirect (0x9b): the
+	// relocation must resolve through an 8-byte slot to
+	// __gxx_personality_v0. Direct (0x1b, the legacy form): the
+	// relocation names the personality symbol itself.
 	size_t personality_field = 0;
+	bool personality_direct = false;
 };
 
 CieProfile ParseCieProfile(const vector<unsigned char> & frame,
@@ -286,8 +288,11 @@ CieProfile ParseCieProfile(const vector<unsigned char> & frame,
 	{
 		if (pos >= end)
 			return profile;
-		if (frame[pos] == 0x9b)
+		if (frame[pos] == 0x9b || frame[pos] == 0x1b)
+		{
 			profile.personality_field = pos + 1;
+			profile.personality_direct = frame[pos] == 0x1b;
+		}
 		profile.ours = profile.has_lsda &&
 			(frame[pos] == 0x1b || frame[pos] == 0x9b);
 	}
@@ -328,6 +333,22 @@ bool PersonalitySlotIsOurs(const ObjectModule & module,
 				"__gxx_personality_v0";
 	}
 	return false;
+}
+
+// The direct (0x1b) personality field: its relocation names the
+// personality symbol itself, which must be __gxx_personality_v0 for
+// the frame to count as ours.
+bool PersonalityDirectIsOurs(const ObjectModule & module,
+                             const map<unsigned long long, RawReloc> & relocs,
+                             size_t field)
+{
+	map<unsigned long long, RawReloc>::const_iterator entry =
+		relocs.find(field);
+	if (entry == relocs.end() ||
+	    entry->second.symbol >= module.symbols.size())
+		return false;
+	return module.symbols[entry->second.symbol].external_name ==
+		"__gxx_personality_v0";
 }
 
 // Parses .eh_frame + .gcc_except_table back into typed host-EH facts
@@ -378,10 +399,16 @@ void RecoverEhFacts(ObjectModule & module, const ElfFile & elf,
 		if (id == 0)
 		{
 			CieProfile profile = ParseCieProfile(frame, pos, end);
-			if (profile.ours && profile.personality_field != 0 &&
-			    !PersonalitySlotIsOurs(module, frame_relocs,
-			                           profile.personality_field))
-				profile.ours = false;
+			if (profile.ours && profile.personality_field != 0)
+			{
+				bool verified = profile.personality_direct
+					? PersonalityDirectIsOurs(module, frame_relocs,
+					                          profile.personality_field)
+					: PersonalitySlotIsOurs(module, frame_relocs,
+					                        profile.personality_field);
+				if (!verified)
+					profile.ours = false;
+			}
 			cies[pos] = profile;
 			pos = end;
 			continue;
