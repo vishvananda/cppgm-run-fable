@@ -261,6 +261,13 @@ protected:
 	// PA12 binder qualifies it with the enclosing namespace path.
 	virtual string TypeDisplayName(const string& key,
 	                               const string& name) const;
+	// The display of a type declared into a specific scope (the
+	// 3.3.2p6 rehomed elaborated first-declaration); the PA12 binder
+	// qualifies with that scope's path so the display matches
+	// info->scope.
+	virtual string TypeDisplayNameIn(const string& key,
+	                                 const string& name,
+	                                 const Scope* home) const;
 	virtual string AnonymousTypeName(const AstDecl& decl);
 
 	TypesModel& model_;

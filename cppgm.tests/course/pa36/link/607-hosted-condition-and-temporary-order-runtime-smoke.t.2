@@ -1,0 +1,8 @@
+#include "607-hosted-condition-and-temporary-order-runtime-smoke.shared.h"
+
+int main()
+{
+	if (Lock().ok() && use_after())
+		return 0;
+	return 1;
+}

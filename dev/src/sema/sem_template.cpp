@@ -728,17 +728,29 @@ void SemBinder::InstantiateSpecializationBody(TemplateInfo& tmpl,
 	catch (const InstantiationBodyFault& e)
 	{
 		class_replay_depth_--;
-		spec.bind_failed = true;
-		if (repeat_failure)
-			throw runtime_error(e.what());
+		// bind_failed pairs with the bind paths' reset (the record
+		// re-instantiates on the next demand). A fault escaping the
+		// post-bind member instantiation leaves the class record
+		// standing - no re-bind will ever read the flag, and arming
+		// the soft-repeat downgrade from it would report a later
+		// genuine bind failure softly.
+		if (!spec.instantiated)
+		{
+			spec.bind_failed = true;
+			if (repeat_failure)
+				throw runtime_error(e.what());
+		}
 		throw;
 	}
 	catch (const std::exception& e)
 	{
 		class_replay_depth_--;
-		spec.bind_failed = true;
-		if (repeat_failure)
-			throw runtime_error(e.what());
+		if (!spec.instantiated)
+		{
+			spec.bind_failed = true;
+			if (repeat_failure)
+				throw runtime_error(e.what());
+		}
 		throw InstantiationBodyFault(e.what());
 	}
 	class_replay_depth_--;
@@ -1303,7 +1315,7 @@ void SemBinder::BindClassDeclaration(const AstDecl& decl)
 	    current_->kind == SCOPE_CLASS)
 	{
 		TypePtr forward = BindClassForward(decl, false);
-		PendingClassDefinition pending;
+		SemPendingClassDefinition pending;
 		pending.decl = &decl;
 		pending.scope = current_;
 		pending_classes_[forward->named] = pending;
@@ -1402,11 +1414,11 @@ void SemBinder::EnsureTypeCompleteness(const NamedTypeInfo* info)
 			return;
 		}
 	}
-	std::map<const NamedTypeInfo*, PendingClassDefinition>::iterator
+	std::map<const NamedTypeInfo*, SemPendingClassDefinition>::iterator
 		found = pending_classes_.find(info);
 	if (found == pending_classes_.end())
 		return;
-	PendingClassDefinition pending = found->second;
+	SemPendingClassDefinition pending = found->second;
 	pending_classes_.erase(found);
 	InstantiationContext context(*this, pending.scope, true);
 	// The forward-declared entity completes in place (the pending

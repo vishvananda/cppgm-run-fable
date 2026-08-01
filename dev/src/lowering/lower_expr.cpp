@@ -141,25 +141,42 @@ void FunctionLowerer::LowerCondition(const SemNode& node,
                                      const string& true_label,
                                      const string& false_label)
 {
+	LowerCondition(node, true_label, false_label, true, true);
+}
+
+void FunctionLowerer::LowerCondition(const SemNode& node,
+                                     const string& true_label,
+                                     const string& false_label,
+                                     bool true_edge_cleanups,
+                                     bool false_edge_cleanups)
+{
 	if (node.kind == SN_BINARY_EXPRESSION && node.op == OP_LAND)
 	{
 		string rhs_label = NewLabel("land_rhs");
-		LowerCondition(*node.children[0], rhs_label, false_label);
+		// The fall-through edge into the right operand stays inside
+		// the condition's full expression: the left operand's
+		// temporaries live until a final edge leaves it (12.2).
+		LowerCondition(*node.children[0], rhs_label, false_label,
+		               false, false_edge_cleanups);
 		OpenBlock(rhs_label);
 		OpenSegmentRegion(*node.children[1]);
-		LowerCondition(*node.children[1], true_label, false_label);
+		LowerCondition(*node.children[1], true_label, false_label,
+		               true_edge_cleanups, false_edge_cleanups);
 		return;
 	}
 	if (node.kind == SN_BINARY_EXPRESSION && node.op == OP_LOR)
 	{
 		string rhs_label = NewLabel("lor_rhs");
-		LowerCondition(*node.children[0], true_label, rhs_label);
+		LowerCondition(*node.children[0], true_label, rhs_label,
+		               true_edge_cleanups, false);
 		OpenBlock(rhs_label);
 		OpenSegmentRegion(*node.children[1]);
-		LowerCondition(*node.children[1], true_label, false_label);
+		LowerCondition(*node.children[1], true_label, false_label,
+		               true_edge_cleanups, false_edge_cleanups);
 		return;
 	}
-	BranchOnValue(node, true_label, false_label, true);
+	BranchOnValue(node, true_label, false_label, true_edge_cleanups,
+	              false_edge_cleanups);
 }
 
 // --- values ---------------------------------------------------------------
@@ -714,10 +731,10 @@ LowerValue FunctionLowerer::LowerLogicalValue(const SemNode& node)
 	string end_label = NewLabel(string(family) + "_end");
 	if (is_and)
 		BranchOnValue(*node.children[0], rhs_label, short_label,
-		              false);
+		              false, false);
 	else
 		BranchOnValue(*node.children[0], short_label, rhs_label,
-		              false);
+		              false, false);
 	OpenBlock(rhs_label);
 	OpenSegmentRegion(*node.children[1]);
 	size_t rhs_mark = temp_cleanups_.size();

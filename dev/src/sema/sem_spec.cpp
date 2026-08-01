@@ -92,9 +92,9 @@ const ScopeBinding* SemBinder::ResolveAliasTemplateId(
 	// PA34: the builtin __type_pack_element selects its indexed
 	// element instead of substituting an aliased type; the builtin
 	// __is_nothrow_invocable synthesizes its value record.
-	if (&tmpl == type_pack_element_tmpl_.get())
+	if (&tmpl == builtin_tmpls_.type_pack_element.get())
 		return ResolveTypePackElementUse(args);
-	if (&tmpl == nothrow_invocable_tmpl_.get())
+	if (&tmpl == builtin_tmpls_.nothrow_invocable.get())
 		return ResolveNothrowInvocableUse(args);
 	if (!tmpl.alias_type)
 		throw runtime_error("alias template " + tmpl.name +
@@ -397,7 +397,13 @@ TemplateInfo* SemBinder::CaptureFunctionTemplate(const AstDecl& decl,
 			AdoptFunctionTemplateDefinition(*merged, decl, inner, params,
 			                                name, replace_instantiated);
 		// A real namespace-scope redeclaration makes a hidden friend
-		// template visible (7.3.1.2p3).
+		// template visible (7.3.1.2p3). The template-set flag must
+		// clear here like the create path below: an SB_FUNCTION
+		// binding carries its first overload's type, so the
+		// per-overload clear's !type guard cannot serve the template
+		// set when concrete hidden friends share the name.
+		if (!as_friend && binding)
+			binding->fn_templates_adl_only = false;
 		if (!as_friend && binding && !binding->fn_adl_only.empty() &&
 		    !binding->type)
 			binding->fn_adl_only.assign(binding->fn_adl_only.size(),

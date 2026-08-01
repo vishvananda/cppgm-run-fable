@@ -583,6 +583,13 @@ string SemBinder::TypeDisplayName(const string& key,
 	return key + " " + QualifiedScopePath(current_) + name;
 }
 
+string SemBinder::TypeDisplayNameIn(const string& key,
+                                    const string& name,
+                                    const Scope* home) const
+{
+	return key + " " + QualifiedScopePath(home) + name;
+}
+
 ScopeBinding& SemBinder::BindFunctionName(const string& name,
                                           const TypePtr& type,
                                           bool allow_block)
@@ -1149,8 +1156,14 @@ void SemBinder::BindFunctionBody(const AstDecl& decl,
 	item->type = composed.type;
 	item->entity_scope = declaring;
 	item->entity_name = name;
-	item->unwind_no = composed.noexcept_simple;
-	item->noexcept_decl = composed.noexcept_simple;
+	// PA39/CWG 1330: route through the shared fact reader so a
+	// pending spec (impossible for a parsed namespace-scope
+	// definition today, which composes at depth 0) never reads as a
+	// silent may-throw.
+	bool noexcept_fact = ComposedNoexceptSimple(composed);
+	item->unwind_no = noexcept_fact;
+	item->noexcept_decl = noexcept_fact;
+	RegisterPendingNodeFact(*item, composed);
 	item->throw_spec = composed.throw_spec_types;
 	item->alias_collapsed = composed_alias_collapsed_;
 	// 7.1.2p4: an inline function emits weak and only where used;

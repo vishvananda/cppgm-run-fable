@@ -1,0 +1,9 @@
+#include "606-hosted-static-member-aggregate-array-runtime-smoke.shared.h"
+
+int seed() { return 7; }
+
+int main()
+{
+	return H::t[0].a == 7 && H::t[0].b == 1 && H::t[1].a == 2 &&
+	       H::t[1].b == 3 ? 0 : 1;
+}

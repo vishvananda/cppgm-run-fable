@@ -428,9 +428,14 @@ void SemBinder::AppendAggregateArrayInit(SemNode& item,
 			call->children.push_back(std::move(zero.node));
 		}
 		// The shared-base offset form serves member/local contexts;
-		// a namespace-scope array's init-helper actions carry their
-		// subscripted element address explicitly.
-		if (binding.home && binding.home->kind == SCOPE_NAMESPACE)
+		// an array emitted at namespace scope - a namespace variable
+		// or a static data member definition (whose binding home is
+		// its class scope) - carries the subscripted element address
+		// explicitly, because its actions may clone into the
+		// @__cppgm_init helper where no enclosing object supplies the
+		// base.
+		if (binding.home && (binding.home->kind == SCOPE_NAMESPACE ||
+		                     binding.home->kind == SCOPE_CLASS))
 		{
 			call->children.insert(
 				call->children.begin() + 1,

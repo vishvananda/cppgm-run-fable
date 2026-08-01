@@ -470,24 +470,28 @@ bool SemBinder::RetryDeferredBodies()
 	pass.swap(retry_bodies_);
 	for (size_t i = 0; i < pass.size(); i++)
 	{
-		DeferredBody body = pass[i].body;
 		const size_t deferred_index = pass[i].deferred_index;
 		bool saved_instantiating = instantiating_;
 		instantiating_ = true;
 		try
 		{
-			AnalyzeDeferredBody(body);
+			AnalyzeDeferredBody(pass[i].body);
 		}
 		catch (const std::exception&)
 		{
 			instantiating_ = saved_instantiating;
-			retry_bodies_.push_back(pass[i]);
+			retry_bodies_.push_back(std::move(pass[i]));
 			continue;
 		}
 		instantiating_ = saved_instantiating;
 		healed = true;
 		const size_t last = unit_.deferred.size() - 1;
 		unit_.deferred[deferred_index].swap(unit_.deferred[last]);
+		// The poisoned node (now at the back) is about to be
+		// destroyed; a pending node-fact record naming it must not
+		// dangle - the healed replacement bound at depth 0 and
+		// resolved its own facts inline.
+		DropPendingNodeFact(unit_.deferred[last].get());
 		unit_.deferred.pop_back();
 		// The replacement destroyed the poisoned node; the const-eval
 		// body index holds raw pointers into the deferred list and
@@ -519,12 +523,19 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 	DrainPendingInstantiations();
 	while (!retry_bodies_.empty())
 	{
-		// PA39: failed retries re-queue; a round that heals nothing
-		// ends the loop (the remaining bodies keep their poisoned
-		// definitions, as before).
+		// PA39: failed retries re-queue; a round that neither heals a
+		// body nor poisons a fresh one ends the loop (the remaining
+		// bodies keep their poisoned definitions, as before). The
+		// drain can append new retry entries - a body instantiated
+		// there can poison a sibling - so drain progress keeps the
+		// loop alive even when the retry pass itself healed nothing.
+		// Termination: each pass either heals or poisons a body that
+		// was not poisoned before, both bounded by the unit's finite
+		// body set; a no-progress pass breaks.
 		const bool healed = RetryDeferredBodies();
+		const size_t queued = retry_bodies_.size();
 		DrainPendingInstantiations();
-		if (!healed)
+		if (!healed && retry_bodies_.size() == queued)
 			break;
 	}
 	// PA22: the mangler spells specialization object names from the
@@ -568,6 +579,10 @@ void SemBinder::BindTranslationUnit(const AstDecl& unit)
 					unit_.extern_class_scopes.push_back(members);
 	}
 	FinishTemplateChecks();
+	// PA39/CWG 1330: definition nodes built inside replay windows
+	// resolve their deferred noexcept facts now that every class is
+	// complete - the lowering reads them next.
+	ResolvePendingNodeFacts();
 }
 
 // 13.5p6: a namespace-scope operator function must take at least one

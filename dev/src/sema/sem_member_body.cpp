@@ -163,10 +163,13 @@ SemNodePtr SemBinder::BuildFunctionNode(const DeferredBody& body,
 	item->entity_scope = body.declaring;
 	item->entity_name = body.name;
 	// PA39/CWG 1330: a spec deferred at replay time evaluates here
-	// (drained bodies bind outside the replay window).
+	// when this bind runs outside the replay window (drained and
+	// retried bodies do); an in-window bind registers the pending
+	// spec for the end-of-unit node-fact resolution instead.
 	bool noexcept_fact = ComposedNoexceptSimple(body.composed);
 	item->unwind_no = noexcept_fact;
 	item->noexcept_decl = noexcept_fact;
+	RegisterPendingNodeFact(*item, body.composed);
 	item->throw_spec = body.composed.throw_spec_types;
 	item->inline_def = !body.out_of_class;
 	item->is_method = is_method;

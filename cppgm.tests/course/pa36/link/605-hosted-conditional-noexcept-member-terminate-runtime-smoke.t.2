@@ -1,0 +1,14 @@
+#include "605-hosted-conditional-noexcept-member-terminate-runtime-smoke.shared.h"
+
+int main()
+{
+	try
+	{
+		poke_noexcept_member();
+	}
+	catch (...)
+	{
+		return 1;
+	}
+	return 2;
+}

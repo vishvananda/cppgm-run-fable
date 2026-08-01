@@ -201,6 +201,7 @@ SemNodePtr SemBinder::MakeInstantiatedBodyNode(
 	bool noexcept_fact = ComposedNoexceptSimple(composed);
 	item->unwind_no = noexcept_fact;
 	item->noexcept_decl = noexcept_fact;
+	RegisterPendingNodeFact(*item, composed);
 	item->throw_spec = composed.throw_spec_types;
 	item->inline_def = true;
 	item->demand_strong = spec.explicit_def && !spec.explicit_inline;
@@ -921,5 +922,49 @@ bool SemBinder::ComposedNoexceptSimple(const DeclaratorInfo& composed)
 		return false;
 	return EvaluatePendingNoexcept(*composed.noexcept_pending_expr,
 	                               composed.noexcept_pending_scope);
+}
+
+// A definition node whose composed spec is still pending inside a
+// replay window (an in-class body flushed by the replayed class's own
+// CompleteClass binds at depth > 0) records the spec for the
+// end-of-unit resolution pass. Bodies that poison instead re-bind at
+// depth 0 through the retry queue and resolve inline.
+void SemBinder::RegisterPendingNodeFact(SemNode& item,
+                                        const DeclaratorInfo& composed)
+{
+	if (item.unwind_no || !composed.noexcept_pending_expr ||
+	    class_replay_depth_ <= 0)
+		return;
+	SemPendingNodeFact fact;
+	fact.node = &item;
+	fact.expr = composed.noexcept_pending_expr;
+	fact.scope = composed.noexcept_pending_scope;
+	pending_node_facts_.push_back(fact);
+}
+
+void SemBinder::DropPendingNodeFact(const SemNode* node)
+{
+	for (size_t i = 0; i < pending_node_facts_.size(); i++)
+		if (pending_node_facts_[i].node == node)
+		{
+			pending_node_facts_[i] = pending_node_facts_.back();
+			pending_node_facts_.pop_back();
+			return;
+		}
+}
+
+void SemBinder::ResolvePendingNodeFacts()
+{
+	// Promote-only, matching the eager writers: an unknown or false
+	// evaluation keeps the conservative may-throw definition.
+	for (size_t i = 0; i < pending_node_facts_.size(); i++)
+	{
+		const SemPendingNodeFact& fact = pending_node_facts_[i];
+		if (!EvaluatePendingNoexcept(*fact.expr, fact.scope))
+			continue;
+		fact.node->unwind_no = true;
+		fact.node->noexcept_decl = true;
+	}
+	pending_node_facts_.clear();
 }
 

@@ -1091,6 +1091,13 @@ string DeclBinder::TypeDisplayName(const string& key,
 	return key + " " + name;
 }
 
+string DeclBinder::TypeDisplayNameIn(const string& key,
+                                     const string& name,
+                                     const Scope*) const
+{
+	return key + " " + name;
+}
+
 void DeclBinder::CompleteClassLayout(NamedTypeInfo& info,
                                      const vector<TypePtr>& fields,
                                      unsigned long long min_alignment)
@@ -1349,8 +1356,12 @@ TypePtr DeclBinder::BindClassForward(const AstDecl& decl, bool elaborated)
 	if (elaborated)
 		while (home->kind != SCOPE_NAMESPACE && home->kind != SCOPE_BLOCK)
 			home = home->parent;
+	// The display qualifies with the scope the entity is declared in
+	// (the rehomed target), not the syntactic context - the record
+	// stays internally consistent with info->scope.
 	NamedTypeInfo* info = model_.CreateNamedTypeInfo(
-		TypeDisplayName(decl.class_key_spelling, name), home, name);
+		TypeDisplayNameIn(decl.class_key_spelling, name, home),
+		home, name);
 	info->is_union = is_union;
 	info->class_key = decl.class_key_spelling;
 	TypePtr type = MakeNamedType(TK_CLASS, info);

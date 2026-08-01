@@ -238,7 +238,7 @@ bool SemBinder::CapturelessClosureFunction(const NamedTypeInfo* cls,
                                            const Scope*& owner,
                                            string& name, TypePtr& type)
 {
-	std::map<const NamedTypeInfo*, ClosureFunction>::const_iterator
+	std::map<const NamedTypeInfo*, SemClosureFunction>::const_iterator
 		found = lambda_.closure_functions.find(cls);
 	if (found == lambda_.closure_functions.end())
 		return false;

@@ -24,6 +24,17 @@ Scope* TypesModel::CreateScope(EScopeKind kind, const string& name,
 	return scope;
 }
 
+// Contract: the caller must be the scope's only retainer. The refusal
+// set below (global, member/entity scopes, pinned scopes, scopes with
+// children) blocks the durable owners it can see, but it cannot see
+// ScopeBinding* lookup results, AddBinding references, or the
+// owner/home back-pointers bindings carry - a caller that created
+// bindings other code may still hold must re-home them first
+// (ResolveAliasTemplateId re-homes its cached binding;
+// MakePackElementScope re-homes SB_PARAMETER elements) or must not
+// release. Cross-scope links other than parent/children (class_base,
+// using_directives, ...) only ever name entity-bearing scopes, which
+// the entity refusal already covers.
 void TypesModel::ReleaseScope(Scope* scope)
 {
 	if (!scope || scope == global_ || scope->entity || scope->pinned ||

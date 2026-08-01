@@ -1,0 +1,69 @@
+function @take(%x : obj<4x4>) -> i32 [binding=weak, object=_Z4take1A] {
+  slot $x : obj<4x4>
+
+  block ^entry:
+    %t1 = addr $x
+    copyobj 4x4 %x, %t1
+    %t2 = addr $x
+    %t3 = index i8 [projection=field] %t2, 0
+    %t4 = load i32 %t3
+    return i32 %t4
+}
+function @main() -> i32 [role=entry, binding=strong, keep_alias=yes] {
+  slot $a : obj<4x4>
+  slot $x : i32
+  slot $cond__1 : i32
+  slot $land__2 : i64
+  slot $argobj__3 : obj<4x4>
+
+  block ^entry:
+    %t1 = addr $a
+    %t2 = addr $a
+    %t3 = index i8 [projection=field] %t2, 0
+    store i32 5, %t3
+    store i32 3, $x
+    %t4 = addr $argobj__3
+    %t5 = addr $a
+    copyobj 4x4 %t5, %t4
+    %t6 = call i32 @take($argobj__3)
+    %t7 = cmp eq i32 %t6, 5
+    branch %t7, ^land_rhs_4, ^land_short_5
+
+  block ^land_rhs_4:
+    %t8 = addr $x
+    %t9 = call i32 @take__ov2(%t8)
+    %t10 = cmp eq i32 %t9, 4
+    %t11 = cmp ne i64 %t10, 0
+    store i64 %t11, $land__2
+    jump ^land_end_6
+
+  block ^land_short_5:
+    store i64 0, $land__2
+    jump ^land_end_6
+
+  block ^land_end_6:
+    %t12 = load i64 $land__2
+    branch %t12, ^cond_then_1, ^cond_else_2
+
+  block ^cond_then_1:
+    store i32 0, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_else_2:
+    store i32 1, $cond__1
+    jump ^cond_end_3
+
+  block ^cond_end_3:
+    %t13 = load i32 $cond__1
+    return i32 %t13
+}
+function @take__ov2(%p : ptr) -> i32 [binding=weak, object=_Z4takeIiEiPT_] {
+  slot $p : ptr
+
+  block ^entry:
+    store ptr %p, $p
+    %t1 = load ptr $p
+    %t2 = load i32 %t1
+    %t3 = binary add i32 %t2, 1
+    return i32 %t3
+}

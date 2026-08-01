@@ -363,6 +363,11 @@ struct SemNode
 	// SN_CONSTRUCTOR_ACTION: the call's second child is the target
 	// object address (declared objects, members, placement results),
 	// not the first constructor argument.
+	// `value` is overloaded by this flag: with ctor_addressed it is
+	// the zero-fill span in bytes (lower_function.cpp); without it,
+	// the shared-base element offset of an aggregate array element
+	// (sem_lifetime.cpp/sem_aggregate.cpp, consumed by the contexts
+	// that know the base object).
 	bool ctor_addressed;
 	// SN_FUNCTION_DEFINITION: a compiler-synthesized special-member
 	// body (implicit/defaulted); emitted only when directly called.

@@ -29,10 +29,10 @@ runtime_error OutsideBoundary(const char* what)
 
 TemplateInfo& SemBinder::TypePackElementTemplate()
 {
-	if (!type_pack_element_tmpl_)
+	if (!builtin_tmpls_.type_pack_element)
 	{
-		type_pack_index_param_.reset(new AstTemplateParameter());
-		AstTemplateParameter& index = *type_pack_index_param_;
+		builtin_tmpls_.type_pack_index_param.reset(new AstTemplateParameter());
+		AstTemplateParameter& index = *builtin_tmpls_.type_pack_index_param;
 		index.kind = TP_NON_TYPE;
 		AstSpecifier spec_unsigned;
 		spec_unsigned.kind = SPEC_KEYWORD;
@@ -44,8 +44,8 @@ TemplateInfo& SemBinder::TypePackElementTemplate()
 		spec_long.keyword = KW_LONG;
 		spec_long.spelling = "long";
 		index.specifiers.push_back(std::move(spec_long));
-		type_pack_element_tmpl_.reset(new TemplateInfo());
-		TemplateInfo& tmpl = *type_pack_element_tmpl_;
+		builtin_tmpls_.type_pack_element.reset(new TemplateInfo());
+		TemplateInfo& tmpl = *builtin_tmpls_.type_pack_element;
 		tmpl.name = "__type_pack_element";
 		tmpl.kind = TMPL_ALIAS;
 		tmpl.declaring = model_.global();
@@ -65,7 +65,7 @@ TemplateInfo& SemBinder::TypePackElementTemplate()
 		tmpl.anchor->is_template_anchor = true;
 		tmpl.anchor->spec_template = &tmpl;
 	}
-	return *type_pack_element_tmpl_;
+	return *builtin_tmpls_.type_pack_element;
 }
 
 const ScopeBinding* SemBinder::ResolveTypePackElementUse(
@@ -110,10 +110,10 @@ const ScopeBinding* SemBinder::ResolveTypePackElementUse(
 // probe result.
 TemplateInfo& SemBinder::NothrowInvocableTemplate()
 {
-	if (!nothrow_invocable_tmpl_)
+	if (!builtin_tmpls_.nothrow_invocable)
 	{
-		nothrow_invocable_tmpl_.reset(new TemplateInfo());
-		TemplateInfo& tmpl = *nothrow_invocable_tmpl_;
+		builtin_tmpls_.nothrow_invocable.reset(new TemplateInfo());
+		TemplateInfo& tmpl = *builtin_tmpls_.nothrow_invocable;
 		tmpl.name = "__is_nothrow_invocable";
 		tmpl.kind = TMPL_ALIAS;
 		tmpl.declaring = model_.global();
@@ -132,7 +132,7 @@ TemplateInfo& SemBinder::NothrowInvocableTemplate()
 		tmpl.anchor->is_template_anchor = true;
 		tmpl.anchor->spec_template = &tmpl;
 	}
-	return *nothrow_invocable_tmpl_;
+	return *builtin_tmpls_.nothrow_invocable;
 }
 
 const ScopeBinding* SemBinder::ResolveNothrowInvocableUse(

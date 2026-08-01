@@ -1,0 +1,12 @@
+#include "605-hosted-conditional-noexcept-member-terminate-runtime-smoke.shared.h"
+
+template <typename T>
+struct Carrier
+{
+	void fire() noexcept(sizeof(T) < 100) { throw 1; }
+};
+
+void poke_noexcept_member()
+{
+	Carrier<int>().fire();
+}

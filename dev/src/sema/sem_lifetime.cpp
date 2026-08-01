@@ -75,12 +75,21 @@ SemNodePtr SemBinder::VariableObjectExpr(const ScopeBinding& binding)
 // AppendElidedObjectInit) and the declaration destroys the referee at
 // scope exit through the stored reference instead.
 void SemBinder::ExtendBoundTemporaryLifetime(SemNode& item,
-                                             const ScopeBinding& binding)
+                                             const ScopeBinding& binding,
+                                             const DeclSpecifierInfo& specs)
 {
 	if (!IsReferenceType(binding.type) || item.children.empty())
 		return;
 	// Namespace-scope extension (destruction at shutdown) stays out of
 	// scope: the reference emission has no static cleanup for it.
+	// Static-duration locals share that boundary: attaching a
+	// scope-exit destructor to a block-scope static both misplaces
+	// the destruction (the referee outlives every activation) and
+	// trips the whole-program local-static-destructor limit on code
+	// the reference accepts; like the reference, the referee of a
+	// static reference is never destroyed.
+	if (specs.is_static || specs.is_thread_local)
+		return;
 	if (!binding.home || (binding.home->kind != SCOPE_BLOCK &&
 	                      binding.home->kind != SCOPE_FUNCTION))
 		return;
@@ -538,7 +547,7 @@ void SemBinder::AttachObjectLifetime(SemNode& item, ScopeBinding& binding,
 		if (init)
 		{
 			AnalyzeVariableInit(item, binding, init);
-			ExtendBoundTemporaryLifetime(item, binding);
+			ExtendBoundTemporaryLifetime(item, binding, specs);
 		}
 		return;
 	}

@@ -1219,7 +1219,11 @@ SemNodePtr SemBinder::MemberAssignAction(const ClassField& field,
 	{
 		// The synthesized aggregate constructor's array member arrives
 		// as the decayed pointer to the caller-materialized argument
-		// array; the assignment lowers as a raw span copy.
+		// array; the assignment lowers as a raw span copy. Only that
+		// synthesized-ctor path reaches here: user-written member
+		// initializers aimed at array members reject earlier
+		// (AppendMemberInit), so the raw copy never sees an arbitrary
+		// user pointer.
 		TypePtr value_type = RemoveTopCv(value.type);
 		if (value_type->kind != TK_POINTER ||
 		    !TypeEquals(RemoveTopCv(value_type->target),

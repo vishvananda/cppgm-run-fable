@@ -20,9 +20,7 @@ class SemBinder : public DeclBinder, public ISemExprHost
 	typedef SemDeferredBody DeferredBody;
 	typedef SemMethodContext MethodContext;
 	typedef SemPackParamRecord PackParamRecord;
-	typedef SemClosureFunction ClosureFunction;
 	typedef SemRetryBody RetryBody;
-	typedef SemPendingClassDefinition PendingClassDefinition;
 
 public:
 	SemBinder(TypesModel& model, SemUnit& unit);
@@ -87,6 +85,7 @@ public:
 	virtual bool CapturelessClosureFunction(const NamedTypeInfo* cls,
 	                                        const Scope*& owner,
 	                                        string& name, TypePtr& type);
+	string CurrentFunctionName() override;
 
 	virtual TypePtr ResolveDecltype(const AstExpr& expr);  // decltype
 	virtual TypePtr ResolveTypeName(const AstName& name);  // 11.8
@@ -119,6 +118,9 @@ protected:
 	virtual void BindStatement(const AstStmt& stmt);
 	virtual string TypeDisplayName(const string& key,
 	                               const string& name) const;
+	virtual string TypeDisplayNameIn(const string& key,
+	                                 const string& name,
+	                                 const Scope* home) const;
 	virtual string AnonymousTypeName(const AstDecl& decl);
 
 	// --- PA15 class machinery (sem_class.cpp) ---
@@ -404,7 +406,8 @@ private:
 	SemNodePtr MakeDestructorCall(const ClassInfo& cls, bool base_entry,
 	                              SemNodePtr address);
 	void ExtendBoundTemporaryLifetime(SemNode& item,
-	                                  const ScopeBinding& binding);
+	                                  const ScopeBinding& binding,
+	                                  const DeclSpecifierInfo& specs);
 
 	// --- PA18 templates (sem_template.cpp) ---
 	// Capture seams: template declarations are recorded, not analyzed;
@@ -754,6 +757,12 @@ private:
 	// Evaluates one recorded spec in its recorded scope; true only
 	// when it evaluates to a nonzero constant.
 	bool EvaluatePendingNoexcept(const AstExpr& expr, Scope* scope);
+	// Replay-window definition-node specs (SemPendingNodeFact).
+	void RegisterPendingNodeFact(SemNode& item,
+	                             const DeclaratorInfo& composed);
+	void DropPendingNodeFact(const SemNode* node);
+	void ResolvePendingNodeFacts();
+	vector<SemPendingNodeFact> pending_node_facts_;
 	// The most recent clause expansion (one pack parameter per clause
 	// in the slice): the declared pack name and its expanded slots,
 	// consumed right after signature composition to bind the function
@@ -762,13 +771,13 @@ private:
 	// Binds (or completes) the pack-parameter binding in `scope` from
 	// last_pack_param_.
 	void BindCapturedPackParameter(Scope* scope);
-	// The specialization record for `args`, instantiating the class
-	// body on demand when the definition is available.
 	// PA25 18.9: the builtin initializer_list record when the program
 	// only declares the template.
 	void BuildBuiltinInitializerList(NamedTypeInfo* info);
 	// PA25 7.1.6.4p6: the std::initializer_list<element> type.
 	TypePtr StdInitializerListType(const TypePtr& element);
+	// The specialization record for `args`, instantiating the class
+	// body on demand when the definition is available.
 	ClassSpecialization* EnsureClassSpecialization(
 		TemplateInfo& tmpl, const vector<TemplateArg>& args);
 	// PA21: deferred-body helpers (14.7.1p4).
@@ -795,8 +804,7 @@ private:
 		const NamedTypeInfo* entity);
 	void DemandSpecializationStatics(const NamedTypeInfo* entity);
 	// Saved-and-cleared binder state around one instantiation; the
-	// destructor restores it (exception-safe). Defined at the end of
-	// this header (it captures the binder's private state).
+	// destructor restores it (exception-safe; sem_instantiation.h).
 	struct InstantiationContext;
 	// DK_CLASS dispatch (14.7.1p1: a member-class definition of an
 	// instantiated class defers; a qualified class-name defines a
@@ -1066,12 +1074,8 @@ private:
 	bool RetryDeferredBodies();
 	// The lambda machinery state (sem_lambda_state.h).
 	SemLambdaState lambda_;
-	// PA34 __type_pack_element shadow record and the synthesized AST
-	// for its index parameter's declared type.
-	std::unique_ptr<TemplateInfo> type_pack_element_tmpl_;
-	std::unique_ptr<AstTemplateParameter> type_pack_index_param_;
-	// PA34 __is_nothrow_invocable shadow record.
-	std::unique_ptr<TemplateInfo> nothrow_invocable_tmpl_;
+	// PA34 builtin shadow templates (sem_binder_state.h).
+	SemBuiltinTemplates builtin_tmpls_;
 
 	vector<ClassInfo*> open_classes_;
 	vector<DeferredBody> deferred_bodies_;
@@ -1079,9 +1083,6 @@ private:
 	// unit (the poisoned deferred item is replaced on success).
 	vector<RetryBody> retry_bodies_;
 	MethodContext method_;
-public:
-	string CurrentFunctionName() override;
-private:
 	bool NothrowTraitShorthand(const AstName& name, ConstValue& out);
 	void ClassifyUserAssignOperators(ClassInfo& cls);
 	// Saved method contexts around member-signature composition.
@@ -1120,7 +1121,7 @@ private:
 	Scope* param_capture_scope_;
 	// Deferred member-class definitions of instantiated classes
 	// (14.7.1p1), completed on demand by EnsureTypeCompleteness.
-	std::map<const NamedTypeInfo*, PendingClassDefinition> pending_classes_;
+	std::map<const NamedTypeInfo*, SemPendingClassDefinition> pending_classes_;
 
 public:
 	// IConstExprContext (const_expr.h): the analyzer classifies the

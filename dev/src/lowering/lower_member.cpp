@@ -655,7 +655,7 @@ void FunctionLowerer::LowerClassInit(const SemNode& node,
 		string else_label = NewLabel("condobj_else");
 		string end_label = NewLabel("condobj_end");
 		BranchOnValue(*node.children[0], then_label, else_label,
-		              false);
+		              false, false);
 		OpenBlock(then_label);
 		cond_arm_depth_++;
 		OpenSegmentRegion(*node.children[1]);
@@ -745,6 +745,14 @@ string FunctionLowerer::MaterializeClassResult(const SemNode& call,
 			temp_cleanups_.push_back(cleanup);
 			if (reopen)
 				OpenEhRegion();
+		}
+		else if (call.lifetime_extended && !cond_arm_depth_ && reopen)
+		{
+			// An extended temporary registers nothing, but the open
+			// region must still balance: the rest of the declaration's
+			// full expression keeps its pending cleanups covered.
+			// (Conditional arms keep the pinned close-only shape.)
+			OpenEhRegion();
 		}
 	}
 	return address;

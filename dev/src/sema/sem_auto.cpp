@@ -528,8 +528,10 @@ void SemBinder::BindRangeForStatement(const AstStmt& stmt)
 			analyzer_.CopyInitialize(range, added.type, "range binding");
 			item->children.push_back(std::move(range.node));
 			// 6.5.4p1 with 12.2p5: the temporary range the hidden
-			// reference binds lives for the whole loop.
-			ExtendBoundTemporaryLifetime(*item, added);
+			// reference binds lives for the whole loop (the hidden
+			// __range binding is always an automatic local).
+			ExtendBoundTemporaryLifetime(*item, added,
+			                             DeclSpecifierInfo());
 		}
 	}
 	AstExprPtr loop_init;

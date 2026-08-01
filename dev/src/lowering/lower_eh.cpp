@@ -298,7 +298,8 @@ void FunctionLowerer::EmitZeroValueReturn()
 void FunctionLowerer::BranchOnValue(const SemNode& node,
                                     const string& true_label,
                                     const string& false_label,
-                                    bool edge_cleanups)
+                                    bool true_edge_cleanups,
+                                    bool false_edge_cleanups)
 {
 	// Reference parity: a branch on a namespace-scope
 	// pointer-to-function object spells the object's address - but
@@ -324,31 +325,54 @@ void FunctionLowerer::BranchOnValue(const SemNode& node,
 	LowerValue truth = MaterializeTruth(LowerValueExpr(node));
 	// The dispatch region closes once the branch value is secured;
 	// pending condition temporaries destroy on per-edge cleanup
-	// trampolines before the real targets - but only when this branch
+	// trampolines before the real targets - but only on an edge that
 	// ends the condition's own full expression (a statement
-	// condition). An expression-level branch keeps the enclosing full
-	// expression's temporaries alive (12.2: they die at its end).
+	// condition's exit). An expression-level branch, and the
+	// short-circuit fall-through edge into a right operand, keep the
+	// enclosing full expression's temporaries alive (12.2: they die
+	// at its end). The registration list shrinks only once both
+	// edges have consumed it; a single-edge trampoline leaves it for
+	// the continuing operand's own final edges.
 	if (eh_open_)
 		CloseEhRegion();
 	size_t mark = fe_marks_.empty() ? 0 : fe_marks_.back();
-	if (edge_cleanups && temp_cleanups_.size() > mark &&
-	    !in_cleanup_emission_)
+	if ((true_edge_cleanups || false_edge_cleanups) &&
+	    temp_cleanups_.size() > mark && !in_cleanup_emission_)
 	{
-		string true_cleanup = NewLabel("cond_true_cleanup");
-		string false_cleanup = NewLabel("cond_false_cleanup");
-		ReferenceLabel(true_cleanup);
-		ReferenceLabel(false_cleanup);
-		Terminate("branch " + truth.text + ", ^" + true_cleanup +
-		          ", ^" + false_cleanup);
-		OpenBlock(true_cleanup);
-		EmitTempCleanups(mark);
-		ReferenceLabel(true_label);
-		Terminate("jump ^" + true_label);
-		OpenBlock(false_cleanup);
-		EmitTempCleanups(mark);
-		ReferenceLabel(false_label);
-		Terminate("jump ^" + false_label);
-		temp_cleanups_.resize(mark);
+		string true_target = true_label;
+		string false_target = false_label;
+		string true_cleanup;
+		string false_cleanup;
+		if (true_edge_cleanups)
+		{
+			true_cleanup = NewLabel("cond_true_cleanup");
+			true_target = true_cleanup;
+		}
+		if (false_edge_cleanups)
+		{
+			false_cleanup = NewLabel("cond_false_cleanup");
+			false_target = false_cleanup;
+		}
+		ReferenceLabel(true_target);
+		ReferenceLabel(false_target);
+		Terminate("branch " + truth.text + ", ^" + true_target +
+		          ", ^" + false_target);
+		if (true_edge_cleanups)
+		{
+			OpenBlock(true_cleanup);
+			EmitTempCleanups(mark);
+			ReferenceLabel(true_label);
+			Terminate("jump ^" + true_label);
+		}
+		if (false_edge_cleanups)
+		{
+			OpenBlock(false_cleanup);
+			EmitTempCleanups(mark);
+			ReferenceLabel(false_label);
+			Terminate("jump ^" + false_label);
+		}
+		if (true_edge_cleanups && false_edge_cleanups)
+			temp_cleanups_.resize(mark);
 		return;
 	}
 	ReferenceLabel(true_label);
@@ -365,7 +389,7 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 	if (IsVoidType(node.type))
 	{
 		BranchOnValue(*node.children[0], then_label, else_label,
-	              false);
+	              false, false);
 		OpenBlock(then_label);
 		cond_arm_depth_++;
 		OpenSegmentRegion(*node.children[1]);
@@ -390,7 +414,7 @@ LowerValue FunctionLowerer::LowerConditionalValue(const SemNode& node)
 	TypePtr type = NodeType(node);
 	string slot = AddMatSlot("cond", LowerValueType(type));
 	BranchOnValue(*node.children[0], then_label, else_label,
-	              false);
+	              false, false);
 	OpenBlock(then_label);
 	cond_arm_depth_++;
 	OpenSegmentRegion(*node.children[1]);
@@ -425,7 +449,7 @@ string FunctionLowerer::LowerConditionalAddress(const SemNode& node)
 	string end_label = NewLabel("condaddr_end");
 	TypePtr result_type = NodeType(node);
 	BranchOnValue(*node.children[0], then_label, else_label,
-	              false);
+	              false, false);
 	for (int arm = 1; arm <= 2; arm++)
 	{
 		OpenBlock(arm == 1 ? then_label : else_label);
