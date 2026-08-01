@@ -6,9 +6,13 @@ the compiler itself, all 136 objects byte-match the host-seeded
 build, and cppgm++-inception is byte-identical to cppgm++-self
 (`MATCH cppgm++`). compare-pptoken-inception matches, test-through-
 pa10 is green (pa10 134/134 self-built), `make
-test-report-through-pa38` is green at 3456/3456, and the file audit
-passes. Twenty-seven failures were root-caused and fixed along the
-way; the last two were backend codegen bugs the sema TUs exposed:
+test-report-through-pa38` is green (3456/3456 at completion,
+3461/3461 after the audit added five reducers), and the file audit
+passes. The post-completion audit (pa39/audit.md and the "Audit
+fixes" section below) fixed six more behavioral defects and re-ran
+the whole ladder against the audited compiler. Twenty-seven failures
+were root-caused and fixed on the way to inception; the last two
+were backend codegen bugs the sema TUs exposed:
 
 - Failure 26: a scratch parameter copy hoisted into the prologue
   could target r8/r9 after a call-staging evacuation released the
@@ -652,7 +656,7 @@ rung (sem_lambda.cpp) and the inception build gate the behavior.
 Reduced form kept for reference: a nontrivial class returned by value
 from a function whose parameter is named `ret`.
 
-### Failure 21 (in progress): frontend retains transient template
+### Failure 21 (fixed): frontend retains transient template
 ### resolution scopes for the whole unit (pa10 rung OOM kills)
 
 The rung's Error-137/125 exits are memory, not logic: the Ralph check
@@ -944,11 +948,151 @@ sem_spec.cpp byte-identical under ASLR). Memory after the failure-21
 work: heavy sema TU 3.43->2.26 GiB frontend peak, compile_unit.cpp
 10.2->4.6 GiB, cppgm++.cpp 8.4->3.9 GiB (both giants now under the
 8 GiB per-command cap), plus token-stream release before sema and a
-post-frontend malloc_trim. The canonical -j32 rung's aggregate peak
-inside the 64 GiB envelope is being measured; if it still overflows,
-the next levers are the SemNode record (592 B x ~1.1M) and the
-ScopeBinding record (896 B, mostly empty per-overload vectors on
-non-function bindings).
+post-frontend malloc_trim. The canonical -j32 rung then completed
+inside the 64 GiB envelope (test-through-pa10 green, both selfhost and
+inception object trees built with no EXIT_OOM), so the further levers
+considered at the time - shrinking the SemNode record (592 B x ~1.1M)
+and the ScopeBinding record (896 B, mostly empty per-overload vectors
+on non-function bindings) - were not needed for PA39.
+
+## Audit fixes (post-inception)
+
+The PA39 audit (pa39/audit.md) re-reviewed the whole change range and
+fixed six behavioral defects the ladder had not exposed, each at its
+owning surface and each verified failing-before/passing-after:
+
+- Deferred noexcept facts now reach definition nodes bound inside a
+  class replay window (the CWG-1330 machinery's own gap: the callee
+  compiled without the 15.4p9 terminate barrier its call sites
+  assume). Reducer: pa36/link 605 terminate smoke.
+- `emit_dest_copy` adopts `gpr_read`'s width rule: narrow parameter
+  homes re-load at their own width and re-normalize unconditionally;
+  temp homes load the canonical i64 (a negative `int` shifted or
+  divided out of an EH-forced frame home folded wrong in both modes).
+  Reducer: pa28 210-narrow-signed-shift-div-frame-home.
+- The hidden-friend merge path clears `fn_templates_adl_only`
+  (an ordinary template redeclaration beside a concrete hidden friend
+  stayed invisible). Reducer: pa18 hidden-friend-template-redeclared-
+  beside-friends.
+- Reference lifetime extension skips static/thread_local declarations
+  (the failure-8 fix had regressed `static const T& = temp` into a
+  whole-program boundary error and a wrong hosted atexit target); no
+  ref-fixture harness can express the shape (audit.md finding 4).
+- Statement-condition `&&`/`||` no longer destroy left-operand
+  temporaries on the short-circuit fall-through edge (per-edge cleanup
+  flags through LowerCondition/BranchOnValue). Reducer: pa36/link 607.
+- Class-static member aggregate arrays take the explicit
+  element-address init form (their `@__cppgm_init` clones previously
+  mislowered). Reducer: pa36/link 606.
+
+Plus: `bind_failed` pairs with its record reset, the end-of-unit retry
+loop tracks drain progress, lifetime-extended results rebalance their
+EH region, `WideReadPair`/`value_info` fail loudly on desyncs, the ELF
+personality writer reuses defined symbols and the reader verifies the
+legacy 0x1b form, and rehomed elaborated declarations display their
+true scope. The full disposition of every review finding - including
+the claims that did not verify and the measured non-issues - is in
+pa39/audit.md.
+
+## Architecture Review
+
+- **No PA39 compiler surface.** The inception work added zero
+  self-hosting conditionals to `dev/src`: a sweep for
+  inception/selfhost/PA39 gating finds only comments tagging fixes to
+  their motivating failure. Every one of the 27 ladder failures was
+  fixed at the earliest assignment surface that owns the behavior
+  (PA11 enum/elaborated binding, PA12 member categories, PA14-16
+  lowering scope/branch cleanups, PA18/22 friend visibility, PA20
+  const-eval, PA21 member-template sequencing, PA28 MIR staging, PA29
+  wide ops, PA36 hosted emission, PA37 inliner), so the self-build and
+  ordinary user programs exercise the same code paths.
+- **Fixed source sets, two flavor trees.** Checkpoint composition
+  comes only from the hand-maintained
+  `dev/frontend_source_sets.mk` lists (unchanged in the PA39 range;
+  the Makefile errors out on a missing list rather than scanning).
+  The selfhost and inception trees compile the same sources with
+  byte-identical command lines from the same directory; the only
+  variable is which compiler binary runs. The inception pass
+  byte-compares every object against its selfhost twin before the
+  final link compare, so drift is caught at the first responsible TU.
+- **Reproducibility model.** Cross-flavor identity is what PA39
+  proves: two different compiler binaries (host-seeded-built vs
+  self-built) produce 136 byte-identical objects and a byte-identical
+  final binary, which also transitively validates emission-order
+  determinism in every stage the compiler runs on itself. Generated
+  configuration (`cppgm_builtin_host_config.h`) is produced once,
+  content-compared on regeneration, and shared by both flavors. The
+  `-DCPPGM_DEFAULT_*` defines carry flavor-invariant values (and are
+  currently consumed by no source file, so they cannot embed paths in
+  objects). Same-binary determinism across runs was spot-checked under
+  ASLR during the ladder (type.cpp, sem_spec.cpp byte-identical).
+- **Harness integrity.** The PA39 range changes no test harness: no
+  edits under `scripts/`, the root `Makefile`, or any other
+  `pa*/Makefile`; the cppgm.tests diff is purely additive (new
+  reducers and their reference-generated fixtures). The pa39
+  timeouts (30s text tests, 900s/3600s compile walls) and the 8 GiB
+  RSS cap are the course-provided values from the original assignment
+  export, not run-added accommodations.
+- **Memory discipline as architecture.** The failure-21 work gave the
+  template machinery a transient-scope ownership rule:
+  resolution/probe scopes are released at their creation site
+  (`TransientScope` RAII over `ReleaseScope`), and release refuses by
+  construction anything durable (global scope, member scopes, pinned
+  scopes such as deferred-noexcept evaluation contexts, any scope
+  that acquired children). That keeps the CWG-1330 records' pinned
+  chains alive while stopping the retain-everything growth that made
+  the giant TUs exceed the per-command cap.
+- **Reducer coverage.** Every behavioral fix left a test at the
+  earliest harness that can express it (pa11, pa12, pa18, pa28
+  course tests; pa36/link smokes where hosted libstdc++ ordering or
+  host linking is intrinsic to the trigger). The two exceptions
+  (failures 13 and 20) are documented in their failure entries with
+  the specific reason a reference-generated fixture would pin the
+  wrong behavior; both are gated by the ladder rungs and the
+  inception build itself.
+
+## Final Architecture Review
+
+Completed after the audit fixes landed and the full ladder re-ran
+against the audited compiler.
+
+- **The inception property held under change.** The audit modified 30+
+  compiler files (sema fact plumbing, lowering cleanup edges, backend
+  width discipline, ELF EH edges) and the ladder was re-run from
+  scratch: host report green (3461/3461 with the five new reducers),
+  self-built checkpoints through pa10 green, pptoken inception and the
+  full cppgm++ inception byte-identical again. No pinned fixture was
+  regenerated or weakened at any point - every fix either matched the
+  reference on a previously-uncovered shape or changed emission only
+  where no fixture pins it (verified suite-by-suite before the ladder).
+- **Fix-at-owning-surface discipline preserved.** The audit fixes
+  follow the same rule as the 27 ladder failures: each landed in the
+  earlier assignment surface that owns the behavior, with a reducer in
+  the earliest harness that can express it; the one inexpressible fix
+  (static-reference extension) carries the same class of written
+  justification as failures 13 and 20.
+- **The CWG-1330 machinery is now internally complete.** The deferral
+  had three fact sinks (scope bindings, ctor/dtor records, definition
+  nodes); the audit closed the third. All three resolve promote-only,
+  and the resolution points are ordered: read sites on demand
+  post-window, definition nodes after the end-of-unit retry fixpoint,
+  both strictly before the lowering consumes them.
+- **Backend width contract is now one rule.** Narrow parameter homes:
+  load at own width, normalize unconditionally. Every other GPR frame
+  home: load the canonical normalized i64. `gpr_read` and
+  `emit_dest_copy` share the rule's single implementation
+  (`emit_frame_home_load`), the compare path documents why its
+  unsigned-only exception is sound, and the checked `value_info` read
+  makes a future desync loud instead of silently skipping
+  normalization.
+- **No deferred problems.** Every audit finding was either fixed or
+  resolved as not-a-defect with recorded evidence (audit.md); nothing
+  is parked as future work. The remaining documented boundaries
+  (namespace/static-duration reference extension, per-iteration
+  while/do condition destruction, class-element aggregate argument
+  arrays, i128 host-boundary ABI) predate the audit, reject loudly or
+  match the reference's own emission, and are exercised by no
+  checkpoint source - they are dialect scope, not defects.
 
 ## Ladder expectations
 
